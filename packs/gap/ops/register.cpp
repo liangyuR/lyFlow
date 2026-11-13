@@ -43,4 +43,4 @@ void registerPackOps(Registry& r) {
   registerSnippets(r);
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

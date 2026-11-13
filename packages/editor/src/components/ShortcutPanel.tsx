@@ -1,8 +1,8 @@
 // `?` 快捷键面板。整张表从 lib/keymap.ts 生成（E7）——
 // 手抄一份说明必然和实际按键漂移，而用户只会相信面板上写的那个。
 
-import { keyLabel, groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from "../lib/keymap";
-import { useUiStore } from "../store/ui";
+import { keyLabel, groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from '../lib/keymap';
+import { useUiStore } from '../store/ui';
 
 export function ShortcutPanel() {
   const open = useUiStore((s) => s.helpOpen);
@@ -14,7 +14,12 @@ export function ShortcutPanel() {
       <div className="qs-dialog sheet__box" onClick={(e) => e.stopPropagation()}>
         <header className="hd sheet__head">
           <h2>快捷键</h2>
-          <button type="button" className="qs-btn sm text" data-testid="shortcut-close" onClick={() => setOpen(false)}>
+          <button
+            type="button"
+            className="qs-btn sm text"
+            data-testid="shortcut-close"
+            onClick={() => setOpen(false)}
+          >
             关闭
           </button>
         </header>

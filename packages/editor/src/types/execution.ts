@@ -1,20 +1,13 @@
 // ExecutionEvent 的 TypeScript 镜像，契约在 schema/execution-event.schema.json。
 // 与 manifest 一样，这里只是给编辑器用的视图；改动顺序永远是 schema → C++ → 这里。
 
-import type { PortRef } from "./graph";
+import type { PortRef } from './graph';
 
-export type NodeState =
-  | "idle"
-  | "pending"
-  | "running"
-  | "done"
-  | "error"
-  | "cancelled"
-  | "skipped";
+export type NodeState = 'idle' | 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'skipped';
 
-export type RunStatus = "ok" | "error" | "cancelled";
+export type RunStatus = 'ok' | 'error' | 'cancelled';
 
-export type Phase = "validate" | "compile" | "execute";
+export type Phase = 'validate' | 'compile' | 'execute';
 
 export interface Diagnostic {
   phase: Phase;
@@ -30,15 +23,15 @@ export interface Diagnostic {
 /** `lyflow_validate` 返回的诊断，比事件里的多一个 nodeId 和 severity。 */
 export interface GraphDiagnostic extends Diagnostic {
   nodeId: string;
-  severity: "error" | "warning";
+  severity: 'error' | 'warning';
   /** "diagnostic" 或 "migration"。老 core 不带这个字段，缺省按普通诊断。 */
-  kind?: "diagnostic" | "migration";
+  kind?: 'diagnostic' | 'migration';
 }
 
 /** 迁移动作（ADR-0008）：C++ 只说「该改成什么」，写回 doc 是 applyMigrations 的事。
  *  params 是**完整**的参数对象而不是补丁 —— 改名参数没法用补丁表达。 */
 export interface MigrationAction extends GraphDiagnostic {
-  kind: "migration";
+  kind: 'migration';
   op: string;
   opVersion: string;
   params: Record<string, unknown>;
@@ -62,7 +55,7 @@ export interface MigrationEdits {
 }
 
 export function isMigration(d: GraphDiagnostic): d is MigrationAction {
-  return d.kind === "migration";
+  return d.kind === 'migration';
 }
 
 /** `plan_graph` 的每节点结果。缓存判定的唯一权威在 C++（ADR-0007）。 */
@@ -143,7 +136,7 @@ export interface OutputValue {
   width?: number;
   height?: number;
   channels?: number;
-  depth?: "u8" | "u16" | "f32";
+  depth?: 'u8' | 'u16' | 'f32';
   /** 预览时源头缩小过的图（ADR-0028）：一个像素对应原图 scale × scale 个像素。只在 > 1 时有。 */
   scale?: number;
 }
@@ -195,7 +188,7 @@ interface EventBase {
 }
 
 export interface RunStartedEvent extends EventBase {
-  kind: "run_started";
+  kind: 'run_started';
   nodeCount?: number;
   /** 本次实际用了几个 worker（E2）。 */
   maxParallel?: number;
@@ -215,14 +208,14 @@ export interface RunStartedEvent extends EventBase {
 
 /** 惰性闭包被 demand，追加进本次计划（ADR-0016）。nodes 与 run_started.nodes 同构。 */
 export interface PlanExtendedEvent extends EventBase {
-  kind: "plan_extended";
+  kind: 'plan_extended';
   demandedBy?: string;
   port?: string;
   nodes: RunPlanNode[];
 }
 
 export interface NodeStateEvent extends EventBase {
-  kind: "node_state";
+  kind: 'node_state';
   nodeId: string;
   state: NodeState;
   durationMs?: number;
@@ -232,7 +225,7 @@ export interface NodeStateEvent extends EventBase {
 }
 
 export interface NodeProgressEvent extends EventBase {
-  kind: "node_progress";
+  kind: 'node_progress';
   nodeId: string;
   progress: number;
   message?: string;
@@ -240,11 +233,11 @@ export interface NodeProgressEvent extends EventBase {
 
 /** summary 里 status 的三态（ADR-0022 H2）。与 `RunStatus` 不是一回事：
  *  带 fallback 的图可以 run_finished=ok 而 summary=degraded。 */
-export type SummaryStatus = "ok" | "degraded" | "failed";
+export type SummaryStatus = 'ok' | 'degraded' | 'failed';
 
 /** 图级输出的三态（H3）。`inactive` 是「这一维本来就没有」，
  *  `failed` 是「本该有、崩了」—— 把它们混成一个 missing 是 M5 踩过的坑。 */
-export type OutputState = "value" | "inactive" | "failed";
+export type OutputState = 'value' | 'inactive' | 'failed';
 
 export interface SummaryNode {
   state: NodeState;
@@ -294,7 +287,7 @@ export interface RunSummary {
 }
 
 export interface RunFinishedEvent extends EventBase {
-  kind: "run_finished";
+  kind: 'run_finished';
   status: RunStatus;
   durationMs?: number;
   error?: Diagnostic;
@@ -312,8 +305,8 @@ export interface RunFinishedEvent extends EventBase {
 }
 
 export interface LogEvent extends EventBase {
-  kind: "log";
-  level: "debug" | "info" | "warn" | "error";
+  kind: 'log';
+  level: 'debug' | 'info' | 'warn' | 'error';
   nodeId?: string;
   message: string;
 }
@@ -491,7 +484,9 @@ export function decodeImage(buffer: ArrayBuffer): ImagePayload {
   const rowCount = u(9);
   const rowBytes = u(10);
   if (buffer.byteLength < IMAGE_HEADER_BYTES + rowCount * rowBytes) {
-    throw new Error(`图像载荷太短（${buffer.byteLength} 字节），装不下 ${rowCount} 行 × ${rowBytes} 字节`);
+    throw new Error(
+      `图像载荷太短（${buffer.byteLength} 字节），装不下 ${rowCount} 行 × ${rowBytes} 字节`,
+    );
   }
   const n = rowCount * width * channels;
   const pixels =

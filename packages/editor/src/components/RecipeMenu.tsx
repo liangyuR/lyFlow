@@ -2,17 +2,17 @@
 // 菜单：「基础」+ 各配方（★ = 默认，红徽标 = 失配数）+「新建配方…」「管理配方…」。
 // 切换不弹窗、不进撤销：未保存的改动留在内存里（K6 ③）。
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from 'react';
 
-import { useDismiss } from "../hooks/useDismiss";
-import { BASE_LABEL } from "../lib/recipes";
-import { useGraphStore } from "../store/graph";
-import { selectRecipe, useRecipeReports, useRecipeStore, useRecipesDirty } from "../store/recipe";
-import { useUiStore } from "../store/ui";
+import { useDismiss } from '../hooks/useDismiss';
+import { BASE_LABEL } from '../lib/recipes';
+import { useGraphStore } from '../store/graph';
+import { selectRecipe, useRecipeReports, useRecipeStore, useRecipesDirty } from '../store/recipe';
+import { useUiStore } from '../store/ui';
 
-import { newRecipeInteractive } from "./recipeActions";
+import { newRecipeInteractive } from './recipeActions';
 
-import "../styles.recipe.css";
+import '../styles.recipe.css';
 
 export function RecipeMenu() {
   const set = useRecipeStore((s) => s.set);
@@ -27,7 +27,11 @@ export function RecipeMenu() {
   const box = useRef<HTMLDivElement>(null);
 
   // 点菜单外面收起，Esc 也收起
-  useDismiss(open, box, useCallback(() => setOpen(false), []));
+  useDismiss(
+    open,
+    box,
+    useCallback(() => setOpen(false), []),
+  );
 
   const blocking = current ? (reports.get(current)?.blocking ?? 0) : 0;
   const pick = (name: string | null) => {
@@ -39,15 +43,15 @@ export function RecipeMenu() {
     <div className="recipe-menu" ref={box}>
       <button
         type="button"
-        className={`recipe-menu__toggle${current ? " is-recipe" : ""}`}
+        className={`recipe-menu__toggle${current ? ' is-recipe' : ''}`}
         data-testid="recipe-toggle"
-        data-current={current ?? ""}
-        data-dirty={dirty ? "1" : "0"}
+        data-current={current ?? ''}
+        data-dirty={dirty ? '1' : '0'}
         aria-expanded={open}
         title={
           dir
             ? `当前配方：${current ?? `${BASE_LABEL}（只用默认值）`}。切换不弹窗，没存的改动留在内存里，Ctrl+S 一起保存`
-            : "图还没存过盘：先保存图，才能建配方"
+            : '图还没存过盘：先保存图，才能建配方'
         }
         onClick={() => setOpen((v) => !v)}
       >
@@ -56,11 +60,20 @@ export function RecipeMenu() {
           {current ?? BASE_LABEL}
         </span>
         {blocking > 0 && (
-          <span className="recipe-badge recipe-badge--bad" title={`${blocking} 处失配：这个配方不能运行`}>
+          <span
+            className="recipe-badge recipe-badge--bad"
+            title={`${blocking} 处失配：这个配方不能运行`}
+          >
             {blocking}
           </span>
         )}
-        {dirty && <span className="recipe-menu__dirty" data-testid="recipe-dirty" title="配方有没存的改动" />}
+        {dirty && (
+          <span
+            className="recipe-menu__dirty"
+            data-testid="recipe-dirty"
+            title="配方有没存的改动"
+          />
+        )}
         <span className="recipe-menu__chev">▾</span>
       </button>
       {open && (
@@ -69,12 +82,12 @@ export function RecipeMenu() {
             type="button"
             role="menuitemradio"
             aria-checked={current === null}
-            className={`recipe-menu__item${current === null ? " is-current" : ""}`}
+            className={`recipe-menu__item${current === null ? ' is-current' : ''}`}
             data-testid="recipe-option"
             data-name=""
             onClick={() => pick(null)}
           >
-            <span className="recipe-menu__check">{current === null ? "●" : ""}</span>
+            <span className="recipe-menu__check">{current === null ? '●' : ''}</span>
             <span className="recipe-menu__itemname">{BASE_LABEL}</span>
             <span className="recipe-menu__hint">只用默认值</span>
           </button>
@@ -87,15 +100,17 @@ export function RecipeMenu() {
                 type="button"
                 role="menuitemradio"
                 aria-checked={current === r.name}
-                className={`recipe-menu__item${current === r.name ? " is-current" : ""}`}
+                className={`recipe-menu__item${current === r.name ? ' is-current' : ''}`}
                 data-testid="recipe-option"
                 data-name={r.name}
                 onClick={() => pick(r.name)}
               >
-                <span className="recipe-menu__check">{current === r.name ? "●" : ""}</span>
+                <span className="recipe-menu__check">{current === r.name ? '●' : ''}</span>
                 <span className="recipe-menu__itemname">{r.name}</span>
                 {set.defaultName === r.name && (
-                  <span className="recipe-menu__star" title="默认配方：打开图时选它">★</span>
+                  <span className="recipe-menu__star" title="默认配方：打开图时选它">
+                    ★
+                  </span>
                 )}
                 {unsaved && <span className="recipe-menu__dirty" title="没存的改动" />}
                 <span className="recipe-menu__hint">{Object.keys(r.values).length} 个值</span>
@@ -107,14 +122,14 @@ export function RecipeMenu() {
               </button>
             );
           })}
-          {status === "loading" && <p className="recipe-menu__note">正在读配方目录…</p>}
+          {status === 'loading' && <p className="recipe-menu__note">正在读配方目录…</p>}
           <div className="recipe-menu__sep" />
           <button
             type="button"
             className="recipe-menu__item recipe-menu__action"
             data-testid="recipe-new"
             disabled={!dir}
-            title={dir ? "新建一个配方（空的，或复制当前配方）" : "先保存图"}
+            title={dir ? '新建一个配方（空的，或复制当前配方）' : '先保存图'}
             onClick={() => {
               setOpen(false);
               void newRecipeInteractive();
@@ -130,7 +145,7 @@ export function RecipeMenu() {
               setOpen(false);
               const ui = useUiStore.getState();
               ui.toggleParamPanel(true);
-              ui.setParamPanelTab("recipes");
+              ui.setParamPanelTab('recipes');
             }}
           >
             管理配方…

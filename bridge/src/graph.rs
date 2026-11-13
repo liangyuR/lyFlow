@@ -169,7 +169,9 @@ impl GraphDoc {
     /// op / opVersion / params 整份替换；edits 里删边、插节点、加边。插进来的节点摆在被迁移
     /// 节点的左下方，标题写进 ui.title。nodeId 不是顶层节点（子图里的路径）时什么都不做，返回 false。
     pub fn apply_migration(&mut self, m: &serde_json::Value) -> bool {
-        let Some(node_id) = m["nodeId"].as_str() else { return false };
+        let Some(node_id) = m["nodeId"].as_str() else {
+            return false;
+        };
         let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) else {
             return false;
         };
@@ -182,26 +184,33 @@ impl GraphDoc {
         if let Some(params) = m["params"].as_object() {
             node.params = params.clone();
         }
-        let near = node
-            .ui
-            .as_ref()
-            .and_then(|ui| ui.get("position"))
-            .map(|p| (p["x"].as_f64().unwrap_or(0.0), p["y"].as_f64().unwrap_or(0.0)));
+        let near = node.ui.as_ref().and_then(|ui| ui.get("position")).map(|p| {
+            (
+                p["x"].as_f64().unwrap_or(0.0),
+                p["y"].as_f64().unwrap_or(0.0),
+            )
+        });
 
         let edits = &m["edits"];
         if !edits.is_object() {
             return true;
         }
         let same = |a: &PortRef, b: &serde_json::Value| {
-            b["node"].as_str() == Some(a.node.as_str()) && b["port"].as_str() == Some(a.port.as_str())
+            b["node"].as_str() == Some(a.node.as_str())
+                && b["port"].as_str() == Some(a.port.as_str())
         };
         if let Some(remove) = edits["removeEdges"].as_array() {
-            self.edges
-                .retain(|e| !remove.iter().any(|r| same(&e.from, &r["from"]) && same(&e.to, &r["to"])));
+            self.edges.retain(|e| {
+                !remove
+                    .iter()
+                    .any(|r| same(&e.from, &r["from"]) && same(&e.to, &r["to"]))
+            });
         }
         if let Some(add) = edits["addNodes"].as_array() {
             for (k, n) in add.iter().enumerate() {
-                let (Some(id), Some(op)) = (n["id"].as_str(), n["op"].as_str()) else { continue };
+                let (Some(id), Some(op)) = (n["id"].as_str(), n["op"].as_str()) else {
+                    continue;
+                };
                 if self.nodes.iter().any(|x| x.id == id) {
                     continue;
                 }
@@ -218,7 +227,10 @@ impl GraphDoc {
                 self.nodes.push(Node {
                     id: id.to_string(),
                     op: op.to_string(),
-                    op_version: n["opVersion"].as_str().filter(|v| !v.is_empty()).map(String::from),
+                    op_version: n["opVersion"]
+                        .as_str()
+                        .filter(|v| !v.is_empty())
+                        .map(String::from),
                     bypass: false,
                     params: n["params"].as_object().cloned().unwrap_or_default(),
                     ui: (!ui.is_empty()).then(|| ui.into()),
@@ -270,8 +282,14 @@ mod tests {
                 .iter()
                 .map(|(id, fnode, fport, tnode, tport)| Edge {
                     id: (*id).into(),
-                    from: PortRef { node: (*fnode).into(), port: (*fport).into() },
-                    to: PortRef { node: (*tnode).into(), port: (*tport).into() },
+                    from: PortRef {
+                        node: (*fnode).into(),
+                        port: (*fport).into(),
+                    },
+                    to: PortRef {
+                        node: (*tnode).into(),
+                        port: (*tport).into(),
+                    },
                 })
                 .collect(),
             groups: Vec::new(),
@@ -288,18 +306,53 @@ mod tests {
     #[test]
     fn validate_structure_accepts_and_rejects() {
         let cases: &[(&str, Nodes, Edges, Option<&str>)] = &[
-            ("合法的链", &[("n1", "io.load_pcd"), ("n2", "filter.voxel_grid")],
-             &[("e1", "n1", "cloud", "n2", "cloud")], None),
-            ("悬空的边", &[("n1", "io.load_pcd")], &[("e1", "n1", "cloud", "ghost", "cloud")],
-             Some("目标节点不存在")),
-            ("重复的节点 id", &[("n1", "io.load_pcd"), ("n1", "filter.voxel_grid")], &[], Some("节点 id 重复")),
+            (
+                "合法的链",
+                &[("n1", "io.load_pcd"), ("n2", "filter.voxel_grid")],
+                &[("e1", "n1", "cloud", "n2", "cloud")],
+                None,
+            ),
+            (
+                "悬空的边",
+                &[("n1", "io.load_pcd")],
+                &[("e1", "n1", "cloud", "ghost", "cloud")],
+                Some("目标节点不存在"),
+            ),
+            (
+                "重复的节点 id",
+                &[("n1", "io.load_pcd"), ("n1", "filter.voxel_grid")],
+                &[],
+                Some("节点 id 重复"),
+            ),
             // 输入端口是单连接。多输入合并必须由算子显式声明多个端口来表达，
             // 否则求值顺序是隐式的（docs/graph-doc.md）
-            ("两条边进同一个输入", &[("a", "io.load_pcd"), ("b", "io.load_pcd"), ("c", "filter.voxel_grid")],
-             &[("e1", "a", "cloud", "c", "cloud"), ("e2", "b", "cloud", "c", "cloud")], Some("单连接")),
+            (
+                "两条边进同一个输入",
+                &[
+                    ("a", "io.load_pcd"),
+                    ("b", "io.load_pcd"),
+                    ("c", "filter.voxel_grid"),
+                ],
+                &[
+                    ("e1", "a", "cloud", "c", "cloud"),
+                    ("e2", "b", "cloud", "c", "cloud"),
+                ],
+                Some("单连接"),
+            ),
             // 一个输出端口连多个输入是合法的
-            ("一个输出扇出", &[("a", "io.load_pcd"), ("b", "filter.voxel_grid"), ("c", "filter.passthrough")],
-             &[("e1", "a", "cloud", "b", "cloud"), ("e2", "a", "cloud", "c", "cloud")], None),
+            (
+                "一个输出扇出",
+                &[
+                    ("a", "io.load_pcd"),
+                    ("b", "filter.voxel_grid"),
+                    ("c", "filter.passthrough"),
+                ],
+                &[
+                    ("e1", "a", "cloud", "b", "cloud"),
+                    ("e2", "a", "cloud", "c", "cloud"),
+                ],
+                None,
+            ),
         ];
         for (name, nodes, edges, want) in cases {
             let got = doc(nodes, edges).validate_structure();
@@ -383,7 +436,10 @@ mod tests {
     fn apply_migration_rewires_edges_and_inserts_nodes() {
         let mut d = doc(
             &[("a", "t.src"), ("b", "t.src"), ("s", "t.sink")],
-            &[("e1", "a", "out", "s", "old1"), ("e2", "b", "out", "s", "old2")],
+            &[
+                ("e1", "a", "out", "s", "old1"),
+                ("e2", "b", "out", "s", "old2"),
+            ],
         );
         d.nodes[2].ui = Some(serde_json::json!({ "position": { "x": 500, "y": 100 } }));
         let m = serde_json::json!({
@@ -407,7 +463,11 @@ mod tests {
         assert!(d.apply_migration(&m));
         assert_eq!(d.nodes[2].op_version.as_deref(), Some("2.0.0"));
         assert_eq!(d.nodes[2].params["k"], 1);
-        let pack = d.nodes.iter().find(|n| n.id == "s_pack").expect("插入的节点");
+        let pack = d
+            .nodes
+            .iter()
+            .find(|n| n.id == "s_pack")
+            .expect("插入的节点");
         assert_eq!(pack.op_version.as_deref(), Some("1.0.0"));
         let ui = pack.ui.as_ref().unwrap();
         assert_eq!(ui["position"]["x"], 280.0);
@@ -415,9 +475,21 @@ mod tests {
         let wires: Vec<_> = d
             .edges
             .iter()
-            .map(|e| format!("{}:{}.{}>{}.{}", e.id, e.from.node, e.from.port, e.to.node, e.to.port))
+            .map(|e| {
+                format!(
+                    "{}:{}.{}>{}.{}",
+                    e.id, e.from.node, e.from.port, e.to.node, e.to.port
+                )
+            })
             .collect();
-        assert_eq!(wires, ["e1:a.out>s_pack.x", "m_s_pack_y:b.out>s_pack.y", "m_s_in:s_pack.out>s.in"]);
+        assert_eq!(
+            wires,
+            [
+                "e1:a.out>s_pack.x",
+                "m_s_pack_y:b.out>s_pack.y",
+                "m_s_in:s_pack.out>s.in"
+            ]
+        );
         assert!(d.validate_structure().is_ok());
 
         // 子图里的路径 id 不写回

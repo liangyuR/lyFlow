@@ -27,4 +27,4 @@ inline constexpr std::size_t kNumChannels = 6;
 // kProfileSlots long.
 std::vector<float> buildChannels(const ProfileRow& row);
 
-}  // namespace gap::ml
+} // namespace gap::ml

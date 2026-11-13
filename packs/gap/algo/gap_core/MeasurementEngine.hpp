@@ -5,8 +5,8 @@
 namespace gap::core {
 
 class MeasurementEngine {
- public:
+public:
   MeasurementResult measure(const MeasurementRequest& request) const noexcept;
 };
 
-}  // namespace gap::core
+} // namespace gap::core

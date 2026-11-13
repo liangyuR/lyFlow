@@ -22,4 +22,4 @@ inline bool insideBox2D(float x, float y, const Eigen::Vector2f& lo, const Eigen
 bool cropBox2D(const Cloud2D& src, Cloud2D* dst, const Eigen::Matrix2f& roi,
                Bounds2D bounds = Bounds2D::Open);
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

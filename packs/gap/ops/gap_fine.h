@@ -37,7 +37,7 @@ Status labelsFromLogits(const Inputs&, const ParamView&, Outputs&, ExecContext&)
 Status roiFromLabels(const Inputs&, const ParamView&, Outputs&, ExecContext&);
 Status dropNonFinite(const Inputs&, const ParamView&, Outputs&, ExecContext&);
 Status rollAnchoredCrop(const Inputs&, const ParamView&, Outputs&, ExecContext&);
-}  // namespace fine
+} // namespace fine
 
 // ---------------------------------------------------------------- 两种 Bundle（L4）
 inline constexpr const char* kScanPairKind = "gap.ScanPair";
@@ -107,7 +107,7 @@ std::array<double, 4> boxToMm(const lyflow::Box2D& box);
 /// 积木算子里的一步：把一个细粒度算子的 compute 原样调一遍（L6）。参数从那个算子的
 /// 默认值起步，再用 copy / set 覆盖；输入端口没给的就是「没接」。
 class Step {
- public:
+public:
   /// fn 为空时用注册表里 opId 那个算子注册的 compute（跨包的算子走这条）。
   explicit Step(const char* opId, ComputeFn fn = nullptr);
 
@@ -124,7 +124,7 @@ class Step {
   /// 跑完之后取输出。没有这个端口返回一个空 Data。
   const Data& out(const char* port) const;
 
- private:
+private:
   std::string opId_;
   const OperatorDesc* desc_ = nullptr;
   ComputeFn fn_ = nullptr;
@@ -138,4 +138,4 @@ class Step {
 Param paramOf(const Registry& r, const char* opId, const char* name, int advanced = -1,
               const char* group = nullptr);
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

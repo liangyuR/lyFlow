@@ -1,44 +1,43 @@
 // 算子详情（只读）。没选中节点时展示，用来在加进图之前先看清楚这个算子是什么。
 // 它同时证明 manifest 的每个字段都真的走通了三层。
 
-import { usePortColor } from "../store/manifest";
-import type { OperatorDesc, Param, Port, PortContract } from "../types/manifest";
+import { usePortColor } from '../store/manifest';
+import type { OperatorDesc, Param, Port, PortContract } from '../types/manifest';
 
 function formatDefault(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (Array.isArray(value)) return `[${value.join(", ")}]`;
-  if (typeof value === "string") return value === "" ? '""' : value;
+  if (value === null || value === undefined) return '—';
+  if (Array.isArray(value)) return `[${value.join(', ')}]`;
+  if (typeof value === 'string') return value === '' ? '""' : value;
   return String(value);
 }
 
 function formatRange(p: Param): string | null {
   const parts: string[] = [];
   const hard =
-    p.min !== undefined || p.max !== undefined
-      ? `${p.min ?? "-∞"} … ${p.max ?? "+∞"}`
-      : null;
+    p.min !== undefined || p.max !== undefined ? `${p.min ?? '-∞'} … ${p.max ?? '+∞'}` : null;
   const soft =
     p.softMin !== undefined || p.softMax !== undefined
-      ? `滑块 ${p.softMin ?? "-∞"} … ${p.softMax ?? "+∞"}`
+      ? `滑块 ${p.softMin ?? '-∞'} … ${p.softMax ?? '+∞'}`
       : null;
   if (hard) parts.push(hard);
   if (soft) parts.push(soft);
   if (p.step !== undefined) parts.push(`步长 ${p.step}`);
-  return parts.length > 0 ? parts.join("　") : null;
+  return parts.length > 0 ? parts.join('　') : null;
 }
 
 function conditionText(p: Param): string | null {
   const c = p.visibleWhen ?? p.enabledWhen;
   if (!c) return null;
-  const verb = p.visibleWhen ? "显示" : "启用";
+  const verb = p.visibleWhen ? '显示' : '启用';
   if (c.eq !== undefined) return `仅当 ${c.param} = ${formatDefault(c.eq)} 时${verb}`;
-  if (c.in !== undefined) return `仅当 ${c.param} ∈ [${c.in.map(formatDefault).join(", ")}] 时${verb}`;
+  if (c.in !== undefined)
+    return `仅当 ${c.param} ∈ [${c.in.map(formatDefault).join(', ')}] 时${verb}`;
   if (c.ne !== undefined) return `仅当 ${c.param} ≠ ${formatDefault(c.ne)} 时${verb}`;
   return null;
 }
 
 /** 元素数一条契约的人话版。eq 与 min/max 互斥，见 schema 里的说明。 */
-function formatElementCount(c: NonNullable<PortContract["elementCount"]>): string | null {
+function formatElementCount(c: NonNullable<PortContract['elementCount']>): string | null {
   if (c.eq !== undefined) return `元素数 = ${c.eq}`;
   if (c.min !== undefined && c.max !== undefined) return `元素数 ${c.min} … ${c.max}`;
   if (c.min !== undefined) return `元素数 ≥ ${c.min}`;
@@ -53,8 +52,9 @@ function describeContract(contract: PortContract): string[] {
     const s = formatElementCount(contract.elementCount);
     if (s) parts.push(s);
   }
-  if (contract.finite) parts.push("全部有限");
-  if (contract.shape) parts.push(`形状 [${contract.shape.map((d) => (d === -1 ? "*" : d)).join(", ")}]`);
+  if (contract.finite) parts.push('全部有限');
+  if (contract.shape)
+    parts.push(`形状 [${contract.shape.map((d) => (d === -1 ? '*' : d)).join(', ')}]`);
   if (contract.recordType) parts.push(`Record 类型 ${contract.recordType}`);
   return parts;
 }
@@ -74,7 +74,7 @@ export function PortRow({
   const contractParts = port.contract ? describeContract(port.contract) : [];
 
   return (
-    <li className={compact ? "port port--compact" : "port"}>
+    <li className={compact ? 'port port--compact' : 'port'}>
       <span className="port__dot" style={{ background: color }} aria-hidden />
       <span className="port__name">{port.label || port.name}</span>
       <code className="port__type" style={{ color }}>
@@ -88,7 +88,7 @@ export function PortRow({
           data-testid="port-contract"
           title={JSON.stringify(port.contract)}
         >
-          {contractParts.join(" · ")}
+          {contractParts.join(' · ')}
         </span>
       )}
       {port.example !== undefined && (
@@ -145,11 +145,7 @@ function ParamRow({ param }: { param: Param }) {
         {param.filters && (
           <>
             <dt>文件类型</dt>
-            <dd>
-              {param.filters
-                .map((f) => `${f.name} (${f.extensions.join(", ")})`)
-                .join("　")}
-            </dd>
+            <dd>{param.filters.map((f) => `${f.name} (${f.extensions.join(', ')})`).join('　')}</dd>
           </>
         )}
 
@@ -178,12 +174,24 @@ export function OperatorDetail({ op }: { op: OperatorDesc }) {
         </div>
         {op.doc && <p className="detail__doc">{op.doc}</p>}
         <div className="detail__caps">
-          {caps.cancellable && <span className="tag" title="支持中途取消，可用于 live preview">可取消</span>}
-          {caps.previewable && <span className="tag" title="支持降级质量的快速预览">可预览</span>}
+          {caps.cancellable && (
+            <span className="tag" title="支持中途取消，可用于 live preview">
+              可取消
+            </span>
+          )}
+          {caps.previewable && (
+            <span className="tag" title="支持降级质量的快速预览">
+              可预览
+            </span>
+          )}
           {caps.deterministic ? (
-            <span className="tag" title="同输入同输出，可参与缓存复用">确定性</span>
+            <span className="tag" title="同输入同输出，可参与缓存复用">
+              确定性
+            </span>
           ) : (
-            <span className="tag tag--warn" title="结果不可复现，不能参与缓存">非确定性</span>
+            <span className="tag tag--warn" title="结果不可复现，不能参与缓存">
+              非确定性
+            </span>
           )}
         </div>
       </header>

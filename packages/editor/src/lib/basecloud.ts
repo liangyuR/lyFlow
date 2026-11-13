@@ -1,10 +1,10 @@
 // 几何节点的底图：显示节点自己没有点云输出时，沿输入边往上游找**最近**的一片云当背景。
 // 找到的 id 走 resolveOutput 展开成路径 id（F2），子图内外都能直接喂给 getOutputCloud。
 
-import { levelOf, resolveOutput, pathPrefix, type SubPath } from "./subgraph";
-import type { OutputStat } from "../types/execution";
-import type { GraphDoc, GraphNode } from "../types/graph";
-import { bundleKindOf, type BundleDesc, type OperatorDesc } from "../types/manifest";
+import { levelOf, resolveOutput, pathPrefix, type SubPath } from './subgraph';
+import type { OutputStat } from '../types/execution';
+import type { GraphDoc, GraphNode } from '../types/graph';
+import { bundleKindOf, type BundleDesc, type OperatorDesc } from '../types/manifest';
 
 /** 上游借来的那片云。 */
 export interface BaseCloud {
@@ -29,12 +29,12 @@ export function firstCloudPort(
 ): string | null {
   const declared = ops.get(opId)?.outputs ?? [];
   for (const p of declared) {
-    if (p.type === "PointCloud") return p.name;
+    if (p.type === 'PointCloud') return p.name;
   }
   for (const p of declared) {
     const kind = bundleKindOf(p.type);
     const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
-    const fields = (desc?.fields ?? []).filter((f) => f.type === "PointCloud");
+    const fields = (desc?.fields ?? []).filter((f) => f.type === 'PointCloud');
     if (fields.length === 0) continue;
     let best = `${p.name}.${fields[fields.length - 1]!.name}`;
     let most = -1;
@@ -58,12 +58,12 @@ export function cloudPortsOf(
   bundles?: readonly BundleDesc[],
 ): string[] {
   const declared = ops.get(opId)?.outputs ?? [];
-  const out = declared.filter((p) => p.type === "PointCloud").map((p) => p.name);
+  const out = declared.filter((p) => p.type === 'PointCloud').map((p) => p.name);
   for (const p of declared) {
     const kind = bundleKindOf(p.type);
     const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
     for (const f of desc?.fields ?? []) {
-      if (f.type === "PointCloud") out.push(`${p.name}.${f.name}`);
+      if (f.type === 'PointCloud') out.push(`${p.name}.${f.name}`);
     }
   }
   return out;
@@ -151,7 +151,9 @@ export function findBaseCloud(
     }
   };
   const via = viaPort !== undefined ? upstreamOf(doc, path, start, ops, viaPort) : [];
-  push((via.length > 0 ? via : upstreamOf(doc, path, start, ops)).map((f) => ({ ...f, first: true })));
+  push(
+    (via.length > 0 ? via : upstreamOf(doc, path, start, ops)).map((f) => ({ ...f, first: true })),
+  );
 
   // 队列是先进先出，所以先耗完同一层深度才往上走一层 —— 「最近的」由此保证，
   // 同深度之间的先后则来自 upstreamOf 的端口声明顺序。
@@ -167,7 +169,11 @@ export function findBaseCloud(
     // 解不开的（库算子的定义在库文件里）不算数，继续往上找
     const resolved = port ? resolveOutput(doc, frame.path, node.id, port) : null;
     if (port && resolved) {
-      const direct = !!frame.first && !!frame.port && !!port && (port === frame.port || port.startsWith(`${frame.port}.`));
+      const direct =
+        !!frame.first &&
+        !!frame.port &&
+        !!port &&
+        (port === frame.port || port.startsWith(`${frame.port}.`));
       return { localId: node.id, label: titleOf(node, ops), resolved, direct };
     }
     push(upstreamOf(doc, frame.path, node, ops));

@@ -62,6 +62,13 @@ M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之
 core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)），
 只导出 `c_api.h` 里那些 C 函数。Rust 侧用 libloading 在**运行时**加载它，
 既不链 import 库，也不再用 cc crate 逐个编 `.cpp`。
+C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`，通过
+`lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本属于同一 主.次 系列，
+补丁版本之间保持 C ABI 兼容；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
+完整版本，例如 `find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)`。
+`LYFLOW_RELEASE_BUILD` 默认关闭，仅由统一打包入口在验证固定依赖后启用。只有该受控发布构建、
+固定四个发布算子包、无外部包、Windows x64 RelWithDebInfo 且干净 Git 修订时，
+`lyflow_source_revision()` 才提供可用于跨进程缓存的修订；其他构建返回空串。
 `bridge/build.rs` 调的就是这份 `CMakeLists.txt` —— 两条路径同源，
 不会出现「命令行能编、cargo 编不了」。
 
@@ -70,8 +77,15 @@ core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)�
 pnpm core:build
 # 或者直接
 pwsh -File scripts/build-core.ps1
-pwsh -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建
+pwsh -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建 DLL 与算子自检工具
 ```
+
+`-NoTests` 会设置 `BUILD_TESTING=OFF`，不生成测试程序和客户端 fixture；再次运行默认命令会恢复测试构建。
+Cargo 依赖构建也关闭这部分目标，C++ 测试仍由 `core:build` 负责。
+
+core 与未指定 PCH 的算子包预编译 `nlohmann/json.hpp`，点云和图像包把 JSON 放入各自的 PCH，
+测试单独预编译 doctest 与 JSON。core 与测试新增的 PCH 仅包含第三方头，避免修改 core 公共头时连带重建 PCH。
+手动配置时可用 `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` 关闭；CI 的 sccache 构建显式关闭 PCH，继续复用编译缓存。
 
 产物全部落在 `build/core/bin/`：
 

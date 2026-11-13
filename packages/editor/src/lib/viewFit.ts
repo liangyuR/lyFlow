@@ -1,4 +1,4 @@
-import { niceStep } from "./params";
+import { niceStep } from './params';
 
 // 换了一片云要不要重新取景。同一个坐标系里（两个包围盒相交、对角线差不到 4 倍）就不动相机：调参数重跑、
 // 在链上逐个点节点时，视角连同双击设好的转心都留着；平移了 100 m、放大了 1000 倍、完全不相交的才重新取景。
@@ -21,7 +21,7 @@ export function sameFrame(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
 // 标准视角（预览栏的 俯 / 前 / 侧 / 轴，鼠标在预览上按 1–4）：绕着现在的转心转过去、距离不变 ——
 // 缩放与双击设好的转心都留着，画面不跳；要看全貌照旧按 ⤢。
 
-export type ViewPreset = "top" | "front" | "side" | "iso";
+export type ViewPreset = 'top' | 'front' | 'side' | 'iso';
 
 /** ⤢ 取景（fitToBounds）的方向：斜 45°。「轴」也是它。 */
 export const ISO_DIR: readonly [number, number, number] = [1, -1, 0.7];
@@ -52,11 +52,19 @@ export function presetPosition(
 
 /** 快捷键 id → 视角。 */
 export function presetOfShortcut(id: string): ViewPreset | null {
-  return id === "viewTop" ? "top" : id === "viewFront" ? "front" : id === "viewSide" ? "side" : id === "viewIso" ? "iso" : null;
+  return id === 'viewTop'
+    ? 'top'
+    : id === 'viewFront'
+      ? 'front'
+      : id === 'viewSide'
+        ? 'side'
+        : id === 'viewIso'
+          ? 'iso'
+          : null;
 }
 
 /** 快捷键按在哪个预览上：useShortcuts 往鼠标底下那个预览发这个事件，预览自己转过去（detail.done 置 true）。 */
-export const VIEW_PRESET_EVENT = "lyflow:view-preset";
+export const VIEW_PRESET_EVENT = 'lyflow:view-preset';
 
 // 预览的网格跟着云走（以前固定 4 m、16 格、铺在原点）：格子取 1/2/5 × 10^n，让云的长边上有 10–25 格；
 // 中心对齐到整格上、铺在云最低点的下面一丝。毫米级的小零件、x = 1000 m 的云都看得到网格，栏上写着一格多大。
@@ -74,7 +82,9 @@ export interface GridSpec {
 }
 
 export function gridText(cell: number): string {
-  return cell < 1 ? `格 ${Number((cell * 1000).toPrecision(3))} mm` : `格 ${Number(cell.toPrecision(3))} m`;
+  return cell < 1
+    ? `格 ${Number((cell * 1000).toPrecision(3))} mm`
+    : `格 ${Number(cell.toPrecision(3))} m`;
 }
 
 /** b 是包围盒 [minx, miny, minz, maxx, maxy, maxz]。keepCell：上一次的格子 —— 没重新取景时（同一坐标系里重跑、换节点）

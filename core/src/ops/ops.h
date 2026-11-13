@@ -10,4 +10,4 @@ void registerGenSynthetic(Registry& r);
 void registerUtilReroute(Registry& r);
 void registerFlowOps(Registry& r);
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

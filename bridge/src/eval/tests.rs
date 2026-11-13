@@ -69,6 +69,7 @@ fn the_progress_line_rewrites_itself_and_stays_silent_when_off() {
     let buf = Buf::default();
     let sink = crate::cli::sink_of(buf.clone());
     let row = |status: &str, ms: f64| Row {
+        snapshot_id: None,
         param_set: 0,
         sample: 0,
         status: status.to_string(),
@@ -132,6 +133,7 @@ fn the_progress_line_rewrites_itself_and_stays_silent_when_off() {
 #[test]
 fn the_failure_digest_groups_by_status_then_code() {
     let row = |status: &str, errors: &[&str]| Row {
+        snapshot_id: None,
         param_set: 0,
         sample: 0,
         status: status.to_string(),
@@ -588,6 +590,7 @@ fn glob_gives_colliding_stems_distinct_ids() {
 
 fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row {
     Row {
+        snapshot_id: None,
         param_set: 0,
         sample,
         status: status.to_string(),

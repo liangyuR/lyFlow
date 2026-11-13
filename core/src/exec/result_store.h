@@ -14,8 +14,8 @@
 namespace lyflow::exec {
 
 struct CloudPreview {
-  std::uint32_t pointCount = 0;   ///< 抽样后
-  std::uint32_t totalPoints = 0;  ///< 抽样前
+  std::uint32_t pointCount = 0;  ///< 抽样后
+  std::uint32_t totalPoints = 0; ///< 抽样前
   bool hasIntensity = false;
   bool hasNormals = false;
   bool hasRgb = false;
@@ -66,7 +66,7 @@ struct CacheStats {
 /// 没有它，一个大节点的输出可能在它的下游读到之前就被 LRU 淘汰掉。
 class ResultStore;
 class CachePin {
- public:
+public:
   CachePin() = default;
   CachePin(ResultStore& store, std::vector<std::string> keys);
   ~CachePin();
@@ -75,13 +75,13 @@ class CachePin {
 
   void add(const std::string& cacheKey);
 
- private:
+private:
   ResultStore* store_ = nullptr;
   std::vector<std::string> keys_;
 };
 
 class ResultStore {
- public:
+public:
   static ResultStore& instance();
 
   /// replace=false 时同一个键已经在仓里就保留原来那份（内容寻址：键相同即内容相同）。
@@ -113,7 +113,8 @@ class ResultStore {
   std::string lastCompletedBefore(const std::string& runId) const;
   /// 把 fromRun 里这个节点的索引原样挂进 runId：每个端口的数据都还在内容层才挂，返回挂没挂上。
   /// 与 attach 一样不算缓存命中，不动 hits / misses。
-  bool attachFromRun(const std::string& fromRun, const std::string& runId, const std::string& nodeId);
+  bool attachFromRun(const std::string& fromRun, const std::string& runId,
+                     const std::string& nodeId);
 
   /// 不改动命中计数的只读探测，lyflow_plan 用它预测 cached。
   bool peek(const std::string& cacheKey, const std::vector<std::string>& ports) const;
@@ -157,7 +158,7 @@ class ResultStore {
   void pin(const std::string& cacheKey);
   void unpin(const std::string& cacheKey);
 
- private:
+private:
   ResultStore() = default;
 
   struct Entry {
@@ -202,4 +203,4 @@ class ResultStore {
 /// 默认预算：min(8 GB, 物理内存 40%)。取不到物理内存时退回 2 GB。
 std::uint64_t defaultCacheBudget();
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

@@ -27,14 +27,14 @@ inline lyflow::std_pc::Circle2DFitOptions circleOptions(double distThresh, doubl
   return o;
 }
 
-inline bool lineFit2D(const PointCloud &cloud, Eigen::VectorXf *line, pcl::Indices *inliers,
+inline bool lineFit2D(const PointCloud& cloud, Eigen::VectorXf* line, pcl::Indices* inliers,
                       double distThresh = 0.0001) {
   return lyflow::std_pc::fitLine2D(cloud, line, inliers, lineOptions(distThresh));
 }
 
 /// line_type 是 "vertical line" / "horizontal line" 时约束方向，其余按普通拟合。
-inline bool lineFit2D(const PointCloud &cloud, Eigen::VectorXf *line, pcl::Indices *inliers,
-                      const std::string &lineType, double distThresh) {
+inline bool lineFit2D(const PointCloud& cloud, Eigen::VectorXf* line, pcl::Indices* inliers,
+                      const std::string& lineType, double distThresh) {
   if (lineType != "vertical line" && lineType != "horizontal line") {
     return lineFit2D(cloud, line, inliers, distThresh);
   }
@@ -48,11 +48,10 @@ struct RadiusPrior {
   double sigma = 0.0;
 };
 
-inline bool circleFit2D(const PointCloud &cloud, Eigen::VectorXf *circle, pcl::Indices *inliers,
+inline bool circleFit2D(const PointCloud& cloud, Eigen::VectorXf* circle, pcl::Indices* inliers,
                         double distThresh = 0.00003, double minRadius = 0.0005,
-                        double maxRadius = 0.01, double fixedRadius = 0.0,
-                        RadiusPrior prior = {},
-                        lyflow::std_pc::Circle2DFitReport *report = nullptr) {
+                        double maxRadius = 0.01, double fixedRadius = 0.0, RadiusPrior prior = {},
+                        lyflow::std_pc::Circle2DFitReport* report = nullptr) {
   auto options = circleOptions(distThresh, minRadius, maxRadius);
   // 半径钉死时先验没有意义（钉死那一步会把半径覆盖掉），只在自由半径时带上。
   if (fixedRadius <= 0) {
@@ -65,8 +64,8 @@ inline bool circleFit2D(const PointCloud &cloud, Eigen::VectorXf *circle, pcl::I
 }
 
 /// 四边严格开区间（原 filterCloudByRoi 的语义）。roi.col(0) 是 min 角。
-inline bool roiCrop2D(const PointCloud &src, PointCloud *dst, const Eigen::Matrix2f &roi) {
+inline bool roiCrop2D(const PointCloud& src, PointCloud* dst, const Eigen::Matrix2f& roi) {
   return lyflow::std_pc::cropBox2D(src, dst, roi, lyflow::std_pc::Bounds2D::Open);
 }
 
-}  // namespace gap_std
+} // namespace gap_std

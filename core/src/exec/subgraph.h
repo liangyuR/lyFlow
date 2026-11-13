@@ -31,4 +31,4 @@ const SubgraphDef* findSubgraphDef(const RawGraph& graph, const std::string& opI
 /// 递归展开成平图。失败时诊断已写进 diags，out 的内容不可用。
 bool expandGraph(const RawGraph& in, RawGraph& out, Diagnostics& diags);
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

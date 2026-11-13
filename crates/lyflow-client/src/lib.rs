@@ -3,7 +3,7 @@
 //!
 //! 这是 `lyflow/client.hpp`（C++ header-only 客户端，见 docs/embedding.md）的 Rust 对应物：
 //! 不构建 core、不链接任何库、不含 build.rs，core 是运行时按给定路径加载的 DLL（ADR-0004）。
-//! `ABI_VERSION` 必须与 core 的 `LYFLOW_ABI_VERSION` 一致。
+//! core 的 `LYFLOW_ABI_VERSION` 与引擎版本必须与 `ABI_VERSION` 属于同一 主.次 系列：补丁版本不破坏 C ABI。
 //!
 //! 进程级单例、DLL 路径解析与热重载**不在这里** —— 那是宿主自己的事，桥接层的那一份在
 //! `bridge/src/core_ffi.rs`。
@@ -19,8 +19,18 @@ use libloading::{Library, Symbol};
 
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
-/// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 15;
+/// 客户端的产品版本。core 的 LYFLOW_ABI_VERSION（core/include/lyflow/c_api.h）与它同属一个 主.次 系列才能加载。
+pub const ABI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn series(version: &str) -> Option<(u64, u64)> {
+    let mut parts = version.split('.');
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+}
+
+/// 同一 主.次 系列的 core 与本客户端兼容；补丁版本不破坏 C ABI。
+pub fn abi_compatible(version: &str) -> bool {
+    series(version).is_some() && series(version) == series(ABI_VERSION)
+}
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -179,6 +189,100 @@ impl RunImageInput {
     }
 }
 
+/// `RunInput` / `RunImageInput` 摊成 C ABI 的两个数组。指针借的是调用方的缓冲与这里的 CString，
+/// 所以它活着指针才有效；core 在调用里就拷走，调用返回后即可丢。运行、带注入的计划与清缓存共用它，
+/// 三处交给 core 的是同一种摊法，core 算出的注入摘要（进 cacheKey）才一致。
+struct RawInputs<'a> {
+    // 顺序有意义：clouds / images 里的指针指向 names 的 CString，先丢指针。
+    clouds: Vec<RunInputRaw>,
+    images: Vec<RunImageInputRaw>,
+    #[allow(dead_code)]
+    names: Vec<CString>,
+    _borrow: std::marker::PhantomData<&'a [RunInput]>,
+}
+
+impl<'a> RawInputs<'a> {
+    fn new(
+        inputs: &'a [RunInput],
+        images: &'a [RunImageInput],
+    ) -> Result<Self, std::ffi::NulError> {
+        let mut names = Vec::with_capacity(2 * (inputs.len() + images.len()));
+        // CString 的缓冲在堆上，Vec 扩容只搬句柄，指针不失效。
+        let mut name = |text: &str| -> Result<*const c_char, std::ffi::NulError> {
+            let owned = CString::new(text)?;
+            let ptr = owned.as_ptr();
+            names.push(owned);
+            Ok(ptr)
+        };
+        let or_null = |empty: bool, ptr: *const f32| if empty { std::ptr::null() } else { ptr };
+        let mut clouds = Vec::with_capacity(inputs.len());
+        for i in inputs {
+            clouds.push(RunInputRaw {
+                node_id: name(&i.node_id)?,
+                port: name(&i.port)?,
+                kind: INPUT_POINT_CLOUD,
+                count: (i.xyz.len() / 3) as u32,
+                xyz: i.xyz.as_ptr(),
+                intensity: or_null(i.intensity.is_empty(), i.intensity.as_ptr()),
+                normals: or_null(i.normals.is_empty(), i.normals.as_ptr()),
+                rgb: if i.rgb.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.rgb.as_ptr()
+                },
+            });
+        }
+        let mut raw_images = Vec::with_capacity(images.len());
+        for i in images {
+            raw_images.push(RunImageInputRaw {
+                node_id: name(&i.node_id)?,
+                port: name(&i.port)?,
+                width: i.width,
+                height: i.height,
+                channels: i.channels,
+                depth: i.depth,
+                row_bytes: 0,
+                reserved: 0,
+                pixels: i.pixels_ptr(),
+            });
+        }
+        Ok(RawInputs {
+            clouds,
+            images: raw_images,
+            names,
+            _borrow: std::marker::PhantomData,
+        })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.clouds.is_empty() && self.images.is_empty()
+    }
+
+    fn clouds_ptr(&self) -> *const RunInputRaw {
+        if self.clouds.is_empty() {
+            std::ptr::null()
+        } else {
+            self.clouds.as_ptr()
+        }
+    }
+
+    fn cloud_count(&self) -> usize {
+        self.clouds.len()
+    }
+
+    fn images_ptr(&self) -> *const RunImageInputRaw {
+        if self.images.is_empty() {
+            std::ptr::null()
+        } else {
+            self.images.as_ptr()
+        }
+    }
+
+    fn image_count(&self) -> usize {
+        self.images.len()
+    }
+}
+
 /// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
@@ -252,6 +356,12 @@ pub enum CoreError {
     Load(String),
     #[error("lyflow_core.dll 里找不到符号 {0}（DLL 版本与本程序不匹配）")]
     MissingSymbol(&'static str),
+    #[error("core 版本不匹配: client={client}, ABI={abi}, engine={engine}")]
+    VersionMismatch {
+        client: &'static str,
+        abi: String,
+        engine: String,
+    },
     #[error("core 返回了空指针（内存分配失败）")]
     NullReturn,
     #[error("core 返回的不是合法 UTF-8: {0}")]
@@ -270,12 +380,8 @@ type FnStringFree = unsafe extern "C" fn(*mut c_char);
 type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnValidateParams =
     unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
-type FnPlan = unsafe extern "C" fn(
-    *const c_char,
-    *const c_char,
-    *const *const c_char,
-    usize,
-) -> *mut c_char;
+type FnPlan =
+    unsafe extern "C" fn(*const c_char, *const c_char, *const *const c_char, usize) -> *mut c_char;
 type FnPlanParams = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -330,8 +436,7 @@ type FnImageViewFree = unsafe extern "C" fn(*mut ImageViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnRunSummary = unsafe extern "C" fn(*const c_char) -> *mut c_char;
-type FnImport =
-    unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
+type FnImport = unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
 type FnLibraryDefinition = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -343,6 +448,31 @@ type FnCacheEvict = unsafe extern "C" fn(
     usize,
     c_int,
     *const c_char,
+) -> *mut c_char;
+/// 1.1.3：`lyflow_plan_inputs`。
+type FnPlanInputs = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    *const c_char,
+    *const RunInputRaw,
+    usize,
+    *const RunImageInputRaw,
+    usize,
+) -> *mut c_char;
+/// 1.1.3：`lyflow_cache_evict_inputs`。
+type FnCacheEvictInputs = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    c_int,
+    *const c_char,
+    *const RunInputRaw,
+    usize,
+    *const RunImageInputRaw,
+    usize,
 ) -> *mut c_char;
 type FnOutputSave = unsafe extern "C" fn(
     *const c_char,
@@ -357,6 +487,8 @@ type FnOutputSave = unsafe extern "C" fn(
 pub struct Core {
     // 顺序有意义：把 lib 放最后，让「DLL 先于函数指针卸载」在类型层面不可能发生。
     version: FnVersion,
+    abi_version: FnVersion,
+    source_revision: FnVersion,
     manifest_json: FnJson,
     manifest_problems: FnJson,
     string_free: FnStringFree,
@@ -389,6 +521,10 @@ pub struct Core {
     library_count: FnLibraryCount,
     library_definition: FnLibraryDefinition,
     cache_set_dir: FnCacheSetDir,
+    // 1.1.3 起才有：同系列的老运行库缺这两个符号也照样加载（补丁版可直接替换运行库），
+    // 用到时才报 MissingSymbol。
+    plan_inputs: Option<FnPlanInputs>,
+    cache_evict_inputs: Option<FnCacheEvictInputs>,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -406,6 +542,14 @@ macro_rules! sym {
     }};
 }
 
+/// 同系列较新的补丁版才加的符号：找不到是 None，不算加载失败。
+macro_rules! sym_opt {
+    ($lib:expr, $name:literal, $ty:ty) => {{
+        let s: Option<Symbol<$ty>> = unsafe { $lib.get(concat!($name, "\0").as_bytes()) }.ok();
+        s.map(|s| unsafe { *s.into_raw() })
+    }};
+}
+
 /// Windows 仅从 DLL 所在目录解析非系统运行依赖。
 #[cfg(windows)]
 fn open_library(path: &Path) -> Result<Library, libloading::Error> {
@@ -415,7 +559,8 @@ fn open_library(path: &Path) -> Result<Library, libloading::Error> {
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }.map(Library::from)
+    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }
+        .map(Library::from)
 }
 
 #[cfg(not(windows))]
@@ -429,8 +574,29 @@ impl Core {
         let lib = open_library(path)
             .map_err(|e| CoreError::Load(format!("{} —— {e}", path.display())))?;
 
+        let abi_version = sym!(lib, "lyflow_abi_version_string", FnVersion);
+        let version = sym!(lib, "lyflow_version", FnVersion);
+        let read_version = |function: FnVersion| -> Result<String, CoreError> {
+            let raw = unsafe { function() };
+            if raw.is_null() {
+                return Ok("<null>".to_owned());
+            }
+            Ok(unsafe { CStr::from_ptr(raw) }.to_str()?.to_owned())
+        };
+        let abi = read_version(abi_version)?;
+        let engine = read_version(version)?;
+        if !abi_compatible(&abi) || !abi_compatible(&engine) {
+            return Err(CoreError::VersionMismatch {
+                client: ABI_VERSION,
+                abi,
+                engine,
+            });
+        }
+
         Ok(Core {
-            version: sym!(lib, "lyflow_version", FnVersion),
+            version,
+            abi_version,
+            source_revision: sym!(lib, "lyflow_source_revision", FnVersion),
             manifest_json: sym!(lib, "lyflow_manifest_json", FnJson),
             manifest_problems: sym!(lib, "lyflow_manifest_problems", FnJson),
             string_free: sym!(lib, "lyflow_string_free", FnStringFree),
@@ -464,6 +630,8 @@ impl Core {
             library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
             library_definition: sym!(lib, "lyflow_library_definition", FnLibraryDefinition),
             cache_set_dir: sym!(lib, "lyflow_cache_set_dir", FnCacheSetDir),
+            plan_inputs: sym_opt!(lib, "lyflow_plan_inputs", FnPlanInputs),
+            cache_evict_inputs: sym_opt!(lib, "lyflow_cache_evict_inputs", FnCacheEvictInputs),
             lib,
         })
     }
@@ -485,6 +653,25 @@ impl Core {
                 .to_string_lossy()
                 .into_owned()
         }
+    }
+
+    pub fn abi_version(&self) -> String {
+        unsafe {
+            CStr::from_ptr((self.abi_version)())
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    pub fn source_revision(&self) -> String {
+        let raw = unsafe { (self.source_revision)() };
+        if raw.is_null() {
+            return String::new();
+        }
+        unsafe { CStr::from_ptr(raw) }
+            .to_str()
+            .unwrap_or_default()
+            .to_owned()
     }
 
     pub fn manifest_json(&self) -> Result<String, CoreError> {
@@ -598,7 +785,11 @@ impl Core {
             .map(|t| CString::new(t.as_str()))
             .collect::<Result<_, _>>()?;
         let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
-        let head = if ptrs.is_empty() { std::ptr::null() } else { ptrs.as_ptr() };
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
         unsafe {
             self.take_owned((self.cache_evict)(
                 g.as_ptr(),
@@ -607,6 +798,114 @@ impl Core {
                 ptrs.len(),
                 c_int::from(include_downstream),
                 p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            ))
+        }
+    }
+
+    /// 运行库认不认带注入的计划与清缓存（1.1.3 起有）。
+    pub fn supports_injected_plan(&self) -> bool {
+        self.plan_inputs.is_some() && self.cache_evict_inputs.is_some()
+    }
+
+    /// 1.1.3：同 [`Core::plan_with_params`]，另带运行时注入。注入的数据进 cacheKey（ADR-0017），
+    /// 「注入点云再跑」之后要给那次运行的**同一份** `inputs` / `image_inputs`，cacheKey 与 cached
+    /// 才对得上；两者都空时就是 `plan_with_params`。运行库早于 1.1.3 而又给了注入时报
+    /// `MissingSymbol("lyflow_plan_inputs")`。
+    pub fn plan_with_inputs(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        targets: &[String],
+        params_json: Option<&str>,
+        inputs: &[RunInput],
+        image_inputs: &[RunImageInput],
+    ) -> Result<String, CoreError> {
+        let raw = RawInputs::new(inputs, image_inputs)?;
+        if raw.is_empty() {
+            return self.plan_with_params(graph_json, base_dir, targets, params_json);
+        }
+        let plan_inputs = self
+            .plan_inputs
+            .ok_or(CoreError::MissingSymbol("lyflow_plan_inputs"))?;
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let owned: Vec<CString> = targets
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        unsafe {
+            self.take_owned(plan_inputs(
+                g.as_ptr(),
+                b.as_ptr(),
+                head,
+                ptrs.len(),
+                p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                raw.clouds_ptr(),
+                raw.cloud_count(),
+                raw.images_ptr(),
+                raw.image_count(),
+            ))
+        }
+    }
+
+    /// 1.1.3：同 [`Core::cache_evict`]，另带运行时注入，规则同 [`Core::plan_with_inputs`]：
+    /// 「注入再跑」的结果只有给同一份注入才清得掉。两者都空时就是 `cache_evict`。
+    #[allow(clippy::too_many_arguments)]
+    pub fn cache_evict_with_inputs(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        node_ids: &[String],
+        include_downstream: bool,
+        params_json: Option<&str>,
+        inputs: &[RunInput],
+        image_inputs: &[RunImageInput],
+    ) -> Result<String, CoreError> {
+        let raw = RawInputs::new(inputs, image_inputs)?;
+        if raw.is_empty() {
+            return self.cache_evict(
+                graph_json,
+                base_dir,
+                node_ids,
+                include_downstream,
+                params_json,
+            );
+        }
+        let cache_evict_inputs = self
+            .cache_evict_inputs
+            .ok_or(CoreError::MissingSymbol("lyflow_cache_evict_inputs"))?;
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let owned: Vec<CString> = node_ids
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        unsafe {
+            self.take_owned(cache_evict_inputs(
+                g.as_ptr(),
+                b.as_ptr(),
+                head,
+                ptrs.len(),
+                c_int::from(include_downstream),
+                p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                raw.clouds_ptr(),
+                raw.cloud_count(),
+                raw.images_ptr(),
+                raw.image_count(),
             ))
         }
     }
@@ -620,10 +919,15 @@ impl Core {
     pub fn self_check(&self) -> Result<(), String> {
         let problems = self.manifest_problems().map_err(|e| e.to_string())?;
         if !problems.is_empty() {
-            return Err(format!("算子描述自检有 {} 条问题：
-  - {}", problems.len(),
-                               problems.join("
-  - ")));
+            return Err(format!(
+                "算子描述自检有 {} 条问题：
+  - {}",
+                problems.len(),
+                problems.join(
+                    "
+  - "
+                )
+            ));
         }
         let raw = self.manifest_json().map_err(|e| e.to_string())?;
         serde_json::from_str::<serde_json::Value>(&raw)
@@ -655,13 +959,14 @@ impl Core {
         unsafe { (self.library_count)() }
     }
 
-    /// 落盘缓存（v14，docs/disk-cache-plan.md）：结果放在 `<dir>/<fingerprint>/` 下，`dir` 空串 = 关。
-    /// `fingerprint` 是构建指纹 —— 变了整个目录不再复用。Err 里是一句人话的原因。
-    pub fn cache_set_dir(&self, dir: &str, fingerprint: &str) -> Result<(), String> {
+    /// 落盘缓存放在 `<dir>/<build_identity>/` 下，`dir` 空串 = 关。
+    /// `build_identity` 使用产品版本与明确源码修订；源码修订为空时不能启用跨进程缓存。
+    pub fn cache_set_dir(&self, dir: &str, build_identity: &str) -> Result<(), String> {
         let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
-        let (d, f) = (cs(dir)?, cs(fingerprint)?);
-        let message = unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), f.as_ptr())) }
-            .map_err(|e| e.to_string())?;
+        let (d, identity) = (cs(dir)?, cs(build_identity)?);
+        let message =
+            unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), identity.as_ptr())) }
+                .map_err(|e| e.to_string())?;
         if message.is_empty() {
             Ok(())
         } else {
@@ -1193,8 +1498,7 @@ impl RunHandle {
             .iter()
             .map(|t| CString::new(t.as_str()))
             .collect::<Result<_, _>>()?;
-        let target_ptrs: Vec<*const c_char> =
-            target_cstrings.iter().map(|c| c.as_ptr()).collect();
+        let target_ptrs: Vec<*const c_char> = target_cstrings.iter().map(|c| c.as_ptr()).collect();
         let isolate_cstrings: Vec<CString> = spec
             .isolate
             .iter()
@@ -1210,60 +1514,7 @@ impl RunHandle {
         let force_ptrs: Vec<*const c_char> = force_cstrings.iter().map(|c| c.as_ptr()).collect();
 
         // node_id / port 的 CString 与点云缓冲都必须活到 run_start 返回：core 在里面拷贝。
-        let input_names: Vec<(CString, CString)> = spec
-            .inputs
-            .iter()
-            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
-            .collect::<Result<_, std::ffi::NulError>>()?;
-        let input_raw: Vec<RunInputRaw> = spec
-            .inputs
-            .iter()
-            .zip(input_names.iter())
-            .map(|(i, (node, port))| RunInputRaw {
-                node_id: node.as_ptr(),
-                port: port.as_ptr(),
-                kind: INPUT_POINT_CLOUD,
-                count: (i.xyz.len() / 3) as u32,
-                xyz: i.xyz.as_ptr(),
-                intensity: if i.intensity.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.intensity.as_ptr()
-                },
-                normals: if i.normals.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.normals.as_ptr()
-                },
-                rgb: if i.rgb.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.rgb.as_ptr()
-                },
-            })
-            .collect();
-
-        let image_names: Vec<(CString, CString)> = spec
-            .image_inputs
-            .iter()
-            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
-            .collect::<Result<_, std::ffi::NulError>>()?;
-        let image_raw: Vec<RunImageInputRaw> = spec
-            .image_inputs
-            .iter()
-            .zip(image_names.iter())
-            .map(|(i, (node, port))| RunImageInputRaw {
-                node_id: node.as_ptr(),
-                port: port.as_ptr(),
-                width: i.width,
-                height: i.height,
-                channels: i.channels,
-                depth: i.depth,
-                row_bytes: 0,
-                reserved: 0,
-                pixels: i.pixels_ptr(),
-            })
-            .collect();
+        let raw_inputs = RawInputs::new(spec.inputs, spec.image_inputs)?;
 
         let params_c = spec.params_json.map(CString::new).transpose()?;
         let options = RunOptionsRaw {
@@ -1281,12 +1532,8 @@ impl RunHandle {
             preview_max_points: spec.preview_max_points,
             preview_budget_ms: spec.preview_budget_ms,
             no_reuse: i32::from(spec.no_reuse),
-            inputs: if input_raw.is_empty() {
-                std::ptr::null()
-            } else {
-                input_raw.as_ptr()
-            },
-            input_count: input_raw.len(),
+            inputs: raw_inputs.clouds_ptr(),
+            input_count: raw_inputs.cloud_count(),
             params_json: params_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
             isolate: if isolate_ptrs.is_empty() {
                 std::ptr::null()
@@ -1300,12 +1547,8 @@ impl RunHandle {
                 force_ptrs.as_ptr()
             },
             force_count: force_ptrs.len(),
-            image_inputs: if image_raw.is_empty() {
-                std::ptr::null()
-            } else {
-                image_raw.as_ptr()
-            },
-            image_input_count: image_raw.len(),
+            image_inputs: raw_inputs.images_ptr(),
+            image_input_count: raw_inputs.image_count(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;
@@ -1360,3 +1603,89 @@ impl Drop for RunHandle {
     }
 }
 
+#[cfg(test)]
+mod load_contract_tests {
+    use super::*;
+    use std::process::Command;
+
+    struct Fixtures(std::path::PathBuf);
+    impl Drop for Fixtures {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn rejects_incompatible_versions_before_binding_business_symbols() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixtures = Fixtures(
+            std::env::temp_dir().join(format!("lyflow-abi-{}-{unique}", std::process::id())),
+        );
+        std::fs::create_dir_all(&fixtures.0).unwrap();
+        let (base, patch) = ABI_VERSION.rsplit_once('.').unwrap();
+        let next_patch = format!("{base}.{}", patch.parse::<u64>().unwrap() + 1);
+        let (major, minor) = base.split_once('.').unwrap();
+        let next_minor = format!("{major}.{}.0", minor.parse::<u64>().unwrap() + 1);
+        let cases = [
+            ("legacy", None, ABI_VERSION),
+            ("abi_patch", Some(next_patch.as_str()), ABI_VERSION),
+            ("engine_patch", Some(ABI_VERSION), next_patch.as_str()),
+            ("abi_minor", Some(next_minor.as_str()), ABI_VERSION),
+            ("engine_minor", Some(ABI_VERSION), next_minor.as_str()),
+            ("legacy_string", Some("15"), ABI_VERSION),
+            ("null_abi", Some(""), ABI_VERSION),
+            ("matching", Some(ABI_VERSION), ABI_VERSION),
+        ];
+        for (name, abi, engine) in cases {
+            let abi_export = match abi {
+                None => "#[no_mangle] pub extern \"C\" fn lyflow_abi_version() -> u32 { 15 }".to_owned(),
+                Some("") => "#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char { std::ptr::null() }".to_owned(),
+                Some(value) => format!("#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char {{ b\"{value}\\0\".as_ptr().cast() }}"),
+            };
+            let source = format!("{abi_export}\n#[no_mangle] pub extern \"C\" fn lyflow_version() -> *const std::ffi::c_char {{ b\"{engine}\\0\".as_ptr().cast() }}");
+            let input = fixtures.0.join(format!("{name}.rs"));
+            let library = fixtures
+                .0
+                .join(format!("{name}.{}", std::env::consts::DLL_EXTENSION));
+            std::fs::write(&input, source).unwrap();
+            let mut compiler =
+                Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
+            compiler
+                .arg("--crate-type=cdylib")
+                .arg("--edition=2021")
+                .arg(&input)
+                .arg("-o")
+                .arg(&library);
+            #[cfg(windows)]
+            compiler.args(["-C", "target-feature=+crt-static"]);
+            let result = compiler.output().unwrap();
+            assert!(
+                result.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let error = match Core::load_from(&library) {
+                Ok(_) => panic!("incomplete fixture unexpectedly loaded: {name}"),
+                Err(error) => error,
+            };
+            match name {
+                "legacy" => assert!(
+                    matches!(error, CoreError::MissingSymbol("lyflow_abi_version_string")),
+                    "{error}"
+                ),
+                "matching" | "abi_patch" | "engine_patch" => assert!(
+                    matches!(error, CoreError::MissingSymbol("lyflow_source_revision")),
+                    "{name}: {error}"
+                ),
+                _ => assert!(
+                    matches!(error, CoreError::VersionMismatch { .. }),
+                    "{name}: {error}"
+                ),
+            }
+            std::fs::remove_file(&library).expect("failed loads must release the DLL handle");
+        }
+    }
+}

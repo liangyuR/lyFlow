@@ -716,7 +716,9 @@
   margin: 0;
   font-family: var(--lyflow-mono);
 }
-.search-popup__arrow { color: var(--lyflow-fg-2); }
+.search-popup__arrow {
+  color: var(--lyflow-fg-2);
+}
 
 .search-popup__row {
   display: flex;
@@ -802,8 +804,14 @@
   border-radius: var(--r-sm);
   font-size: 10px;
 }
-.finder__tone--ng { background: var(--ng-container); color: var(--on-ng-container); }
-.finder__tone--margin { background: var(--warn-container); color: var(--on-warn-container); }
+.finder__tone--ng {
+  background: var(--ng-container);
+  color: var(--on-ng-container);
+}
+.finder__tone--margin {
+  background: var(--warn-container);
+  color: var(--on-warn-container);
+}
 
 .finder__muted {
   padding: 0 5px;
@@ -854,12 +862,25 @@
 
 /* 状态用**边框色 + 一个色点**表达，不改节点底色：改底色会让端口文字的对比度
    随状态漂移，而端口才是节点上最需要看清的东西。 */
-.node--pending  { border-color: var(--outline); }
-.node--running  { border-color: var(--lyflow-accent); }
-.node--done     { border-color: var(--ok); }
-.node--error    { border-color: var(--ng); }
-.node--cancelled{ border-color: var(--warn); }
-.node--skipped  { border-color: var(--ok); border-style: dashed; }
+.node--pending {
+  border-color: var(--outline);
+}
+.node--running {
+  border-color: var(--lyflow-accent);
+}
+.node--done {
+  border-color: var(--ok);
+}
+.node--error {
+  border-color: var(--ng);
+}
+.node--cancelled {
+  border-color: var(--warn);
+}
+.node--skipped {
+  border-color: var(--ok);
+  border-style: dashed;
+}
 
 /* 呼吸光（node-pulse）在 styles.motion.css；关动效时停在这一档静态光上 */
 .node--running {
@@ -906,11 +927,22 @@
   background: var(--outline);
 }
 
-.node__dot--running   { background: var(--lyflow-accent); }
-.node__dot--done      { background: var(--ok); }
-.node__dot--error     { background: var(--ng); }
-.node__dot--cancelled { background: var(--warn); }
-.node__dot--skipped   { background: var(--ok); opacity: 0.6; }
+.node__dot--running {
+  background: var(--lyflow-accent);
+}
+.node__dot--done {
+  background: var(--ok);
+}
+.node__dot--error {
+  background: var(--ng);
+}
+.node__dot--cancelled {
+  background: var(--warn);
+}
+.node__dot--skipped {
+  background: var(--ok);
+  opacity: 0.6;
+}
 
 .node__count,
 .node__time {
@@ -927,12 +959,31 @@
   min-width: 0;
   overflow: hidden;
 }
-.node__reading { display: inline-flex; align-items: center; gap: 3px; flex: none; }
-.node__reading-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
-.node__reading[data-tone="ng"] .node__reading-value { color: var(--ng); }
-.node__reading[data-tone="margin"] .node__reading-value { color: var(--warn); }
-.node__reading .insp-out__verdict { padding: 0 3px; font-size: 9px; line-height: 13px; }
-.node__reading-more { flex: none; color: var(--lyflow-fg-2); }
+.node__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.node__reading-value {
+  color: var(--lyflow-fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.node__reading[data-tone='ng'] .node__reading-value {
+  color: var(--ng);
+}
+.node__reading[data-tone='margin'] .node__reading-value {
+  color: var(--warn);
+}
+.node__reading .insp-out__verdict {
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 13px;
+}
+.node__reading-more {
+  flex: none;
+  color: var(--lyflow-fg-2);
+}
 
 .node__err {
   color: var(--ng);
@@ -952,7 +1003,9 @@
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
-.node__err--link:hover { color: var(--on-ng-container); }
+.node__err--link:hover {
+  color: var(--on-ng-container);
+}
 
 /* 空画布的提示：不挡鼠标，双击照样落到画布上 */
 .canvas__empty {
@@ -969,7 +1022,9 @@
   font-size: 13px;
   text-align: center;
 }
-.canvas__empty p { margin: 0; }
+.canvas__empty p {
+  margin: 0;
+}
 
 /* 空画布上的最近打开：这一块接鼠标（.canvas__empty 整体不接，双击照样落到画布上） */
 .canvas__recent {
@@ -1001,7 +1056,10 @@
 .canvas__recent button:hover {
   background: var(--lyflow-bg-2);
 }
-.canvas__empty-title { color: var(--lyflow-fg-1); font-size: 15px; }
+.canvas__empty-title {
+  color: var(--lyflow-fg-1);
+  font-size: 15px;
+}
 .canvas__empty kbd {
   padding: 1px 5px;
   border: 1px solid var(--lyflow-border-strong);
@@ -1032,8 +1090,13 @@
   cursor: pointer;
 }
 
-.ctxmenu button:hover:not(:disabled) { background: var(--lyflow-bg-3); }
-.ctxmenu button:disabled { color: var(--lyflow-fg-2); cursor: default; }
+.ctxmenu button:hover:not(:disabled) {
+  background: var(--lyflow-bg-3);
+}
+.ctxmenu button:disabled {
+  color: var(--lyflow-fg-2);
+  cursor: default;
+}
 /* 菜单里分组的那条线、删除这种不好撤回的动作用警示色 */
 /* 检查器混选时「2 × 体素栅格」：点了只留这一种 */
 .insp__multi-pick {
@@ -1051,7 +1114,9 @@
   border: 0;
   border-top: 1px solid var(--lyflow-border);
 }
-.ctxmenu button.ctxmenu__danger { color: var(--ng); }
+.ctxmenu button.ctxmenu__danger {
+  color: var(--ng);
+}
 
 /* ------------------------------------------ 参数红框与错误列表（P0 #15）*/
 
@@ -1143,9 +1208,17 @@
   font-size: 11.5px;
 }
 
-.viewer__title { color: var(--lyflow-fg-1); font-weight: 500; }
-.viewer__count { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
-.viewer__spacer { flex: 1; }
+.viewer__title {
+  color: var(--lyflow-fg-1);
+  font-weight: 500;
+}
+.viewer__count {
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.viewer__spacer {
+  flex: 1;
+}
 
 .viewer__select {
   height: var(--ctl-h-sm);
@@ -1157,7 +1230,9 @@
   padding: 1px 8px;
 }
 
-.viewer__size { width: 64px; }
+.viewer__size {
+  width: 64px;
+}
 
 .viewer__fit {
   border: 1px solid var(--lyflow-border);
@@ -1224,8 +1299,13 @@
   font-size: 12px;
   cursor: pointer;
 }
-.viewer__empty-actions button:hover { border-color: var(--lyflow-accent); }
-.viewer__empty-hint { font-size: 11px; color: var(--lyflow-fg-2); }
+.viewer__empty-actions button:hover {
+  border-color: var(--lyflow-accent);
+}
+.viewer__empty-hint {
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
 
 /* M3：静音 / 折叠 / 重命名 / 精确 stale / 端口兼容性 / 参考线 / 抽屉 / 快捷键面板 */
 
@@ -1341,8 +1421,12 @@
   position: absolute;
   background: color-mix(in srgb, var(--warn) 85%, transparent);
 }
-.canvas__guide--x { width: 1px; }
-.canvas__guide--y { height: 1px; }
+.canvas__guide--x {
+  width: 1px;
+}
+.canvas__guide--y {
+  height: 1px;
+}
 
 .ctxmenu kbd {
   margin-left: auto;
@@ -1358,7 +1442,9 @@
 
 /* -- 状态栏 ---------------------------------------------------------------- */
 
-.statusbar__cache { font-variant-numeric: tabular-nums; }
+.statusbar__cache {
+  font-variant-numeric: tabular-nums;
+}
 .statusbar__muted {
   padding: 0 6px;
   border: 0;
@@ -1368,7 +1454,9 @@
   font: inherit;
   cursor: pointer;
 }
-.statusbar__muted:hover { background: color-mix(in srgb, var(--warn) 28%, transparent); }
+.statusbar__muted:hover {
+  background: color-mix(in srgb, var(--warn) 28%, transparent);
+}
 .statusbar__hot {
   padding: 0 6px;
   border-radius: var(--r-sm);
@@ -1378,7 +1466,11 @@
 
 /* -- 调参记录（抽屉的「调参」页）------------------------------------------- */
 
-.runs { margin: 0; padding: 0; list-style: none; }
+.runs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .runs__row {
   display: flex;
   flex-direction: column;
@@ -1386,13 +1478,32 @@
   padding: 6px 10px;
   border-bottom: 1px solid var(--lyflow-border);
 }
-.runs__row[data-status="running"] { opacity: 0.7; }
-.runs__head { display: flex; align-items: baseline; gap: 10px; font-size: 11px; color: var(--lyflow-fg-2); }
-.runs__seq { color: var(--lyflow-fg-0); font-family: var(--lyflow-mono); }
-.runs__time { font-variant-numeric: tabular-nums; }
-.runs__status--ok { color: var(--lyflow-ok); }
-.runs__status--error { color: var(--ng); }
-.runs__status--cancelled { color: var(--lyflow-warn); }
+.runs__row[data-status='running'] {
+  opacity: 0.7;
+}
+.runs__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
+.runs__seq {
+  color: var(--lyflow-fg-0);
+  font-family: var(--lyflow-mono);
+}
+.runs__time {
+  font-variant-numeric: tabular-nums;
+}
+.runs__status--ok {
+  color: var(--lyflow-ok);
+}
+.runs__status--error {
+  color: var(--ng);
+}
+.runs__status--cancelled {
+  color: var(--lyflow-warn);
+}
 .runs__diff {
   overflow: hidden;
   color: var(--lyflow-fg-1);
@@ -1400,7 +1511,11 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.runs__readings { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.runs__readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
 .runs__reading {
   display: inline-flex;
   align-items: center;
@@ -1414,13 +1529,29 @@
   font-size: 11px;
   cursor: pointer;
 }
-.runs__reading:hover:not(:disabled) { border-color: var(--lyflow-accent); }
-.runs__reading:disabled { cursor: default; }
-.runs__reading-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
-.runs__reading[data-tone="ng"] .runs__reading-value { color: var(--ng); }
-.runs__reading[data-tone="margin"] .runs__reading-value { color: var(--warn); }
-.runs__delta { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
-.runs__spacer { flex: 1; }
+.runs__reading:hover:not(:disabled) {
+  border-color: var(--lyflow-accent);
+}
+.runs__reading:disabled {
+  cursor: default;
+}
+.runs__reading-value {
+  color: var(--lyflow-fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.runs__reading[data-tone='ng'] .runs__reading-value {
+  color: var(--ng);
+}
+.runs__reading[data-tone='margin'] .runs__reading-value {
+  color: var(--warn);
+}
+.runs__delta {
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.runs__spacer {
+  flex: 1;
+}
 .runs__base {
   display: flex;
   align-items: center;
@@ -1431,10 +1562,23 @@
   color: var(--lyflow-fg-1);
   font-size: 11px;
 }
-.runs__base-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.runs__row.is-baseline { background: color-mix(in srgb, var(--lyflow-accent) 8%, transparent); }
-.runs__diff--base { color: var(--lyflow-accent); }
-.runs__restore.is-on { border-color: var(--lyflow-accent); color: var(--lyflow-accent); }
+.runs__base-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs__row.is-baseline {
+  background: color-mix(in srgb, var(--lyflow-accent) 8%, transparent);
+}
+.runs__diff--base {
+  color: var(--lyflow-accent);
+}
+.runs__restore.is-on {
+  border-color: var(--lyflow-accent);
+  color: var(--lyflow-accent);
+}
 .runs__restore {
   padding: 0 8px;
   border: 1px solid var(--lyflow-border-strong);
@@ -1445,7 +1589,10 @@
   font-size: 11px;
   cursor: pointer;
 }
-.runs__restore:hover { border-color: var(--lyflow-accent); color: var(--lyflow-fg-0); }
+.runs__restore:hover {
+  border-color: var(--lyflow-accent);
+  color: var(--lyflow-fg-0);
+}
 /* 未运行的改动：一处一个小块，参数的那几块带 ↩ */
 .runs__pending {
   display: flex;
@@ -1458,7 +1605,9 @@
   color: var(--lyflow-fg-1);
   font-size: 11px;
 }
-.runs__pending-title { color: var(--lyflow-warn); }
+.runs__pending-title {
+  color: var(--lyflow-warn);
+}
 .runs__chip {
   display: inline-flex;
   align-items: center;
@@ -1477,7 +1626,9 @@
   font: inherit;
   cursor: pointer;
 }
-.runs__chip-undo:hover { color: var(--lyflow-accent); }
+.runs__chip-undo:hover {
+  color: var(--lyflow-accent);
+}
 
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
 
@@ -1502,12 +1653,14 @@
 }
 
 .drawer__resize:hover::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 3px 0;
   background: var(--lyflow-accent);
 }
-.drawer.is-open { height: 220px; }
+.drawer.is-open {
+  height: 220px;
+}
 
 .drawer__tabs {
   display: flex;
@@ -1530,14 +1683,19 @@
   background: var(--secondary-container);
   color: var(--on-secondary-container);
 }
-.drawer__spacer { flex: 1; }
+.drawer__spacer {
+  flex: 1;
+}
 .drawer__badge {
   padding: 0 5px;
   border-radius: var(--r-sm);
   background: var(--lyflow-bg-3);
   font-size: 10px;
 }
-.drawer__badge--error { background: color-mix(in srgb, var(--ng) 25%, transparent); color: var(--ng); }
+.drawer__badge--error {
+  background: color-mix(in srgb, var(--ng) 25%, transparent);
+  color: var(--ng);
+}
 
 .drawer__body {
   flex: 1;
@@ -1545,13 +1703,31 @@
   padding: 8px 10px;
   font-size: 12px;
 }
-.drawer__empty { color: var(--lyflow-fg-2); }
+.drawer__empty {
+  color: var(--lyflow-fg-2);
+}
 
-.drawer__logs { margin: 0; padding: 0; list-style: none; font-family: var(--lyflow-mono); }
-.drawer__log { display: flex; gap: 8px; padding: 1px 0; }
-.drawer__log-level { width: 42px; color: var(--lyflow-fg-2); }
-.drawer__log--warn .drawer__log-level { color: var(--lyflow-warn); }
-.drawer__log--error .drawer__log-level { color: var(--ng); }
+.drawer__logs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--lyflow-mono);
+}
+.drawer__log {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+.drawer__log-level {
+  width: 42px;
+  color: var(--lyflow-fg-2);
+}
+.drawer__log--warn .drawer__log-level {
+  color: var(--lyflow-warn);
+}
+.drawer__log--error .drawer__log-level {
+  color: var(--ng);
+}
 .drawer__log-node {
   padding: 0;
   border: 0;
@@ -1560,8 +1736,13 @@
   font: inherit;
   cursor: pointer;
 }
-.drawer__log-node:hover:not(:disabled) { color: var(--lyflow-accent); text-decoration: underline; }
-.drawer__log-node:disabled { cursor: default; }
+.drawer__log-node:hover:not(:disabled) {
+  color: var(--lyflow-accent);
+  text-decoration: underline;
+}
+.drawer__log-node:disabled {
+  cursor: default;
+}
 .drawer__logbar {
   display: flex;
   align-items: center;
@@ -1569,8 +1750,13 @@
   margin-bottom: 6px;
   font-size: 12px;
 }
-.drawer__logbar label { display: flex; align-items: center; gap: 4px; color: var(--lyflow-fg-1); }
-.drawer__logbar input[type="search"] {
+.drawer__logbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--lyflow-fg-1);
+}
+.drawer__logbar input[type='search'] {
   width: 220px;
   padding: 2px 6px;
   border: 1px solid var(--lyflow-border);
@@ -1579,8 +1765,13 @@
   color: var(--lyflow-fg-0);
   font: inherit;
 }
-.drawer__logcount { margin-left: auto; color: var(--lyflow-fg-2); }
-.drawer__log-text { color: var(--lyflow-fg-1); }
+.drawer__logcount {
+  margin-left: auto;
+  color: var(--lyflow-fg-2);
+}
+.drawer__log-text {
+  color: var(--lyflow-fg-1);
+}
 
 /* 运行收尾（ADR-0022）。三态各有自己的颜色：绿=拿到，黄=降级，红=失败 —— 用户
    扫一眼就知道这一轮能不能信，而不是去数红框。 */
@@ -1590,29 +1781,84 @@
   border-left: 2px solid var(--lyflow-fg-2);
   background: var(--lyflow-bg-2);
 }
-.drawer__summary[data-status="ok"] { border-left-color: var(--lyflow-ok); }
-.drawer__summary[data-status="degraded"] { border-left-color: var(--lyflow-warn); }
-.drawer__summary[data-status="failed"] { border-left-color: var(--ng); }
-.drawer__summary-status { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; }
-.drawer__summary-status code { color: var(--lyflow-fg-2); font-family: var(--lyflow-mono); font-size: 11px; }
-.drawer__summary-status--ok { color: var(--lyflow-ok); }
-.drawer__summary-status--degraded { color: var(--lyflow-warn); }
-.drawer__summary-status--failed { color: var(--ng); }
-.drawer__summary-duration { margin-left: auto; color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
+.drawer__summary[data-status='ok'] {
+  border-left-color: var(--lyflow-ok);
+}
+.drawer__summary[data-status='degraded'] {
+  border-left-color: var(--lyflow-warn);
+}
+.drawer__summary[data-status='failed'] {
+  border-left-color: var(--ng);
+}
+.drawer__summary-status {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 4px;
+}
+.drawer__summary-status code {
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+.drawer__summary-status--ok {
+  color: var(--lyflow-ok);
+}
+.drawer__summary-status--degraded {
+  color: var(--lyflow-warn);
+}
+.drawer__summary-status--failed {
+  color: var(--ng);
+}
+.drawer__summary-duration {
+  margin-left: auto;
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
 .drawer__summary-outputs,
-.drawer__summary-decisions { margin: 0; padding: 0; list-style: none; }
-.drawer__summary-decisions { margin-top: 4px; border-top: 1px solid var(--lyflow-bg-1); padding-top: 4px; }
+.drawer__summary-decisions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.drawer__summary-decisions {
+  margin-top: 4px;
+  border-top: 1px solid var(--lyflow-bg-1);
+  padding-top: 4px;
+}
 .drawer__summary-outputs li,
-.drawer__summary-decisions li { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
-.drawer__summary-name { min-width: 84px; color: var(--lyflow-fg-0); }
+.drawer__summary-decisions li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.drawer__summary-name {
+  min-width: 84px;
+  color: var(--lyflow-fg-0);
+}
 .drawer__summary-state,
-.drawer__summary-choice { font-family: var(--lyflow-mono); font-size: 11px; }
-.drawer__summary-state--value { color: var(--lyflow-ok); }
-.drawer__summary-state--inactive { color: var(--lyflow-fg-2); }
-.drawer__summary-state--failed { color: var(--ng); }
-.drawer__summary-choice { color: var(--lyflow-accent-dim); }
+.drawer__summary-choice {
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+.drawer__summary-state--value {
+  color: var(--lyflow-ok);
+}
+.drawer__summary-state--inactive {
+  color: var(--lyflow-fg-2);
+}
+.drawer__summary-state--failed {
+  color: var(--ng);
+}
+.drawer__summary-choice {
+  color: var(--lyflow-accent-dim);
+}
 .drawer__summary-where,
-.drawer__summary-from { color: var(--lyflow-fg-2); font-size: 11px; }
+.drawer__summary-from {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
 .drawer__summary-value {
   min-width: 0;
   overflow: hidden;
@@ -1621,13 +1867,23 @@
   color: var(--lyflow-fg-0);
   font-variant-numeric: tabular-nums;
 }
-.drawer__summary-node { font-size: 11px; }
-.drawer__summary-outputs li[data-verdict="high"] .drawer__summary-value,
-.drawer__summary-outputs li[data-verdict="low"] .drawer__summary-value,
-.drawer__summary-outputs li[data-verdict="fail"] .drawer__summary-value { color: var(--ng); }
-.drawer__summary-outputs li[data-verdict="margin"] .drawer__summary-value { color: var(--warn); }
+.drawer__summary-node {
+  font-size: 11px;
+}
+.drawer__summary-outputs li[data-verdict='high'] .drawer__summary-value,
+.drawer__summary-outputs li[data-verdict='low'] .drawer__summary-value,
+.drawer__summary-outputs li[data-verdict='fail'] .drawer__summary-value {
+  color: var(--ng);
+}
+.drawer__summary-outputs li[data-verdict='margin'] .drawer__summary-value {
+  color: var(--warn);
+}
 
-.drawer__diags { margin: 0; padding: 0; list-style: none; }
+.drawer__diags {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .drawer__diags button {
   display: flex;
   gap: 8px;
@@ -1638,15 +1894,39 @@
   color: var(--lyflow-fg-1);
   text-align: left;
 }
-.drawer__diags button:hover { background: var(--lyflow-bg-2); }
-.drawer__diag-node { color: var(--lyflow-fg-0); }
+.drawer__diags button:hover {
+  background: var(--lyflow-bg-2);
+}
+.drawer__diag-node {
+  color: var(--lyflow-fg-0);
+}
 .drawer__diag-code,
-.drawer__diag-param { color: var(--lyflow-warn); font-family: var(--lyflow-mono); font-size: 11px; }
+.drawer__diag-param {
+  color: var(--lyflow-warn);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
 
-.drawer__cache dl { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 24px; margin: 0; }
-.drawer__cache dt { color: var(--lyflow-fg-2); font-size: 11px; }
-.drawer__cache dd { margin: 0; color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
-.drawer__cache-actions { display: flex; gap: 8px; margin-top: 12px; }
+.drawer__cache dl {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 4px 24px;
+  margin: 0;
+}
+.drawer__cache dt {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+.drawer__cache dd {
+  margin: 0;
+  color: var(--lyflow-fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.drawer__cache-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
 
 /* -- 快捷键面板（E7）------------------------------------------------------- */
 
@@ -1670,15 +1950,27 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--lyflow-border);
 }
-.sheet__head h2 { margin: 0; font-size: 14px; }
+.sheet__head h2 {
+  margin: 0;
+  font-size: 14px;
+}
 .sheet__body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 18px;
   padding: 14px;
 }
-.sheet__group h3 { margin: 0 0 6px; color: var(--lyflow-fg-2); font-size: 11px; font-weight: 600; }
-.sheet__group ul { margin: 0; padding: 0; list-style: none; }
+.sheet__group h3 {
+  margin: 0 0 6px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.sheet__group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .sheet__group li {
   display: flex;
   align-items: center;
@@ -1686,9 +1978,18 @@
   padding: 3px 0;
   font-size: 12px;
 }
-.sheet__label { color: var(--lyflow-fg-0); }
-.sheet__scope { color: var(--lyflow-fg-2); font-size: 10px; }
-.sheet__keys { margin-left: auto; display: flex; gap: 4px; }
+.sheet__label {
+  color: var(--lyflow-fg-0);
+}
+.sheet__scope {
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+.sheet__keys {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
 .sheet__keys kbd {
   padding: 1px 6px;
   border: 1px solid var(--lyflow-border-strong);
@@ -1723,13 +2024,32 @@
   color: var(--lyflow-fg-1);
   cursor: pointer;
 }
-.breadcrumb button:hover:not(:disabled) { background: var(--lyflow-bg-3); color: var(--lyflow-fg-0); }
-.breadcrumb button:disabled { color: var(--lyflow-fg-0); cursor: default; font-weight: 600; }
-.breadcrumb__seg { display: inline-flex; align-items: center; gap: 4px; }
-.breadcrumb__sep { color: var(--lyflow-fg-2); }
-.breadcrumb__hint { margin-left: 8px; color: var(--lyflow-fg-2); font-size: 10px; }
+.breadcrumb button:hover:not(:disabled) {
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-0);
+}
+.breadcrumb button:disabled {
+  color: var(--lyflow-fg-0);
+  cursor: default;
+  font-weight: 600;
+}
+.breadcrumb__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.breadcrumb__sep {
+  color: var(--lyflow-fg-2);
+}
+.breadcrumb__hint {
+  margin-left: 8px;
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
 
-.node--sub .node__head { background: color-mix(in srgb, var(--lyflow-accent) 18%, var(--lyflow-bg-3)); }
+.node--sub .node__head {
+  background: color-mix(in srgb, var(--lyflow-accent) 18%, var(--lyflow-bg-3));
+}
 .node__badge--sub {
   background: color-mix(in srgb, var(--lyflow-accent) 40%, transparent);
   color: var(--lyflow-fg-0);
@@ -1753,8 +2073,18 @@
   min-width: 320px;
   padding: 14px 16px;
 }
-.modal h4 { margin: 0 0 10px; font-size: 13px; }
-.modal label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 11px; color: var(--lyflow-fg-2); }
+.modal h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
 .modal input {
   padding: 4px 6px;
   border: 1px solid var(--lyflow-border-strong);
@@ -1763,8 +2093,16 @@
   color: var(--lyflow-fg-0);
   font-size: 12px;
 }
-.modal__hint { margin: 0 0 10px; color: var(--lyflow-fg-2); font-size: 11px; }
-.modal__row { display: flex; justify-content: flex-end; gap: 8px; }
+.modal__hint {
+  margin: 0 0 10px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+.modal__row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 .viewer__preview {
   padding: 1px 6px;
@@ -1799,8 +2137,12 @@
   text-align: left;
   cursor: pointer;
 }
-.insp-cloud:hover { background: var(--lyflow-bg-2); }
-.insp-cloud.is-picked .insp-out__port { color: var(--lyflow-accent); }
+.insp-cloud:hover {
+  background: var(--lyflow-bg-2);
+}
+.insp-cloud.is-picked .insp-out__port {
+  color: var(--lyflow-accent);
+}
 
 .insp-out__port {
   color: var(--lyflow-fg-2);
@@ -1849,7 +2191,9 @@
   background: var(--lyflow-bg-2);
 }
 
-.insp__outputs .insp-out.is-missing .insp-out__value { color: var(--ng); }
+.insp__outputs .insp-out.is-missing .insp-out__value {
+  color: var(--ng);
+}
 
 .insp__outputs .insp-out {
   align-items: center;
@@ -1879,7 +2223,9 @@
   border-bottom: 1px solid var(--lyflow-border);
   background: var(--lyflow-bg-2);
 }
-.insp__graph-params > summary { cursor: pointer; }
+.insp__graph-params > summary {
+  cursor: pointer;
+}
 .insp-gparam__binds {
   display: flex;
   flex-wrap: wrap;
@@ -1900,8 +2246,16 @@
   line-height: 14px;
   font-size: 10px;
 }
-.insp-gparam__head { display: flex; align-items: center; gap: 6px; }
-.insp-gparam__name { font-family: var(--lyflow-mono); font-size: 10px; color: var(--lyflow-fg-2); }
+.insp-gparam__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.insp-gparam__name {
+  font-family: var(--lyflow-mono);
+  font-size: 10px;
+  color: var(--lyflow-fg-2);
+}
 
 /* 高级组（默认收起，与参数面板同一规则）：标题是个按钮，长得和别的组标题一样 */
 .insp__group-toggle {
@@ -1916,8 +2270,12 @@
   cursor: pointer;
 }
 
-.insp__group-toggle:hover { color: var(--lyflow-fg-0); }
-.insp__group--advanced[data-open="0"] .insp__group-toggle { margin-bottom: 0; }
+.insp__group-toggle:hover {
+  color: var(--lyflow-fg-0);
+}
+.insp__group--advanced[data-open='0'] .insp__group-toggle {
+  margin-bottom: 0;
+}
 
 .insp__group-adv,
 .insp__group-count {
@@ -1927,4 +2285,6 @@
   color: var(--lyflow-fg-2);
 }
 
-.insp__group-count { margin-left: auto; }
+.insp__group-count {
+  margin-left: auto;
+}

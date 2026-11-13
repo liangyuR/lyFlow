@@ -11,8 +11,8 @@ import {
   type AnimationOptions,
   type AnimationPlaybackControls,
   type AnimationPlaybackControlsWithThen,
-} from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+} from 'motion/react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import {
   GLOW_FADE,
@@ -25,9 +25,9 @@ import {
   onNodeLocateFlash,
   TRANSITION,
   useMotionEnabled,
-} from "../lib/motion";
-import { useExecutionStore } from "../store/execution";
-import type { NodeState } from "../types/execution";
+} from '../lib/motion';
+import { useExecutionStore } from '../store/execution';
+import type { NodeState } from '../types/execution';
 
 export interface NodeMotionRefs {
   /** `.node` 本身。只许动 opacity（A5）。 */
@@ -41,7 +41,7 @@ export interface NodeMotionRefs {
 export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs): void {
   const motionOn = useMotionEnabled();
   // 进不进场只在挂载那一刻问一次：之后就算短命集合里还有它，也不该再播
-  const [entering] = useState(() => motionOn && isEntering("node", id));
+  const [entering] = useState(() => motionOn && isEntering('node', id));
   const running = useRef<AnimationPlaybackControls[]>([]);
 
   // 进场放在 layout effect 里：在首帧绘制之前就把 opacity 压到 0，否则会先闪一下全亮
@@ -49,12 +49,12 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
     const root = refs.root.current;
     const fx = refs.fx.current;
     if (!entering || !root) return;
-    root.dataset.entering = "1";
+    root.dataset.entering = '1';
     const fade = animate(root, NODE_ENTER, TRANSITION.base);
-    const glow = fx ? glowOnce(fx, "enter", GLOW_FADE, TRANSITION.slow) : null;
+    const glow = fx ? glowOnce(fx, 'enter', GLOW_FADE, TRANSITION.slow) : null;
     const done = () => {
       // 终值会被 motion 写成 inline opacity: 1，得擦掉，否则 stale/静音的半透明失效
-      root.style.opacity = "";
+      root.style.opacity = '';
       delete root.dataset.entering;
     };
     void fade.then(done);
@@ -76,10 +76,10 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
     const before = previous.current;
     previous.current = state;
     if (!motionOn || before === state) return;
-    if (state !== "done" && state !== "error") return;
+    if (state !== 'done' && state !== 'error') return;
     // 实时预览（拖参数触发的 preview run）一秒能跑好几轮，每轮都闪一次绿只是噪音（S2）。
     // 出错照闪照抖：那是要人看的。读当下的值就够，不必订阅
-    if (state === "done" && useExecutionStore.getState().preview) return;
+    if (state === 'done' && useExecutionStore.getState().preview) return;
     const root = refs.root.current;
     const fx = refs.fx.current;
     if (!root || !fx) return;
@@ -91,11 +91,11 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
       if (root.dataset.flash === state) delete root.dataset.flash;
     });
     const head = refs.head.current;
-    if (state === "error" && head) {
-      const shake = animate(head, HEAD_SHAKE, { duration: HEAD_SHAKE_MS / 1000, ease: "easeOut" });
+    if (state === 'error' && head) {
+      const shake = animate(head, HEAD_SHAKE, { duration: HEAD_SHAKE_MS / 1000, ease: 'easeOut' });
       running.current.push(shake);
       void shake.then(() => {
-        head.style.transform = "";
+        head.style.transform = '';
       });
     }
     // refs 是三个 useRef，身份不变；只跟着状态走
@@ -111,11 +111,14 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
       const fx = refs.fx.current;
       if (!root || !fx) return;
       stopAll(running.current, refs);
-      root.dataset.flash = "locate";
-      const flash = glowOnce(fx, "error", GLOW_FLASH, { ...TRANSITION.slow, times: GLOW_FLASH_TIMES });
+      root.dataset.flash = 'locate';
+      const flash = glowOnce(fx, 'error', GLOW_FLASH, {
+        ...TRANSITION.slow,
+        times: GLOW_FLASH_TIMES,
+      });
       running.current.push(flash);
       void flash.then(() => {
-        if (root.dataset.flash === "locate") delete root.dataset.flash;
+        if (root.dataset.flash === 'locate') delete root.dataset.flash;
       });
     });
     // refs 身份不变
@@ -134,7 +137,7 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
 function stopAll(list: AnimationPlaybackControls[], refs: NodeMotionRefs): void {
   for (const a of list) a.stop();
   list.length = 0;
-  if (refs.head.current) refs.head.current.style.transform = "";
+  if (refs.head.current) refs.head.current.style.transform = '';
   if (refs.fx.current) resetGlow(refs.fx.current);
   if (refs.root.current) delete refs.root.current.dataset.flash;
 }
@@ -153,5 +156,5 @@ function glowOnce(
 }
 
 function resetGlow(fx: HTMLSpanElement): void {
-  fx.style.opacity = "";
+  fx.style.opacity = '';
 }

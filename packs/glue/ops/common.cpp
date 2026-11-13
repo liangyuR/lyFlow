@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <limits>
 
+#include <opencv2/imgproc.hpp>
+
 #include "glue.h"
 #include "lyflow_cv/adapter.h"
 
@@ -12,29 +14,58 @@ namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
 double roundTo(double v, int decimals) {
-  if (!std::isfinite(v)) return v;
+  if (!std::isfinite(v))
+    return v;
   const double k = std::pow(10.0, decimals);
   return std::round(v * k) / k;
 }
 
-}  // namespace
+} // namespace
 
 // ------------------------------------------------------------------ Bundle 声明（M8a L2）
 
 void registerBundles(Registry& r) {
   r.addBundle(BundleDesc{
+      kResponseMapsKind,
+      "响应图",
+      "glue.response 的输出：三张单通道 f32 图只有 frame 那一块（roi ∩ 图像，没设 roi 时是整幅），"
+      "下游按 frame 的偏移采样，坐标仍是整幅图像素坐标。",
+      "",
+      {BundleField{"response", "Image", "顶帽响应（≥ 0）。"},
+       BundleField{"gray", "Image", "平滑灰度（亮胶已取反），边缘陡度用。"},
+       BundleField{"level", "Image", "局部亮度，对比度归一化用。"},
+       BundleField{"frame", "Record",
+                   "glue.Frame：x、y（块左上角在整幅图里的整数像素坐标）、width、height（块的宽高，"
+                   "与三张图一致）、imageWidth、imageHeight（整幅图的宽高）。"}}});
+  r.addBundle(BundleDesc{
+      kColorMapsKind,
+      "胶色得分图",
+      "glue.color_map 的输出：三张单通道 f32 图只有 frame 那一块（roi ∩ 图像，没设 roi 时是整幅），"
+      "下游按 frame 的偏移采样，坐标仍是整幅图像素坐标。",
+      "",
+      {BundleField{"score", "Image",
+                   "像胶的得分 ∈ [0, 1]；高光、暗区（无信息）是 NaN，暗背景是 0。"},
+       BundleField{"luma", "Image", "平滑后的 BT.601 亮度。"},
+       BundleField{"state", "Image",
+                   "像素状态：0 有信息、1 高光、2 暗区（无信息）、3 暗背景（得分 0）。"},
+       BundleField{"frame", "Record", "glue.Frame：与 glue.ResponseMaps 的 frame 相同。"}}});
+  r.addBundle(BundleDesc{
       kPathKind,
       "胶路",
       "glue.bead_path 定下的胶路：一条覆盖整个检测区的光滑折线（跨得过断口），与它是怎么找到的。"
-      "没找到胶时 info.ok = false，折线是沿选中方向的一条直线，下游照常跑出「全段无胶」。",
+      "没找到胶时 info.ok = false，折线是沿选中方向的一条直线，下游照常跑出「全段无胶」。"
+      "glue.taught_path 出同形的示教胶路：info.lineSource = taught、ok = true，搜索才有的字段是 null。",
       "",
-      {BundleField{"line", "Record",
-                   "glue.Polyline：points（图像像素）、s（从喷嘴沿胶路的弧长，px）、tangents（单位切向，"
-                   "指向远离喷嘴的一侧），相邻两点 2 px。"},
-       BundleField{"info", "Record",
-                   "glue.PathInfo：ok、message、reason、heading（度，图像坐标）、headingSource"
-                   "（param | search）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
-                   "candidates（试过的方向）。"}}});
+      {BundleField{
+           "line", "Record",
+           "glue.Polyline：points（图像像素）、s（从喷嘴沿胶路的弧长，px）、tangents（单位切向，"
+           "指向远离喷嘴的一侧），相邻两点 2 px。"},
+       BundleField{
+           "info", "Record",
+           "glue.PathInfo：ok、message、reason、heading（度，图像坐标）、headingSource"
+           "（param | search | taught）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
+           "lineSource（fit | fallback | taught）、candidates（试过的方向）；示教胶路另有 tolerance、sharpMin、"
+           "taughtCount、taughtLength。"}}});
   r.addBundle(BundleDesc{
       kBeadKind,
       "胶",
@@ -42,12 +73,15 @@ void registerBundles(Registry& r) {
       "所以把胶路折线本身也带着。",
       "",
       {BundleField{"line", "Record", "glue.Polyline：与 glue.Path 的 line 相同。"},
-       BundleField{"stations", "Record",
-                   "glue.Stations：数组形式的逐站数据 —— s、center、normal、present、lo / hi（两边沿法向的"
-                   "偏移，px）、left / right（两边的像素点）、width（按 unit）、widthPx、contrast。"},
-       BundleField{"info", "Record",
-                   "glue.BeadInfo：form、stationStep、unit（px | mm）、pathOk、message、zone、coverage、"
-                   "wRef、polarity、widthMax、calib（接了标定时的那一份 image.PlaneCalib，否则 null）。"}}});
+       BundleField{
+           "stations", "Record",
+           "glue.Stations：数组形式的逐站数据 —— s、center、normal、present、lo / hi（两边沿法向的"
+           "偏移，px）、left / right（两边的像素点）、width（按 unit）、widthPx、contrast。"},
+       BundleField{
+           "info", "Record",
+           "glue.BeadInfo：form、stationStep、unit（px | mm）、pathOk、message、zone、coverage、"
+           "wRef、polarity、widthMax、lineSource、calib（接了标定时的那一份 image.PlaneCalib，否则 null）；"
+           "示教胶路另有 tolerance、offset、trackSupport、sharpness、reason。"}}});
 }
 
 // ------------------------------------------------------------------ 图像
@@ -58,12 +92,160 @@ cv::Mat grayOf(const Data& image) {
   return img && img->scale == 1 ? cvx::gray8(*img) : cv::Mat{};
 }
 
+cv::Mat rgbOf(const Data& image) {
+  const Image* img = image.asImage();
+  if (!img || img->scale != 1 || img->depth != PixelDepth::U8 || !img->consistent() ||
+      (img->channels != 3 && img->channels != 4))
+    return {};
+  const cv::Mat v = cvx::view(*img);
+  if (img->channels == 3)
+    return v;
+  cv::Mat out;
+  cv::cvtColor(v, out, cv::COLOR_RGBA2RGB);
+  return out;
+}
+
+Status badColorImage(const char* port) {
+  return Status::Error(
+      Phase::Execute, "bad_input",
+      "彩色算子需要 RGB：全分辨率 u8 三通道 / 四通道图像（灰度图请走 glue.response 链路）", {},
+      port);
+}
+
+namespace {
+
+Record frameRecord(cv::Rect frame, cv::Size image) {
+  Record rec;
+  rec.type = kFrameType;
+  rec.data = Json{{"x", frame.x},
+                  {"y", frame.y},
+                  {"width", frame.width},
+                  {"height", frame.height},
+                  {"imageWidth", image.width},
+                  {"imageHeight", image.height}};
+  return rec;
+}
+
+/// Bundle 里的 frame 与同尺寸的单通道 f32 图。
+bool frameOf(const Bundle& b, cv::Rect* out) {
+  const Data* f = b.field("frame");
+  const Record* rec = f ? f->asRecord() : nullptr;
+  if (!rec || rec->type != kFrameType)
+    return false;
+  const Json& j = rec->data;
+  const auto num = [&](const char* k) { return j.contains(k) && j[k].is_number_integer(); };
+  if (!num("x") || !num("y") || !num("width") || !num("height"))
+    return false;
+  *out =
+      cv::Rect(j["x"].get<int>(), j["y"].get<int>(), j["width"].get<int>(), j["height"].get<int>());
+  return true;
+}
+
+bool planeOf(const Bundle& b, const char* name, cv::Rect frame, cv::Mat* out) {
+  const Data* x = b.field(name);
+  const Image* img = x ? x->asImage() : nullptr;
+  if (!img || img->scale != 1 || img->channels != 1 || img->depth != PixelDepth::F32 ||
+      !img->consistent() || img->width != frame.width || img->height != frame.height)
+    return false;
+  *out = cvx::view(*img);
+  return true;
+}
+
+} // namespace
+
+Data colorMapsBundle(ColorMaps maps, cv::Size image) {
+  Bundle b(kColorMapsKind);
+  b.set("score", f32Image(std::move(maps.score)));
+  b.set("luma", f32Image(std::move(maps.luma)));
+  b.set("state", f32Image(std::move(maps.state)));
+  b.set("frame", Data::record(frameRecord(maps.frame, image)));
+  return Data::bundle(std::move(b));
+}
+
+bool readColorMaps(const Data& d, ColorMapsView* out) {
+  const Bundle* b = d.asBundle();
+  if (!b || b->kind != kColorMapsKind)
+    return false;
+  cv::Rect frame;
+  cv::Mat score;
+  if (!frameOf(*b, &frame) || !planeOf(*b, "score", frame, &score) ||
+      !planeOf(*b, "state", frame, &out->state) || !planeOf(*b, "luma", frame, &out->luma))
+    return false;
+  out->image = {};
+  const Json& meta = b->field("frame")->asRecord()->data;
+  if (meta.contains("imageWidth") && meta["imageWidth"].is_number_integer() &&
+      meta.contains("imageHeight") && meta["imageHeight"].is_number_integer())
+    out->image = cv::Size(meta["imageWidth"].get<int>(), meta["imageHeight"].get<int>());
+  out->score = Field(score, frame.tl(), frame);
+  out->frame = frame;
+  return true;
+}
+
+Data mapsBundle(ResponseMaps maps, cv::Size image) {
+  Record frame;
+  frame.type = kFrameType;
+  frame.data = Json{{"x", maps.frame.x},         {"y", maps.frame.y},
+                    {"width", maps.frame.width}, {"height", maps.frame.height},
+                    {"imageWidth", image.width}, {"imageHeight", image.height}};
+  Bundle b(kResponseMapsKind);
+  b.set("response", f32Image(std::move(maps.response)));
+  b.set("gray", f32Image(std::move(maps.gray)));
+  b.set("level", f32Image(std::move(maps.level)));
+  b.set("frame", Data::record(std::move(frame)));
+  return Data::bundle(std::move(b));
+}
+
+bool readMaps(const Data& d, MapsView* out) {
+  const Bundle* b = d.asBundle();
+  if (!b || b->kind != kResponseMapsKind)
+    return false;
+  const Data* f = b->field("frame");
+  const Record* rec = f ? f->asRecord() : nullptr;
+  if (!rec || rec->type != kFrameType)
+    return false;
+  const Json& j = rec->data;
+  const auto num = [&](const char* k) { return j.contains(k) && j[k].is_number_integer(); };
+  if (!num("x") || !num("y") || !num("width") || !num("height"))
+    return false;
+  const cv::Rect frame(j["x"].get<int>(), j["y"].get<int>(), j["width"].get<int>(),
+                       j["height"].get<int>());
+  const auto field = [&](const char* name, Field* to) {
+    const Data* x = b->field(name);
+    const Image* img = x ? x->asImage() : nullptr;
+    if (!img || img->scale != 1 || img->channels != 1 || img->depth != PixelDepth::F32 ||
+        !img->consistent() || img->width != frame.width || img->height != frame.height)
+      return false;
+    *to = Field(cvx::view(*img), frame.tl(), frame);
+    return true;
+  };
+  if (!field("response", &out->response) || !field("gray", &out->gray) ||
+      !field("level", &out->level))
+    return false;
+  out->frame = frame;
+  return true;
+}
+
+Data f32Image(cv::Mat m) {
+  Image img;
+  cvx::fromMat(std::move(m), img);
+  return Data::image(std::move(img));
+}
+
+Status badImage(const char* port, bool maps) {
+  return Status::Error(
+      Phase::Execute, "bad_input",
+      maps ? "需要 glue.response 输出的 maps（Bundle<glue.ResponseMaps>）"
+           : "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行",
+      {}, port);
+}
+
 // ------------------------------------------------------------------ JSON
 
 double round3(double v) { return roundTo(v, 3); }
 
 Json pxJson(P2 p) {
-  if (!finite(p)) return Json();
+  if (!finite(p))
+    return Json();
   return Json::array({round3(p.x), round3(p.y)});
 }
 
@@ -75,9 +257,14 @@ P2 pxOf(const Json& j) {
 }
 
 Json numOrNull(double v, int decimals) {
-  if (!std::isfinite(v)) return Json();
+  if (!std::isfinite(v))
+    return Json();
   return roundTo(v, decimals);
 }
+
+Json exact(double v) { return std::isfinite(v) ? Json(v) : Json(); }
+
+Json exactPx(P2 p) { return finite(p) ? Json::array({p.x, p.y}) : Json(); }
 
 double numOf(const Json& j) { return j.is_number() ? j.get<double>() : kNaN; }
 
@@ -85,13 +272,15 @@ double numOf(const Json& j) { return j.is_number() ? j.get<double>() : kNaN; }
 
 std::vector<P2> Polyline::between(double s0, double s1) const {
   std::vector<P2> out;
-  if (s.empty() || s1 < s0) return out;
+  if (s.empty() || s1 < s0)
+    return out;
   const PolylineView v = view();
   P2 p, t;
   v.at(s0, &p, &t);
   out.push_back(p);
   for (std::size_t i = 0; i < s.size(); ++i) {
-    if (s[i] > s0 + 1e-9 && s[i] < s1 - 1e-9) out.push_back(points[i]);
+    if (s[i] > s0 + 1e-9 && s[i] < s1 - 1e-9)
+      out.push_back(points[i]);
   }
   v.at(s1, &p, &t);
   out.push_back(p);
@@ -120,7 +309,8 @@ Data polylineRecord(const std::vector<double>& s, const std::vector<P2>& points,
 
 bool readPolyline(const Data& d, Polyline* out) {
   const Record* rec = d.asRecord();
-  if (!rec) return false;
+  if (!rec)
+    return false;
   const Json& j = rec->data;
   const auto s = j.find("s");
   const auto p = j.find("points");
@@ -134,11 +324,54 @@ bool readPolyline(const Data& d, Polyline* out) {
     line.s.push_back(numOf((*s)[i]));
     line.points.push_back(pxOf((*p)[i]));
     line.tangents.push_back(unit(pxOf((*t)[i])));
-    if (!std::isfinite(line.s.back()) || !finite(line.points.back())) return false;
-    if (i > 0 && line.s[i] < line.s[i - 1]) return false;
+    if (!std::isfinite(line.s.back()) || !finite(line.points.back()))
+      return false;
+    if (i > 0 && line.s[i] < line.s[i - 1])
+      return false;
   }
   *out = std::move(line);
   return true;
+}
+
+bool readLine(const Data& d, Polyline* out) {
+  const Record* rec = d.asRecord();
+  if (!rec || rec->type != kPolylineType)
+    return false;
+  const auto count = rec->data.find("count");
+  if (count != rec->data.end() && count->is_number() && count->get<double>() == 0) {
+    *out = Polyline();
+    return true;
+  }
+  return readPolyline(d, out);
+}
+
+std::vector<StationPose> layStations(const Polyline& line, double step, double rangeA,
+                                     double rangeB, double* usedA, double* usedB) {
+  std::vector<StationPose> out;
+  *usedA = *usedB = kNaN;
+  if (line.s.empty() || !(step > 0))
+    return out;
+  double a = line.s.front(), b = line.s.back();
+  if (!(rangeA == 0 && rangeB == 0)) {
+    a = std::max(a, rangeA);
+    b = std::min(b, rangeB);
+  }
+  if (!(b >= a))
+    return out;
+  *usedA = a;
+  *usedB = b;
+  const PolylineView v = line.view();
+  for (int k = 0;; ++k) {
+    const double s = a + k * step;
+    if (s > b + 1e-6)
+      break;
+    StationPose st;
+    st.s = s;
+    v.at(s, &st.c, &st.t);
+    st.n = perp(st.t);
+    out.push_back(st);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ Bundle 读写
@@ -155,10 +388,12 @@ Data pathBundle(Data line, Json info) {
 
 bool readPath(const Data& d, Polyline* line, Json* info) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kPathKind) return false;
+  if (!b || b->kind != kPathKind)
+    return false;
   const Data* l = b->field("line");
   const Data* i = b->field("info");
-  if (!l || !i || !i->asRecord() || !readPolyline(*l, line)) return false;
+  if (!l || !i || !i->asRecord() || !readPolyline(*l, line))
+    return false;
   *info = i->asRecord()->data;
   return true;
 }
@@ -179,12 +414,15 @@ Data beadBundle(Data line, Json stations, Json info) {
 
 bool readBead(const Data& d, BeadView* out) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kBeadKind) return false;
+  if (!b || b->kind != kBeadKind)
+    return false;
   const Data* l = b->field("line");
   const Data* s = b->field("stations");
   const Data* i = b->field("info");
-  if (!l || !s || !i || !s->asRecord() || !i->asRecord()) return false;
-  if (!readPolyline(*l, &out->line)) return false;
+  if (!l || !s || !i || !s->asRecord() || !i->asRecord())
+    return false;
+  if (!readPolyline(*l, &out->line))
+    return false;
   out->stations = s->asRecord()->data;
   out->info = i->asRecord()->data;
   return true;
@@ -201,12 +439,18 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
   j["unit"] = metric.unit();
   Json s = Json::array(), center = Json::array(), normal = Json::array(), present = Json::array(),
        lo = Json::array(), hi = Json::array(), left = Json::array(), right = Json::array(),
-       width = Json::array(), widthPx = Json::array(), contrast = Json::array();
+       width = Json::array(), widthPx = Json::array(), contrast = Json::array(),
+       candidateLo = Json::array(), candidateHi = Json::array(), candidateWidthPx = Json::array();
   for (const Station& st : stations) {
     s.push_back(round3(st.s));
     center.push_back(pxJson(st.c));
     normal.push_back(Json::array({roundTo(st.n.x, 5), roundTo(st.n.y, 5)}));
     present.push_back(st.present);
+    const double diagnosticLo = st.present ? st.lo : st.candidateLo;
+    const double diagnosticHi = st.present ? st.hi : st.candidateHi;
+    candidateLo.push_back(numOrNull(diagnosticLo));
+    candidateHi.push_back(numOrNull(diagnosticHi));
+    candidateWidthPx.push_back(numOrNull(diagnosticHi - diagnosticLo));
     if (st.present) {
       lo.push_back(round3(st.lo));
       hi.push_back(round3(st.hi));
@@ -216,7 +460,8 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
       widthPx.push_back(round3(st.width()));
       contrast.push_back(roundTo(st.peak, 1));
     } else {
-      for (Json* a : {&lo, &hi, &left, &right, &width, &widthPx, &contrast}) a->push_back(Json());
+      for (Json* a : {&lo, &hi, &left, &right, &width, &widthPx, &contrast})
+        a->push_back(Json());
     }
   }
   j["s"] = std::move(s);
@@ -230,6 +475,9 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
   j["width"] = std::move(width);
   j["widthPx"] = std::move(widthPx);
   j["contrast"] = std::move(contrast);
+  j["candidateLo"] = std::move(candidateLo);
+  j["candidateHi"] = std::move(candidateHi);
+  j["candidateWidthPx"] = std::move(candidateWidthPx);
   return j;
 }
 
@@ -238,9 +486,12 @@ bool readStations(const Json& j, std::vector<Station>* out) {
   std::size_t n = 0;
   for (std::size_t k = 0; k < std::size(keys); ++k) {
     const auto it = j.find(keys[k]);
-    if (it == j.end() || !it->is_array()) return false;
-    if (k == 0) n = it->size();
-    if (it->size() != n) return false;
+    if (it == j.end() || !it->is_array())
+      return false;
+    if (k == 0)
+      n = it->size();
+    if (it->size() != n)
+      return false;
   }
   std::vector<Station> st(n);
   for (std::size_t i = 0; i < n; ++i) {
@@ -248,15 +499,17 @@ bool readStations(const Json& j, std::vector<Station>* out) {
     x.s = numOf(j["s"][i]);
     x.c = pxOf(j["center"][i]);
     x.n = unit(pxOf(j["normal"][i]));
-    x.t = P2(x.n.y, -x.n.x);  // n = (−t.y, t.x) 反过来
+    x.t = P2(x.n.y, -x.n.x); // n = (−t.y, t.x) 反过来
     x.present = j["present"][i].is_boolean() && j["present"][i].get<bool>();
     if (x.present) {
       x.lo = numOf(j["lo"][i]);
       x.hi = numOf(j["hi"][i]);
       x.peak = numOf(j["contrast"][i]);
-      if (!std::isfinite(x.lo) || !std::isfinite(x.hi)) x.present = false;
+      if (!std::isfinite(x.lo) || !std::isfinite(x.hi))
+        x.present = false;
     }
-    if (!std::isfinite(x.s) || !finite(x.c)) return false;
+    if (!std::isfinite(x.s) || !finite(x.c))
+      return false;
   }
   *out = std::move(st);
   return true;
@@ -265,22 +518,27 @@ bool readStations(const Json& j, std::vector<Station>* out) {
 // ------------------------------------------------------------------ 标定
 
 double Metric::distance(P2 a, P2 b) const {
-  if (!finite(a) || !finite(b)) return kNaN;
-  if (!calib) return glue::length(b - a);
+  if (!finite(a) || !finite(b))
+    return kNaN;
+  if (!calib)
+    return glue::length(b - a);
   return calib->distance(a.x, a.y, b.x, b.y);
 }
 
 double Metric::length(const std::vector<P2>& pts) const {
   double total = 0;
-  for (std::size_t i = 1; i < pts.size(); ++i) total += distance(pts[i - 1], pts[i]);
+  for (std::size_t i = 1; i < pts.size(); ++i)
+    total += distance(pts[i - 1], pts[i]);
   return total;
 }
 
 Status metricFromInput(const Inputs& inputs, const char* port, Metric* out) {
   out->calib.reset();
-  if (!inputs.has(port)) return Status::Ok();
+  if (!inputs.has(port))
+    return Status::Ok();
   const Record* rec = inputs.get(port).asRecord();
-  if (!rec) return Status::Error(Phase::Execute, "bad_input", "calib 不是 Record", {}, port);
+  if (!rec)
+    return Status::Error(Phase::Execute, "bad_input", "calib 不是 Record", {}, port);
   std_image::PlaneCalib c;
   std::string why;
   if (!std_image::parsePlaneCalib(rec->data, &c, &why)) {
@@ -296,7 +554,8 @@ Metric metricFromInfo(const Json& info) {
   const auto it = info.find("calib");
   if (it != info.end() && it->is_object()) {
     std_image::PlaneCalib c;
-    if (std_image::parsePlaneCalib(*it, &c, nullptr)) m.calib = c;
+    if (std_image::parsePlaneCalib(*it, &c, nullptr))
+      m.calib = c;
   }
   return m;
 }
@@ -308,7 +567,8 @@ Data measurement(double value, const std::string& unitName, const std::string& m
   m.value = value;
   m.ok = std::isfinite(value);
   m.unit = unitName;
-  if (!m.ok) m.message = messageIfMissing;
+  if (!m.ok)
+    m.message = messageIfMissing;
   return Data::measurement(std::move(m));
 }
 
@@ -369,6 +629,31 @@ Param boolParam(const char* name, const char* label, bool def, const char* doc, 
   return p;
 }
 
+Param intParam(const char* name, const char* label, int def, const char* doc, int lo, int hi,
+               bool advanced) {
+  Param p;
+  p.name = name;
+  p.tuningRole = "detection";
+  p.type = ParamType::Int;
+  p.label = label;
+  p.doc = doc;
+  p.def = Value::integer(def);
+  p.min = lo;
+  p.max = hi;
+  p.advanced = advanced;
+  return p;
+}
+
+Param rangedFloat(const char* name, const char* label, double def, const char* unitName,
+                  const char* doc, double lo, double hi, bool advanced) {
+  Param p = floatParam(name, label, def, unitName, doc, advanced);
+  if (std::isfinite(lo))
+    p.min = lo;
+  if (std::isfinite(hi))
+    p.max = hi;
+  return p;
+}
+
 Param visibleWhen(Param p, const char* param, const char* eq) {
   p.visibleWhen.param = param;
   p.visibleWhen.eq = Value::text(eq);
@@ -385,7 +670,8 @@ std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<S
       continue;
     }
     std::size_t j = i;
-    while (j + 1 < st.size() && st[j + 1].present) ++j;
+    while (j + 1 < st.size() && st[j + 1].present)
+      ++j;
     out.emplace_back(i, j);
     i = j + 1;
   }
@@ -393,10 +679,11 @@ std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<S
 }
 
 std::string fmt(double v, int decimals) {
-  if (!std::isfinite(v)) return "—";
+  if (!std::isfinite(v))
+    return "—";
   char buf[48];
   std::snprintf(buf, sizeof(buf), "%.*f", decimals, v);
   return buf;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

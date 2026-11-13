@@ -17,12 +17,12 @@ namespace image {
 /// 测试按同一个公式断言（testImageValue）。
 inline double testImageValue(PixelDepth depth, std::int32_t x, std::int32_t y, std::int32_t c) {
   switch (depth) {
-    case PixelDepth::U8:
-      return static_cast<double>((x * 3 + y * 5 + c * 60) % 256);
-    case PixelDepth::U16:
-      return static_cast<double>((x * 300 + y * 7 + c * 1000) % 65536);
-    case PixelDepth::F32:
-      return static_cast<double>(x) * 0.5 + static_cast<double>(y) * 0.25 + c * 100.0;
+  case PixelDepth::U8:
+    return static_cast<double>((x * 3 + y * 5 + c * 60) % 256);
+  case PixelDepth::U16:
+    return static_cast<double>((x * 300 + y * 7 + c * 1000) % 65536);
+  case PixelDepth::F32:
+    return static_cast<double>(x) * 0.5 + static_cast<double>(y) * 0.25 + c * 100.0;
   }
   return 0;
 }
@@ -53,8 +53,10 @@ inline Image makeTestImage(std::int32_t w, std::int32_t h, std::int32_t c, Pixel
 }
 
 inline PixelDepth depthOf(const std::string& name) {
-  if (name == "u16") return PixelDepth::U16;
-  if (name == "f32") return PixelDepth::F32;
+  if (name == "u16")
+    return PixelDepth::U16;
+  if (name == "f32")
+    return PixelDepth::F32;
   return PixelDepth::U8;
 }
 
@@ -76,17 +78,18 @@ inline Status takeGrayCompute(const Inputs& inputs, const ParamView&, Outputs& o
   const Image* img = inputs.get("image").asImage();
   Measurement m;
   m.ok = img != nullptr;
-  m.unit = "px²";  // 像素个数，量纲是 px²（预览按 s² 换回原图，ADR-0028）
+  m.unit = "px²"; // 像素个数，量纲是 px²（预览按 s² 换回原图，ADR-0028）
   m.value = img ? static_cast<double>(img->pixelCount()) : 0.0;
   outputs.set("pixels", Data::measurement(m));
   return Status::Ok();
 }
 
-}  // namespace image
+} // namespace image
 
 /// 注册 test.make_image 与 test.take_gray。已经注册过就什么都不做。
 inline void registerImageTestOps(Registry& r) {
-  if (r.find("test.make_image")) return;
+  if (r.find("test.make_image"))
+    return;
   {
     OperatorDesc op;
     op.id = "test.make_image";
@@ -141,4 +144,4 @@ inline void registerImageTestOps(Registry& r) {
   }
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

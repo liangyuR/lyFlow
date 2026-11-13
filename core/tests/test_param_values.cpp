@@ -31,19 +31,21 @@ std::string badParam(const Json& diags, const std::string& param) {
 
 const Json* findOperator(const Json& manifest, const std::string& id) {
   for (const Json& op : manifest["operators"]) {
-    if (op["id"] == id) return &op;
+    if (op["id"] == id)
+      return &op;
   }
   return nullptr;
 }
 
 const Json* findParamIn(const Json& op, const std::string& name) {
   for (const Json& p : op["params"]) {
-    if (p["name"] == name) return &p;
+    if (p["name"] == name)
+      return &p;
   }
   return nullptr;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("test.param_showcase：14 种类型各有一个，注册表自检不挑它的毛病") {
   ensureTestOps();
@@ -83,7 +85,8 @@ TEST_CASE("manifest 导出：curve 的默认值是对象，flags 的选项值是
   CHECK((*response)["default"]["points"].size() == 3);
   const Json* features = findParamIn(*op, "features");
   REQUIRE(features != nullptr);
-  for (const Json& o : (*features)["options"]) CHECK(o["value"].is_number_integer());
+  for (const Json& o : (*features)["options"])
+    CHECK(o["value"].is_number_integer());
   CHECK((*features)["options"][2]["value"] == 4);
   const Json* pose = findParamIn(*op, "pose");
   REQUIRE(pose != nullptr);
@@ -96,10 +99,13 @@ TEST_CASE("manifest 导出：curve 的默认值是对象，flags 的选项值是
   const Json published = Json::parse(local.toManifestJson());
   CHECK(published["operators"][0]["params"][0]["tuningRole"] == "detection");
   CHECK(published["operators"][0]["params"][0]["unitSource"] == "bead.info.unit");
-  tuned.id = "test.bad_role"; tuned.params[0].tuningRole = "typo";
+  tuned.id = "test.bad_role";
+  tuned.params[0].tuningRole = "typo";
   local.addOperator(tuned);
   const auto issues = local.validate();
-  CHECK(std::any_of(issues.begin(),issues.end(),[](const std::string& s){return s.find("tuningRole") != std::string::npos;}));
+  CHECK(std::any_of(issues.begin(), issues.end(), [](const std::string& s) {
+    return s.find("tuningRole") != std::string::npos;
+  }));
 }
 
 TEST_CASE("curve / transform 的值：合法的通过，形状不对的报 bad_param 并说清楚哪里不对") {
@@ -118,16 +124,20 @@ TEST_CASE("curve / transform 的值：合法的通过，形状不对的报 bad_p
   CHECK(bad(Json::array({0, 1})).find("对象") != std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}}}}).find("两个控制点") != std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}, {1.5, 1}}}}).find("[0, 1]") != std::string::npos);
-  CHECK(bad(Json{{"points", {{0, 0}, {0.5, 1}, {0.5, 0.2}}}}).find("大于前一个点") != std::string::npos);
+  CHECK(bad(Json{{"points", {{0, 0}, {0.5, 1}, {0.5, 0.2}}}}).find("大于前一个点") !=
+        std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}, {1, 1.2}}}}).find("不能大于 1") != std::string::npos);
-  CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"interp", "cubic"}}).find("interp") != std::string::npos);
-  CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"tension", 1}}).find("tension") != std::string::npos);
+  CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"interp", "cubic"}}).find("interp") !=
+        std::string::npos);
+  CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"tension", 1}}).find("tension") !=
+        std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}, {1, "a"}}}}).find("[x, y]") != std::string::npos);
 
   // transform 的值：16 个数的行主序矩阵，长度不对报 bad_param
   Json pose = Json::array();
-  for (int i = 0; i < 16; ++i) pose.push_back(i % 5 == 0 ? 1.0 : 0.0);
-  pose[3] = 0.25;  // 平移 x
+  for (int i = 0; i < 16; ++i)
+    pose.push_back(i % 5 == 0 ? 1.0 : 0.0);
+  pose[3] = 0.25; // 平移 x
   CHECK(validate(showcaseGraph(Json{{"pose", pose}})).empty());
   Json shortPose = pose;
   shortPose.erase(shortPose.begin());
@@ -137,7 +147,8 @@ TEST_CASE("curve / transform 的值：合法的通过，形状不对的报 bad_p
 
 TEST_CASE("curve 进 cacheKey 与键的书写顺序无关；两种值都原样进了 compute") {
   ensureTestOps();
-  const Json a = showcaseGraph(Json{{"response", {{"points", {{0, 0}, {1, 0.5}}}, {"interp", "linear"}}}});
+  const Json a =
+      showcaseGraph(Json{{"response", {{"points", {{0, 0}, {1, 0.5}}}, {"interp", "linear"}}}});
   const Json b = Json::parse(
       R"({"schemaVersion":1,"id":"01TESTTESTTESTTESTTESTTEST","nodes":[
           {"id":"src","op":"gen.synthetic","params":{"pointCount":500}},
@@ -145,7 +156,8 @@ TEST_CASE("curve 进 cacheKey 与键的书写顺序无关；两种值都原样�
           "edges":[{"id":"e0","from":{"node":"src","port":"cloud"},"to":{"node":"show","port":"cloud"}}]})");
   const auto keyOf = [](const Json& doc) {
     for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}))) {
-      if (n.value("nodeId", "") == "show") return n.value("cacheKey", "");
+      if (n.value("nodeId", "") == "show")
+        return n.value("cacheKey", "");
     }
     return std::string();
   };
@@ -153,7 +165,8 @@ TEST_CASE("curve 进 cacheKey 与键的书写顺序无关；两种值都原样�
   CHECK(keyOf(a) == keyOf(b));
 
   Json pose = Json::array();
-  for (int i = 0; i < 16; ++i) pose.push_back(i % 5 == 0 ? 1.0 : 0.0);
+  for (int i = 0; i < 16; ++i)
+    pose.push_back(i % 5 == 0 ? 1.0 : 0.0);
   pose[7] = -0.5;
   Json withPose = a;
   withPose["nodes"][1]["params"]["pose"] = pose;
@@ -163,7 +176,8 @@ TEST_CASE("curve 进 cacheKey 与键的书写顺序无关；两种值都原样�
   REQUIRE(done.contains("stats"));
   const Json* echo = nullptr;
   for (const Json& o : done["stats"]["outputs"]) {
-    if (o["port"] == "echo") echo = &o;
+    if (o["port"] == "echo")
+      echo = &o;
   }
   REQUIRE(echo != nullptr);
   const Json data = (*echo)["value"]["data"];
@@ -180,7 +194,8 @@ TEST_CASE("evaluateCurve：线性插值、端点外取端点值、smooth 不冲�
   CHECK(evaluateCurve(linear, 1.0) == doctest::Approx(3.0));
 
   // 单调的控制点插出来的线也单调，且过每一个控制点
-  const Json smooth = Json{{"interp", "smooth"}, {"points", {{0, 0}, {0.5, 0.35}, {0.6, 0.95}, {1, 1}}}};
+  const Json smooth =
+      Json{{"interp", "smooth"}, {"points", {{0, 0}, {0.5, 0.35}, {0.6, 0.95}, {1, 1}}}};
   double prev = -1;
   for (int i = 0; i <= 100; ++i) {
     const double y = evaluateCurve(smooth, i / 100.0);
@@ -194,4 +209,4 @@ TEST_CASE("evaluateCurve：线性插值、端点外取端点值、smooth 不冲�
   CHECK(evaluateCurve(Json::object(), 0.5) == 0.0);
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

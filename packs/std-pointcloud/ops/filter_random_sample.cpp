@@ -7,8 +7,7 @@
 namespace lyflow::ops {
 namespace {
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   const std::size_t n = in.pointCount();
   const bool byRatio = params.choice("mode") == "ratio";
@@ -29,7 +28,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     // 否则调参时画面每次都在变，根本判断不出改动有没有效果。
     std::mt19937 rng(seed);
     for (std::size_t i = 0; i < want; ++i) {
-      if (ctx.cancelled()) return Status::Ok();
+      if (ctx.cancelled())
+        return Status::Ok();
       std::uniform_int_distribution<std::size_t> pick(i, n - 1);
       std::swap(keep[i], keep[pick(rng)]);
     }
@@ -41,10 +41,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
       std::sort(keep.begin(), keep.end());
     } else {
       std::vector<char> marked(n, 0);
-      for (const std::int32_t i : keep) marked[static_cast<std::size_t>(i)] = 1;
+      for (const std::int32_t i : keep)
+        marked[static_cast<std::size_t>(i)] = 1;
       std::size_t at = 0;
       for (std::size_t i = 0; i < n; ++i) {
-        if (marked[i]) keep[at++] = static_cast<std::int32_t>(i);
+        if (marked[i])
+          keep[at++] = static_cast<std::int32_t>(i);
       }
     }
   }
@@ -60,14 +62,15 @@ nlohmann::json migrateFromV1(const nlohmann::json& params) {
   for (const auto& rename : {std::pair<const char*, const char*>{"count", "keepCount"},
                              std::pair<const char*, const char*>{"ratio", "keepRatio"}}) {
     auto it = out.find(rename.first);
-    if (it == out.end()) continue;
+    if (it == out.end())
+      continue;
     out[rename.second] = *it;
     out.erase(rename.first);
   }
   return out;
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterRandomSample(Registry& r) {
   OperatorDesc op;
@@ -75,12 +78,18 @@ void registerFilterRandomSample(Registry& r) {
   op.version = "2.0.0";
   op.label = "随机采样";
   op.category = "过滤/降采样";
-  op.keywords = {
-      "random sampling", "random downsampling", "subsampling",
-      "随机抽样", "随机降采样", "点云抽稀",
-      "random", "sample", "subsample",
-      "随机", "抽样", "降采样"
-  };
+  op.keywords = {"random sampling",
+                 "random downsampling",
+                 "subsampling",
+                 "随机抽样",
+                 "随机降采样",
+                 "点云抽稀",
+                 "random",
+                 "sample",
+                 "subsample",
+                 "随机",
+                 "抽样",
+                 "降采样"};
   op.doc = "随机抽取一部分点。种子固定，同输入同结果。";
   // v2 把 count/ratio 改名成 keepCount/keepRatio：原来的名字读不出「保留还是丢弃」。
 
@@ -136,4 +145,4 @@ void registerFilterRandomSample(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

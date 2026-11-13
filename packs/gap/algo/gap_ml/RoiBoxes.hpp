@@ -132,4 +132,4 @@ RoiBoxesResult boxesFromLabels(const SegmentRow& row0, const SegmentRow& row1);
 RoiBoxesResult boxesFromRefinedLabels(const SegmentRow& row0, const SegmentRow& row1,
                                       const MaskRefineOptions& options = {});
 
-}  // namespace gap::ml
+} // namespace gap::ml

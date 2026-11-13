@@ -30,12 +30,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                            {"x1", v.x(v.size() - 1)}});
   }
   j["faces"] = nlohmann::json::array();
-  for (const Face& f : faces) j["faces"].push_back(faceToJson(f));
+  for (const Face& f : faces)
+    j["faces"].push_back(faceToJson(f));
   outputs.set("faces", Data::record(Record{"DtsFaces", std::move(j)}));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerSplitFaces(Registry& r) {
   OperatorDesc op;
@@ -43,16 +44,20 @@ void registerSplitFaces(Registry& r) {
   op.version = "1.0.0";
   op.label = "轮廓平面分割";
   op.category = "DTS/分面";
-  op.keywords = {
-      "profile face segmentation", "planar segment extraction", "sliding window fitting",
-      "轮廓分段", "平面片提取", "平面拟合",
-      "faces", "split", "flat",
-      "分面", "平面"
-  };
-  op.doc =
-      "先按 x 间断与 z 跳变切成分片，再在每个分片里滑窗找平：\n"
-      "rms 达标的窗口、相邻窗口夹角不超过阈值的连成一块面，合并后整体拟合。\n"
-      "输出的面表是挑钣金面的依据 —— 挑面从藏在启发式里变成看着这张表挑。";
+  op.keywords = {"profile face segmentation",
+                 "planar segment extraction",
+                 "sliding window fitting",
+                 "轮廓分段",
+                 "平面片提取",
+                 "平面拟合",
+                 "faces",
+                 "split",
+                 "flat",
+                 "分面",
+                 "平面"};
+  op.doc = "先按 x 间断与 z 跳变切成分片，再在每个分片里滑窗找平：\n"
+           "rms 达标的窗口、相邻窗口夹角不超过阈值的连成一块面，合并后整体拟合。\n"
+           "输出的面表是挑钣金面的依据 —— 挑面从藏在启发式里变成看着这张表挑。";
   op.inputs = {Port{"clean", "PointCloud", "Clean", "清理过的轮廓。", true}};
   op.outputs = {Port{"faces", "Record", "Faces", "分片与面表（DtsFaces）。", true}};
 
@@ -81,12 +86,11 @@ void registerSplitFaces(Registry& r) {
                minPoints,
                mk("fitLenMm", "滑窗长度", 5.0, "找平用的窗口长度。"),
                mk("maxRmsMm", "平面 rms 上限", 0.05, "窗口的直线拟合残差低于它才算平。"),
-               mk("angleBreakDeg", "角度断开阈", 6.0,
-                  "相邻窗口夹角超过它就当成两块面。", "deg"),
+               mk("angleBreakDeg", "角度断开阈", 6.0, "相邻窗口夹角超过它就当成两块面。", "deg"),
                mk("minLenMm", "最短面长", 3.0, "合并后短于它的面丢掉。")};
   op.capabilities = {false, true, true};
   op.compute = &compute;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

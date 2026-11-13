@@ -48,8 +48,7 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
       rc = io::loadPcd(narrow.str(), blob, ctx.threadBudget());
     }
   } catch (const std::exception& e) {
-    return Status::Error(Phase::Execute, "io",
-                         std::string("读取失败: ") + e.what(), "path");
+    return Status::Error(Phase::Execute, "io", std::string("读取失败: ") + e.what(), "path");
   }
   if (rc < 0) {
     return Status::Error(Phase::Execute, "io",
@@ -62,10 +61,10 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
   const std::uint64_t declared =
       static_cast<std::uint64_t>(blob.width) * static_cast<std::uint64_t>(blob.height);
   if (cloud.pointCount() == 0 && declared > 0) {
-    return Status::Error(Phase::Execute, "io", "文件里没有 x/y/z 字段: " + file.u8string(),
-                         "path");
+    return Status::Error(Phase::Execute, "io", "文件里没有 x/y/z 字段: " + file.u8string(), "path");
   }
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
 
   if (params.flag("recenter") && cloud.pointCount() > 0) {
     double cx = 0, cy = 0, cz = 0;
@@ -96,14 +95,15 @@ std::string externalKey(const ParamView& params) {
   const std::filesystem::path file = params.path("path");
   std::error_code ec;
   const auto size = std::filesystem::file_size(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = std::filesystem::last_write_time(file, ec);
-  if (ec) return {};
-  return std::to_string(size) + ":" +
-         std::to_string(mtime.time_since_epoch().count());
+  if (ec)
+    return {};
+  return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
-}  // namespace
+} // namespace
 
 void registerIoLoadPcd(Registry& r) {
   OperatorDesc op;
@@ -111,12 +111,18 @@ void registerIoLoadPcd(Registry& r) {
   op.version = "1.0.0";
   op.label = "点云读取";
   op.category = "输入输出/输入";
-  op.keywords = {
-      "point cloud loading", "point cloud file reading", "PCD",
-      "PLY", "点云导入", "点云文件",
-      "点云加载", "load", "read",
-      "open", "读取", "载入"
-  };
+  op.keywords = {"point cloud loading",
+                 "point cloud file reading",
+                 "PCD",
+                 "PLY",
+                 "点云导入",
+                 "点云文件",
+                 "点云加载",
+                 "load",
+                 "read",
+                 "open",
+                 "读取",
+                 "载入"};
   op.doc = "从磁盘读取点云文件。支持 PCD 与 PLY，按文件里实际存在的字段带出强度/法线/颜色通道。";
 
   // 无输入端口：这是一个源节点。
@@ -155,4 +161,4 @@ void registerIoLoadPcd(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

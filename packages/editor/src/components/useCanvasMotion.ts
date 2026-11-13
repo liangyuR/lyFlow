@@ -2,8 +2,8 @@
 // 自动布局的位置过渡。三件事都从同一个地方来 —— 对 graph store 的**同步**订阅：
 // 在那一刻 React 还没重渲，被删节点的 DOM 还在，新节点也还没挂载。
 
-import { animate, animateMini, type AnimationPlaybackControls } from "motion/react";
-import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from "react";
+import { animate, animateMini, type AnimationPlaybackControls } from 'motion/react';
+import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
 import {
   clearEntering,
@@ -14,10 +14,10 @@ import {
   MOTION_MS,
   MOTION_NODE_LIMIT,
   TRANSITION,
-} from "../lib/motion";
-import { levelOf, pathPrefix } from "../lib/subgraph";
-import { useGraphStore } from "../store/graph";
-import { useUiStore } from "../store/ui";
+} from '../lib/motion';
+import { levelOf, pathPrefix } from '../lib/subgraph';
+import { useGraphStore } from '../store/graph';
+import { useUiStore } from '../store/ui';
 
 type Point = { x: number; y: number };
 /** 布局过渡期间喂给 React Flow 的临时位置。null = 没有过渡，一切以 doc 为准。 */
@@ -37,7 +37,12 @@ function snapshot(): LevelSnapshot {
   const lvl = levelOf(g.doc, path);
   const nodes = new Map<string, Point>();
   for (const n of lvl.nodes) nodes.set(n.id, n.ui?.position ?? { x: 0, y: 0 });
-  return { epoch: g.epoch, pathKey: pathPrefix(path), nodes, edges: new Set(lvl.edges.map((e) => e.id)) };
+  return {
+    epoch: g.epoch,
+    pathKey: pathPrefix(path),
+    nodes,
+    edges: new Set(lvl.edges.map((e) => e.id)),
+  };
 }
 
 /** 位置覆盖放在一个外部 store 里，经 useSyncExternalStore 读：它和 graph store 的更新
@@ -63,10 +68,10 @@ function createOverrideStore() {
 /** 残影不能被 e2e 或无障碍树当成真节点（N3）：id 与全部 data-*（data-testid、React Flow 的
  *  data-handleid / data-nodeid……）一律剥掉。 */
 function scrub(root: Element): void {
-  for (const el of [root, ...root.querySelectorAll("*")]) {
-    el.removeAttribute("id");
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    el.removeAttribute('id');
     for (const attr of [...el.attributes]) {
-      if (attr.name.startsWith("data-")) el.removeAttribute(attr.name);
+      if (attr.name.startsWith('data-')) el.removeAttribute(attr.name);
     }
   }
 }
@@ -91,7 +96,10 @@ export function useCanvasMotion(
   // 订阅只建一次，开关经 ref 读：prop 变化不该让差分的基线重来
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
-  const layout = useRef<{ ctrl: AnimationPlaybackControls | null; frame: Map<string, Point> } | null>(null);
+  const layout = useRef<{
+    ctrl: AnimationPlaybackControls | null;
+    frame: Map<string, Point>;
+  } | null>(null);
 
   const cancelLayout = useCallback(() => {
     layout.current?.ctrl?.stop();
@@ -108,12 +116,14 @@ export function useCanvasMotion(
       const root = wrapper.current;
       if (!layer || !root) return;
       for (const id of ids) {
-        const host = root.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
-        const node = host?.querySelector(".node");
+        const host = root.querySelector<HTMLElement>(
+          `.react-flow__node[data-id="${CSS.escape(id)}"]`,
+        );
+        const node = host?.querySelector('.node');
         if (!host || !node) continue; // 虚拟化下不在视野里的节点本来就没有 DOM
-        const ghost = document.createElement("div");
-        ghost.className = "canvas__ghost";
-        ghost.setAttribute("aria-hidden", "true");
+        const ghost = document.createElement('div');
+        ghost.className = 'canvas__ghost';
+        ghost.setAttribute('aria-hidden', 'true');
         // React Flow 把节点位置写在包装层的 translate 上，残影层同在视口坐标系里，照抄即可
         ghost.style.transform = host.style.transform;
         ghost.style.width = `${host.offsetWidth}px`;
@@ -203,10 +213,10 @@ export function useCanvasMotion(
       const addedEdges = [...next.edges].filter((id) => !before.edges.has(id));
       // 一次冒出来太多就不播了：满屏同时淡入没有信息量，还拖慢那一帧
       if (addedNodes.length > 0 && addedNodes.length <= MOTION_NODE_LIMIT) {
-        markEntering("node", addedNodes);
+        markEntering('node', addedNodes);
       }
       if (addedEdges.length > 0 && addedEdges.length <= MOTION_NODE_LIMIT * 2) {
-        markEntering("edge", addedEdges);
+        markEntering('edge', addedEdges);
       }
 
       const removed = [...before.nodes.keys()].filter((id) => !next.nodes.has(id));

@@ -8,6 +8,7 @@ void registerPackOps(Registry& r) {
   registerBundles(r);
   // 顺序即面板里同分类下的排列顺序：一张检测图从左到右
   registerBeadPath(r);
+  registerTaughtPath(r); // 示教胶路：与 bead_path 二选一，出同形的 glue.Path（glue-plan §6）
   registerBeadWidth(r);
   registerBeadBreaks(r);
   registerEdgeDistance(r);
@@ -16,8 +17,21 @@ void registerPackOps(Registry& r) {
   // 固定相机飞拍后检（glue-plan §5）：定位 → 逐点卡尺
   registerLocate(r);
   registerStationCalipers(r);
+  // 1.2 的测量算子：只测量、门限全开放，判定归宿主（docs/glue-measure-ops.md）
+  registerResponse(r);
+  registerFanScan(r);
+  registerTrackPath(r);
+  registerLateralRuns(r);
+  registerPartEdges(r);
+  registerPolyline(r);
+  // 1.3 的彩色测量算子：RGB 帧上的颜色模型与得分图，判定同样归宿主
+  registerColorModel(r);
+  registerColorMap(r);
+  registerColorFan(r);
+  registerColorTrack(r);
+  registerColorRuns(r);
   // 片段引用上面的算子；自检在注册表填满之后才跑
   registerSnippets(r);
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

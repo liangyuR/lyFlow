@@ -1,4 +1,4 @@
-import type { Diagnostic, ExecutionEvent, OutputValue, RunOutputs } from "./types.js";
+import type { Diagnostic, ExecutionEvent, OutputValue, RunOutputs } from './types.js';
 
 /** core 产出的 run summary（ADR-0022）。这一份不是 MCP 算出来的 ——
  *  它整个来自 run_finished 事件，与 `lyflow_run_summary(runId)` 是同一个对象。
@@ -46,9 +46,9 @@ export interface CoreRunSummary {
 /** 从事件流里把 core 那份 summary 取出来。老 core（ABI < v9）没有它，返回 null。 */
 export function coreSummary(events: ExecutionEvent[]): CoreRunSummary | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
-    if (events[i]?.kind !== "run_finished") continue;
-    const s = events[i]?.["summary"];
-    return s && typeof s === "object" ? (s as CoreRunSummary) : null;
+    if (events[i]?.kind !== 'run_finished') continue;
+    const s = events[i]?.['summary'];
+    return s && typeof s === 'object' ? (s as CoreRunSummary) : null;
   }
   return null;
 }
@@ -81,18 +81,18 @@ export interface GraphOutputSummary {
 
 export function summarizeRun(events: ExecutionEvent[]): RunSummary {
   const nodes = new Map<string, NodeSummary>();
-  let status = "unknown";
+  let status = 'unknown';
   let durationMs: number | null = null;
   const diagnostics: Diagnostic[] = [];
 
   for (const e of events) {
-    if (e.kind === "node_state" && typeof e.nodeId === "string") {
+    if (e.kind === 'node_state' && typeof e.nodeId === 'string') {
       const errors: Diagnostic[] = [];
       if (Array.isArray(e.errors)) errors.push(...e.errors);
       else if (e.error) errors.push(e.error);
       nodes.set(e.nodeId, {
         id: e.nodeId,
-        state: e.state ?? "unknown",
+        state: e.state ?? 'unknown',
         outputsAvailable: e.stats?.outputsAvailable ?? null,
         durationMs: e.durationMs ?? null,
         elementCount: e.stats?.elementCount ?? null,
@@ -100,8 +100,8 @@ export function summarizeRun(events: ExecutionEvent[]): RunSummary {
       });
       continue;
     }
-    if (e.kind === "run_finished") {
-      status = e.status ?? "unknown";
+    if (e.kind === 'run_finished') {
+      status = e.status ?? 'unknown';
       durationMs = e.durationMs ?? null;
       if (e.error) diagnostics.push(e.error);
     }
@@ -120,7 +120,7 @@ export function summarizeOutputs(outputs: RunOutputs): Record<string, GraphOutpu
   const out: Record<string, GraphOutputSummary> = {};
   for (const [name, o] of Object.entries(outputs ?? {})) {
     const item: GraphOutputSummary = { node: o.node, port: o.port, type: o.type };
-    if (typeof o.elementCount === "number") item.elementCount = o.elementCount;
+    if (typeof o.elementCount === 'number') item.elementCount = o.elementCount;
     if (o.value !== undefined) item.value = o.value;
     if (o.missing) item.missing = true;
     out[name] = item;
@@ -132,9 +132,9 @@ export function parseDiagnostics(text: string): Diagnostic[] | null {
   try {
     const value = JSON.parse(text) as unknown;
     if (Array.isArray(value)) return value as Diagnostic[];
-    if (value && typeof value === "object") {
+    if (value && typeof value === 'object') {
       const inner = (value as { error?: unknown }).error;
-      if (typeof inner === "string") return parseDiagnostics(inner);
+      if (typeof inner === 'string') return parseDiagnostics(inner);
     }
   } catch {
     return null;

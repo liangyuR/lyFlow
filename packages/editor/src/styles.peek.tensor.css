@@ -63,7 +63,9 @@
   font-family: var(--lyflow-mono);
 }
 
-.peek-tensor__num--idx { width: 44px; }
+.peek-tensor__num--idx {
+  width: 44px;
+}
 
 .peek-tensor__stage {
   position: relative;
@@ -83,7 +85,9 @@
   object-fit: contain;
 }
 
-.peek-tensor__canvas[data-mode="image"] { image-rendering: pixelated; }
+.peek-tensor__canvas[data-mode='image'] {
+  image-rendering: pixelated;
+}
 
 .peek-tensor__overlay {
   position: absolute;
@@ -147,4 +151,6 @@
   font-weight: normal;
 }
 
-.peek-tensor__stats td { color: var(--lyflow-fg-0); }
+.peek-tensor__stats td {
+  color: var(--lyflow-fg-0);
+}

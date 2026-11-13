@@ -2,6 +2,9 @@
 
 版本 0.2.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "gap"`。
 
+日常构建默认关闭；**正式发布包（`pnpm run package` / `Windows release`）固定编入 gap**，组合见 `packaging/release.json`，
+下游（xyz-gap-inspector）直接用发布的 SDK，不必自己编。见 [docs/deployment/packaging.md](../../docs/deployment/packaging.md)。
+
 把线扫双头剖面的测量主路径拆成 `gap.*` 算子，每个中间阶段（裁剪、ICP、
 分割、有效 ROI、拟合）都能在画布上点开看。两条路径都在：
 
@@ -122,6 +125,11 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
   `((r − prior) / sigma)²`，点残差按 `distThresh / 2` 归一 —— 弧长时听点的，弧短时往先验收，
   结果连续、不贴界。默认 sigma 0 = 不加；作用于不带圆心 / 方位带的一侧，以及 guard 档先拟的那一次（在带内就留下），
   always 档与 guard 出带后走的约束拟合不吃先验；`radiusMode: prior`。
+- **`gap.fit_gap_circles` 1.4.0**：逐侧**相切带** `leftTangentAbove` / `leftTangentTol`（右侧同）：要求圆顶
+  （圆心高度 + 半径）相对参考线落在窄带里。圆角从平面圆滑拐下去时圆顶就压在面线上；缝里更深处还有一段弧
+  （翻边、胶）时，拟到那上面的圆半径小、圆心高度却和拐角圆差不多，圆心高度带拦不住，只有圆顶悬在面下面
+  分得开（风挡 KUN10 点 3：正常帧圆顶 −0.14~+0.22 mm，拟错的 −0.41~−0.74）。档位跟 `*CenterMode` 走，
+  refLine 要接这一侧自己那张面的线。接了参考线时 quality 另报 `centerAboveRefMm`、`topAboveRefMm`。
 - **`gap.flush`**：`signed` 默认 true，输出带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）
   为正，基准线竖直时在右侧（x 更大）为正。符号只看参考点在哪一侧，与拟合给出的方向正反无关
   （本包出端口的 `Line2D.dir` 一律朝 +x、竖直时朝 +y，`gap.flush` 自己也再统一一次）。

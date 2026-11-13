@@ -1,6 +1,6 @@
-@import "qing-steel/tokens.css";
-@import "qing-steel/components.css";
-@import "./styles.motion.css";
+@import 'qing-steel/tokens.css';
+@import 'qing-steel/components.css';
+@import './styles.motion.css';
 
 /* 定义在编辑器根元素上而不是 :root：宿主页面的其余部分不该被我们改色。
    宿主想换皮就在更外层或 `theme` prop 里覆盖同名变量。 */
@@ -98,7 +98,7 @@
   min-height: 0;
 }
 
-.app[data-flow-busy="1"] :is(.toolbar, .app__body) {
+.app[data-flow-busy='1'] :is(.toolbar, .app__body) {
   pointer-events: none;
 }
 
@@ -131,7 +131,9 @@
 }
 
 /* 对比时两栏各只有一半宽，再加一张差异表：视图长高（compare-plan §1.2） */
-.app__viewer:has(> .viewer[data-compare="1"]) { flex-basis: 60%; }
+.app__viewer:has(> .viewer[data-compare='1']) {
+  flex-basis: 60%;
+}
 
 .app__inspector {
   flex: 1;
@@ -150,7 +152,7 @@
 }
 
 .app__splitter::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 3px;
   background: transparent;
@@ -191,7 +193,7 @@
 }
 
 .app__hsplit:hover::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 3px 0;
   background: var(--lyflow-accent);

@@ -1,0 +1,1360 @@
+<title>Intensity Gate Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+/>
+
+<style>
+  :root {
+    --ground: #f4f5f2;
+    --surface: #ffffff;
+    --surface-2: #eceee9;
+    --ink: #161b21;
+    --ink-muted: #5c6570;
+    --ink-faint: #8b939c;
+    --hairline: #d9ddd6;
+    --accent: #0d6c76;
+    --accent-soft: #d6e8e9;
+    --on-accent: #ffffff;
+    --removed: #b0453f;
+    --removed-soft: #f0dcda;
+    --plot-ground: #fbfbf9;
+    --plot-grid: #e6e9e3;
+    --ramp-0: #1d2b4d;
+    --ramp-1: #2f6f8f;
+    --ramp-2: #5fae9e;
+    --ramp-3: #d9c489;
+    --shadow: 0 1px 2px rgba(22, 27, 33, 0.06), 0 6px 18px rgba(22, 27, 33, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --ground: #11151a;
+      --surface: #181d24;
+      --surface-2: #212832;
+      --ink: #e7eaed;
+      --ink-muted: #9aa3ae;
+      --ink-faint: #6d7681;
+      --hairline: #2b323c;
+      --accent: #4bb5bd;
+      --accent-soft: #16333a;
+      --on-accent: #0a1014;
+      --removed: #e0736b;
+      --removed-soft: #3a1f1d;
+      --plot-ground: #0d1116;
+      --plot-grid: #212832;
+      --ramp-0: #3f5182;
+      --ramp-1: #4a8fae;
+      --ramp-2: #74c4b1;
+      --ramp-3: #f0dda2;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme='dark'] {
+    --ground: #11151a;
+    --surface: #181d24;
+    --surface-2: #212832;
+    --ink: #e7eaed;
+    --ink-muted: #9aa3ae;
+    --ink-faint: #6d7681;
+    --hairline: #2b323c;
+    --accent: #4bb5bd;
+    --accent-soft: #16333a;
+    --on-accent: #0a1014;
+    --removed: #e0736b;
+    --removed-soft: #3a1f1d;
+    --plot-ground: #0d1116;
+    --plot-grid: #212832;
+    --ramp-0: #3f5182;
+    --ramp-1: #4a8fae;
+    --ramp-2: #74c4b1;
+    --ramp-3: #f0dda2;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 310px minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+    min-height: 100vh;
+    align-items: start;
+  }
+
+  /* ---------- rail ---------- */
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: sticky;
+    top: 16px;
+  }
+
+  .masthead {
+    padding: 2px 2px 0;
+  }
+  .masthead h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .masthead p {
+    margin: 4px 0 0;
+    color: var(--ink-muted);
+    font-size: 12.5px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    padding: 13px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  button,
+  .filebtn {
+    font: inherit;
+    font-size: 13px;
+    border: 1px solid var(--hairline);
+    background: var(--surface-2);
+    color: var(--ink);
+    border-radius: 5px;
+    padding: 7px 11px;
+    cursor: pointer;
+    transition:
+      background 0.12s,
+      border-color 0.12s;
+  }
+  button:hover,
+  .filebtn:hover {
+    border-color: var(--accent);
+  }
+  button:focus-visible,
+  .filebtn:focus-within,
+  input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  /* :not(.file) both excludes the file toggles (which show state through opacity and their own
+   swatch) and lifts specificity above `.seg button`, whose flat background would otherwise win on
+   source order and make the segmented control's pressed state invisible. */
+  button[aria-pressed='true']:not(.file) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .filebtn {
+    display: block;
+    text-align: center;
+    font-weight: 500;
+  }
+  .filebtn input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+
+  .btnrow {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .btnrow > button {
+    flex: 1 1 auto;
+  }
+
+  .seg {
+    display: flex;
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .seg button {
+    border: 0;
+    border-radius: 0;
+    flex: 1;
+    background: var(--surface);
+  }
+  .seg button + button {
+    border-left: 1px solid var(--hairline);
+  }
+  .seg button[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  /* slider */
+  .thresh-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .thresh-value {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .thresh-sub {
+    font-size: 11.5px;
+    color: var(--ink-muted);
+  }
+
+  input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 22px;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+  }
+  input[type='range']::-webkit-slider-runnable-track {
+    height: 5px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--ramp-0), var(--ramp-1), var(--ramp-2), var(--ramp-3));
+  }
+  input[type='range']::-moz-range-track {
+    height: 5px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--ramp-0), var(--ramp-1), var(--ramp-2), var(--ramp-3));
+  }
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--accent);
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--accent);
+    box-sizing: border-box;
+  }
+
+  /* readouts */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 10px;
+    font-size: 12.5px;
+  }
+  .stats dt {
+    color: var(--ink-muted);
+  }
+  .stats dd {
+    margin: 0;
+    text-align: right;
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats dd.drop {
+    color: var(--removed);
+  }
+
+  .files {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .file {
+    display: grid;
+    grid-template-columns: 9px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    background: var(--surface-2);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .file[aria-pressed='true'] {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .file[aria-pressed='false'] {
+    opacity: 0.42;
+  }
+  .file .swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  .file .name {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file .n {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-muted);
+  }
+
+  .hint {
+    font-size: 11.5px;
+    color: var(--ink-muted);
+    line-height: 1.45;
+  }
+  .hint kbd {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    border: 1px solid var(--hairline);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 0 4px;
+    background: var(--surface-2);
+  }
+
+  .err {
+    color: var(--removed);
+    font-size: 12px;
+  }
+
+  /* ---------- stage ---------- */
+  .stage {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .plotwrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  #plot {
+    display: block;
+    width: 100%;
+    height: 520px;
+    cursor: grab;
+    touch-action: none;
+  }
+  #plot.boxing {
+    cursor: crosshair;
+  }
+  #plot.dragging {
+    cursor: grabbing;
+  }
+
+  .overlay {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    pointer-events: none;
+  }
+  .chip {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-muted);
+  }
+  .readout {
+    position: absolute;
+    right: 12px;
+    top: 10px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    pointer-events: none;
+    white-space: pre;
+  }
+  .readout[hidden] {
+    display: none;
+  }
+
+  .empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--ink-muted);
+    text-align: center;
+    padding: 24px;
+  }
+  .empty strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .empty.hidden {
+    display: none;
+  }
+  .plotwrap.dropping {
+    border-color: var(--accent);
+  }
+
+  .histwrap {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    padding: 11px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .histhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .histnote {
+    font-size: 11.5px;
+    color: var(--ink-muted);
+  }
+  #hist {
+    display: block;
+    width: 100%;
+    height: 118px;
+  }
+
+  .boxstats {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    padding: 9px 11px;
+    border-radius: 5px;
+    background: var(--accent-soft);
+    border: 1px solid var(--hairline);
+    font-size: 12px;
+  }
+  .boxstats[hidden] {
+    display: none;
+  }
+  .boxstats span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .boxstats b {
+    font-weight: 600;
+  }
+
+  @media (max-width: 900px) {
+    .shell {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .rail {
+      position: static;
+    }
+    #plot {
+      height: 380px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+    }
+  }
+</style>
+
+<div class="shell">
+  <div class="rail">
+    <div class="masthead">
+      <h1>Intensity Gate Bench</h1>
+      <p>Load a laser profile, drag the threshold, watch what the gate would remove.</p>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">Profiles</span>
+      <label class="filebtn"
+        >Load .pcd files
+        <input type="file" id="file" accept=".pcd" multiple />
+      </label>
+      <div class="files" id="filelist"></div>
+      <p class="hint" id="loadhint">
+        Drop files on the plot, or pick them above. ASCII and uncompressed binary PCD,
+        <span class="mono">x y z rgb</span> or an <span class="mono">intensity</span> field.
+      </p>
+      <p class="err" id="err" hidden></p>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">Threshold</span>
+      <div class="seg" role="group" aria-label="Threshold mode">
+        <button id="mode-abs" aria-pressed="true">Absolute</button>
+        <button id="mode-rel" aria-pressed="false">× median</button>
+      </div>
+      <div class="thresh-head">
+        <span class="thresh-value mono" id="threshval">0</span>
+        <span class="thresh-sub" id="threshsub">keep ≥ 0 counts</span>
+      </div>
+      <input
+        type="range"
+        id="thresh"
+        min="0"
+        max="255"
+        step="1"
+        value="0"
+        aria-label="Intensity threshold"
+      />
+      <dl class="stats">
+        <dt>Points</dt>
+        <dd id="s-total">—</dd>
+        <dt>Kept</dt>
+        <dd id="s-kept">—</dd>
+        <dt>Removed</dt>
+        <dd class="drop" id="s-drop">—</dd>
+        <dt>Median intensity</dt>
+        <dd id="s-median">—</dd>
+        <dt>Range</dt>
+        <dd id="s-range">—</dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">View</span>
+      <div class="btnrow">
+        <button id="btn-box" aria-pressed="false">Box stats</button>
+        <button id="btn-hide" aria-pressed="false">Hide removed</button>
+      </div>
+      <div class="btnrow">
+        <button id="btn-fit">Fit</button>
+        <button id="btn-axes">Axes: auto</button>
+      </div>
+      <p class="hint">
+        Drag to pan, wheel to zoom. <b>Box stats</b> turns drag into a selection — draw one around
+        the suspect line, then one around the real surface, and compare the medians.
+      </p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="plotwrap" id="plotwrap">
+      <canvas id="plot"></canvas>
+      <div class="overlay">
+        <span class="chip" id="axischip">—</span><span class="chip" id="scalechip">—</span>
+      </div>
+      <div class="readout mono" id="readout" hidden></div>
+      <div class="empty" id="empty">
+        <strong>No profile loaded</strong>
+        <span>Drop <span class="mono">.pcd</span> files here</span>
+      </div>
+    </div>
+
+    <div class="histwrap">
+      <div class="histhead">
+        <span class="eyebrow">Intensity distribution</span>
+        <span class="histnote" id="histnote"
+          >Distribution helps explore thresholds; validate retained and removed points on
+          representative samples.</span
+        >
+      </div>
+      <canvas id="hist"></canvas>
+      <div class="boxstats" id="boxstats" hidden>
+        <span>Selection <b id="b-n">0</b> pts</span>
+        <span>median <b id="b-med">—</b></span>
+        <span>p05–p95 <b id="b-p">—</b></span>
+        <span>min–max <b id="b-mm">—</b></span>
+        <span id="b-frac">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (() => {
+    'use strict';
+
+    const SWATCHES = ['#0d6c76', '#b5761f', '#6d5aa8', '#4a7a3f'];
+    const $ = (id) => document.getElementById(id);
+
+    /** @type {{name:string, pts:Float64Array, inten:Uint8Array, n:number, visible:boolean, color:string}[]} */
+    let files = [];
+    let axisMode = 'auto'; // auto | xy | xz | yz
+    let axisPair = [0, 2];
+    let mode = 'abs'; // abs | rel
+    let sliderRaw = 0;
+    let hideRemoved = false;
+    let boxing = false;
+    let view = null; // {cx, cy, scale}
+    let box = null; // {x0,y0,x1,y1} in screen px
+    let drag = null;
+
+    const plot = $('plot'),
+      hist = $('hist');
+    const pctx = plot.getContext('2d'),
+      hctx = hist.getContext('2d');
+
+    const tok = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    /* ---------------- PCD parsing ---------------- */
+
+    function parsePcd(buffer, name) {
+      const bytes = new Uint8Array(buffer);
+      // The header is ASCII; it ends with the newline after the DATA line.
+      const probe = new TextDecoder('ascii').decode(
+        bytes.subarray(0, Math.min(bytes.length, 4096)),
+      );
+      const dataIdx = probe.search(/^DATA\s+\S+[ \t]*\r?\n/m);
+      if (dataIdx < 0) throw new Error('no DATA line in the first 4 KB — is this a PCD file?');
+      const afterData = probe.slice(dataIdx);
+      const headerEnd = dataIdx + afterData.indexOf('\n') + 1;
+      const header = probe.slice(0, headerEnd);
+
+      const line = (key) => {
+        const m = header.match(new RegExp('^' + key + '\\s+(.+?)[ \\t]*$', 'm'));
+        return m ? m[1].trim().split(/\s+/) : null;
+      };
+      const fields = line('FIELDS');
+      const sizes = (line('SIZE') || []).map(Number);
+      const types = line('TYPE') || [];
+      const counts = (line('COUNT') || []).map(Number);
+      const dataKind = (line('DATA') || ['ascii'])[0];
+      if (!fields) throw new Error('PCD header has no FIELDS line');
+      if (dataKind === 'binary_compressed') {
+        throw new Error('binary_compressed PCD is not supported — re-save as binary or ascii');
+      }
+
+      const width = Number((line('WIDTH') || [0])[0]);
+      const height = Number((line('HEIGHT') || [1])[0]);
+      const declared = Number((line('POINTS') || [0])[0]) || width * height;
+
+      const cnt = fields.map((_, i) => (counts.length ? counts[i] : 1) || 1);
+      const offsets = [];
+      let stride = 0;
+      for (let i = 0; i < fields.length; i++) {
+        offsets.push(stride);
+        stride += (sizes[i] || 4) * cnt[i];
+      }
+
+      const ix = fields.indexOf('x'),
+        iy = fields.indexOf('y'),
+        iz = fields.indexOf('z');
+      if (ix < 0 || iy < 0 || iz < 0) throw new Error('PCD is missing an x/y/z field');
+      let iInt = fields.indexOf('intensity');
+      const iRgb =
+        iInt < 0
+          ? fields.indexOf('rgb') >= 0
+            ? fields.indexOf('rgb')
+            : fields.indexOf('rgba')
+          : -1;
+      if (iInt < 0 && iRgb < 0) throw new Error('PCD has neither an intensity nor an rgb field');
+
+      const xs = new Float64Array(declared * 3);
+      const inten = new Uint8Array(declared);
+      let n = 0;
+
+      const push = (x, y, z, level) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+        xs[n * 3] = x;
+        xs[n * 3 + 1] = y;
+        xs[n * 3 + 2] = z;
+        inten[n] = Math.max(0, Math.min(255, Math.round(level)));
+        n++;
+      };
+
+      if (dataKind === 'ascii') {
+        const text = new TextDecoder('ascii').decode(bytes.subarray(headerEnd));
+        for (const raw of text.split('\n')) {
+          const t = raw.trim();
+          if (!t) continue;
+          const v = t.split(/\s+/);
+          if (v.length < fields.length) continue;
+          let level;
+          if (iInt >= 0) level = parseFloat(v[iInt]);
+          else level = (Number(v[iRgb]) >>> 16) & 0xff;
+          push(parseFloat(v[ix]), parseFloat(v[iy]), parseFloat(v[iz]), level);
+        }
+      } else {
+        const dv = new DataView(buffer, headerEnd);
+        const avail = Math.floor((bytes.length - headerEnd) / stride);
+        const total = Math.min(declared || avail, avail);
+        const readF = (base, i) => dv.getFloat32(base + offsets[i], true);
+        for (let p = 0; p < total; p++) {
+          const base = p * stride;
+          let level;
+          if (iInt >= 0) {
+            level =
+              sizes[iInt] === 4 && types[iInt] === 'F'
+                ? readF(base, iInt)
+                : dv.getUint32(base + offsets[iInt], true);
+          } else {
+            // rgb is packed into 4 bytes whether the header calls it U or F; the red byte is the
+            // laser return level (see SensorXzProfile.hpp).
+            level = dv.getUint8(base + offsets[iRgb] + 2);
+          }
+          push(readF(base, ix), readF(base, iy), readF(base, iz), level);
+        }
+      }
+      if (!n) throw new Error('no finite points found');
+      return {
+        name,
+        pts: xs.subarray(0, n * 3),
+        inten: inten.subarray(0, n),
+        n,
+        visible: true,
+        color: '#000',
+      };
+    }
+
+    /* ---------------- data helpers ---------------- */
+
+    const visible = () => files.filter((f) => f.visible);
+
+    function allIntensities() {
+      const out = [];
+      for (const f of visible()) for (let i = 0; i < f.n; i++) out.push(f.inten[i]);
+      return out;
+    }
+
+    function quantile(sorted, q) {
+      if (!sorted.length) return NaN;
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos),
+        hi = Math.ceil(pos);
+      return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+    }
+
+    function medianOf(values) {
+      const s = Float64Array.from(values).sort();
+      return quantile(s, 0.5);
+    }
+
+    function chooseAxes() {
+      if (axisMode === 'xy') return [0, 1];
+      if (axisMode === 'xz') return [0, 2];
+      if (axisMode === 'yz') return [1, 2];
+      const lo = [Infinity, Infinity, Infinity],
+        hi = [-Infinity, -Infinity, -Infinity];
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          for (let a = 0; a < 3; a++) {
+            const v = f.pts[i * 3 + a];
+            if (v < lo[a]) lo[a] = v;
+            if (v > hi[a]) hi[a] = v;
+          }
+        }
+      }
+      const span = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]].map((v) =>
+        Number.isFinite(v) ? v : 0,
+      );
+      const order = [0, 1, 2].sort((a, b) => span[b] - span[a]);
+      const pair = [order[0], order[1]].sort((a, b) => a - b);
+      return pair;
+    }
+
+    const AXIS_NAME = ['x', 'y', 'z'];
+
+    // PCD coordinates arrive in metres for clouds saved by the pipeline and in millimetres for
+    // sensor-frame exports. Nothing in the header says which, so infer it from the magnitude: a
+    // profile in metres never reaches 10, one in millimetres always does (stand-off alone is ~160).
+    function unitLabel() {
+      let maxAbs = 0;
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          for (let a = 0; a < 3; a++) {
+            const v = Math.abs(f.pts[i * 3 + a]);
+            if (v > maxAbs) maxAbs = v;
+          }
+        }
+      }
+      return maxAbs === 0 ? '' : maxAbs < 10 ? 'm' : 'mm';
+    }
+
+    function threshold() {
+      if (mode === 'abs') return sliderRaw;
+      const med = medianOf(allIntensities());
+      return Number.isFinite(med) ? med * (sliderRaw / 100) : 0;
+    }
+
+    function bounds() {
+      const [ax, ay] = axisPair;
+      let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity;
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          const x = f.pts[i * 3 + ax],
+            y = f.pts[i * 3 + ay];
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+      if (!Number.isFinite(x0)) return null;
+      return { x0, y0, x1, y1 };
+    }
+
+    function fitView() {
+      const b = bounds();
+      if (!b) {
+        view = null;
+        return;
+      }
+      const w = plot.clientWidth,
+        h = plot.clientHeight;
+      const dx = Math.max(b.x1 - b.x0, 1e-6),
+        dy = Math.max(b.y1 - b.y0, 1e-6);
+      const scale = Math.min(w / dx, h / dy) * 0.88;
+      view = { cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, scale };
+    }
+
+    // world -> screen; screen y is flipped so +axis points up, as on a profile plot.
+    const toScreen = (x, y) => [
+      plot.clientWidth / 2 + (x - view.cx) * view.scale,
+      plot.clientHeight / 2 - (y - view.cy) * view.scale,
+    ];
+    const toWorld = (sx, sy) => [
+      view.cx + (sx - plot.clientWidth / 2) / view.scale,
+      view.cy - (sy - plot.clientHeight / 2) / view.scale,
+    ];
+
+    /* ---------------- colour ---------------- */
+
+    function hex2rgb(h) {
+      const v = parseInt(h.slice(1), 16);
+      return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+    }
+    function rampColor(level, stops) {
+      const t = Math.max(0, Math.min(1, level / 255)) * (stops.length - 1);
+      const i = Math.min(stops.length - 2, Math.floor(t));
+      const f = t - i;
+      const a = stops[i],
+        b = stops[i + 1];
+      return `rgb(${Math.round(a[0] + (b[0] - a[0]) * f)},${Math.round(a[1] + (b[1] - a[1]) * f)},${Math.round(a[2] + (b[2] - a[2]) * f)})`;
+    }
+
+    /* ---------------- drawing ---------------- */
+
+    function sizeCanvas(cv, ctx) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = cv.clientWidth,
+        h = cv.clientHeight;
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+        cv.width = Math.round(w * dpr);
+        cv.height = Math.round(h * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return [w, h];
+    }
+
+    function niceStep(rawStep) {
+      const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+      const norm = rawStep / mag;
+      return (norm > 5 ? 10 : norm > 2 ? 5 : norm > 1 ? 2 : 1) * mag;
+    }
+
+    function drawPlot() {
+      const [w, h] = sizeCanvas(plot, pctx);
+      pctx.clearRect(0, 0, w, h);
+      pctx.fillStyle = tok('--plot-ground');
+      pctx.fillRect(0, 0, w, h);
+      if (!view || !visible().length) return;
+
+      const stops = [tok('--ramp-0'), tok('--ramp-1'), tok('--ramp-2'), tok('--ramp-3')].map(
+        hex2rgb,
+      );
+      const thr = threshold();
+
+      // grid in world millimetres
+      const step = niceStep(80 / view.scale) || 1e-6;
+      const [wx0, wy1] = toWorld(0, 0);
+      const [wx1, wy0] = toWorld(w, h);
+      pctx.strokeStyle = tok('--plot-grid');
+      pctx.lineWidth = 1;
+      pctx.fillStyle = tok('--ink-faint');
+      pctx.font = '10px "IBM Plex Mono", monospace';
+      pctx.beginPath();
+      for (let gx = Math.ceil(wx0 / step) * step; gx <= wx1; gx += step) {
+        const [sx] = toScreen(gx, 0);
+        pctx.moveTo(Math.round(sx) + 0.5, 0);
+        pctx.lineTo(Math.round(sx) + 0.5, h);
+      }
+      for (let gy = Math.ceil(wy0 / step) * step; gy <= wy1; gy += step) {
+        const [, sy] = toScreen(0, gy);
+        pctx.moveTo(0, Math.round(sy) + 0.5);
+        pctx.lineTo(w, Math.round(sy) + 0.5);
+      }
+      pctx.stroke();
+
+      const removedColor = tok('--removed');
+      const r = view.scale > 12 ? 2.4 : 1.7;
+
+      // removed first, so kept points sit on top
+      if (!hideRemoved) {
+        pctx.globalAlpha = 0.55;
+        pctx.fillStyle = removedColor;
+        for (const f of visible()) {
+          for (let i = 0; i < f.n; i++) {
+            if (f.inten[i] >= thr) continue;
+            const [sx, sy] = toScreen(f.pts[i * 3 + axisPair[0]], f.pts[i * 3 + axisPair[1]]);
+            if (sx < -4 || sy < -4 || sx > w + 4 || sy > h + 4) continue;
+            pctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+          }
+        }
+        pctx.globalAlpha = 1;
+      }
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          if (f.inten[i] < thr) continue;
+          const [sx, sy] = toScreen(f.pts[i * 3 + axisPair[0]], f.pts[i * 3 + axisPair[1]]);
+          if (sx < -4 || sy < -4 || sx > w + 4 || sy > h + 4) continue;
+          pctx.fillStyle = rampColor(f.inten[i], stops);
+          pctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+        }
+      }
+
+      if (box) {
+        pctx.strokeStyle = tok('--accent');
+        pctx.lineWidth = 1.5;
+        pctx.setLineDash([4, 3]);
+        pctx.strokeRect(
+          Math.min(box.x0, box.x1),
+          Math.min(box.y0, box.y1),
+          Math.abs(box.x1 - box.x0),
+          Math.abs(box.y1 - box.y0),
+        );
+        pctx.setLineDash([]);
+      }
+
+      const unit = unitLabel();
+      const stepText = step >= 1 ? String(step) : step.toPrecision(2);
+      $('axischip').textContent =
+        `${AXIS_NAME[axisPair[0]]} / ${AXIS_NAME[axisPair[1]]}  ·  grid ${stepText} ${unit}`;
+      // Always quoted per millimetre: px/m runs to six figures on a metre-scale cloud and stops
+      // being readable at a glance.
+      const pxPerMm = view.scale * (unit === 'm' ? 0.001 : 1);
+      $('scalechip').textContent =
+        `${pxPerMm < 100 ? pxPerMm.toFixed(1) : pxPerMm.toFixed(0)} px/mm`;
+    }
+
+    function drawHist() {
+      const [w, h] = sizeCanvas(hist, hctx);
+      hctx.clearRect(0, 0, w, h);
+      const values = allIntensities();
+      if (!values.length) return;
+
+      const BINS = 64;
+      const bins = new Array(BINS).fill(0);
+      for (const v of values) bins[Math.min(BINS - 1, Math.floor((v / 256) * BINS))]++;
+      const peak = Math.max(...bins);
+      const thr = threshold();
+      const stops = [tok('--ramp-0'), tok('--ramp-1'), tok('--ramp-2'), tok('--ramp-3')].map(
+        hex2rgb,
+      );
+      const pad = 18,
+        plotH = h - pad;
+      const bw = w / BINS;
+
+      for (let i = 0; i < BINS; i++) {
+        if (!bins[i]) continue;
+        const level = (i + 0.5) * (256 / BINS);
+        const bh = Math.max(1, (bins[i] / peak) * (plotH - 4));
+        hctx.fillStyle = level < thr ? tok('--removed') : rampColor(level, stops);
+        hctx.globalAlpha = level < thr ? 0.6 : 1;
+        hctx.fillRect(i * bw + 0.5, plotH - bh, Math.max(1, bw - 1), bh);
+      }
+      hctx.globalAlpha = 1;
+
+      // threshold marker
+      const tx = (thr / 256) * w;
+      hctx.strokeStyle = tok('--accent');
+      hctx.lineWidth = 1.5;
+      hctx.beginPath();
+      hctx.moveTo(tx, 0);
+      hctx.lineTo(tx, plotH);
+      hctx.stroke();
+
+      hctx.fillStyle = tok('--ink-faint');
+      hctx.font = '10px "IBM Plex Mono", monospace';
+      hctx.textBaseline = 'bottom';
+      for (const t of [0, 64, 128, 192, 255]) {
+        const x = (t / 256) * w;
+        hctx.textAlign = t === 0 ? 'left' : t === 255 ? 'right' : 'center';
+        hctx.fillText(String(t), x, h);
+      }
+    }
+
+    const draw = () => {
+      drawPlot();
+      drawHist();
+    };
+
+    /* ---------------- stats ---------------- */
+
+    function refreshStats() {
+      const values = allIntensities();
+      const thr = threshold();
+      const total = values.length;
+      let kept = 0;
+      for (const v of values) if (v >= thr) kept++;
+      const sorted = Float64Array.from(values).sort();
+      const med = quantile(sorted, 0.5);
+
+      $('s-total').textContent = total ? total.toLocaleString() : '—';
+      $('s-kept').textContent = total
+        ? `${kept.toLocaleString()}  ${((100 * kept) / total).toFixed(1)}%`
+        : '—';
+      $('s-drop').textContent = total
+        ? `${(total - kept).toLocaleString()}  ${((100 * (total - kept)) / total).toFixed(1)}%`
+        : '—';
+      $('s-median').textContent = total ? med.toFixed(1) : '—';
+      $('s-range').textContent = total ? `${sorted[0]}–${sorted[sorted.length - 1]}` : '—';
+
+      $('threshval').textContent =
+        mode === 'abs' ? String(sliderRaw) : `${(sliderRaw / 100).toFixed(2)}×`;
+      $('threshsub').textContent =
+        mode === 'abs'
+          ? 'keep ≥ ' + sliderRaw + ' counts'
+          : total
+            ? `keep ≥ ${thr.toFixed(1)} counts (median ${med.toFixed(1)})`
+            : 'keep ≥ median × factor';
+    }
+
+    function refreshFiles() {
+      const list = $('filelist');
+      list.textContent = '';
+      files.forEach((f, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'file';
+        btn.type = 'button';
+        btn.setAttribute('aria-pressed', String(f.visible));
+        btn.title = f.name;
+        const sw = document.createElement('span');
+        sw.className = 'swatch';
+        sw.style.background = f.color;
+        const nm = document.createElement('span');
+        nm.className = 'name';
+        nm.textContent = f.name;
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = f.n.toLocaleString();
+        btn.append(sw, nm, n);
+        btn.addEventListener('click', () => {
+          f.visible = !f.visible;
+          btn.setAttribute('aria-pressed', String(f.visible));
+          if (axisMode === 'auto') axisPair = chooseAxes();
+          refreshStats();
+          draw();
+        });
+        list.append(btn);
+      });
+      $('empty').classList.toggle('hidden', files.length > 0);
+    }
+
+    function boxStats() {
+      if (!box || !view) {
+        $('boxstats').hidden = true;
+        return;
+      }
+      const bx0 = Math.min(box.x0, box.x1),
+        bx1 = Math.max(box.x0, box.x1);
+      const by0 = Math.min(box.y0, box.y1),
+        by1 = Math.max(box.y0, box.y1);
+      if (bx1 - bx0 < 3 || by1 - by0 < 3) {
+        $('boxstats').hidden = true;
+        return;
+      }
+      const inside = [];
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          const [sx, sy] = toScreen(f.pts[i * 3 + axisPair[0]], f.pts[i * 3 + axisPair[1]]);
+          if (sx >= bx0 && sx <= bx1 && sy >= by0 && sy <= by1) inside.push(f.inten[i]);
+        }
+      }
+      const panel = $('boxstats');
+      if (!inside.length) {
+        panel.hidden = true;
+        return;
+      }
+      const s = Float64Array.from(inside).sort();
+      const med = quantile(s, 0.5);
+      const all = Float64Array.from(allIntensities()).sort();
+      const allMed = quantile(all, 0.5);
+      $('b-n').textContent = inside.length.toLocaleString();
+      $('b-med').textContent = med.toFixed(0);
+      $('b-p').textContent = `${quantile(s, 0.05).toFixed(0)}–${quantile(s, 0.95).toFixed(0)}`;
+      $('b-mm').textContent = `${s[0]}–${s[s.length - 1]}`;
+      $('b-frac').textContent = `${(med / allMed).toFixed(2)}× the profile median`;
+      panel.hidden = false;
+    }
+
+    /* ---------------- loading ---------------- */
+
+    async function loadFiles(fileList) {
+      const errEl = $('err');
+      const problems = [];
+      for (const file of fileList) {
+        try {
+          const parsed = parsePcd(await file.arrayBuffer(), file.name);
+          parsed.color = SWATCHES[files.length % SWATCHES.length];
+          files.push(parsed);
+        } catch (e) {
+          problems.push(`${file.name}: ${e.message}`);
+        }
+      }
+      errEl.hidden = problems.length === 0;
+      errEl.textContent = problems.join('  ·  ');
+      if (axisMode === 'auto') axisPair = chooseAxes();
+      box = null;
+      fitView();
+      refreshFiles();
+      refreshStats();
+      boxStats();
+      draw();
+    }
+
+    /* ---------------- events ---------------- */
+
+    $('file').addEventListener('change', (e) => {
+      loadFiles(Array.from(e.target.files));
+      e.target.value = '';
+    });
+
+    const wrap = $('plotwrap');
+    ['dragenter', 'dragover'].forEach((t) =>
+      wrap.addEventListener(t, (e) => {
+        e.preventDefault();
+        wrap.classList.add('dropping');
+      }),
+    );
+    ['dragleave', 'drop'].forEach((t) =>
+      wrap.addEventListener(t, (e) => {
+        e.preventDefault();
+        wrap.classList.remove('dropping');
+      }),
+    );
+    wrap.addEventListener('drop', (e) => {
+      if (e.dataTransfer?.files?.length) loadFiles(Array.from(e.dataTransfer.files));
+    });
+
+    $('thresh').addEventListener('input', (e) => {
+      sliderRaw = Number(e.target.value);
+      refreshStats();
+      draw();
+    });
+
+    function setMode(next) {
+      mode = next;
+      $('mode-abs').setAttribute('aria-pressed', String(next === 'abs'));
+      $('mode-rel').setAttribute('aria-pressed', String(next === 'rel'));
+      const slider = $('thresh');
+      if (next === 'abs') {
+        slider.max = '255';
+        sliderRaw = Math.min(sliderRaw, 255);
+      } else {
+        slider.max = '150';
+        sliderRaw = 50;
+      }
+      slider.value = String(sliderRaw);
+      refreshStats();
+      draw();
+    }
+    $('mode-abs').addEventListener('click', () => setMode('abs'));
+    $('mode-rel').addEventListener('click', () => setMode('rel'));
+
+    $('btn-hide').addEventListener('click', (e) => {
+      hideRemoved = !hideRemoved;
+      e.currentTarget.setAttribute('aria-pressed', String(hideRemoved));
+      draw();
+    });
+    $('btn-box').addEventListener('click', (e) => {
+      boxing = !boxing;
+      e.currentTarget.setAttribute('aria-pressed', String(boxing));
+      plot.classList.toggle('boxing', boxing);
+      if (!boxing) {
+        box = null;
+        boxStats();
+        draw();
+      }
+    });
+    $('btn-fit').addEventListener('click', () => {
+      fitView();
+      draw();
+    });
+    $('btn-axes').addEventListener('click', (e) => {
+      const cycle = ['auto', 'xy', 'xz', 'yz'];
+      axisMode = cycle[(cycle.indexOf(axisMode) + 1) % cycle.length];
+      e.currentTarget.textContent = 'Axes: ' + axisMode;
+      axisPair = chooseAxes();
+      box = null;
+      fitView();
+      boxStats();
+      draw();
+    });
+
+    plot.addEventListener('pointerdown', (e) => {
+      if (!view) return;
+      plot.setPointerCapture(e.pointerId);
+      const rect = plot.getBoundingClientRect();
+      const sx = e.clientX - rect.left,
+        sy = e.clientY - rect.top;
+      if (boxing) {
+        box = { x0: sx, y0: sy, x1: sx, y1: sy };
+      } else {
+        drag = { sx, sy, cx: view.cx, cy: view.cy };
+        plot.classList.add('dragging');
+      }
+    });
+
+    plot.addEventListener('pointermove', (e) => {
+      if (!view) return;
+      const rect = plot.getBoundingClientRect();
+      const sx = e.clientX - rect.left,
+        sy = e.clientY - rect.top;
+
+      if (box && boxing && e.buttons) {
+        box.x1 = sx;
+        box.y1 = sy;
+        boxStats();
+        drawPlot();
+        return;
+      }
+      if (drag) {
+        view.cx = drag.cx - (sx - drag.sx) / view.scale;
+        view.cy = drag.cy + (sy - drag.sy) / view.scale;
+        draw();
+        return;
+      }
+      // hover readout: nearest visible point within 12 px
+      let best = null,
+        bestD = 12 * 12;
+      for (const f of visible()) {
+        for (let i = 0; i < f.n; i++) {
+          const [px, py] = toScreen(f.pts[i * 3 + axisPair[0]], f.pts[i * 3 + axisPair[1]]);
+          const d = (px - sx) * (px - sx) + (py - sy) * (py - sy);
+          if (d < bestD) {
+            bestD = d;
+            best = { f, i };
+          }
+        }
+      }
+      const ro = $('readout');
+      if (!best) {
+        ro.hidden = true;
+        return;
+      }
+      const { f, i } = best;
+      const thr = threshold();
+      ro.hidden = false;
+      ro.textContent =
+        `${AXIS_NAME[axisPair[0]]}  ${f.pts[i * 3 + axisPair[0]].toFixed(3)}\n` +
+        `${AXIS_NAME[axisPair[1]]}  ${f.pts[i * 3 + axisPair[1]].toFixed(3)}\n` +
+        `int ${String(f.inten[i]).padStart(3)}  ${f.inten[i] < thr ? 'removed' : 'kept'}\n` +
+        `idx ${i}`;
+    });
+
+    const endPointer = (e) => {
+      if (drag) {
+        drag = null;
+        plot.classList.remove('dragging');
+      }
+      if (plot.hasPointerCapture?.(e.pointerId)) plot.releasePointerCapture(e.pointerId);
+      boxStats();
+    };
+    plot.addEventListener('pointerup', endPointer);
+    plot.addEventListener('pointercancel', endPointer);
+    plot.addEventListener('pointerleave', () => {
+      $('readout').hidden = true;
+    });
+
+    plot.addEventListener(
+      'wheel',
+      (e) => {
+        if (!view) return;
+        e.preventDefault();
+        const rect = plot.getBoundingClientRect();
+        const sx = e.clientX - rect.left,
+          sy = e.clientY - rect.top;
+        const [wx, wy] = toWorld(sx, sy);
+        const factor = Math.exp(-e.deltaY * 0.0015);
+        view.scale = Math.max(0.05, Math.min(4000, view.scale * factor));
+        const [nx, ny] = toWorld(sx, sy);
+        view.cx += wx - nx;
+        view.cy += wy - ny;
+        box = null;
+        boxStats();
+        draw();
+      },
+      { passive: false },
+    );
+
+    const redraw = () => {
+      if (view) draw();
+    };
+    window.addEventListener('resize', () => {
+      redraw();
+    });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw);
+    new MutationObserver(redraw).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    refreshFiles();
+    refreshStats();
+    draw();
+  })();
+</script>

@@ -33,7 +33,8 @@ PointCloud removeNonFinitePoints(const PointCloud& cloud) {
   result.sensor_orientation_ = cloud.sensor_orientation_;
   result.points.reserve(cloud.size());
   for (const auto& point : cloud) {
-    if (pcl::isFinite(point)) result.points.push_back(point);
+    if (pcl::isFinite(point))
+      result.points.push_back(point);
   }
   result.width = static_cast<std::uint32_t>(result.points.size());
   result.height = 1;
@@ -65,7 +66,7 @@ MeasurementValue successfulValue(double value_mm, const std::string& component) 
   return value;
 }
 
-}  // namespace
+} // namespace
 
 MeasurementResult MeasurementEngine::measure(const MeasurementRequest& request) const noexcept {
   const auto total_start = std::chrono::steady_clock::now();
@@ -85,17 +86,21 @@ MeasurementResult MeasurementEngine::measure(const MeasurementRequest& request) 
 
   const auto failGlobally = [&](Failure failure) {
     result.failure = failure;
-    if (request.configuration.flush.enabled) result.flush = failedValue(failure);
-    if (request.configuration.gap.enabled) result.gap = failedValue(failure);
+    if (request.configuration.flush.enabled)
+      result.flush = failedValue(failure);
+    if (request.configuration.gap.enabled)
+      result.gap = failedValue(failure);
   };
 
   try {
     if (!request.configuration.flush.enabled && !request.configuration.gap.enabled) {
       failGlobally({FailureStage::kInput, FailureCode::kInvalidConfiguration, "configuration",
                     "at least one of gap or flush must be enabled"});
-    } else if (const auto primaryFailure = validateCloud(primary_cloud, "primary"); primaryFailure) {
+    } else if (const auto primaryFailure = validateCloud(primary_cloud, "primary");
+               primaryFailure) {
       failGlobally(primaryFailure);
-    } else if (const auto secondaryFailure = validateCloud(secondary_cloud, "secondary"); secondaryFailure) {
+    } else if (const auto secondaryFailure = validateCloud(secondary_cloud, "secondary");
+               secondaryFailure) {
       failGlobally(secondaryFailure);
     } else {
       detection::GapDetection detector;
@@ -164,8 +169,9 @@ MeasurementResult MeasurementEngine::measure(const MeasurementRequest& request) 
   result.quality.total_runtime_us = std::chrono::duration_cast<std::chrono::microseconds>(
                                         std::chrono::steady_clock::now() - total_start)
                                         .count();
-  if (result.quality.runtime_us == 0) result.quality.runtime_us = result.quality.total_runtime_us;
+  if (result.quality.runtime_us == 0)
+    result.quality.runtime_us = result.quality.total_runtime_us;
   return result;
 }
 
-}  // namespace gap::core
+} // namespace gap::core

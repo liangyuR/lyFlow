@@ -2,7 +2,7 @@ const SENTENCE_END = /[。！？!?]|\.\s|\n/;
 const MAX_SENTENCE = 160;
 
 export function firstSentence(doc: string | undefined): string {
-  if (!doc) return "";
+  if (!doc) return '';
   const text = doc.trim();
   const m = SENTENCE_END.exec(text);
   let head = m && m.index > 0 ? text.slice(0, m.index) : text;
@@ -50,5 +50,5 @@ export function nearest(target: string, candidates: string[], count: number): st
 export function matches(query: string, fields: (string | undefined)[]): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
-  return fields.some((f) => (f ?? "").toLowerCase().includes(needle));
+  return fields.some((f) => (f ?? '').toLowerCase().includes(needle));
 }

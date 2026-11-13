@@ -25,13 +25,14 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecCont
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const std::filesystem::path file = params.path("path");
   const Status s = saveCloudToFile(cloud, file, params.choice("format"), ctx.threadBudget());
-  if (!s.ok) return s;
+  if (!s.ok)
+    return s;
   ctx.log(LogLevel::Info,
           "写出 " + std::to_string(cloud.pointCount()) + " 个点 -> " + file.u8string());
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format) {
@@ -94,12 +95,18 @@ void registerIoSavePcd(Registry& r) {
   op.version = "1.0.0";
   op.label = "点云保存";
   op.category = "输入输出/输出";
-  op.keywords = {
-      "point cloud saving", "point cloud file writing", "point cloud export",
-      "PCD", "PLY", "点云写入",
-      "点云导出", "save", "write",
-      "export", "保存", "导出"
-  };
+  op.keywords = {"point cloud saving",
+                 "point cloud file writing",
+                 "point cloud export",
+                 "PCD",
+                 "PLY",
+                 "点云写入",
+                 "点云导出",
+                 "save",
+                 "write",
+                 "export",
+                 "保存",
+                 "导出"};
   op.doc = "把点云写到磁盘。按扩展名选 PCD 或 PLY，实际存在的通道都会写进去。";
 
   // 只有输入没有输出：这是一个 sink。执行器不会因为「没有输出端口」而报错，
@@ -136,4 +143,4 @@ void registerIoSavePcd(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -13,18 +13,18 @@
 
 namespace conv {
 enum AxisType { kX, kY, kZ };
-Eigen::Matrix4f EigenMatrix3fto4f(const Eigen::Matrix3f &m_2d, AxisType ignore_dim);
+Eigen::Matrix4f EigenMatrix3fto4f(const Eigen::Matrix3f& m_2d, AxisType ignore_dim);
 
-Eigen::Matrix3f EigenMatrix4fto3f(const Eigen::Matrix4f &m_3d, AxisType ignore_dim);
+Eigen::Matrix3f EigenMatrix4fto3f(const Eigen::Matrix4f& m_3d, AxisType ignore_dim);
 
-std::vector<std::vector<float>> EigenMatrix4f2VectorOfVector(const Eigen::Matrix4f &tf);
+std::vector<std::vector<float>> EigenMatrix4f2VectorOfVector(const Eigen::Matrix4f& tf);
 
-Eigen::Matrix4f VectorOfVector2EigenMatrix4f(const std::vector<std::vector<float>> &pose_vec);
+Eigen::Matrix4f VectorOfVector2EigenMatrix4f(const std::vector<std::vector<float>>& pose_vec);
 
-Eigen::Matrix4f swapCloudAxis(const PointCloud &cloud, PointCloud *cloud_out, AxisType a,
+Eigen::Matrix4f swapCloudAxis(const PointCloud& cloud, PointCloud* cloud_out, AxisType a,
                               AxisType b);
 
-std::string MeasureToText(const std::string &value, const std::string &nominal,
-                          const std::string &prefix);
+std::string MeasureToText(const std::string& value, const std::string& nominal,
+                          const std::string& prefix);
 
-}  // namespace conv
+} // namespace conv

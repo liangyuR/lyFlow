@@ -2,8 +2,8 @@
 // （跟数据强相关，不落盘）。以前四样都是组件里的 state，每次开 app 回到默认；手动范围只有一份，强度下填的
 // 0–255 切到高度后整片云变成一种颜色。
 
-import type { RampName } from "./ramps";
-import type { ShadingMode } from "./cloudScene";
+import type { RampName } from './ramps';
+import type { ShadingMode } from './cloudScene';
 
 export interface ViewerPrefs {
   shading: ShadingMode;
@@ -12,20 +12,26 @@ export interface ViewerPrefs {
   maxPoints: number;
 }
 
-export const VIEWER_PREFS_KEY = "lyflow.viewer.display";
+export const VIEWER_PREFS_KEY = 'lyflow.viewer.display';
 /** 主预览「最多显示多少点」的可选项（抽样在 C++ 侧做）。 */
 export const MAX_POINTS_CHOICES: readonly number[] = [100_000, 500_000, 2_000_000, 8_000_000];
 export const POINT_SIZE_MIN = 0.5;
 export const POINT_SIZE_MAX = 6;
 export const DEFAULT_VIEWER_PREFS: ViewerPrefs = {
-  shading: "intensity",
-  ramp: "viridis",
+  shading: 'intensity',
+  ramp: 'viridis',
   pointSize: 1.6,
   maxPoints: 2_000_000,
 };
 
 // 只引类型：ui store 读它，不该为此把 three 拉进来。写成 Record —— 加了新的着色 / 色带而这里漏了，编译不过
-const SHADINGS: Record<ShadingMode, true> = { intensity: true, height: true, normal: true, rgb: true, flat: true };
+const SHADINGS: Record<ShadingMode, true> = {
+  intensity: true,
+  height: true,
+  normal: true,
+  rgb: true,
+  flat: true,
+};
 const RAMP_NAMES: Record<RampName, true> = { viridis: true, gray: true, jet: true };
 
 export function clampPointSize(v: number): number {
@@ -37,18 +43,29 @@ export function parseViewerPrefs(raw: string | null): ViewerPrefs {
   let v: Record<string, unknown> = {};
   try {
     const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) v = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      v = parsed as Record<string, unknown>;
   } catch {
     // 不是 JSON：整份当没有
   }
   const d = DEFAULT_VIEWER_PREFS;
   return {
-    shading: typeof v.shading === "string" && Object.hasOwn(SHADINGS, v.shading) ? (v.shading as ShadingMode) : d.shading,
-    ramp: typeof v.ramp === "string" && Object.hasOwn(RAMP_NAMES, v.ramp) ? (v.ramp as RampName) : d.ramp,
+    shading:
+      typeof v.shading === 'string' && Object.hasOwn(SHADINGS, v.shading)
+        ? (v.shading as ShadingMode)
+        : d.shading,
+    ramp:
+      typeof v.ramp === 'string' && Object.hasOwn(RAMP_NAMES, v.ramp)
+        ? (v.ramp as RampName)
+        : d.ramp,
     pointSize:
-      typeof v.pointSize === "number" && Number.isFinite(v.pointSize) ? clampPointSize(v.pointSize) : d.pointSize,
+      typeof v.pointSize === 'number' && Number.isFinite(v.pointSize)
+        ? clampPointSize(v.pointSize)
+        : d.pointSize,
     maxPoints:
-      typeof v.maxPoints === "number" && MAX_POINTS_CHOICES.includes(v.maxPoints) ? v.maxPoints : d.maxPoints,
+      typeof v.maxPoints === 'number' && MAX_POINTS_CHOICES.includes(v.maxPoints)
+        ? v.maxPoints
+        : d.maxPoints,
   };
 }
 

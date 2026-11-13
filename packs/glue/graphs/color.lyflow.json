@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "id": "01JGLUE0000000000000COLOR1",
+  "name": "涂胶测量 · 彩色胶条（1.3 彩色测量算子示例）",
+  "meta": {
+    "app": "lyflow/1.3.0",
+    "note": "docs/glue-measure-ops.md「1.3 彩色测量算子」的参考连法。示教：示教帧 + 示教线 → glue.color_model 出颜色模型（宿主把 n_model.model 的 JSON 存进配方）。生产：glue.color_map 打一次分（maps 一条线接给下游），沿示教线布彩色卡尺，或扇形扫描 → 彩色粗跟踪 → 彩色卡尺。宿主生产时不带 n_teach / n_model，把配方里的模型 JSON 填进 n_map.model 参数。判定（有无胶、无信息的站算不算、断胶）归宿主。拿文件跑：lyflow run <图> --set n_teach.source='\"file\"' --set n_teach.path='\"<示教帧>\"' --set n_load.source='\"file\"' --set n_load.path='\"<帧>\"' --param points='\"[[640,900],[640,300]]\"' --outputs。"
+  },
+  "params": {
+    "points": {
+      "type": "text",
+      "label": "示教线",
+      "doc": "沿胶中心画的示教线：JSON 数组 [[x, y], …]（图像像素），至少两个点。",
+      "default": "[[640, 900], [640, 300]]",
+      "binds": [
+        "n_line.points"
+      ],
+      "rows": 4
+    },
+    "roi": {
+      "type": "vec4f",
+      "label": "打分区域",
+      "unit": "px",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "binds": [
+        "n_map.roi"
+      ]
+    },
+    "anchor": {
+      "type": "vec2f",
+      "label": "出胶点",
+      "unit": "px",
+      "default": [
+        640,
+        900
+      ],
+      "binds": [
+        "n_fan.anchor",
+        "n_track.anchor"
+      ]
+    },
+    "sector": {
+      "type": "vec2f",
+      "label": "方向范围",
+      "unit": "deg",
+      "default": [
+        -120,
+        -60
+      ],
+      "binds": [
+        "n_fan.sector",
+        "n_track.bearingRange"
+      ]
+    },
+    "zone": {
+      "type": "vec2f",
+      "label": "检测区",
+      "unit": "px",
+      "default": [
+        100,
+        400
+      ],
+      "binds": [
+        "n_track.zone"
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "id": "n_teach",
+      "op": "io.load_image",
+      "opVersion": "1.0.0",
+      "params": {
+        "source": "inputs"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "title": "示教帧"
+      }
+    },
+    {
+      "id": "n_line",
+      "op": "glue.polyline",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 180
+        },
+        "title": "示教线"
+      }
+    },
+    {
+      "id": "n_model",
+      "op": "glue.color_model",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 0
+        },
+        "title": "胶色建模"
+      }
+    },
+    {
+      "id": "n_load",
+      "op": "io.load_image",
+      "opVersion": "1.0.0",
+      "params": {
+        "source": "inputs"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 360
+        },
+        "title": "生产帧"
+      }
+    },
+    {
+      "id": "n_map",
+      "op": "glue.color_map",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 180
+        },
+        "title": "胶色得分图"
+      }
+    },
+    {
+      "id": "n_taught",
+      "op": "glue.color_runs",
+      "opVersion": "1.0.0",
+      "params": {
+        "stationStep": 10,
+        "searchHalf": 60
+      },
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 0
+        },
+        "title": "彩色卡尺 · 示教线"
+      }
+    },
+    {
+      "id": "n_fan",
+      "op": "glue.color_fan",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 180
+        },
+        "title": "彩色扇形扫描"
+      }
+    },
+    {
+      "id": "n_track",
+      "op": "glue.color_track",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1040,
+          "y": 180
+        },
+        "title": "彩色粗跟踪"
+      }
+    },
+    {
+      "id": "n_runs",
+      "op": "glue.color_runs",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1300,
+          "y": 180
+        },
+        "title": "彩色卡尺 · 跟踪胶路"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "n_teach",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_model",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "n_line",
+        "port": "line"
+      },
+      "to": {
+        "node": "n_model",
+        "port": "line"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "n_load",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_map",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "n_model",
+        "port": "model"
+      },
+      "to": {
+        "node": "n_map",
+        "port": "model"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "n_map",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_taught",
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "n_line",
+        "port": "line"
+      },
+      "to": {
+        "node": "n_taught",
+        "port": "line"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "n_map",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_fan",
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "n_map",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_track",
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "n_fan",
+        "port": "scan"
+      },
+      "to": {
+        "node": "n_track",
+        "port": "fan"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "n_map",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_runs",
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e10",
+      "from": {
+        "node": "n_track",
+        "port": "line"
+      },
+      "to": {
+        "node": "n_runs",
+        "port": "line"
+      }
+    }
+  ],
+  "outputs": {
+    "model": {
+      "node": "n_model",
+      "port": "model",
+      "label": "颜色模型"
+    },
+    "taughtRuns": {
+      "node": "n_taught",
+      "port": "runs",
+      "label": "彩色卡尺 · 示教线"
+    },
+    "scan": {
+      "node": "n_fan",
+      "port": "scan",
+      "label": "彩色扇形扫描"
+    },
+    "track": {
+      "node": "n_track",
+      "port": "track",
+      "label": "彩色粗跟踪"
+    },
+    "runs": {
+      "node": "n_runs",
+      "port": "runs",
+      "label": "彩色卡尺 · 跟踪胶路"
+    }
+  }
+}

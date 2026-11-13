@@ -4,24 +4,24 @@
 // 叠画（像素几何、可拖的像素框）经 overlay 画在图上，坐标一律是**原图像素**，与显示的级别无关。
 // 预览时源头缩小过的图（pixelScale > 1，ADR-0028）按原图尺寸摆放：一个像素拉成 pixelScale 个原图像素那么大。
 // 视角（缩放、平移）与级别都按原图坐标记：换级别、预览 ↔ 正式只换画上去的那张图，视角不动。
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import * as THREE from "three";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import * as THREE from 'three';
 
-import { num } from "./Inspector";
-import { RAMPS, type RampName } from "../lib/ramps";
-import { fetchImageLevel } from "../lib/imageFetch";
-import { transport } from "../transport";
+import { num } from './Inspector';
+import { RAMPS, type RampName } from '../lib/ramps';
+import { fetchImageLevel } from '../lib/imageFetch';
+import { transport } from '../transport';
 
-import "../styles.peek.tensor.css";
-import "../styles.peek.image.css";
+import '../styles.peek.tensor.css';
+import '../styles.peek.image.css';
 
 /** 概览级别的长边上限：再大浏览器的 canvas 也画得动，但 IPC 与上色都开始按秒计。 */
 const OVERVIEW_EDGE = 2048;
 /** 手动选级别时，这一级的像素数上限（约 4096²）。原图更大就只能看缩小的。 */
 const MAX_LEVEL_PIXELS = 16_777_216;
-const RAMP_NAMES: RampName[] = ["gray", "viridis", "jet"];
+const RAMP_NAMES: RampName[] = ['gray', 'viridis', 'jet'];
 
-export type Depth = "u8" | "u16" | "f32";
+export type Depth = 'u8' | 'u16' | 'f32';
 
 /** 与 core 的 shrinkImage 同一个取整：尺寸向上取整。 */
 function levelSize(full: number, level: number): number {
@@ -64,13 +64,15 @@ interface Footprint {
  *  按原图算 4102 —— 差的那一个像素是取整，不是另一张图。 */
 function sameFootprint(a: Footprint, b: Footprint): boolean {
   const m = Math.max(a.scale, b.scale);
-  return a.nodeId === b.nodeId && a.port === b.port && Math.abs(a.w - b.w) < m && Math.abs(a.h - b.h) < m;
+  return (
+    a.nodeId === b.nodeId && a.port === b.port && Math.abs(a.w - b.w) < m && Math.abs(a.h - b.h) < m
+  );
 }
 
 /** 不拉伸时每种位深的「原值」范围：u8 0..255、u16 0..65535、f32 0..1。 */
 function naturalRange(depth: Depth): [number, number] {
-  if (depth === "u8") return [0, 255];
-  if (depth === "u16") return [0, 65535];
+  if (depth === 'u8') return [0, 255];
+  if (depth === 'u16') return [0, 65535];
   return [0, 1];
 }
 
@@ -119,7 +121,7 @@ function draw(
 ): void {
   canvas.width = img.width;
   canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const out = ctx.createImageData(img.width, img.height);
   const px = out.data;
@@ -174,10 +176,17 @@ async function fetchLevel(
   port: string,
   level: number,
   abandoned: () => boolean,
-): Promise<Omit<Loaded, "key" | "footprint" | "pixelScale">> {
+): Promise<Omit<Loaded, 'key' | 'footprint' | 'pixelScale'>> {
   const get = transport.getOutputImage;
-  if (!get) throw new Error("宿主不支持取图像（需要 C ABI v15）");
-  return fetchImageLevel((...args) => get.apply(transport, args), runId, nodeId, port, level, abandoned);
+  if (!get) throw new Error('宿主不支持取图像（需要 C ABI v15）');
+  return fetchImageLevel(
+    (...args) => get.apply(transport, args),
+    runId,
+    nodeId,
+    port,
+    level,
+    abandoned,
+  );
 }
 
 /** 视角按原图坐标记：scale = 原图一个像素在屏幕上多大，(tx, ty) = 原图 (0, 0) 在舞台上的位置。
@@ -234,13 +243,13 @@ export function ImageCanvas({
   overlay,
   pixelScale = 1,
 }: ImageCanvasProps) {
-  const [levelChoice, setLevelChoice] = useState<"auto" | number>("auto");
+  const [levelChoice, setLevelChoice] = useState<'auto' | number>('auto');
   // null = 还没手动选过：跟着图走（三通道以上看 RGB；u8 不拉伸，u16 / f32 拉伸）
-  const [channelPick, setChannelChoice] = useState<number | "rgb" | null>(null);
-  const [ramp, setRamp] = useState<RampName>("gray");
+  const [channelPick, setChannelChoice] = useState<number | 'rgb' | null>(null);
+  const [ramp, setRamp] = useState<RampName>('gray');
   const [stretchPick, setStretch] = useState<boolean | null>(null);
-  const channelChoice = channelPick ?? (channels >= 3 ? "rgb" : 0);
-  const stretch = stretchPick ?? depth !== "u8";
+  const channelChoice = channelPick ?? (channels >= 3 ? 'rgb' : 0);
+  const stretch = stretchPick ?? depth !== 'u8';
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -259,16 +268,18 @@ export function ImageCanvas({
   const autoLevel = levelToFit(logicalW, logicalH, OVERVIEW_EDGE);
   const maxLevel = maxLevelOf(logicalW, logicalH);
   let minLevel = 0;
-  while (levelSize(logicalW, minLevel) * levelSize(logicalH, minLevel) > MAX_LEVEL_PIXELS) minLevel += 1;
-  const wanted = levelChoice === "auto" ? autoLevel : Math.max(minLevel, Math.min(maxLevel, levelChoice));
+  while (levelSize(logicalW, minLevel) * levelSize(logicalH, minLevel) > MAX_LEVEL_PIXELS)
+    minLevel += 1;
+  const wanted =
+    levelChoice === 'auto' ? autoLevel : Math.max(minLevel, Math.min(maxLevel, levelChoice));
   /** 这张图自己要取的那一级。 */
   const level = Math.max(0, wanted - log2Of(pixelScale));
   /** 「适配」此刻落在哪一块上（下拉框里写这个，与别的选项同一种写法）。 */
   const autoBlock = 2 ** Math.max(autoLevel, log2Of(pixelScale));
 
-  const canFetch = fullW > 0 && fullH > 0 && runId !== null && nodeId !== "" && port !== "";
+  const canFetch = fullW > 0 && fullH > 0 && runId !== null && nodeId !== '' && port !== '';
   const footprint: Footprint = { nodeId, port, w: logicalW, h: logicalH, scale: pixelScale };
-  const fetchKey = `${runId ?? ""}|${nodeId}|${port}|${pixelScale}|${level}`;
+  const fetchKey = `${runId ?? ''}|${nodeId}|${port}|${pixelScale}|${level}`;
 
   useEffect(() => {
     if (!canFetch || runId === null) {
@@ -284,7 +295,13 @@ export function ImageCanvas({
       try {
         const img = await fetchLevel(runId, nodeId, port, level, () => cancelled);
         if (cancelled) return;
-        const at: Footprint = { nodeId, port, w: fullW * pixelScale, h: fullH * pixelScale, scale: pixelScale };
+        const at: Footprint = {
+          nodeId,
+          port,
+          w: fullW * pixelScale,
+          h: fullH * pixelScale,
+          scale: pixelScale,
+        };
         setLoaded({ ...img, key: fetchKey, footprint: at, pixelScale });
       } catch (e) {
         if (cancelled) return;
@@ -302,18 +319,19 @@ export function ImageCanvas({
   // 自动运行 / 拖参数时的预览运行每次都换 runId，换级别也要重取：原图坐标里是同一张图的旧图先顶着，
   // 新图到了再换 —— 否则每跑一次画面就闪一下、放大的位置也丢了，拖框拖到一半还会被卸载
   const img =
-    loaded !== null && (loaded.key === fetchKey || sameFootprint(loaded.footprint, footprint)) ? loaded : null;
+    loaded !== null && (loaded.key === fetchKey || sameFootprint(loaded.footprint, footprint))
+      ? loaded
+      : null;
   const stale = img !== null && img.key !== fetchKey;
 
   const picks = useMemo(() => {
-    if (channels >= 3 && channelChoice === "rgb") return [0, 1, 2];
-    const c = typeof channelChoice === "number" ? channelChoice : 0;
+    if (channels >= 3 && channelChoice === 'rgb') return [0, 1, 2];
+    const c = typeof channelChoice === 'number' ? channelChoice : 0;
     return [Math.min(Math.max(0, c), Math.max(0, channels - 1))];
   }, [channels, channelChoice]);
 
   const extent = useMemo(() => (img ? extentOf(img, picks) : null), [img, picks]);
   const [lo, hi] = stretch && extent ? [extent.lo, extent.hi] : naturalRange(depth);
-
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -362,7 +380,10 @@ export function ImageCanvas({
     toStage: (x, y) => [t.tx + x * t.scale, t.ty + y * t.scale],
     toImage: (clientX, clientY) => {
       const r = stageRef.current?.getBoundingClientRect();
-      return [(clientX - (r?.left ?? 0) - t.tx) / t.scale, (clientY - (r?.top ?? 0) - t.ty) / t.scale];
+      return [
+        (clientX - (r?.left ?? 0) - t.tx) / t.scale,
+        (clientY - (r?.top ?? 0) - t.ty) / t.scale,
+      ];
     },
   });
 
@@ -391,7 +412,7 @@ export function ImageCanvas({
 
   let message: string | null = null;
   if (error !== null) message = error;
-  else if (img === null) message = loading ? "正在取图像…" : "还没取到图像";
+  else if (img === null) message = loading ? '正在取图像…' : '还没取到图像';
 
   const block = img ? blockOf(img) : 1;
   const readout = (() => {
@@ -404,13 +425,18 @@ export function ImageCanvas({
     const x0 = px * block;
     const y0 = py * block;
     const { w: shownW, h: shownH } = img.footprint;
-    const where = block > 1 ? `(${x0}–${Math.min(shownW, x0 + block) - 1}, ${y0}–${Math.min(shownH, y0 + block) - 1})` : `(${x0}, ${y0})`;
-    const text = vals.map((v) => (depth === "f32" ? num(v) : Number.isFinite(v) ? String(v) : "—")).join(", ");
+    const where =
+      block > 1
+        ? `(${x0}–${Math.min(shownW, x0 + block) - 1}, ${y0}–${Math.min(shownH, y0 + block) - 1})`
+        : `(${x0}, ${y0})`;
+    const text = vals
+      .map((v) => (depth === 'f32' ? num(v) : Number.isFinite(v) ? String(v) : '—'))
+      .join(', ');
     const notes = [
-      img.pixelScale > 1 ? `预览 1/${img.pixelScale}` : "",
-      img.level > 0 ? `1/${block} 的块均值` : "",
+      img.pixelScale > 1 ? `预览 1/${img.pixelScale}` : '',
+      img.level > 0 ? `1/${block} 的块均值` : '',
     ].filter(Boolean);
-    return `${where} = [${text}]${notes.length > 0 ? `（${notes.join("，")}）` : ""}`;
+    return `${where} = [${text}]${notes.length > 0 ? `（${notes.join('，')}）` : ''}`;
   })();
 
   const levels: number[] = [];
@@ -424,10 +450,10 @@ export function ImageCanvas({
       data-full-h={fullH}
       data-channels={channels}
       data-depth={depth}
-      data-level={img?.level ?? ""}
-      data-block={img ? block : ""}
+      data-level={img?.level ?? ''}
+      data-block={img ? block : ''}
       data-pixel-scale={pixelScale}
-      data-stale={stale ? "1" : "0"}
+      data-stale={stale ? '1' : '0'}
       data-w={img?.width ?? 0}
       data-h={img?.height ?? 0}
     >
@@ -437,18 +463,20 @@ export function ImageCanvas({
           <select
             className="peek-tensor__select"
             data-testid={`${testid}-level`}
-            value={levelChoice === "auto" ? "auto" : String(wanted)}
-            onChange={(e) => setLevelChoice(e.target.value === "auto" ? "auto" : Number(e.target.value))}
+            value={levelChoice === 'auto' ? 'auto' : String(wanted)}
+            onChange={(e) =>
+              setLevelChoice(e.target.value === 'auto' ? 'auto' : Number(e.target.value))
+            }
             title={
               pixelScale > 1
                 ? `这是缩小 1/${pixelScale} 的预览图：比 1/${pixelScale} 细的级别先按 1/${pixelScale} 显示，松手后的正式结果再按选的来`
-                : "原图 = 一个像素一个像素地看；1/k = k × k 块均值缩小（离远了看同一张图）"
+                : '原图 = 一个像素一个像素地看；1/k = k × k 块均值缩小（离远了看同一张图）'
             }
           >
-            <option value="auto">适配（{autoBlock === 1 ? "原图" : `1/${autoBlock}`}）</option>
+            <option value="auto">适配（{autoBlock === 1 ? '原图' : `1/${autoBlock}`}）</option>
             {levels.map((l) => (
               <option key={l} value={String(l)}>
-                {l === 0 ? "原图" : `1/${2 ** l}`}
+                {l === 0 ? '原图' : `1/${2 ** l}`}
               </option>
             ))}
           </select>
@@ -460,13 +488,15 @@ export function ImageCanvas({
             <select
               className="peek-tensor__select"
               data-testid={`${testid}-channel`}
-              value={picks.length >= 3 ? "rgb" : String(picks[0])}
-              onChange={(e) => setChannelChoice(e.target.value === "rgb" ? "rgb" : Number(e.target.value))}
+              value={picks.length >= 3 ? 'rgb' : String(picks[0])}
+              onChange={(e) =>
+                setChannelChoice(e.target.value === 'rgb' ? 'rgb' : Number(e.target.value))
+              }
             >
               {channels >= 3 && <option value="rgb">RGB</option>}
               {Array.from({ length: channels }, (_, i) => (
                 <option key={i} value={String(i)}>
-                  {"RGBA"[i] ?? i}
+                  {'RGBA'[i] ?? i}
                 </option>
               ))}
             </select>
@@ -491,7 +521,10 @@ export function ImageCanvas({
           </span>
         )}
 
-        <label className="peek-tensor__check" title={`不拉伸时按 ${depth} 的原值范围 ${naturalRange(depth).join("–")} 显示`}>
+        <label
+          className="peek-tensor__check"
+          title={`不拉伸时按 ${depth} 的原值范围 ${naturalRange(depth).join('–')} 显示`}
+        >
           <input
             type="checkbox"
             data-testid={`${testid}-stretch`}
@@ -541,7 +574,7 @@ export function ImageCanvas({
                   height: img.height * block * xf.scale,
                   transform: `translate(${xf.tx}px, ${xf.ty}px)`,
                 }
-              : { visibility: "hidden" }
+              : { visibility: 'hidden' }
           }
         />
         {xf && img && overlay && (
@@ -570,8 +603,9 @@ export function ImageCanvas({
         ) : (
           <>
             {fullW * pixelScale}×{fullH * pixelScale}×{channels} {depth}
-            {pixelScale > 1 ? ` · 预览 1/${pixelScale}（${fullW}×${fullH}）` : ""}
-            {img && block > 1 ? ` · 显示 1/${block}（${img.width}×${img.height}）` : ""} · 范围 {num(lo)}–{num(hi)}
+            {pixelScale > 1 ? ` · 预览 1/${pixelScale}（${fullW}×${fullH}）` : ''}
+            {img && block > 1 ? ` · 显示 1/${block}（${img.width}×${img.height}）` : ''} · 范围{' '}
+            {num(lo)}–{num(hi)}
           </>
         )}
       </div>

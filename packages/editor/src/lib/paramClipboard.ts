@@ -4,11 +4,11 @@
 // 剪贴板只在内存里（ui store），不进系统剪贴板：写系统剪贴板会顶掉复制好的节点，读它要 WebView2 的权限、
 // 菜单打开那一刻也没法同步知道「粘贴参数」能不能点。
 
-import { resolveGraphBinding, withBoundValues } from "./graphParams";
-import { effectiveParams, effectiveValue, valueEquals } from "./params";
-import { levelOf, promotedBy, type SubPath } from "./subgraph";
-import type { GraphDoc } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+import { resolveGraphBinding, withBoundValues } from './graphParams';
+import { effectiveParams, effectiveValue, valueEquals } from './params';
+import { levelOf, promotedBy, type SubPath } from './subgraph';
+import type { GraphDoc } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 export interface ParamClipboard {
   /** 算子 id：只往同一种算子上粘。 */
@@ -32,10 +32,15 @@ export interface ParamEditPlan {
 }
 
 /** 这个参数此刻不归节点自己管：被图参数绑着（值在图参数 / 配方里），或在子图里提升成了子图参数（值在实例上）。 */
-export function paramLock(doc: GraphDoc, path: SubPath, nodeId: string, name: string): "bound" | "promoted" | null {
-  if (resolveGraphBinding(doc, path, nodeId, name)) return "bound";
+export function paramLock(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  name: string,
+): 'bound' | 'promoted' | null {
+  if (resolveGraphBinding(doc, path, nodeId, name)) return 'bound';
   const seg = path[path.length - 1];
-  if (seg && promotedBy(doc.subgraphs?.[seg.subgraphId], nodeId, name)) return "promoted";
+  if (seg && promotedBy(doc.subgraphs?.[seg.subgraphId], nodeId, name)) return 'promoted';
   return null;
 }
 
@@ -52,17 +57,22 @@ export function snapshotParams(
   if (!node || !op || op.params.length === 0) return null;
   const names = op.params.map((p) => p.name);
   const values = effectiveParams(op, withBoundValues(doc, path, node, names, overrides));
-  for (const name of names) if (paramLock(doc, path, nodeId, name) === "promoted") delete values[name];
+  for (const name of names)
+    if (paramLock(doc, path, nodeId, name) === 'promoted') delete values[name];
   return {
     op: node.op,
-    docId: node.op.startsWith("sub:") ? (doc.id ?? null) : null,
+    docId: node.op.startsWith('sub:') ? (doc.id ?? null) : null,
     from: node.ui?.title ?? op.label ?? node.id,
     values: structuredClone(values),
   };
 }
 
 /** 剪贴板能不能粘到这个节点上（菜单里「粘贴参数」可不可点）。 */
-export function canPasteParams(doc: GraphDoc, clip: ParamClipboard | null, op: string | undefined): boolean {
+export function canPasteParams(
+  doc: GraphDoc,
+  clip: ParamClipboard | null,
+  op: string | undefined,
+): boolean {
   return !!clip && clip.op === op && (clip.docId === null || clip.docId === (doc.id ?? null));
 }
 

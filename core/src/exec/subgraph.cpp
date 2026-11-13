@@ -27,36 +27,48 @@ Value valueFromJson(ParamType type, const nlohmann::json& j) {
   auto numbers = [&](std::size_t fallback) {
     std::vector<double> v;
     if (j.is_array()) {
-      for (const auto& e : j) v.push_back(e.is_number() ? e.get<double>() : 0.0);
+      for (const auto& e : j)
+        v.push_back(e.is_number() ? e.get<double>() : 0.0);
     }
-    if (v.empty()) v.assign(fallback, 0.0);
+    if (v.empty())
+      v.assign(fallback, 0.0);
     return Value::vec(std::move(v));
   };
   switch (type) {
-    case ParamType::Bool:      return Value::boolean(j.is_boolean() && j.get<bool>());
-    case ParamType::Int:
-    case ParamType::Flags:     return Value::integer(j.is_number() ? j.get<std::int64_t>() : 0);
-    case ParamType::Float:     return Value::number(j.is_number() ? j.get<double>() : 0.0);
-    case ParamType::Vec2f:     return numbers(2);
-    case ParamType::Vec3f:     return numbers(3);
-    case ParamType::Vec4f:     return numbers(4);
-    case ParamType::Color:     return numbers(3);
-    case ParamType::Transform: return numbers(16);
-    case ParamType::Enum:
-    case ParamType::String:
-    case ParamType::Text:
-    case ParamType::Path:      return Value::text(j.is_string() ? j.get<std::string>() : std::string());
-    // 没给默认值时退回恒等曲线：一份形状不对的默认值会让注册表自检拒掉整个库算子
-    case ParamType::Curve:
-      return Value::text(j.is_object() ? j.dump()
-                                       : std::string(R"({"interp":"linear","points":[[0,0],[1,1]]})"));
+  case ParamType::Bool:
+    return Value::boolean(j.is_boolean() && j.get<bool>());
+  case ParamType::Int:
+  case ParamType::Flags:
+    return Value::integer(j.is_number() ? j.get<std::int64_t>() : 0);
+  case ParamType::Float:
+    return Value::number(j.is_number() ? j.get<double>() : 0.0);
+  case ParamType::Vec2f:
+    return numbers(2);
+  case ParamType::Vec3f:
+    return numbers(3);
+  case ParamType::Vec4f:
+    return numbers(4);
+  case ParamType::Color:
+    return numbers(3);
+  case ParamType::Transform:
+    return numbers(16);
+  case ParamType::Enum:
+  case ParamType::String:
+  case ParamType::Text:
+  case ParamType::Path:
+    return Value::text(j.is_string() ? j.get<std::string>() : std::string());
+  // 没给默认值时退回恒等曲线：一份形状不对的默认值会让注册表自检拒掉整个库算子
+  case ParamType::Curve:
+    return Value::text(
+        j.is_object() ? j.dump() : std::string(R"({"interp":"linear","points":[[0,0],[1,1]]})"));
   }
   return Value::number(0.0);
 }
 
 void readOptional(const nlohmann::json& j, const char* key, std::optional<double>& out) {
   auto it = j.find(key);
-  if (it != j.end() && it->is_number()) out = it->get<double>();
+  if (it != j.end() && it->is_number())
+    out = it->get<double>();
 }
 
 Status subgraphStub(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
@@ -64,7 +76,7 @@ Status subgraphStub(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
                        "子图算子应当在 compile 之前被展开掉，执行器不该看见它");
 }
 
-}  // namespace
+} // namespace
 
 Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
   Param p;
@@ -74,7 +86,8 @@ Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
     auto it = j.find(key);
     return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
   };
-  if (!parseParamType(text("type"), p.type)) p.type = ParamType::Float;
+  if (!parseParamType(text("type"), p.type))
+    p.type = ParamType::Float;
   p.label = text("label");
   p.doc = text("doc");
   p.group = text("group");
@@ -97,21 +110,25 @@ Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
   auto labels = j.find("componentLabels");
   if (labels != j.end() && labels->is_array()) {
     for (const auto& e : *labels) {
-      if (e.is_string()) p.componentLabels.push_back(e.get<std::string>());
+      if (e.is_string())
+        p.componentLabels.push_back(e.get<std::string>());
     }
   }
   auto options = j.find("options");
   if (options != j.end() && options->is_array()) {
     for (const auto& o : *options) {
-      if (!o.is_object()) continue;
+      if (!o.is_object())
+        continue;
       EnumOption e;
       // schema 允许整数的选项值（flags 的位）：json::value 碰到类型不符会抛，这里自己取
       auto v = o.find("value");
-      if (v != o.end()) e.value = v->is_string() ? v->get<std::string>() : v->dump();
+      if (v != o.end())
+        e.value = v->is_string() ? v->get<std::string>() : v->dump();
       auto label = o.find("label");
       e.label = label != o.end() && label->is_string() ? label->get<std::string>() : e.value;
       auto doc = o.find("doc");
-      if (doc != o.end() && doc->is_string()) e.doc = doc->get<std::string>();
+      if (doc != o.end() && doc->is_string())
+        e.doc = doc->get<std::string>();
       p.options.push_back(std::move(e));
     }
   }
@@ -121,9 +138,11 @@ Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
   if (p.type == ParamType::Enum && !p.options.empty()) {
     bool found = false;
     for (const auto& o : p.options) {
-      if (o.value == p.def.stringValue()) found = true;
+      if (o.value == p.def.stringValue())
+        found = true;
     }
-    if (!found) p.def = Value::text(p.options.front().value);
+    if (!found)
+      p.def = Value::text(p.options.front().value);
   }
   return p;
 }
@@ -142,7 +161,8 @@ OperatorDesc synthesizeOperator(const SubgraphDef& def, const std::string& opId)
   for (const SubOutput& o : def.outputs) {
     op.outputs.push_back(Port{o.name, o.type, o.label, o.doc, true});
   }
-  for (const SubParam& p : def.params) op.params.push_back(paramFromDecl(p.name, p.decl));
+  for (const SubParam& p : def.params)
+    op.params.push_back(paramFromDecl(p.name, p.decl));
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &subgraphStub;
   return op;
@@ -153,14 +173,15 @@ const SubgraphDef* findSubgraphDef(const RawGraph& graph, const std::string& opI
     auto it = graph.subgraphs.find(opId.substr(std::string(kSubPrefix).size()));
     return it == graph.subgraphs.end() ? nullptr : &it->second;
   }
-  if (opId.rfind(kLibraryIdPrefix, 0) == 0) return Library::instance().find(opId);
+  if (opId.rfind(kLibraryIdPrefix, 0) == 0)
+    return Library::instance().find(opId);
   return nullptr;
 }
 
 namespace {
 
 class Expander {
- public:
+public:
   Expander(const RawGraph& in, RawGraph& out, Diagnostics& diags)
       : in_(in), out_(out), diags_(diags) {}
 
@@ -172,7 +193,7 @@ class Expander {
     return ok_;
   }
 
- private:
+private:
   void fail(const std::string& nodeId, const char* code, const std::string& message,
             const std::string& paramPath = {}, const std::string& portName = {}) {
     diags_.error(nodeId, Phase::Validate, code, message, paramPath, portName);
@@ -182,12 +203,14 @@ class Expander {
   /// 一个提升参数的值写进它绑定的每个节点。子图外参（F4）与顶层图参数（J7）共用这一段：
   /// graphParam 非空 = 来自顶层参数，记进 graphParams；否则记进 boundParams。
   /// 找不到的目标节点在这里静默跳过 —— 子图定义解析时已经挡过，顶层参数由调用方先查。
-  static void writeBinds(std::vector<RawNode>& nodes, const std::map<std::string, std::size_t>& byId,
+  static void writeBinds(std::vector<RawNode>& nodes,
+                         const std::map<std::string, std::size_t>& byId,
                          const std::vector<std::pair<std::string, std::string>>& binds,
                          const nlohmann::json& value, const std::string* graphParam) {
     for (const auto& bind : binds) {
       auto n = byId.find(bind.first);
-      if (n == byId.end()) continue;
+      if (n == byId.end())
+        continue;
       RawNode& target = nodes[n->second];
       target.params[bind.second] = value;
       if (graphParam) {
@@ -208,12 +231,14 @@ class Expander {
   void checkGraphParamValues() {
     for (const GraphParam& gp : in_.params) {
       auto typeIt = gp.decl.find("type");
-      if (typeIt == gp.decl.end()) continue;
+      if (typeIt == gp.decl.end())
+        continue;
       Param spec = paramFromDecl(gp.name, gp.decl);
       // enum 没给 options（手写的半份规格）：只能查「是字符串」，查选项会把每个值都判成非法
-      if (spec.type == ParamType::Enum && spec.options.empty()) spec.type = ParamType::String;
-      const std::string who =
-          "图参数 '" + gp.name + "'" + (spec.label.empty() ? std::string(" ") : "（" + spec.label + "）");
+      if (spec.type == ParamType::Enum && spec.options.empty())
+        spec.type = ParamType::String;
+      const std::string who = "图参数 '" + gp.name + "'" +
+                              (spec.label.empty() ? std::string(" ") : "（" + spec.label + "）");
       auto check = [&](const nlohmann::json& value, const char* which) {
         Value v;
         std::string message;
@@ -223,7 +248,8 @@ class Expander {
         }
       };
       check(gp.decl.at("default"), "的 default");
-      if (gp.given) check(*gp.given, "传入的值");
+      if (gp.given)
+        check(*gp.given, "传入的值");
     }
   }
 
@@ -233,7 +259,8 @@ class Expander {
   void applyGraphParams(std::vector<RawNode>& nodes) {
     checkGraphParamValues();
     std::map<std::string, std::size_t> byId;
-    for (std::size_t i = 0; i < nodes.size(); ++i) byId[nodes[i].id] = i;
+    for (std::size_t i = 0; i < nodes.size(); ++i)
+      byId[nodes[i].id] = i;
     std::map<std::pair<std::string, std::string>, std::string> owner;
     bool clean = true;
     for (const GraphParam& gp : in_.params) {
@@ -263,7 +290,8 @@ class Expander {
         }
       }
     }
-    if (!clean) return;
+    if (!clean)
+      return;
     for (const GraphParam& gp : in_.params) {
       writeBinds(nodes, byId, gp.binds, gp.value(), &gp.name);
     }
@@ -278,7 +306,8 @@ class Expander {
       return true;
     }
     auto o = it->second.outputs.find(port);
-    if (o == it->second.outputs.end()) return false;
+    if (o == it->second.outputs.end())
+      return false;
     out = o->second;
     return true;
   }
@@ -292,7 +321,8 @@ class Expander {
       return true;
     }
     auto i = it->second.inputs.find(port);
-    if (i == it->second.inputs.end()) return false;
+    if (i == it->second.inputs.end())
+      return false;
     out = i->second;
     return true;
   }
@@ -301,7 +331,8 @@ class Expander {
                      const std::string& prefix, bool bypass, std::vector<std::string>& stack) {
     std::vector<RawNode> nodes = def.nodes;
     std::map<std::string, std::size_t> byId;
-    for (std::size_t i = 0; i < nodes.size(); ++i) byId[nodes[i].id] = i;
+    for (std::size_t i = 0; i < nodes.size(); ++i)
+      byId[nodes[i].id] = i;
 
     // 外参覆盖内参（F4）。外面没给值就用声明里的默认值 —— 「表单上看到什么就是里面用什么」。
     std::set<std::string> declared;
@@ -313,7 +344,8 @@ class Expander {
         value = *given;
       } else {
         auto def2 = p.decl.find("default");
-        if (def2 == p.decl.end()) continue;
+        if (def2 == p.decl.end())
+          continue;
         value = *def2;
       }
       // 宿主节点的这个外参本身由顶层参数灌进来时，来源一路传下去：
@@ -323,7 +355,8 @@ class Expander {
                  viaGraph == host.graphParams.end() ? nullptr : &viaGraph->second);
     }
     for (auto it = host.params.begin(); it != host.params.end(); ++it) {
-      if (declared.count(it.key())) continue;
+      if (declared.count(it.key()))
+        continue;
       auto viaGraph = host.graphParams.find(it.key());
       if (viaGraph != host.graphParams.end()) {
         fail(hostId, "unknown_bind",
@@ -358,7 +391,8 @@ class Expander {
       Endpoint ep;
       if (!resolveSource(boundaries, prefix, o.node, o.port, ep)) {
         fail(hostId, "unknown_port",
-             "子图 '" + def.id + "' 的输出 " + o.name + " 来自不存在的端口 " + o.node + "." + o.port,
+             "子图 '" + def.id + "' 的输出 " + o.name + " 来自不存在的端口 " + o.node + "." +
+                 o.port,
              {}, o.name);
         continue;
       }
@@ -405,8 +439,8 @@ class Expander {
     for (const RawEdge& e : edges) {
       Endpoint from;
       if (!resolveSource(boundaries, prefix, e.fromNode, e.fromPort, from)) {
-        fail(prefix + e.fromNode, "unknown_port",
-             "子图节点没有输出端口 '" + e.fromPort + "'", {}, e.fromPort);
+        fail(prefix + e.fromNode, "unknown_port", "子图节点没有输出端口 '" + e.fromPort + "'", {},
+             e.fromPort);
         continue;
       }
       std::vector<Endpoint> targets;
@@ -434,7 +468,7 @@ class Expander {
   bool ok_ = true;
 };
 
-}  // namespace
+} // namespace
 
 bool expandGraph(const RawGraph& in, RawGraph& out, Diagnostics& diags) {
   out.id = in.id;
@@ -446,4 +480,4 @@ bool expandGraph(const RawGraph& in, RawGraph& out, Diagnostics& diags) {
   return expander.run();
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

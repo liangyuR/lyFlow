@@ -13,4 +13,4 @@ domain::DetectionConfiguration parseDetectionConfiguration(const YAML::Node& nod
 domain::CalibrationConfiguration parseCalibrationConfiguration(const YAML::Node& node);
 domain::CalibrationConfiguration loadCalibrationConfiguration(const std::string& path);
 
-}  // namespace detection
+} // namespace detection

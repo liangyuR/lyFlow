@@ -24,7 +24,8 @@ struct Case {
 
 std::string readAll(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
-  if (!in) return {};
+  if (!in)
+    return {};
   std::ostringstream buffer;
   buffer << in.rdbuf();
   return buffer.str();
@@ -39,7 +40,8 @@ std::string dirOf(const std::string& path) {
 /// 为一个验收工具引一个 JSON 库不划算。
 std::string runIdOf(const std::string& event) {
   const std::size_t at = event.find("\"runId\":\"");
-  if (at == std::string::npos) return {};
+  if (at == std::string::npos)
+    return {};
   const std::size_t begin = at + 9;
   const std::size_t end = event.find('"', begin);
   return end == std::string::npos ? std::string() : event.substr(begin, end - begin);
@@ -61,18 +63,18 @@ Outcome runOne(const lyflow::Client& client, const Case& c, const std::string& r
 
   Outcome out;
   std::size_t foreign = 0;
-  const lyflow::RunResult result =
-      client.runAsync(c.json, options, [&](const char* eventJson) {
-        out.eventCount += 1;
-        if (runIdOf(eventJson) != runId) foreign += 1;
-      });
+  const lyflow::RunResult result = client.runAsync(c.json, options, [&](const char* eventJson) {
+    out.eventCount += 1;
+    if (runIdOf(eventJson) != runId)
+      foreign += 1;
+  });
   out.status = result.status;
   out.outputs = result.outputs;
   out.eventsIsolated = foreign == 0;
   return out;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
   std::string dll;
@@ -92,7 +94,8 @@ int main(int argc, char** argv) {
     std::cerr << "用法：embed_concurrent --dll <lyflow_core.dll> [--threads 8] <graph>...\n";
     return 2;
   }
-  if (threads < 1) threads = 1;
+  if (threads < 1)
+    threads = 1;
 
   std::vector<Case> cases;
   for (const std::string& f : files) {
@@ -109,8 +112,8 @@ int main(int argc, char** argv) {
 
   try {
     lyflow::Client client(dll);
-    std::cout << "core " << client.version() << "，" << cases.size() << " 张图，"
-              << threads << " 条并发线程\n";
+    std::cout << "core " << client.version() << "，" << cases.size() << " 张图，" << threads
+              << " 条并发线程\n";
 
     std::vector<Outcome> serial(cases.size());
     for (std::size_t i = 0; i < cases.size(); ++i) {
@@ -124,19 +127,22 @@ int main(int argc, char** argv) {
       pool.emplace_back([&] {
         for (;;) {
           const std::size_t i = next.fetch_add(1);
-          if (i >= cases.size()) return;
+          if (i >= cases.size())
+            return;
           parallel[i] = runOne(client, cases[i], "par-" + std::to_string(i));
         }
       });
     }
-    for (auto& th : pool) th.join();
+    for (auto& th : pool)
+      th.join();
 
     std::size_t bad = 0;
     for (std::size_t i = 0; i < cases.size(); ++i) {
       const bool sameStatus = serial[i].status == parallel[i].status;
       const bool sameOutputs = serial[i].outputs == parallel[i].outputs;
       const bool isolated = parallel[i].eventsIsolated && serial[i].eventsIsolated;
-      if (sameStatus && sameOutputs && isolated) continue;
+      if (sameStatus && sameOutputs && isolated)
+        continue;
       bad += 1;
       std::cerr << "不一致 " << cases[i].path << "\n";
       if (!sameStatus) {
@@ -146,10 +152,12 @@ int main(int argc, char** argv) {
         std::cerr << "  outputs 串行: " << serial[i].outputs << "\n";
         std::cerr << "  outputs 并发: " << parallel[i].outputs << "\n";
       }
-      if (!isolated) std::cerr << "  收到了别的 run 的事件\n";
+      if (!isolated)
+        std::cerr << "  收到了别的 run 的事件\n";
     }
 
-    std::cout << (cases.size() - bad) << " / " << cases.size() << " 张图串并一致，事件按 runId 隔离\n";
+    std::cout << (cases.size() - bad) << " / " << cases.size()
+              << " 张图串并一致，事件按 runId 隔离\n";
     return bad == 0 ? 0 : 1;
   } catch (const std::exception& e) {
     std::cerr << "失败: " << e.what() << "\n";

@@ -43,4 +43,4 @@ Data toNodeScale(const Data& d, std::int32_t s);
 void scaleOutputs(std::unordered_map<std::string, Data>& outputs, std::int32_t s,
                   bool absoluteSize);
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

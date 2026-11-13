@@ -30,11 +30,16 @@ bool isDigit(char c) { return c >= '0' && c <= '9'; }
 /// 快路径只收「普通十进制数」：数字开头，或 '-' / '.' 后面跟着数字（"-.5" 也算）。
 /// 字母开头的（nan、inf）、'+' 开头的、太长的，一律交给 PCL —— nan 还要顺手把 is_dense 置 false。
 bool plainNumber(std::string_view t) {
-  if (t.empty() || t.size() > 64) return false;
-  if (isDigit(t[0])) return true;
-  if (t.size() < 2) return false;
-  if (t[0] == '.') return isDigit(t[1]);
-  if (t[0] != '-') return false;
+  if (t.empty() || t.size() > 64)
+    return false;
+  if (isDigit(t[0]))
+    return true;
+  if (t.size() < 2)
+    return false;
+  if (t[0] == '.')
+    return isDigit(t[1]);
+  if (t[0] != '-')
+    return false;
   return isDigit(t[1]) || (t[1] == '.' && t.size() > 2 && isDigit(t[2]));
 }
 
@@ -42,49 +47,62 @@ bool plainNumber(std::string_view t) {
 /// 尾数与 10^k 都是精确的 double，一次乘除就是正确舍入 —— 与 strtod / from_chars 逐位相同，只是快得多
 /// （PCL 写出来的 %.8g 基本都落在这里）。形状不对或超出范围返回 false，交给 from_chars。
 bool clingerDouble(std::string_view t, double& out) {
-  static constexpr double kPow10[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
-                                      1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+  static constexpr double kPow10[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,
+                                      1e8,  1e9,  1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+                                      1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
   const char* p = t.data();
   const char* const end = p + t.size();
   const bool neg = p != end && *p == '-';
-  if (neg) ++p;
+  if (neg)
+    ++p;
   std::uint64_t m = 0;
-  int significant = 0;  // 第一个非零数字起算
+  int significant = 0; // 第一个非零数字起算
   int digits = 0;
   int fraction = 0;
   for (; p != end && isDigit(*p); ++p, ++digits) {
-    if (significant > 0 || *p != '0') ++significant;
-    if (significant > 19) return false;
+    if (significant > 0 || *p != '0')
+      ++significant;
+    if (significant > 19)
+      return false;
     m = m * 10 + static_cast<unsigned>(*p - '0');
   }
   if (p != end && *p == '.') {
     for (++p; p != end && isDigit(*p); ++p, ++digits, ++fraction) {
-      if (significant > 0 || *p != '0') ++significant;
-      if (significant > 19) return false;
+      if (significant > 0 || *p != '0')
+        ++significant;
+      if (significant > 19)
+        return false;
       m = m * 10 + static_cast<unsigned>(*p - '0');
     }
   }
-  if (digits == 0) return false;
+  if (digits == 0)
+    return false;
   int exp10 = 0;
   if (p != end && (*p == 'e' || *p == 'E')) {
     ++p;
     const bool eneg = p != end && *p == '-';
-    if (p != end && (*p == '-' || *p == '+')) ++p;
+    if (p != end && (*p == '-' || *p == '+'))
+      ++p;
     int e = 0;
     int edigits = 0;
     for (; p != end && isDigit(*p); ++p, ++edigits) {
-      if (edigits >= 4) return false;
+      if (edigits >= 4)
+        return false;
       e = e * 10 + (*p - '0');
     }
-    if (edigits == 0) return false;  // "1e"、"1e+"：from_chars 只吃到 e 前面，交给它去判
+    if (edigits == 0)
+      return false; // "1e"、"1e+"：from_chars 只吃到 e 前面，交给它去判
     exp10 = eneg ? -e : e;
   }
-  if (p != end) return false;
+  if (p != end)
+    return false;
   exp10 -= fraction;
-  if (m > (std::uint64_t{1} << 53)) return false;
+  if (m > (std::uint64_t{1} << 53))
+    return false;
   double v = static_cast<double>(m);
   if (m != 0) {
-    if (exp10 < -22 || exp10 > 22) return false;
+    if (exp10 < -22 || exp10 > 22)
+      return false;
     v = exp10 < 0 ? v / kPow10[-exp10] : v * kPow10[exp10];
   }
   out = neg ? -v : v;
@@ -94,8 +112,10 @@ bool clingerDouble(std::string_view t, double& out) {
 /// 词 → double，与 atof 逐位相同的那部分：普通十进制数、整个词吃完、结果是正规数或 0。
 /// 其余（溢出、次正规、半截）返回 false，交回 PCL。
 bool plainDouble(std::string_view t, double& out) {
-  if (!plainNumber(t)) return false;
-  if (clingerDouble(t, out)) return true;
+  if (!plainNumber(t))
+    return false;
+  if (clingerDouble(t, out))
+    return true;
   const char* last = t.data() + t.size();
   const auto [ptr, ec] = std::from_chars(t.data(), last, out);
   return ec == std::errc() && ptr == last && std::fpclassify(out) != FP_SUBNORMAL;
@@ -111,10 +131,13 @@ void splitLine(std::vector<std::string_view>& out, std::string_view line) {
   out.clear();
   std::size_t b = 0;
   std::size_t e = line.size();
-  while (b < e && isSpaceClassic(line[b])) ++b;
-  while (e > b && isSpaceClassic(line[e - 1])) --e;
+  while (b < e && isSpaceClassic(line[b]))
+    ++b;
+  while (e > b && isSpaceClassic(line[e - 1]))
+    --e;
   line = line.substr(b, e - b);
-  if (line.empty()) return;
+  if (line.empty())
+    return;
   const char* delims = "\t\r ";
   std::size_t start = 0;
   while (true) {
@@ -124,30 +147,34 @@ void splitLine(std::vector<std::string_view>& out, std::string_view line) {
       return;
     }
     out.push_back(line.substr(start, end - start));
-    start = line.find_first_not_of(delims, end);  // 连着的分隔符算一个；去过首尾空白，后面一定还有词
+    start = line.find_first_not_of(delims, end); // 连着的分隔符算一个；去过首尾空白，后面一定还有词
   }
 }
 
 template <typename T>
 void store(pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c, T value) {
-  std::memcpy(&cloud.data[static_cast<std::size_t>(idx) * cloud.point_step + cloud.fields[d].offset +
-                          c * sizeof(T)],
+  std::memcpy(&cloud.data[static_cast<std::size_t>(idx) * cloud.point_step +
+                          cloud.fields[d].offset + c * sizeof(T)],
               &value, sizeof(T));
 }
 
 template <typename T>
-bool fastStore(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c) {
-  if (!plainNumber(tok)) return false;
+bool fastStore(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d,
+               unsigned c) {
+  if (!plainNumber(tok))
+    return false;
   if constexpr (std::is_same_v<T, double>) {
     double value = 0;
-    if (!plainDouble(tok, value)) return false;
+    if (!plainDouble(tok, value))
+      return false;
     store(cloud, idx, d, c, value);
   } else {
     using Parsed = std::conditional_t<sizeof(T) == 1, int, T>;
     Parsed value{};
     const char* end = tok.data() + tok.size();
     const auto [ptr, ec] = std::from_chars(tok.data(), end, value);
-    if (ec != std::errc() || ptr != end) return false;
+    if (ec != std::errc() || ptr != end)
+      return false;
     store(cloud, idx, d, c, static_cast<T>(value));
   }
   return true;
@@ -155,9 +182,10 @@ bool fastStore(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, u
 
 /// 普通完整数值直接转换到字段类型；其余保留 PCL 的流解析与 atof 回退。
 template <typename T>
-void copyToken(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c,
-               std::istringstream& is, bool fast) {
-  if (fast && fastStore<T>(tok, cloud, idx, d, c)) return;
+void copyToken(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d,
+               unsigned c, std::istringstream& is, bool fast) {
+  if (fast && fastStore<T>(tok, cloud, idx, d, c))
+    return;
   pcl::copyStringValue<T>(std::string(tok), cloud, static_cast<pcl::index_t>(idx), d, c, is);
 }
 
@@ -170,8 +198,8 @@ bool isNan(std::string_view t) {
 /// 几个线程一起写就是数据竞争；int8 / uint8 的特化里没有 nan 那一支，照样交给 PCL。
 /// 其余不普通的词交给 PCL；每个线程使用自己的流。
 template <typename T>
-void copyTokenParallel(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c,
-                          std::istringstream& is, bool& sawNan) {
+void copyTokenParallel(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d,
+                       unsigned c, std::istringstream& is, bool& sawNan) {
   if constexpr (sizeof(T) != 1) {
     if (isNan(tok)) {
       store(cloud, idx, d, c, std::numeric_limits<T>::quiet_NaN());
@@ -179,44 +207,63 @@ void copyTokenParallel(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigne
       return;
     }
   }
-  if (fastStore<T>(tok, cloud, idx, d, c)) return;
+  if (fastStore<T>(tok, cloud, idx, d, c))
+    return;
   pcl::copyStringValue<T>(std::string(tok), cloud, static_cast<pcl::index_t>(idx), d, c, is);
 }
 
-template <typename T>
-struct Tag {
+template <typename T> struct Tag {
   using type = T;
 };
 
-bool knownType(std::uint8_t t) { return t >= pcl::PCLPointField::INT8 && t <= pcl::PCLPointField::FLOAT64; }
+bool knownType(std::uint8_t t) {
+  return t >= pcl::PCLPointField::INT8 && t <= pcl::PCLPointField::FLOAT64;
+}
 
 /// 一行切成词，按字段类型逐个交给 tok(Tag<T>{}, 词, d, c)。词数不对返回 false（调用方记 warning、照样占点）。
 template <class Tok>
 bool forEachToken(std::string_view text, const pcl::PCLPointCloud2& cloud, unsigned elems,
                   std::vector<std::string_view>& st, Tok&& tok) {
   splitLine(st, text);
-  if (st.size() != elems) return false;
+  if (st.size() != elems)
+    return false;
   std::size_t total = 0;
   for (unsigned d = 0; d < static_cast<unsigned>(cloud.fields.size()); ++d) {
     const pcl::PCLPointField& f = cloud.fields[d];
-    if (f.name == "_") {  // 二进制数据带过来的填充维
+    if (f.name == "_") { // 二进制数据带过来的填充维
       total += f.count;
       continue;
     }
     for (pcl::uindex_t c = 0; c < f.count; ++c) {
       const std::string_view t = st[total + c];
       switch (f.datatype) {
-        case pcl::PCLPointField::INT8: tok(Tag<std::int8_t>{}, t, d, c); break;
-        case pcl::PCLPointField::UINT8: tok(Tag<std::uint8_t>{}, t, d, c); break;
-        case pcl::PCLPointField::INT16: tok(Tag<std::int16_t>{}, t, d, c); break;
-        case pcl::PCLPointField::UINT16: tok(Tag<std::uint16_t>{}, t, d, c); break;
-        case pcl::PCLPointField::INT32: tok(Tag<std::int32_t>{}, t, d, c); break;
-        case pcl::PCLPointField::UINT32: tok(Tag<std::uint32_t>{}, t, d, c); break;
-        case pcl::PCLPointField::FLOAT32: tok(Tag<float>{}, t, d, c); break;
-        case pcl::PCLPointField::FLOAT64: tok(Tag<double>{}, t, d, c); break;
-        default:
-          PCL_WARN("[pcl::PCDReader::read] Incorrect field data type specified (%d)!\n", f.datatype);
-          break;
+      case pcl::PCLPointField::INT8:
+        tok(Tag<std::int8_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::UINT8:
+        tok(Tag<std::uint8_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::INT16:
+        tok(Tag<std::int16_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::UINT16:
+        tok(Tag<std::uint16_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::INT32:
+        tok(Tag<std::int32_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::UINT32:
+        tok(Tag<std::uint32_t>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::FLOAT32:
+        tok(Tag<float>{}, t, d, c);
+        break;
+      case pcl::PCLPointField::FLOAT64:
+        tok(Tag<double>{}, t, d, c);
+        break;
+      default:
+        PCL_WARN("[pcl::PCDReader::read] Incorrect field data type specified (%d)!\n", f.datatype);
+        break;
       }
     }
     total += f.count;
@@ -248,22 +295,27 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
   is.imbue(std::locale::classic());
   // atof 认的是 C locale 的小数点：不是 '.' 时不走快路径，逐个词照 PCL 来（慢，但一样）
   const lconv* lc = std::localeconv();
-  const bool fast = lc != nullptr && lc->decimal_point != nullptr && std::strcmp(lc->decimal_point, ".") == 0;
+  const bool fast =
+      lc != nullptr && lc->decimal_point != nullptr && std::strcmp(lc->decimal_point, ".") == 0;
   // 不认识的字段类型每个点都要 warning 一次：那种文件不并行，warning 的顺序与 PCL 一样
   const bool canSplit =
       fast && threads > 1 &&
-      std::all_of(cloud.fields.begin(), cloud.fields.end(),
-                  [](const pcl::PCLPointField& f) { return f.name == "_" || knownType(f.datatype); });
+      std::all_of(cloud.fields.begin(), cloud.fields.end(), [](const pcl::PCLPointField& f) {
+        return f.name == "_" || knownType(f.datatype);
+      });
   bool sawNan = false;
 
   // 顺序读的一行（getline 读出来的，不含 '\n'）。返回 false = 点数够了，PCL 在这里就不再往下读
   auto line = [&](std::string_view text) -> bool {
-    if (text.empty()) return true;  // 空行跳过、不占点
-    const bool ok = forEachToken(text, cloud, elems_per_line, st, [&](auto tag, std::string_view t, unsigned d, unsigned c) {
-      using T = typename decltype(tag)::type;
-      copyToken<T>(t, cloud, idx, d, c, is, fast);
-    });
-    if (!ok) warnMalformed(idx + 1, st.size(), elems_per_line);  // 这一行跳过，但照样占一个点
+    if (text.empty())
+      return true; // 空行跳过、不占点
+    const bool ok = forEachToken(text, cloud, elems_per_line, st,
+                                 [&](auto tag, std::string_view t, unsigned d, unsigned c) {
+                                   using T = typename decltype(tag)::type;
+                                   copyToken<T>(t, cloud, idx, d, c, is, fast);
+                                 });
+    if (!ok)
+      warnMalformed(idx + 1, st.size(), elems_per_line); // 这一行跳过，但照样占一个点
     ++idx;
     return idx < nr_points;
   };
@@ -277,7 +329,8 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
   };
   std::vector<Piece> pieces;
   auto parallelLines = [&](std::string_view text) {
-    if (text.empty() || idx >= nr_points) return;
+    if (text.empty() || idx >= nr_points)
+      return;
     const std::size_t want = static_cast<std::size_t>(threads) * 4;
     pieces.clear();
     std::size_t from = 0;
@@ -297,8 +350,10 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
       std::size_t pos = piece.begin;
       while (pos < piece.end) {
         std::size_t nl = text.find('\n', pos);
-        if (nl == std::string_view::npos || nl >= piece.end) nl = piece.end;
-        if (!fn(text.substr(pos, nl - pos))) return;
+        if (nl == std::string_view::npos || nl >= piece.end)
+          nl = piece.end;
+        if (!fn(text.substr(pos, nl - pos)))
+          return;
         pos = nl + 1;
       }
     };
@@ -307,7 +362,8 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
       for (std::size_t k = b; k < e; ++k) {
         unsigned n = 0;
         eachLine(pieces[k], [&](std::string_view l) {
-          if (!l.empty()) ++n;
+          if (!l.empty())
+            ++n;
           return true;
         });
         pieces[k].lines = n;
@@ -330,13 +386,17 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
         Piece& piece = pieces[k];
         unsigned i = first[k];
         eachLine(piece, [&](std::string_view l) {
-          if (l.empty()) return true;
-          if (i >= nr_points) return false;
-          const bool ok = forEachToken(l, cloud, elems_per_line, words, [&](auto tag, std::string_view t, unsigned d, unsigned c) {
-            using T = typename decltype(tag)::type;
-            copyTokenParallel<T>(t, cloud, i, d, c, is, piece.sawNan);
-          });
-          if (!ok) piece.malformed.emplace_back(i + 1, words.size());
+          if (l.empty())
+            return true;
+          if (i >= nr_points)
+            return false;
+          const bool ok = forEachToken(l, cloud, elems_per_line, words,
+                                       [&](auto tag, std::string_view t, unsigned d, unsigned c) {
+                                         using T = typename decltype(tag)::type;
+                                         copyTokenParallel<T>(t, cloud, i, d, c, is, piece.sawNan);
+                                       });
+          if (!ok)
+            piece.malformed.emplace_back(i + 1, words.size());
           ++i;
           return true;
         });
@@ -344,7 +404,8 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
       return true;
     });
     for (const Piece& piece : pieces) {
-      for (const auto& [point, got] : piece.malformed) warnMalformed(point, got, elems_per_line);
+      for (const auto& [point, got] : piece.malformed)
+        warnMalformed(point, got, elems_per_line);
       sawNan = sawNan || piece.sawNan;
     }
     idx = acc;
@@ -359,12 +420,14 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
     while (more) {
       fs.read(buf.data(), static_cast<std::streamsize>(buf.size()));
       const std::size_t got = static_cast<std::size_t>(fs.gcount());
-      if (got == 0) break;
+      if (got == 0)
+        break;
       const std::string_view chunk(buf.data(), got);
       std::size_t pos = 0;
       while (more && !split) {
         const std::size_t nl = chunk.find('\n', pos);
-        if (nl == std::string_view::npos) break;
+        if (nl == std::string_view::npos)
+          break;
         if (carry.empty()) {
           more = line(chunk.substr(pos, nl - pos));
         } else {
@@ -384,7 +447,7 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
             continue;
           }
           carry.append(chunk.substr(pos, nl - pos));
-          parallelLines(carry);  // 一行：parallelLines 自己会只用一块
+          parallelLines(carry); // 一行：parallelLines 自己会只用一块
           carry.clear();
           pos = nl + 1;
         }
@@ -395,7 +458,8 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
         }
         more = idx < nr_points;
       }
-      if (more) carry.append(chunk.substr(pos));
+      if (more)
+        carry.append(chunk.substr(pos));
     }
     // 文件最后一行没有换行符：getline 照样把它读出来
     if (more && !carry.empty()) {
@@ -406,11 +470,12 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
       }
     }
   }
-  if (sawNan) cloud.is_dense = false;
+  if (sawNan)
+    cloud.is_dense = false;
 
   if (idx != nr_points) {
-    PCL_ERROR("[pcl::PCDReader::read] Number of points read (%d) is different than expected (%d)\n", idx,
-              nr_points);
+    PCL_ERROR("[pcl::PCDReader::read] Number of points read (%d) is different than expected (%d)\n",
+              idx, nr_points);
     return -1;
   }
   return 0;
@@ -421,12 +486,12 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
 /// printf 也按 IEEE 舍入，两边逐字相同（tests 里拿 PCL 对照）。
 void appendDouble(std::string& out, double value, int precision) {
   char buf[64];
-  const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value, std::chars_format::general, precision);
+  const auto [ptr, ec] =
+      std::to_chars(buf, buf + sizeof(buf), value, std::chars_format::general, precision);
   out.append(buf, ec == std::errc() ? ptr : buf);
 }
 
-template <typename T>
-void appendInt(std::string& out, T value) {
+template <typename T> void appendInt(std::string& out, T value) {
   char buf[32];
   const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value);
   out.append(buf, ec == std::errc() ? ptr : buf);
@@ -436,13 +501,13 @@ template <typename T>
 T load(const pcl::PCLPointCloud2& cloud, int i, int point_size, unsigned d, int c) {
   T value;
   std::memcpy(&value,
-              &cloud.data[static_cast<std::size_t>(i) * point_size + cloud.fields[d].offset + c * sizeof(T)],
+              &cloud.data[static_cast<std::size_t>(i) * point_size + cloud.fields[d].offset +
+                          c * sizeof(T)],
               sizeof(T));
   return value;
 }
 
-template <typename T>
-void appendFloat(std::string& out, T value, int precision) {
+template <typename T> void appendFloat(std::string& out, T value, int precision) {
   if (std::isnan(value)) {
     out += "nan";
   } else {
@@ -450,7 +515,7 @@ void appendFloat(std::string& out, T value, int precision) {
   }
 }
 
-}  // namespace
+} // namespace
 
 int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads) {
   // PCDReader::read：先查文件在不在（boost 的 exists：窄字符串按 ANSI 代码页解释，与 PCL 一致），再读头
@@ -465,14 +530,15 @@ int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads) {
   int data_type = 0;
   unsigned data_idx = 0;
   int res = reader.readHeader(file, cloud, origin, orientation, version, data_type, data_idx, 0);
-  if (res < 0) return res;
+  if (res < 0)
+    return res;
   if (data_type != 0) {
     // 两种二进制 PCL 本来就快（mmap）：整个交回去，头再读一遍不值一提
     cloud = pcl::PCLPointCloud2();
     return reader.read(file, cloud);
   }
   std::ifstream fs;
-  fs.open(file.c_str());  // 文本模式，与 PCL 相同
+  fs.open(file.c_str()); // 文本模式，与 PCL 相同
   if (!fs.is_open() || fs.fail()) {
     PCL_ERROR("[pcl::PCDReader::read] Could not open file %s.\n", file.c_str());
     return -1;
@@ -484,12 +550,12 @@ int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads) {
 }
 
 int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int threads) {
-  constexpr int precision = 8;  // PCDWriter::write(…, binary=false) 传的就是 8
+  constexpr int precision = 8; // PCDWriter::write(…, binary=false) 传的就是 8
   std::ofstream fs;
   fs.open(file.c_str(), std::ios::binary);
   if (!fs.is_open() || fs.fail()) {
-    PCL_ERROR("[pcl::PCDWriter::writeASCII] Could not open file '%s' for writing! Error : %s\n", file.c_str(),
-              std::strerror(errno));
+    PCL_ERROR("[pcl::PCDWriter::writeASCII] Could not open file '%s' for writing! Error : %s\n",
+              file.c_str(), std::strerror(errno));
     return -1;
   }
   const int nr_points = static_cast<int>(cloud.width * cloud.height);
@@ -506,37 +572,50 @@ int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int 
     lineText.clear();
     for (unsigned d = 0; d < fieldCount; ++d) {
       const pcl::PCLPointField& f = cloud.fields[d];
-      if (f.name == "_") continue;
+      if (f.name == "_")
+        continue;
       int count = static_cast<int>(f.count);
-      if (count == 0) count = 1;  // PCL：「we simply cannot tolerate 0 counts」
+      if (count == 0)
+        count = 1; // PCL：「we simply cannot tolerate 0 counts」
       for (int c = 0; c < count; ++c) {
         switch (f.datatype) {
-          case pcl::PCLPointField::INT8:
-            appendInt(lineText, static_cast<int>(load<std::int8_t>(cloud, i, point_size, d, c)));
-            break;
-          case pcl::PCLPointField::UINT8:
-            appendInt(lineText, static_cast<unsigned>(load<std::uint8_t>(cloud, i, point_size, d, c)));
-            break;
-          case pcl::PCLPointField::INT16: appendInt(lineText, load<std::int16_t>(cloud, i, point_size, d, c)); break;
-          case pcl::PCLPointField::UINT16: appendInt(lineText, load<std::uint16_t>(cloud, i, point_size, d, c)); break;
-          case pcl::PCLPointField::INT32: appendInt(lineText, load<std::int32_t>(cloud, i, point_size, d, c)); break;
-          case pcl::PCLPointField::UINT32: appendInt(lineText, load<std::uint32_t>(cloud, i, point_size, d, c)); break;
-          case pcl::PCLPointField::FLOAT32:
-            // PCL：rgb 虽然是 float，按 uint32 写（好几个不透明的颜色值按 float 看是 nan）
-            if (f.name == "rgb") {
-              appendInt(lineText, load<std::uint32_t>(cloud, i, point_size, d, c));
-            } else {
-              appendFloat(lineText, load<float>(cloud, i, point_size, d, c), precision);
-            }
-            break;
-          case pcl::PCLPointField::FLOAT64:
-            appendFloat(lineText, load<double>(cloud, i, point_size, d, c), precision);
-            break;
-          default:
-            PCL_WARN("[pcl::PCDWriter::writeASCII] Incorrect field data type specified (%d)!\n", f.datatype);
-            break;
+        case pcl::PCLPointField::INT8:
+          appendInt(lineText, static_cast<int>(load<std::int8_t>(cloud, i, point_size, d, c)));
+          break;
+        case pcl::PCLPointField::UINT8:
+          appendInt(lineText,
+                    static_cast<unsigned>(load<std::uint8_t>(cloud, i, point_size, d, c)));
+          break;
+        case pcl::PCLPointField::INT16:
+          appendInt(lineText, load<std::int16_t>(cloud, i, point_size, d, c));
+          break;
+        case pcl::PCLPointField::UINT16:
+          appendInt(lineText, load<std::uint16_t>(cloud, i, point_size, d, c));
+          break;
+        case pcl::PCLPointField::INT32:
+          appendInt(lineText, load<std::int32_t>(cloud, i, point_size, d, c));
+          break;
+        case pcl::PCLPointField::UINT32:
+          appendInt(lineText, load<std::uint32_t>(cloud, i, point_size, d, c));
+          break;
+        case pcl::PCLPointField::FLOAT32:
+          // PCL：rgb 虽然是 float，按 uint32 写（好几个不透明的颜色值按 float 看是 nan）
+          if (f.name == "rgb") {
+            appendInt(lineText, load<std::uint32_t>(cloud, i, point_size, d, c));
+          } else {
+            appendFloat(lineText, load<float>(cloud, i, point_size, d, c), precision);
+          }
+          break;
+        case pcl::PCLPointField::FLOAT64:
+          appendFloat(lineText, load<double>(cloud, i, point_size, d, c), precision);
+          break;
+        default:
+          PCL_WARN("[pcl::PCDWriter::writeASCII] Incorrect field data type specified (%d)!\n",
+                   f.datatype);
+          break;
         }
-        if (d < fieldCount - 1 || c < static_cast<int>(f.count) - 1) lineText += ' ';
+        if (d < fieldCount - 1 || c < static_cast<int>(f.count) - 1)
+          lineText += ' ';
       }
     }
     // PCL 在这里 boost::trim：值里不会有空白，要去的只是首尾的空格
@@ -549,10 +628,10 @@ int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int 
   };
 
   // 不认识的字段类型每个点 warning 一次：那种云不并行，warning 的顺序与 PCL 一样
-  const bool canSplit =
-      threads > 1 && std::all_of(cloud.fields.begin(), cloud.fields.end(), [](const pcl::PCLPointField& f) {
-        return f.name == "_" || knownType(f.datatype);
-      });
+  const bool canSplit = threads > 1 && std::all_of(cloud.fields.begin(), cloud.fields.end(),
+                                                   [](const pcl::PCLPointField& f) {
+                                                     return f.name == "_" || knownType(f.datatype);
+                                                   });
   if (!canSplit) {
     std::string out;
     out.reserve(std::size_t{8} << 20);
@@ -581,15 +660,17 @@ int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int 
           o.clear();
           const std::size_t from = batch + k * block;
           const std::size_t to = std::min(batchEnd, from + block);
-          for (std::size_t i = from; i < to; ++i) pointLine(o, lineText, static_cast<int>(i));
+          for (std::size_t i = from; i < to; ++i)
+            pointLine(o, lineText, static_cast<int>(i));
         }
         return true;
       });
-      for (std::size_t k = 0; k < blocks; ++k) fs.write(outs[k].data(), static_cast<std::streamsize>(outs[k].size()));
+      for (std::size_t k = 0; k < blocks; ++k)
+        fs.write(outs[k].data(), static_cast<std::streamsize>(outs[k].size()));
     }
   }
   fs.close();
   return 0;
 }
 
-}  // namespace lyflow::ops::io
+} // namespace lyflow::ops::io

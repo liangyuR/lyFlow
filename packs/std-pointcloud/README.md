@@ -18,7 +18,7 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 
 ## 算子
 
-19 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
+20 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
@@ -53,6 +53,16 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 |---|---|---|---|
 | `edit.translate_region` | 编辑 | 平移选区 | cloud → cloud |
 
+分割域一个（标定的左右分割，替代 xyz-gap-inspector 里的过渡实现 `calibration/split.rs`）：
+
+| id | 分类 | 名字 | 端口 |
+|---|---|---|---|
+| `segment.region_growing_2d` | 分割 | 区域生长 2D | cloud → left, right, result |
+
+XY 平面上按法线夹角的区域生长（PCL `RegionGrowing` 平滑模式 + 二维协方差法线），取点数最多的两簇、
+x 均值小的从 `left` 出。与 split.rs 逐位一致（`test_2d_ops.cpp` 拿它生成的期望值比对），
+剩下不到两簇报 `split_failed`。
+
 长度参数一律是**米**，与点云同单位。
 
 ## 目录
@@ -73,13 +83,55 @@ algo/
   icp2d.*                       2D point-to-plane ICP
   profile_geometry.*            剖面法线估计
   crop2d.*                      XY 盒裁剪（开/闭区间）
+  region_growing2d.*            XY 区域生长 + 最大两簇分左右（不依赖 PCL）
 src/
   adapter.cpp、pcl_path.cpp     上面两个头的实现
 tests/
   test_std_ops.cpp              算子语义（体素键、通道保留、迁移链…）
   test_io_pcd.cpp               中文路径下的 PCD 往返
-  test_2d_ops.cpp               2D 四个算子（开闭区间、拟合、ICP 恢复平移）
+  test_2d_ops.cpp               2D 算子（开闭区间、拟合、ICP 恢复平移、区域生长与 split.rs 逐位对拍）
+  data/region_growing_2d_cases.h  split.rs 生成的输入与期望下标（勿手改）
 ```
+
+## ICP 的鲁棒损失、多尺度与质量门
+
+`register.icp_2d` 1.1.0 增加可选参数，默认仍为单尺度最小二乘：
+`robustLoss=none`、`multiScaleLevels=1`、`reportQuality=false`、`qualityGate=false`。
+默认路径不新增质量近邻扫描，也不常驻额外的 PCL 转换云；共享 `Icp2DOptions` 的 gap 调用保留原默认值。
+
+| 参数 | 用法 |
+| --- | --- |
+| `robustLoss`、`robustScale` | `huber` 将大于阈值的平面残差降权；`tukey` 将绝对值大于等于阈值的残差权重设为零。阈值单位 m，启用时须为正。几何配对仍受 `maxMatchingDist` 限制。 |
+| `multiScaleLevels`、`coarseVoxelSize` | 层数 1–6。多尺度时最粗层用指定 XY 网格每格保留首点，中间层网格逐次减半；最后一层使用原始全量点。每一层的位姿作为下一层的初值。`coarseVoxelSize` 只在层数大于 1 时要求为正。 |
+| `maxMatchingDist`、`maxIterations` | 距离为最终层的阈值，向上每粗一层乘 2，启用的 `robustScale` 同比例放宽；`maxIterations` 是每层上限。少于 3 个有限点的粗层跳过，最终层照常运行。 |
+| `reportQuality` | 在最终位姿额外做一次近邻扫描。默认关闭，结果中只有 `qualityEvaluated=false`，不填写未计算的质量数值。 |
+| `qualityGate` | 自动启用质量评估，按 `minMatches`（默认 3）、`minInlierRatio`（0.5）、`maxPlaneRmse`（0.001 m）、`requireConverged`（true）筛选配准结果。 |
+
+例如在节点参数里启用三层 Huber 配准，并观察最终质量：
+
+```json
+{
+  "robustLoss": "huber",
+  "robustScale": 0.0005,
+  "multiScaleLevels": 3,
+  "coarseVoxelSize": 0.002,
+  "reportQuality": true
+}
+```
+
+`result` 保留 `fitness`、`iterations`、`converged`；其中 `fitness` 沿用旧的末轮配对口径，
+`iterations` 和 `converged` 属于最终全量层。新增 `totalIterations` 和 `levels` 记录各层样本数、
+抽稀尺度、配对阈值、迭代次数及收敛情况。鲁棒损失不能扩大初始配对范围，仍需合理的初值或粗层距离。
+
+质量评估开启后，`sourceCount` / `targetCount` 为有限 XY 点数，`matchedCount` 为最终位姿下
+`maxMatchingDist` 内的近邻对数，`inlierRatio=matchedCount/sourceCount`。
+`normalMatchedCount` 进一步要求法线有效，`effectiveMatchedCount` 再要求鲁棒权重大于零；
+`minMatches` 检查的是最后一项。`pointRmse` 是几何距离 RMSE，`planeRmse` 是未加权平面残差 RMSE，
+`weightedPlaneRmse` 使用鲁棒权重，均为 m。没有对应匹配时 RMSE 为 `null`；`weightSum` 给出有效权重总和。
+
+质量门拒绝返回 `registration_rejected`，错误消息列出不合格项与实测数值，
+该节点不发布 `transform` / `result`，下游可以通过接受 Error 的 fallback 端口处理。
+质量门通过时 `qualityGateEnabled=true`。配准质量信号可供上层判定定位有效性，尺寸规格仍由量测与验收算子处理。
 
 ## `lyflow_pcl_support`
 
@@ -113,6 +165,7 @@ lyflow_op_pack(NAME mypack LINK lyflow_std_algo ...)
 #include "algo/fit2d.h"   // lyflow::std_pc::fitLine2D / fitCircle2D / fitCircleFixedRadius2D
 #include "algo/icp2d.h"   // lyflow::std_pc::Icp2D
 #include "algo/crop2d.h"  // lyflow::std_pc::insideBox2D / cropBox2D
+#include "algo/region_growing2d.h"  // lyflow::std_pc::regionGrowing2D
 ```
 
 `algo/` 里的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`（迁移时沿用的点类型）。

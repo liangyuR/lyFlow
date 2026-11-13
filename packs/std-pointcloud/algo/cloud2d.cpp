@@ -13,10 +13,11 @@ Cloud2D toCloud2D(const lyflow::PointCloud& cloud) {
     p.y = cloud.xyz[i * 3 + 1];
     p.z = cloud.xyz[i * 3 + 2];
     const float v = cloud.hasIntensity() ? cloud.intensity[i] : 0.0f;
-    const auto level = static_cast<std::uint8_t>(std::isfinite(v) ? std::min(255.0f, std::max(0.0f, v)) : 0.0f);
+    const auto level =
+        static_cast<std::uint8_t>(std::isfinite(v) ? std::min(255.0f, std::max(0.0f, v)) : 0.0f);
     p.r = p.g = p.b = level;
   }
   return out;
 }
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

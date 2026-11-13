@@ -24,13 +24,15 @@
 namespace detection {
 namespace {
 
-bool contains(const std::string &value, const std::string &needle) {
+bool contains(const std::string& value, const std::string& needle) {
   return value.find(needle) != std::string::npos;
 }
 
 std::string formatTwoDecimals(double value) {
-  if (std::isnan(value)) return "NAN";
-  if (std::isinf(value)) return value < 0 ? "-INF" : "INF";
+  if (std::isnan(value))
+    return "NAN";
+  if (std::isinf(value))
+    return value < 0 ? "-INF" : "INF";
   std::ostringstream output;
   output << std::fixed << std::setprecision(2) << value;
   return output.str();
@@ -44,7 +46,7 @@ struct Se2Delta {
   float rotation_rad = 0.0F;
 };
 
-Se2Delta decomposeDelta(const Eigen::Matrix3f &reference, const Eigen::Matrix3f &candidate) {
+Se2Delta decomposeDelta(const Eigen::Matrix3f& reference, const Eigen::Matrix3f& candidate) {
   const Eigen::Matrix3f delta = candidate * reference.inverse();
   Se2Delta result;
   result.translation = delta.block<2, 1>(0, 2);
@@ -52,7 +54,7 @@ Se2Delta decomposeDelta(const Eigen::Matrix3f &reference, const Eigen::Matrix3f 
   return result;
 }
 
-Eigen::Matrix3f composeDelta(const Eigen::Matrix3f &reference, const Eigen::Vector2f &translation,
+Eigen::Matrix3f composeDelta(const Eigen::Matrix3f& reference, const Eigen::Vector2f& translation,
                              float rotation_rad) {
   Eigen::Matrix3f delta = Eigen::Matrix3f::Identity();
   const float cosine = std::cos(rotation_rad);
@@ -68,10 +70,10 @@ Eigen::Matrix3f composeDelta(const Eigen::Matrix3f &reference, const Eigen::Vect
 // Layer 1 trust region: clamp (never reject) a side's final transform back to a bound around the
 // joint/global reference pose. Reports the pre-clamp deviation regardless of whether clamping
 // was applied, for shadow-style diagnostics.
-Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f &reference, const Eigen::Matrix3f &transform,
+Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f& reference, const Eigen::Matrix3f& transform,
                                  double scale, double max_translation_mm, double max_rotation_deg,
-                                 double *raw_translation_mm, double *raw_rotation_deg,
-                                 bool *clamped) {
+                                 double* raw_translation_mm, double* raw_rotation_deg,
+                                 bool* clamped) {
   const auto delta = decomposeDelta(reference, transform);
   const double translation_mm = static_cast<double>(delta.translation.norm()) * scale;
   const double rotation_deg = static_cast<double>(delta.rotation_rad) * 180.0 / M_PI;
@@ -80,7 +82,8 @@ Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f &reference, const Eigen::
   *clamped = false;
   const bool translation_exceeds = translation_mm > max_translation_mm;
   const bool rotation_exceeds = std::fabs(rotation_deg) > max_rotation_deg;
-  if (!translation_exceeds && !rotation_exceeds) return transform;
+  if (!translation_exceeds && !rotation_exceeds)
+    return transform;
 
   *clamped = true;
   Eigen::Vector2f clamped_translation = delta.translation;
@@ -88,19 +91,21 @@ Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f &reference, const Eigen::
     clamped_translation *= static_cast<float>(max_translation_mm / translation_mm);
   }
   double clamped_rotation_deg = rotation_deg;
-  if (rotation_exceeds) clamped_rotation_deg = std::copysign(max_rotation_deg, rotation_deg);
+  if (rotation_exceeds)
+    clamped_rotation_deg = std::copysign(max_rotation_deg, rotation_deg);
   const float clamped_rotation_rad = static_cast<float>(clamped_rotation_deg * M_PI / 180.0);
   return composeDelta(reference, clamped_translation, clamped_rotation_rad);
 }
 
-void removeNonFinitePoints(PointCloud *cloud) {
+void removeNonFinitePoints(PointCloud* cloud) {
   PointCloud finite;
   finite.header = cloud->header;
   finite.sensor_origin_ = cloud->sensor_origin_;
   finite.sensor_orientation_ = cloud->sensor_orientation_;
   finite.points.reserve(cloud->size());
-  for (const auto &point : *cloud) {
-    if (pcl::isFinite(point)) finite.points.push_back(point);
+  for (const auto& point : *cloud) {
+    if (pcl::isFinite(point))
+      finite.points.push_back(point);
   }
   finite.width = static_cast<std::uint32_t>(finite.points.size());
   finite.height = 1;
@@ -108,9 +113,9 @@ void removeNonFinitePoints(PointCloud *cloud) {
   *cloud = std::move(finite);
 }
 
-}  // namespace
+} // namespace
 
-void GapDetection::setConfiguration(const domain::DetectionConfiguration &configuration) {
+void GapDetection::setConfiguration(const domain::DetectionConfiguration& configuration) {
   configuration_ = configuration;
   Alignment::setConfiguration(configuration.alignment);
 }
@@ -149,13 +154,13 @@ void GapDetection::setStage(gap::core::FailureStage stage, std::string component
 
 void GapDetection::finishDiagnostics() { setStage(gap::core::FailureStage::kNone); }
 
-gap::core::Failure GapDetection::makeFailure(const std::string &component,
-                                             const std::exception &error) const {
+gap::core::Failure GapDetection::makeFailure(const std::string& component,
+                                             const std::exception& error) const {
   return {current_stage_, gap::core::classifyFailureCode(error.what()), component, error.what()};
 }
 
-int64_t GapDetection::run(const PointCloud &left_camera_cloud,
-                          const PointCloud &right_camera_cloud) {
+int64_t GapDetection::run(const PointCloud& left_camera_cloud,
+                          const PointCloud& right_camera_cloud) {
   auto start_time = std::chrono::system_clock::now();
   clear();
   quality_.input_point_count = left_camera_cloud.size() + right_camera_cloud.size();
@@ -174,7 +179,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   // labelled feature available here, so it re-establishes a window that follows the part. The
   // boxes are read before the base_side swap, where gap_left/gap_right still mean exactly the
   // model's left and right roll.
-  const auto &roll_crop_configuration = configuration_.common.roll_anchored_crop;
+  const auto& roll_crop_configuration = configuration_.common.roll_anchored_crop;
   std::optional<OverallCropOverride> override_crop;
   if (roll_crop_configuration.enabled) {
     if (!override_short_circuit) {
@@ -206,9 +211,9 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   quality_.preprocessed_point_count = left_camera_cloud_->size() + right_camera_cloud_->size();
   quality_.point_counts["preprocess_primary"] = left_camera_cloud_->size();
   quality_.point_counts["preprocess_secondary"] = right_camera_cloud_->size();
-  const auto &common = configuration_.common;
-  const auto &flush_configuration = configuration_.flush;
-  const auto &gap_configuration = configuration_.gap;
+  const auto& common = configuration_.common;
+  const auto& flush_configuration = configuration_.flush;
+  const auto& gap_configuration = configuration_.gap;
   auto cluster_angle = common.cluster_angle;
   auto neighbors = common.neighbor_count;
   auto label_mode = common.label_mode;
@@ -222,12 +227,12 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       align_cloud_ || roi_guided_segmentation || override_short_circuit;
 
   auto flush_enable = flush_configuration.enabled;
-  const auto &flush_base = flush_configuration.base_side;
-  const auto &flush_base_type = flush_configuration.base_type;
-  const auto &flush_ref_type = flush_configuration.reference_type;
+  const auto& flush_base = flush_configuration.base_side;
+  const auto& flush_base_type = flush_configuration.base_type;
+  const auto& flush_ref_type = flush_configuration.reference_type;
   auto gap_enable = gap_configuration.enabled;
-  const auto &gap_left_type = gap_configuration.left_type;
-  const auto &gap_right_type = gap_configuration.right_type;
+  const auto& gap_left_type = gap_configuration.left_type;
+  const auto& gap_right_type = gap_configuration.right_type;
 
   rois_.resize(4);
   // Shared by configure_business_rois below and by the roi_override application (after the ICP
@@ -235,14 +240,15 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   // applying the same base_side swap either way.
   const auto apply_business_rois = [&](std::vector<std::array<double, 4>> roi_double) {
     assert(roi_double.size() == 4);
-    if (flush_base == "right") std::swap(roi_double[0], roi_double[2]);
+    if (flush_base == "right")
+      std::swap(roi_double[0], roi_double[2]);
     for (int i = 0; i < 4; i++) {
       rois_[i] << roi_double[i][0], roi_double[i][2], roi_double[i][1], roi_double[i][3];
       rois_[i] /= scale_;
     }
   };
   const auto configure_business_rois =
-      [&](const std::optional<domain::TemplateRoiConfiguration> &template_rois) {
+      [&](const std::optional<domain::TemplateRoiConfiguration>& template_rois) {
         apply_business_rois(
             {template_rois ? template_rois->flush_base.values : flush_configuration.base_roi.values,
              template_rois ? template_rois->gap_left.values : gap_configuration.left_roi.values,
@@ -326,7 +332,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       } catch (...) {
       }
     }
-  } else {  // load template and make registration
+  } else { // load template and make registration
     setStage(gap::core::FailureStage::kTemplateLoading);
     struct TemplatePair {
       std::string id;
@@ -351,8 +357,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
     };
 
     const auto load_template_pair =
-        [&](const std::string &id, const std::filesystem::path &left_path,
-            const std::filesystem::path &right_path,
+        [&](const std::string& id, const std::filesystem::path& left_path,
+            const std::filesystem::path& right_path,
             std::optional<domain::TemplateRoiConfiguration> rois, std::size_t configuration_order) {
           TemplatePair pair;
           pair.id = id;
@@ -360,28 +366,30 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
           pair.configuration_order = configuration_order;
           if (pcl::io::loadPCDFile(left_path.string(), pair.left) < 0 ||
               pcl::io::loadPCDFile(right_path.string(), pair.right) < 0) {
-            if (configuration_order == 0) throw std::runtime_error("template missing or empty");
+            if (configuration_order == 0)
+              throw std::runtime_error("template missing or empty");
             throw std::runtime_error("template missing or empty for candidate: " + id);
           }
           removeNonFinitePoints(&pair.left);
           removeNonFinitePoints(&pair.right);
           if (pair.left.empty() || pair.right.empty()) {
-            if (configuration_order == 0) throw std::runtime_error("template missing or empty");
+            if (configuration_order == 0)
+              throw std::runtime_error("template missing or empty");
             throw std::runtime_error("template missing or empty for candidate: " + id);
           }
           return pair;
         };
 
-    const auto &robustness = configuration_.alignment.robustness;
+    const auto& robustness = configuration_.alignment.robustness;
 
     // initial_pose: seed passed to this side's own ICP. trust_region_reference: the joint/global
     // pose the result is clamped against (Layer 1); independent of initial_pose so a
     // success_guide/consistency retry seeded from the other side's transform is still clamped
     // against the shared reference, not against whatever seeded this particular attempt.
-    const auto evaluate_side = [&](const std::string &template_id, const std::string &component,
-                                   const PointCloud &source, const PointCloud &target,
-                                   const Eigen::Matrix3f &initial_pose,
-                                   const Eigen::Matrix3f &trust_region_reference) {
+    const auto evaluate_side = [&](const std::string& template_id, const std::string& component,
+                                   const PointCloud& source, const PointCloud& target,
+                                   const Eigen::Matrix3f& initial_pose,
+                                   const Eigen::Matrix3f& trust_region_reference) {
       setAlignmentComponent(component);
       auto outcome = alignOutcome(source, target, initial_pose);
       gap::core::IcpQuality metric;
@@ -413,17 +421,17 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
     // Shared by the success_guide fallback and the Layer 3 consistency-gate retry: re-run one
     // side's ICP using the other (already-converged) side's transform as the initial pose.
     const auto retry_side_with_transform =
-        [&](const std::string &template_id, const std::string &component, const PointCloud &source,
-            const PointCloud &target, const Eigen::Matrix3f &other_side_transform,
-            const Eigen::Matrix3f &trust_region_reference, AlignmentOutcome *outcome,
-            std::optional<std::size_t> *metric_index) {
+        [&](const std::string& template_id, const std::string& component, const PointCloud& source,
+            const PointCloud& target, const Eigen::Matrix3f& other_side_transform,
+            const Eigen::Matrix3f& trust_region_reference, AlignmentOutcome* outcome,
+            std::optional<std::size_t>* metric_index) {
           auto retried = evaluate_side(template_id, component, source, target, other_side_transform,
                                        trust_region_reference);
           *outcome = retried.first;
           *metric_index = retried.second;
         };
 
-    const auto evaluate_pair = [&](const TemplatePair &pair) {
+    const auto evaluate_pair = [&](const TemplatePair& pair) {
       TemplatePairOutcome result;
       result.id = pair.id;
       result.rois = pair.rois;
@@ -487,7 +495,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
         return result;
       }
       if (!success_guide) {
-        if (!result.left.success) return result;
+        if (!result.left.success)
+          return result;
         auto right = evaluate_side(pair.id, "right", pair.right, *right_cloud_, side_initial_pose,
                                    side_initial_pose);
         result.right = right.first;
@@ -512,7 +521,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
                                  Eigen::Matrix3f::Identity(), side_initial_pose);
       result.right = right.first;
       result.right_metric = right.second;
-      if (!result.right.success) return result;
+      if (!result.right.success)
+        return result;
       retry_side_with_transform(pair.id, "left", pair.left, *left_cloud_, result.right.transform,
                                 side_initial_pose, &result.left, &result.left_metric);
       return result;
@@ -524,7 +534,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
     if (configuration_.template_candidates.empty()) {
       throw std::runtime_error("no template configured");
     }
-    for (const auto &candidate : configuration_.template_candidates) {
+    for (const auto& candidate : configuration_.template_candidates) {
       if (!std::filesystem::is_regular_file(template_root / candidate.left) ||
           !std::filesystem::is_regular_file(template_root / candidate.right)) {
         setStage(gap::core::FailureStage::kTemplateLoading, candidate.id);
@@ -532,7 +542,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       }
     }
     std::size_t configuration_order = 0;
-    for (const auto &candidate : configuration_.template_candidates) {
+    for (const auto& candidate : configuration_.template_candidates) {
       setStage(gap::core::FailureStage::kTemplateLoading, candidate.id);
       pairs.push_back(load_template_pair(candidate.id, template_root / candidate.left,
                                          template_root / candidate.right, candidate.rois,
@@ -543,16 +553,18 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
 
     std::vector<utils::TemplateIcpScore> scores;
     scores.reserve(outcomes.size());
-    for (const auto &outcome : outcomes) {
+    for (const auto& outcome : outcomes) {
       scores.push_back(
           {outcome.id, outcome.left.score, outcome.right.score, outcome.configuration_order});
     }
     const auto selected =
         utils::selectBestTemplateByIcp(scores, configuration_.alignment.icp.minimum_score);
 
-    const auto mark_selected = [&](const TemplatePairOutcome &outcome) {
-      if (outcome.left_metric) icp_metrics_[*outcome.left_metric].selected = true;
-      if (outcome.right_metric) icp_metrics_[*outcome.right_metric].selected = true;
+    const auto mark_selected = [&](const TemplatePairOutcome& outcome) {
+      if (outcome.left_metric)
+        icp_metrics_[*outcome.left_metric].selected = true;
+      if (outcome.right_metric)
+        icp_metrics_[*outcome.right_metric].selected = true;
     };
     if (!selected) {
       mark_selected(outcomes.front());
@@ -566,7 +578,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       throw std::runtime_error(message.str());
     }
 
-    auto &selected_outcome = outcomes[*selected];
+    auto& selected_outcome = outcomes[*selected];
     configure_business_rois(selected_outcome.rois);
     // A candidate without rois only replays the config values, so the source stays "config".
     quality_.roi_source = selected_outcome.rois ? "template" : "config";
@@ -574,13 +586,13 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
     // Layer 3: cross-side consistency gate. Delta = t_left^-1 * t_right; both sides register
     // template -> cloud with left/right templates cropped from one shared captured template
     // cloud (see the label-mode save above), so the nominal Delta is identity.
-    const auto &consistency = robustness.consistency;
+    const auto& consistency = robustness.consistency;
     quality_.consistency_mode = consistency.mode == domain::ConsistencyMode::kOff       ? "off"
                                 : consistency.mode == domain::ConsistencyMode::kEnforce ? "enforce"
                                                                                         : "shadow";
     if (consistency.mode != domain::ConsistencyMode::kOff) {
-      const auto compute_deviation = [&](const Eigen::Matrix3f &left_t,
-                                         const Eigen::Matrix3f &right_t) {
+      const auto compute_deviation = [&](const Eigen::Matrix3f& left_t,
+                                         const Eigen::Matrix3f& right_t) {
         const Eigen::Matrix3f delta = left_t.inverse() * right_t;
         const double translation_mm = static_cast<double>(delta.block<2, 1>(0, 2).norm()) * scale_;
         const double rotation_deg =
@@ -654,7 +666,7 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   // frame directly -- deliberately after the ICP transform block above, so it is never carried
   // through an alignment transform, and applied whether or not align_cloud_ took the ICP branch.
   if (configuration_.roi_override) {
-    const auto &override_rois = *configuration_.roi_override;
+    const auto& override_rois = *configuration_.roi_override;
     apply_business_rois({override_rois.flush_base.values, override_rois.gap_left.values,
                          override_rois.flush_ref.values, override_rois.gap_right.values});
     quality_.roi_source = configuration_.roi_override_source;
@@ -663,8 +675,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   // Record the business ROIs actually used (after auto-centering, template override and ICP
   // alignment) for ML export/evaluation. Millimetres, [x_min, y_min, x_max, y_max].
   quality_.effective_roi["overall"] = resolved_overall_roi_mm_;
-  static constexpr std::array<const char *, 4> kEffectiveRoiNames{"flush_base", "gap_left",
-                                                                  "flush_ref", "gap_right"};
+  static constexpr std::array<const char*, 4> kEffectiveRoiNames{"flush_base", "gap_left",
+                                                                 "flush_ref", "gap_right"};
   for (int i = 0; i < 4; i++) {
     const Eigen::Vector2f min_pt = rois_[i].col(0) * static_cast<float>(scale_);
     const Eigen::Vector2f max_pt = rois_[i].col(1) * static_cast<float>(scale_);
@@ -679,11 +691,13 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   // median (~19) says nothing about a surface (~120), and a no-filter type never produces a
   // cropped cloud in the first place. Called after the base_side swap, so the apply switches are
   // read by semantic role (base/ref) rather than by physical side.
-  const auto &intensity_gate = configuration_.common.intensity_gate;
-  const auto apply_intensity_gate = [&](const std::string &roi_name, const std::string &roi_type,
-                                        bool apply, PointCloud *cloud) {
-    if (!intensity_gate.enabled || !apply) return;
-    if (!filter_by_business_roi || no_filter_types_.count(roi_type) != 0) return;
+  const auto& intensity_gate = configuration_.common.intensity_gate;
+  const auto apply_intensity_gate = [&](const std::string& roi_name, const std::string& roi_type,
+                                        bool apply, PointCloud* cloud) {
+    if (!intensity_gate.enabled || !apply)
+      return;
+    if (!filter_by_business_roi || no_filter_types_.count(roi_type) != 0)
+      return;
     const auto outcome = utils::filterCloudByIntensity(*cloud, cloud, intensity_gate);
     quality_.point_counts[roi_name + "_intensity_dropped"] =
         outcome.input_points - outcome.kept_points;
@@ -698,7 +712,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       PointCloud::Ptr flush_base_cloud(new PointCloud);
       PointCloud::Ptr flush_ref_cloud(new PointCloud);
       std::string flush_left_type = flush_base_type, flush_right_type = flush_ref_type;
-      if (flush_base == "right") std::swap(flush_left_type, flush_right_type);
+      if (flush_base == "right")
+        std::swap(flush_left_type, flush_right_type);
       if (filter_by_business_roi && no_filter_types_.count(flush_left_type) == 0)
         CHECK_(gap_std::roiCrop2D(*left_cloud_, flush_base_cloud.get(), rois_[0]),
                "Left ROI of flush has no points");
@@ -709,7 +724,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
         pcl::copyPointCloud(*left_cloud_, *flush_base_cloud);
         pcl::copyPointCloud(*right_cloud_, *flush_ref_cloud);
       }
-      if (flush_base == "right") std::swap(flush_base_cloud, flush_ref_cloud);
+      if (flush_base == "right")
+        std::swap(flush_base_cloud, flush_ref_cloud);
       apply_intensity_gate("flush_base", flush_base_type, intensity_gate.apply_flush_base,
                            flush_base_cloud.get());
       apply_intensity_gate("flush_ref", flush_ref_type, intensity_gate.apply_flush_ref,
@@ -718,9 +734,10 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       quality_.point_counts["flush_ref_roi"] = flush_ref_cloud->size();
       setStage(gap::core::FailureStage::kFitting, "flush");
       flush = detectFlush(*flush_base_cloud, *flush_ref_cloud);
-    } catch (const std::exception &error) {
+    } catch (const std::exception& error) {
       flush_failure_ = makeFailure("flush", error);
-      if (!diagnostic_mode_) throw;
+      if (!diagnostic_mode_)
+        throw;
     }
   }
 
@@ -747,9 +764,10 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
       quality_.point_counts["gap_right_roi"] = gap_right_cloud->size();
       setStage(gap::core::FailureStage::kFitting, "gap");
       gap = detectGap(*gap_left_cloud, *gap_right_cloud);
-    } catch (const std::exception &error) {
+    } catch (const std::exception& error) {
       gap_failure_ = makeFailure("gap", error);
-      if (!diagnostic_mode_) throw;
+      if (!diagnostic_mode_)
+        throw;
     }
   }
   quality_.icp = alignmentMetrics();
@@ -760,8 +778,8 @@ int64_t GapDetection::run(const PointCloud &left_camera_cloud,
   return quality_.runtime_us / 1000;
 }
 
-int64_t GapDetection::detect(const PointCloud &left_camera_cloud,
-                             const PointCloud &right_camera_cloud) {
+int64_t GapDetection::detect(const PointCloud& left_camera_cloud,
+                             const PointCloud& right_camera_cloud) {
   return run(left_camera_cloud, right_camera_cloud);
 }
 
@@ -778,17 +796,19 @@ std::string GapDetection::getGap() const {
 
 double GapDetection::flushMeasurementMm() const {
   double flush = getMeasurment(flush_pts_);
-  if (flush_pts_.size() == 2) flush *= flush_pts_[0][1] > flush_pts_[1][1] ? 1 : -1;
+  if (flush_pts_.size() == 2)
+    flush *= flush_pts_[0][1] > flush_pts_[1][1] ? 1 : -1;
   return std::fabs(flush) + configuration_.flush.offset;
 }
 
 double GapDetection::gapMeasurementMm() const {
-  if (gap_pts_.size() == 2 && gap_pts_[0][0] > gap_pts_[1][0]) return std::nan("NaN");
+  if (gap_pts_.size() == 2 && gap_pts_[0][0] > gap_pts_[1][0])
+    return std::nan("NaN");
   return std::fabs(getMeasurment(gap_pts_)) + configuration_.gap.offset;
 }
 
 std::string GapDetection::getRadius(bool is_left) const {
-  const auto &type = is_left ? configuration_.gap.left_type : configuration_.gap.right_type;
+  const auto& type = is_left ? configuration_.gap.left_type : configuration_.gap.right_type;
   std::string circle = is_left ? "gap_left" : "gap_right";
   double r = circles_.find(circle) == circles_.end() ? std::nan("NAN") : circles_.at(circle)[2];
   return type == "circle" ? formatTwoDecimals(r * 1000) : "Disabled";
@@ -806,15 +826,16 @@ std::string GapDetection::getLeftRadius() const { return getRadius(true); }
 
 std::string GapDetection::getRightRadius() const { return getRadius(false); }
 
-double GapDetection::getMeasurment(const std::vector<Eigen::Vector2f> &two_point) {
-  if (two_point.size() != 2) return std::nan("NaN");
+double GapDetection::getMeasurment(const std::vector<Eigen::Vector2f>& two_point) {
+  if (two_point.size() != 2)
+    return std::nan("NaN");
   Eigen::Vector2f dis = two_point[1] - two_point[0];
   return dis.norm() * 1000;
 }
 
-double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
-                                 const PointCloud &flush_ref_cloud) {
-  const auto &flush_configuration = configuration_.flush;
+double GapDetection::detectFlush(const PointCloud& flush_base_cloud,
+                                 const PointCloud& flush_ref_cloud) {
+  const auto& flush_configuration = configuration_.flush;
   auto flush_base = flush_configuration.base_side;
   auto base_type = flush_configuration.base_type;
   auto ref_type = flush_configuration.reference_type;
@@ -831,7 +852,7 @@ double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
     std::string side_name = i == 0 ? "base" : "ref";
     bool is_left_side = (i == 0) == (flush_base == "left");
     if (contains(type, "line")) {
-      auto &line = i == 0 ? base_line_eq : ref_line_eq;
+      auto& line = i == 0 ? base_line_eq : ref_line_eq;
       if (type == "2-points line") {
         lines_["flush_" + side] = rois_[is_left_side ? 0 : 2];
         line = utils::getLinefrom2Points(lines_["flush_" + side].col(0),
@@ -855,7 +876,8 @@ double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
         CHECK_(gap_std::lineFit2D(line_cloud, &line, &second_line_indices, line_fit_distance / 3),
                side_name + " flush line fit failed at second time")
         int j = 0;
-        for (auto idx : second_line_indices) line_indices[j++] = line_indices[idx];
+        for (auto idx : second_line_indices)
+          line_indices[j++] = line_indices[idx];
         line_indices.resize(second_line_indices.size());
       }
       recordLineQuality("flush_" + side, cloud, line, line_indices);
@@ -916,14 +938,15 @@ double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
   base_type = type_map_[base_type];
   ref_type = type_map_[ref_type];
   double flush;
-#define COMPUTE_FLUSH(l_type, r_type, distance_function) \
-  if (base_type == (l_type) && ref_type == (r_type)) {   \
-    flush = (distance_function);                         \
-    break;                                               \
+#define COMPUTE_FLUSH(l_type, r_type, distance_function)                                           \
+  if (base_type == (l_type) && ref_type == (r_type)) {                                             \
+    flush = (distance_function);                                                                   \
+    break;                                                                                         \
   }
 
   Eigen::Vector2f start, end;
-  if (!flush_pts_.empty()) end = flush_pts_[0];
+  if (!flush_pts_.empty())
+    end = flush_pts_[0];
   do {
     COMPUTE_FLUSH("line", "point", utils::pointLineDistance(base_line_eq, end, &start))
     COMPUTE_FLUSH("line", "cloud",
@@ -948,9 +971,9 @@ double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
   return flush;
 }
 
-double GapDetection::detectGap(const PointCloud &gap_left_cloud,
-                               const PointCloud &gap_right_cloud) {
-  const auto &gap_configuration = configuration_.gap;
+double GapDetection::detectGap(const PointCloud& gap_left_cloud,
+                               const PointCloud& gap_right_cloud) {
+  const auto& gap_configuration = configuration_.gap;
   auto gap_left_type = gap_configuration.left_type;
   auto gap_right_type = gap_configuration.right_type;
   auto segment_points = gap_configuration.segment_points;
@@ -987,7 +1010,7 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
   for (int i = 0; i < 2; i++) {
     auto type = i == 0 ? gap_left_type : gap_right_type;
     auto cloud = i == 0 ? gap_left_cloud : gap_right_cloud;
-    auto &line = i == 0 ? left_line_eq : right_line_eq;
+    auto& line = i == 0 ? left_line_eq : right_line_eq;
     std::string side = i == 0 ? "left" : "right";
     std::string side_name = i == 0 ? "left" : "right";
     if (contains(type, "line")) {
@@ -1006,7 +1029,8 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
         CHECK_(gap_std::lineFit2D(line_cloud, &line, &second_line_indices, line_fit_distance / 3),
                side_name + " gap line fit failed at second time")
         int j = 0;
-        for (auto idx : second_line_indices) line_indices[j++] = line_indices[idx];
+        for (auto idx : second_line_indices)
+          line_indices[j++] = line_indices[idx];
         line_indices.resize(second_line_indices.size());
       }
       recordLineQuality("gap_" + side, cloud, line, line_indices);
@@ -1023,7 +1047,7 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
     } else if (contains(type, "circle")) {
       Eigen::VectorXf circle;
       pcl::Indices circle_indices;
-      const auto &compensation =
+      const auto& compensation =
           i == 0 ? gap_configuration.left_compensation : gap_configuration.right_compensation;
       bool is_fixed_radius = i == 0 ? is_fixed_radius_left : is_fixed_radius_right;
       double circle_radius_min = i == 0 ? left_circle_radius_min : right_circle_radius_min;
@@ -1110,24 +1134,27 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
           circle << options.nominal_center.x(), options.nominal_center.y(), options.radius;
           circle_model = "nominal-fixed-circle";
         }
-        if (!circle_indices.empty()) circle_model = "fixed-radius-circle";
+        if (!circle_indices.empty())
+          circle_model = "fixed-radius-circle";
         quality_.point_counts[quality_prefix + "inliers"] = circle_indices.size();
         quality_.point_counts[quality_prefix + "fallback"] = circle_indices.empty() ? 1 : 0;
       } else {
-        bool circle_fitted = gap_std::circleFit2D(cloud, &circle, &circle_indices, circle_fit_distance,
-                                              circle_radius_min, circle_radius_max, radius_fixed);
+        bool circle_fitted =
+            gap_std::circleFit2D(cloud, &circle, &circle_indices, circle_fit_distance,
+                                 circle_radius_min, circle_radius_max, radius_fixed);
         if (!circle_fitted && gap_configuration.circle_fit_retry_distance > 0) {
           circle_indices.clear();
           const auto retry_distance = gap_configuration.circle_fit_retry_distance / scale_;
           circle_fitted = gap_std::circleFit2D(cloud, &circle, &circle_indices, retry_distance,
-                                           circle_radius_min, circle_radius_max, radius_fixed);
+                                               circle_radius_min, circle_radius_max, radius_fixed);
           const auto quality_prefix = "gap_" + side + "_circle_retry_";
           quality_.point_counts[quality_prefix + "attempted"] = 1;
           quality_.point_counts[quality_prefix + "distance_um"] = static_cast<std::size_t>(
               std::llround(gap_configuration.circle_fit_retry_distance * 1000.0));
           quality_.point_counts[quality_prefix + "inliers"] = circle_indices.size();
           quality_.point_counts[quality_prefix + "success"] = circle_fitted ? 1 : 0;
-          if (circle_fitted) circle_model = "circle-retry";
+          if (circle_fitted)
+            circle_model = "circle-retry";
         }
         if (!circle_fitted && gap_configuration.camera_separated_circle_fallback) {
           PointCloud primary_roi;
@@ -1142,14 +1169,14 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
           Eigen::VectorXf secondary_circle;
           pcl::Indices primary_indices;
           pcl::Indices secondary_indices;
-          const auto &preferred_camera = gap_configuration.camera_separated_preferred_camera;
+          const auto& preferred_camera = gap_configuration.camera_separated_preferred_camera;
           const bool select_closest_nominal =
               gap_configuration.camera_separated_select_closest_nominal;
           const double separated_radius_fixed = select_closest_nominal ? 0.0 : radius_fixed;
           effective_fixed_radius = separated_radius_fixed;
-          const bool primary_success =
-              gap_std::circleFit2D(primary_roi, &primary_circle, &primary_indices, circle_fit_distance,
-                               circle_radius_min, circle_radius_max, separated_radius_fixed);
+          const bool primary_success = gap_std::circleFit2D(
+              primary_roi, &primary_circle, &primary_indices, circle_fit_distance,
+              circle_radius_min, circle_radius_max, separated_radius_fixed);
           const bool secondary_success = gap_std::circleFit2D(
               secondary_roi, &secondary_circle, &secondary_indices, circle_fit_distance,
               circle_radius_min, circle_radius_max, separated_radius_fixed);
@@ -1201,7 +1228,7 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
           const bool can_select_by_gap_nominal =
               select_closest_nominal && gap_left_type == "circle" && gap_right_type == "circle";
           if (can_select_by_gap_nominal && primary_eligible && secondary_eligible) {
-            auto &deferred = deferred_camera_circles[static_cast<std::size_t>(i)];
+            auto& deferred = deferred_camera_circles[static_cast<std::size_t>(i)];
             deferred.active = true;
             deferred.clouds[0] = primary_roi;
             deferred.clouds[1] = secondary_roi;
@@ -1323,7 +1350,8 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
         const auto diagnostic_prefix =
             "gap_camera_nominal_candidate_" + std::to_string(candidate_number) + "_";
         quality_.point_counts[diagnostic_prefix + "valid"] = valid_candidate ? 1 : 0;
-        if (!valid_candidate) continue;
+        if (!valid_candidate)
+          continue;
 
         const auto nominal_delta_mm = std::fabs(candidate_gap_mm - gap_configuration.nominal);
         quality_.point_counts[diagnostic_prefix + "gap_um"] =
@@ -1352,11 +1380,12 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
 
     CHECK_(found_valid_candidate, "gap nominal camera selection failed")
     const auto select_deferred_circle = [&](std::size_t side, int candidate,
-                                            const std::string &component) {
-      auto &deferred = deferred_camera_circles[side];
-      if (!deferred.active) return;
+                                            const std::string& component) {
+      auto& deferred = deferred_camera_circles[side];
+      if (!deferred.active)
+        return;
       const auto camera_name = candidate == 0 ? "primary" : "secondary";
-      const auto &selected_circle = deferred.circles[candidate];
+      const auto& selected_circle = deferred.circles[candidate];
       circles_[component] = selected_circle;
       // Only reached when camera_separated_select_closest_nominal gated this side into deferred
       // resolution, which always fits with a free (non-fixed) radius -- see effective_fixed_radius
@@ -1367,11 +1396,11 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
           selected_circle.size() >= 3
               ? utils::classifyRadiusMode(selected_circle[2], min_radius, max_radius, false)
               : std::string();
-      recordCircleQuality(
-          component, deferred.clouds[candidate], deferred.circles[candidate],
-          deferred.indices[candidate],
-          "camera-separated-circle-" + std::string(camera_name) + "-closest-gap-nominal",
-          radius_mode);
+      recordCircleQuality(component, deferred.clouds[candidate], deferred.circles[candidate],
+                          deferred.indices[candidate],
+                          "camera-separated-circle-" + std::string(camera_name) +
+                              "-closest-gap-nominal",
+                          radius_mode);
       quality_.point_counts[component + "_camera_nominal_selected"] = candidate + 1;
     };
     select_deferred_circle(0, best_left_candidate, "gap_left");
@@ -1386,15 +1415,17 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
   gap_left_type = type_map_[gap_left_type];
   gap_right_type = type_map_[gap_right_type];
   double gap;
-#define COMPUTE_GAP(l_type, r_type, distance_function)           \
-  if (gap_left_type == (l_type) && gap_right_type == (r_type)) { \
-    gap = (distance_function);                                   \
-    break;                                                       \
+#define COMPUTE_GAP(l_type, r_type, distance_function)                                             \
+  if (gap_left_type == (l_type) && gap_right_type == (r_type)) {                                   \
+    gap = (distance_function);                                                                     \
+    break;                                                                                         \
   }
 
   Eigen::Vector2f start, end;
-  if (gap_left_type == "point") start = gap_pts_[0];
-  if (gap_right_type == "point") end = gap_pts_[0];
+  if (gap_left_type == "point")
+    start = gap_pts_[0];
+  if (gap_right_type == "point")
+    end = gap_pts_[0];
   if (gap_pts_.size() == 2) {
     start = gap_pts_[0];
     end = gap_pts_[1];
@@ -1404,15 +1435,16 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
       // Definition A: gap between the two tangent lines perpendicular to the flush datum
       // surface, instead of the closest distance along the circle-center line.
       Eigen::Vector2f u = (lines_["flush_base"].col(1) - lines_["flush_base"].col(0)).normalized();
-      if (u.x() < 0) u = -u;  // point from left panel toward right panel
+      if (u.x() < 0)
+        u = -u; // point from left panel toward right panel
       const Eigen::Vector2f c1 = circles_["gap_left"].head<2>();
       const Eigen::Vector2f c2 = circles_["gap_right"].head<2>();
       const float r1 = circles_["gap_left"][2];
       const float r2 = circles_["gap_right"][2];
       const float gap_a = (c2 - c1).dot(u) - r1 - r2;
       CHECK_(gap_a >= 0, "Gap definition A: tangent lines overlap")
-      start = c1 + r1 * u;      // tangent point on left circle
-      end = start + gap_a * u;  // its foot on the right tangent line
+      start = c1 + r1 * u;     // tangent point on left circle
+      end = start + gap_a * u; // its foot on the right tangent line
       gap = gap_a;
 
       // Store the two tangent lines for visualization, same column-endpoint format as other
@@ -1465,11 +1497,12 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
   return gap;
 }
 
-void GapDetection::fillMlExportFields(gap::core::FitQuality &metric, const PointCloud &cloud,
-                                      const pcl::Indices &inliers) const {
-  if (!export_fit_points_) return;
+void GapDetection::fillMlExportFields(gap::core::FitQuality& metric, const PointCloud& cloud,
+                                      const pcl::Indices& inliers) const {
+  if (!export_fit_points_)
+    return;
   metric.roi_points_mm.reserve(cloud.size());
-  for (const auto &p : cloud) {
+  for (const auto& p : cloud) {
     metric.roi_points_mm.push_back(
         {static_cast<double>(p.x) * 1000.0, static_cast<double>(p.y) * 1000.0});
   }
@@ -1481,8 +1514,8 @@ void GapDetection::fillMlExportFields(gap::core::FitQuality &metric, const Point
   }
 }
 
-void GapDetection::recordLineQuality(const std::string &component, const PointCloud &cloud,
-                                     const Eigen::VectorXf &line, const pcl::Indices &inliers) {
+void GapDetection::recordLineQuality(const std::string& component, const PointCloud& cloud,
+                                     const Eigen::VectorXf& line, const pcl::Indices& inliers) {
   gap::core::FitQuality metric;
   metric.component = component;
   metric.model = "line";
@@ -1509,8 +1542,9 @@ void GapDetection::recordLineQuality(const std::string &component, const PointCl
     std::size_t valid = 0;
     if (norm > 0) {
       for (const auto index : inliers) {
-        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
-        const auto &point = cloud[index];
+        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size())
+          continue;
+        const auto& point = cloud[index];
         const auto residual =
             std::fabs((point.x - line[0]) * dy - (point.y - line[1]) * dx) / norm * 1000;
         square_sum += residual * residual;
@@ -1526,8 +1560,8 @@ void GapDetection::recordLineQuality(const std::string &component, const PointCl
   quality_.fits.push_back(std::move(metric));
 }
 
-void GapDetection::recordCircleQuality(const std::string &component, const PointCloud &cloud,
-                                       const Eigen::VectorXf &circle, const pcl::Indices &inliers,
+void GapDetection::recordCircleQuality(const std::string& component, const PointCloud& cloud,
+                                       const Eigen::VectorXf& circle, const pcl::Indices& inliers,
                                        std::string model, std::string radius_mode) {
   gap::core::FitQuality metric;
   metric.component = component;
@@ -1549,15 +1583,17 @@ void GapDetection::recordCircleQuality(const std::string &component, const Point
     std::vector<double> angles;
     angles.reserve(inliers.size());
     for (const auto index : inliers) {
-      if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
-      const auto &point = cloud[index];
+      if (index < 0 || static_cast<std::size_t>(index) >= cloud.size())
+        continue;
+      const auto& point = cloud[index];
       const double delta_x = point.x - circle[0];
       const double delta_y = point.y - circle[1];
       const double residual = std::fabs(std::hypot(delta_x, delta_y) - circle[2]) * 1000;
       square_sum += residual * residual;
       maximum = std::max(maximum, residual);
       auto angle = std::atan2(delta_y, delta_x);
-      if (angle < 0) angle += 2 * M_PI;
+      if (angle < 0)
+        angle += 2 * M_PI;
       angles.push_back(angle);
     }
     if (!angles.empty()) {
@@ -1583,4 +1619,4 @@ std::unordered_map<std::string, std::string> GapDetection::type_map_ = {
 
 std::unordered_set<std::string> GapDetection::no_filter_types_ = {"2-points line",
                                                                   "selected point"};
-}  // namespace detection
+} // namespace detection

@@ -32,4 +32,4 @@ ProfileRow profileRowsFromSensorXzCloud(const pcl::PointCloud<PointT>& cloud) {
   return row;
 }
 
-}  // namespace gap::ml
+} // namespace gap::ml

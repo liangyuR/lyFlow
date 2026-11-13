@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -33,12 +33,14 @@ try {
     if ($env:LYFLOW_OP_PACKS) { throw 'External operator packs are forbidden in release packaging.' }
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
     $env:LYFLOW_STD_PACKS = '1'
-    $env:LYFLOW_PACKS = 'glue'
+    # 发布组合以 packaging/release.json 为准：std-* 随 LYFLOW_STD_PACKS 编入，其余（默认关的仓库内包）按名点开。
+    $releasePacks = @($configuration.packs | Sort-Object)
+    $env:LYFLOW_PACKS = (@($releasePacks | Where-Object { $_ -notlike 'std-*' }) -join ';')
     $env:LYFLOW_OP_PACKS = ''
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -47,25 +49,33 @@ try {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $runtimeZip = Join-Path $output "lyflow-runtime-win-x64-v$version.zip"
     $sdkZip = Join-Path $output "lyflow-sdk-win-x64-v$version.zip"
-    foreach ($archive in @($runtimeZip, $sdkZip, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output 'verification-report.json'))) {
+    $editorTgz = Join-Path $output "lyflow-editor-v$version.tgz"
+    foreach ($archive in @($runtimeZip, $sdkZip, $editorTgz, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output "LyFlow.Runtime.win-x64.$version.nupkg"))) {
         if (Test-Path -LiteralPath $archive) { throw "Release asset already exists; use a fresh output directory: $archive" }
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
     $coreBuild = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-core') -Parent $buildParent
+    $diagnostics = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-diagnostics') -Parent $buildParent
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
-    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup
+    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -DiagnosticsName package-dependencies
     $fixtures = Join-Path $buildParent 'release-fixtures'
     & python (Join-Path $root 'tests/release/make_fixtures.py') --output-dir $fixtures
     Assert-ReleaseExit 'Generate release fixtures'
     $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $fixtures 'channels-6-to-8.onnx'
     if (-not (Test-Path -LiteralPath $env:LYFLOW_TEST_ONNX_MODEL)) { throw 'Release ONNX fixture is missing.' }
-    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild
+    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
-    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features
-    Assert-ReleaseExit 'Build release CLI'
+    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
+    $buildExit = $LASTEXITCODE
+    if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
+    & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
+    $testExit = $LASTEXITCODE
+    if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }
     $vs = Get-ReleaseVisualStudio
     $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if (-not (Test-Path -LiteralPath $cmake)) { $cmake = 'cmake' }
@@ -135,18 +145,17 @@ try {
     $dependencies.Add([ordered]@{ name = 'onnxruntime'; version = $configuration.onnxruntimeVersion })
     $dependencies.Add([ordered]@{ name = 'visual-cpp-crt'; version = (Get-Item -LiteralPath (Join-Path $runtime 'vcruntime140.dll')).VersionInfo.FileVersion })
     $inspectionPath = Join-Path $stage 'inspection.json'
-    & (Join-Path $PSScriptRoot 'test-release.ps1') -InspectOnly -RuntimeDir $runtime -ReportPath $inspectionPath
+    & (Join-Path $PSScriptRoot 'inspect-runtime.ps1') -RuntimeDir $runtime -ReportPath $inspectionPath
     $inspection = Get-Content -LiteralPath $inspectionPath -Raw | ConvertFrom-Json
     if ($inspection.engineVersion -ne $version) { throw 'Staged DLL version differs from source product version.' }
-    $abiHeader = Get-Content -LiteralPath (Join-Path $root 'core/include/lyflow/c_api.h') -Raw
-    if ($abiHeader -notmatch '#define\s+LYFLOW_ABI_VERSION\s+(\d+)' -or [int]$Matches[1] -ne $inspection.abiVersion) { throw 'Staged DLL ABI differs from source declaration.' }
+    if ($inspection.abiVersion -isnot [string] -or $inspection.abiVersion -cne $version -or $inspection.abiVersion -cne $inspection.engineVersion) { throw 'Staged DLL ABI must be a string exactly equal to the product and engine version.' }
+    if ($inspection.sourceRevision -isnot [string] -or ($inspection.sourceRevision -cne $revision -and -not ($AllowDirty -and $inspection.sourceRevision -ceq ''))) { throw 'Staged DLL source revision differs from HEAD. Only -AllowDirty diagnostics may use an empty compiled source revision.' }
     $packs = @($inspection.manifest.operators | Where-Object { $_.PSObject.Properties.Name -contains 'pack' -and $_.pack } | ForEach-Object pack | Sort-Object -Unique | ForEach-Object {
         $parts = $_ -split '@', 2
         if ($parts.Count -ne 2) { throw "Versioned operator pack required: $_" }
         [ordered]@{ name = $parts[0]; version = $parts[1] }
     })
-    $expectedPacks = @('glue', 'std-image', 'std-ml', 'std-pointcloud')
-    if (@(Compare-Object -ReferenceObject $expectedPacks -DifferenceObject @($packs | ForEach-Object { $_.name })).Count) { throw 'Staged DLL operator packs differ from the release contract.' }
+    if (@(Compare-Object -ReferenceObject $releasePacks -DifferenceObject @($packs | ForEach-Object { $_.name })).Count) { throw 'Staged DLL operator packs differ from the release contract.' }
     $operators = @($inspection.manifest.operators | Sort-Object id | ForEach-Object {
         [ordered]@{ id = $_.id; version = $_.version; pack = $(if ($_.PSObject.Properties.Name -contains 'pack') { $_.pack } else { 'core' }) }
     })
@@ -155,7 +164,7 @@ try {
     $metadata = [ordered]@{
         schemaVersion = 1; engineVersion = $inspection.engineVersion; abiVersion = $inspection.abiVersion
         sourceRevision = $revision; architecture = 'x64'; buildConfiguration = 'RelWithDebInfo'
-        packs = $packs; operators = $operators; dependencies = @($dependencies | Sort-Object name -Unique)
+        packs = $packs; operators = $operators; dependencies = @($dependencies | Sort-Object { $_.name } -Unique)
         files = @($fileNames | ForEach-Object { [ordered]@{ path = $_ } })
         localValidationOnly = [bool]($AllowDirty -or $SkipDependencySetup)
         licenseStatus = 'Project license not declared in source repository'
@@ -167,19 +176,28 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }
     if (@(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Extension -In @('.pdb', '.onnx')).Count) { throw 'Debug symbols or test models leaked into staging.' }
+    if (-not $AllowDirty -and -not $SkipDependencySetup) {
+        & (Join-Path $PSScriptRoot 'package-runtime-nuget.ps1') -RuntimeDir $runtime -OutputDir $output -ExpectedVersion $version -ExpectedRevision $revision
+    }
     $pendingRuntime = Join-Path $stage (Split-Path -Leaf $runtimeZip)
     $pendingSdk = Join-Path $stage (Split-Path -Leaf $sdkZip)
     [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $pendingRuntime)
     [IO.Compression.ZipFile]::CreateFromDirectory($sdk, $pendingSdk)
-    $report = Join-Path $stage 'verification-report.json'
-    & (Join-Path $PSScriptRoot 'test-release.ps1') -ArchiveDir $stage -ReportPath $report
-    $verification = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-    if ($verification.status -ne 'passed') { throw 'Archive verification did not report passed.' }
     [IO.File]::Copy($pendingRuntime, $runtimeZip, $false)
     [IO.File]::Copy($pendingSdk, $sdkZip, $false)
+    # 编辑器以 TypeScript 源码包随版本发布（宿主用自己的打包器编译），版本必须与产品版本一致。
+    $editorDir = Join-Path $root 'packages/editor'
+    $editorVersion = (Get-Content -LiteralPath (Join-Path $editorDir 'package.json') -Raw | ConvertFrom-Json).version
+    if ($editorVersion -cne $version) { throw "@lyflow/editor version $editorVersion differs from product version $version." }
+    $editorStage = Join-Path $stage 'editor'
+    New-Item -ItemType Directory -Path $editorStage -Force | Out-Null
+    & node (Join-Path $editorDir 'scripts/pack.mjs') --pack-destination $editorStage
+    Assert-ReleaseExit 'Pack @lyflow/editor'
+    $editorPacked = @(Get-ChildItem -LiteralPath $editorStage -Filter '*.tgz' -File)
+    if ($editorPacked.Count -ne 1) { throw 'npm pack did not produce exactly one editor tarball.' }
     [IO.File]::Copy($metadataPath, (Join-Path $output 'lyflow-runtime.json'), $false)
-    [IO.File]::Copy($report, (Join-Path $output 'verification-report.json'), $false)
-    Write-Host "Verified runtime and SDK archives: $output"
+    [IO.File]::Copy($editorPacked[0].FullName, $editorTgz, $false)
+    Write-Host "Built runtime, SDK and editor archives: $output"
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
     Pop-Location

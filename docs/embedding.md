@@ -13,13 +13,20 @@
   [前端编辑器](#前端编辑器lyfloweditor)。
 
 下面先说 C++ 那条。宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
-只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
+只依赖同目录的 `lyflow/c_api.h` 与 `lyflow/version.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v15**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
-v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
-`lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
-`Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
+契约版本使用产品版本字符串 **1.1.0**。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
+`LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
+`lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本属于同一 主.次 系列；同系列的补丁版本保持 C ABI 兼容，可以直接替换运行库。
+只有统一打包入口验证固定依赖并声明 `LYFLOW_RELEASE_BUILD=ON`，且实际为 Windows x64、
+RelWithDebInfo、固定四包（std-pointcloud、std-image、std-ml、glue）、无外部算子包、源码树干净
+且 Git 修订可识别时，`lyflow_source_revision()` 才返回完整提交标识；否则返回空串。
+该开关默认为 OFF，普通开发构建、其他算子组合与未经依赖验证的构建都不能启用跨进程磁盘缓存。
+C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空值不能启用跨进程磁盘缓存。
+不匹配时在绑定业务函数前报错；旧整数 ABI 15 的 DLL 因缺少新的字符串导出而直接拒绝，不会按指针调用旧函数。
+
+下面 v8–v15 描述仅为结构演进历史，不再用作当前版本或兼容性判定。
 
 v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
 见下面「[顶层图参数](#顶层图参数)」。
@@ -52,6 +59,14 @@ v15 是第二个数据域 **Image**（[image-plan.md](image-plan.md)）：
   允许带行填充的 `row_bytes`，core 拷成紧排）。另开结构体是因为 `lyflow_run_input` 是数组元素，改它的大小就破坏 ABI。
   `client.hpp` 是 `RunOptions::imageInputs`（`InputImage`），Rust 是 `RunSpec::image_inputs`。**BGR 的相机缓冲要宿主先转成 RGB。**
 - `lyflow_output_save` 对图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局）；PNG 等格式在图里接 `io.save_image`。
+
+1.1.3 加了两个带运行时注入的入口：`lyflow_plan_inputs` 与 `lyflow_cache_evict_inputs`，参数是
+`lyflow_plan_params` / `lyflow_cache_evict` 的全部，再加与 `lyflow_run_options` 同一套的 `inputs` / `image_inputs`。
+注入的数据进 cacheKey（ADR-0017），所以宿主「注入点云再跑」之后，不带注入的计划永远说「没缓存」、按节点清缓存
+永远 `removed: 0` —— 给出与那次运行**同一份**注入，算出来的才是那次运行的键。注入都为空时与老入口完全相同。
+这是同系列的纯增量：1.1.3 的客户端把两个符号当可选符号加载，配 1.1.2 及更早的运行库照样能用，只是带注入的
+计划与清缓存报缺符号。`client.hpp` 是 `Client::plan` / `Client::evictCache` 多带 `inputs` / `imageInputs` 的重载与
+`supportsInjectedPlan()`，Rust 是 `Core::plan_with_inputs` / `Core::cache_evict_with_inputs` / `supports_injected_plan`。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -91,7 +106,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 1.3.3 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 
@@ -104,7 +119,7 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 | `LYFLOW_CORE_DLL` | `Client` 构造函数要的路径 |
 | `LYFLOW_CLI` | `lyflow.exe`，离线跑图/导入用 |
 | `LYFLOW_LIBRARY_DIR` | 库算子目录 |
-| `LYFLOW_ABI_VERSION` | 整数，与头文件里的常量对照 |
+| `LYFLOW_ABI_VERSION` | 产品版本字符串；与头文件、引擎、客户端严格相等 |
 | `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
 
 完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
@@ -524,14 +539,14 @@ use lyflow_client::{Core, RunSpec};
 let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
 core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
 
-assert_eq!(lyflow_client::ABI_VERSION, 15); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+assert_eq!(core.abi_version(), lyflow_client::ABI_VERSION);
 
 // 顶层图参数：RunSpec 的 params_json: Option<&str>，或链式的 with_params_json
 let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
     .with_params_json(r#"{"gapOffset": 0.12}"#);
 ```
 
-`ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个数。轮廓 / 点云的运行时注入、
+`ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个产品版本字符串。轮廓 / 点云的运行时注入、
 不阻塞的 `RunHandle`、三种 View 的取数，与上面 C++ 各节一一对应。
 
 **进程级单例、DLL 路径解析与热重载不在这个 crate 里** —— 那三样是宿主自己的策略。
@@ -552,6 +567,7 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
   onDocChange={(doc, dirty) => …}
   theme={{ "--lyflow-accent": "#ff8a3d" }}
   animations={false}             // 可选：关掉画布动效，默认 true
+  topologyLocked                 // 可选：锁住拓扑、只许调参，默认 false
 />
 ```
 
@@ -562,6 +578,12 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 宿主不用判断。关掉之后信息不丢：正在流数据的边仍是一条静态高亮，running 的节点仍是蓝框加光。
 适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
 `examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。
+
+`topologyLocked`（默认 `false`）给「流程调试页」这类只许调参的页面：节点与连线不能增删改，不能换算子、
+合成 / 解散 / 展开子图、静音，图参数与图级输出的结构也不能动；调参数、切配方、挪位置、运行、预览照常。
+拦在编辑器的 graph store 里，快捷键、粘贴、右键、拖线走同一道关，被拦时弹「拓扑已锁定」；算子面板与算子搜索不出，
+端口拖不出线。打开图时只改连线的迁移不写回（节点停在老版本），只改版本与参数的照写。锁上时撤销栈清空。
+完整的拦截清单见 [`packages/editor/README.md`](../packages/editor/README.md) 的 Props 一节。
 
 **一页一个编辑器。** store 与 transport 都是模块级单例（[ADR-0018](adr/0018-editor-as-package.md)）：
 同一页面挂两个 `<LyFlowEditor>` 会共用同一份文档与 store，后挂载的 `transport` 顶掉先挂的。

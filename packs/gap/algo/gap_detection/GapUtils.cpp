@@ -46,8 +46,9 @@ constexpr double kMinRollPairSpanMm = 2.0;
 constexpr double kMaxRollPairSpanMm = 40.0;
 // Copies src into dst unless dst already aliases src, so every intensity-gate fail-safe can
 // hand the caller an untouched cloud without the caller having to branch.
-void passThroughCloud(const PointCloud &src, PointCloud *dst) {
-  if (dst != &src) *dst = src;
+void passThroughCloud(const PointCloud& src, PointCloud* dst) {
+  if (dst != &src)
+    *dst = src;
 }
 
 struct PlanarMoments {
@@ -59,9 +60,10 @@ struct PlanarMoments {
   double sum_yy = 0;
 };
 
-bool accumulatePlanarMoments(const PointCloud &cloud, PlanarMoments *moments) {
-  if (cloud.size() < kMinimumInitialPosePoints) return false;
-  for (const auto &point : cloud) {
+bool accumulatePlanarMoments(const PointCloud& cloud, PlanarMoments* moments) {
+  if (cloud.size() < kMinimumInitialPosePoints)
+    return false;
+  for (const auto& point : cloud) {
     if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
       return false;
     }
@@ -75,25 +77,28 @@ bool accumulatePlanarMoments(const PointCloud &cloud, PlanarMoments *moments) {
   return true;
 }
 
-bool computePlanarCentroid(const PlanarMoments &moments, Eigen::Vector2d *centroid) {
-  if (moments.point_count < kMinimumInitialPosePoints) return false;
+bool computePlanarCentroid(const PlanarMoments& moments, Eigen::Vector2d* centroid) {
+  if (moments.point_count < kMinimumInitialPosePoints)
+    return false;
   const auto point_count = static_cast<double>(moments.point_count);
   (*centroid) << moments.sum_x / point_count, moments.sum_y / point_count;
   return centroid->allFinite();
 }
 
-bool computePrincipalAxis(const PlanarMoments &moments, const Eigen::Vector2d &centroid,
-                          double *angle) {
+bool computePrincipalAxis(const PlanarMoments& moments, const Eigen::Vector2d& centroid,
+                          double* angle) {
   const auto point_count = static_cast<double>(moments.point_count);
   Eigen::Matrix2d covariance;
   covariance << moments.sum_xx / point_count - centroid.x() * centroid.x(),
       moments.sum_xy / point_count - centroid.x() * centroid.y(),
       moments.sum_xy / point_count - centroid.x() * centroid.y(),
       moments.sum_yy / point_count - centroid.y() * centroid.y();
-  if (!covariance.allFinite()) return false;
+  if (!covariance.allFinite())
+    return false;
 
   const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> solver(covariance);
-  if (solver.info() != Eigen::Success) return false;
+  if (solver.info() != Eigen::Success)
+    return false;
   const auto eigenvalues = solver.eigenvalues();
   if (!eigenvalues.allFinite() || eigenvalues[0] <= 0 ||
       eigenvalues[1] / eigenvalues[0] < kMinimumPcaEigenvalueRatio) {
@@ -107,13 +112,15 @@ bool computePrincipalAxis(const PlanarMoments &moments, const Eigen::Vector2d &c
 double wrapPcaAxisAngle(double angle) {
   constexpr double kPi = 3.14159265358979323846;
   constexpr double kHalfPi = kPi / 2.0;
-  while (angle >= kHalfPi) angle -= kPi;
-  while (angle < -kHalfPi) angle += kPi;
+  while (angle >= kHalfPi)
+    angle -= kPi;
+  while (angle < -kHalfPi)
+    angle += kPi;
   return angle;
 }
 
-Eigen::Matrix3f legacyInitialPose(const PointCloud &left_template, const PointCloud &right_template,
-                                  const PointCloud &left_target, const PointCloud &right_target) {
+Eigen::Matrix3f legacyInitialPose(const PointCloud& left_template, const PointCloud& right_template,
+                                  const PointCloud& left_target, const PointCloud& right_target) {
   const auto left_template_point = getEndPointofCloud(left_template, true);
   const auto right_template_point = getEndPointofCloud(right_template, false);
   const auto left_target_point = getEndPointofCloud(left_target, true);
@@ -126,11 +133,11 @@ Eigen::Matrix3f legacyInitialPose(const PointCloud &left_template, const PointCl
   return transform;
 }
 
-}  // namespace
+} // namespace
 
-InitialPoseResult computeInitialPose(const PointCloud &left_template,
-                                     const PointCloud &right_template,
-                                     const PointCloud &left_target, const PointCloud &right_target,
+InitialPoseResult computeInitialPose(const PointCloud& left_template,
+                                     const PointCloud& right_template,
+                                     const PointCloud& left_target, const PointCloud& right_target,
                                      domain::InitialPoseMode mode) {
   const auto legacy = legacyInitialPose(left_template, right_template, left_target, right_target);
   if (mode == domain::InitialPoseMode::kEndpointMidpointTranslation) {
@@ -183,10 +190,11 @@ InitialPoseResult computeInitialPose(const PointCloud &left_template,
   return {transform.cast<float>(), false};
 }
 
-RollAnchoredCropResult computeRollAnchoredCropMm(
-    const domain::Roi &gap_left, const domain::Roi &gap_right,
-    const domain::RollAnchoredCropConfiguration &config) {
-  if (!config.enabled) return {std::nullopt, "disabled"};
+RollAnchoredCropResult
+computeRollAnchoredCropMm(const domain::Roi& gap_left, const domain::Roi& gap_right,
+                          const domain::RollAnchoredCropConfiguration& config) {
+  if (!config.enabled)
+    return {std::nullopt, "disabled"};
   const double half_width = config.half_width_mm;
   const double half_height = config.half_height_mm;
   const double max_roll_box_height = config.max_roll_box_height_mm;
@@ -196,9 +204,9 @@ RollAnchoredCropResult computeRollAnchoredCropMm(
       half_height <= 0 || !std::isfinite(max_roll_box_height) || max_roll_box_height <= 0) {
     return {std::nullopt, "bad_config"};
   }
-  const auto &left = gap_left.values;
-  const auto &right = gap_right.values;
-  for (const auto *box : {&left, &right}) {
+  const auto& left = gap_left.values;
+  const auto& right = gap_right.values;
+  for (const auto* box : {&left, &right}) {
     const bool finite = std::isfinite((*box)[0]) && std::isfinite((*box)[1]) &&
                         std::isfinite((*box)[2]) && std::isfinite((*box)[3]);
     // Degenerate box: an unlabelled or collapsed roll carries no anchor information.
@@ -206,10 +214,12 @@ RollAnchoredCropResult computeRollAnchoredCropMm(
       return {std::nullopt, "degenerate_roll_box"};
     }
     // Implausibly tall roll box: the segment swallowed something that is not the roll.
-    if ((*box)[3] - (*box)[1] > max_roll_box_height) return {std::nullopt, "roll_box_height"};
+    if ((*box)[3] - (*box)[1] > max_roll_box_height)
+      return {std::nullopt, "roll_box_height"};
   }
   const double span = std::max(left[2], right[2]) - std::min(left[0], right[0]);
-  if (span < kMinRollPairSpanMm || span > kMaxRollPairSpanMm) return {std::nullopt, "span"};
+  if (span < kMinRollPairSpanMm || span > kMaxRollPairSpanMm)
+    return {std::nullopt, "span"};
   const double left_center_x = (left[0] + left[2]) * 0.5;
   const double left_center_z = (left[1] + left[3]) * 0.5;
   const double right_center_x = (right[0] + right[2]) * 0.5;
@@ -221,8 +231,8 @@ RollAnchoredCropResult computeRollAnchoredCropMm(
           ""};
 }
 
-IntensityGateOutcome filterCloudByIntensity(const PointCloud &src, PointCloud *dst,
-                                            const domain::IntensityGateConfiguration &config) {
+IntensityGateOutcome filterCloudByIntensity(const PointCloud& src, PointCloud* dst,
+                                            const domain::IntensityGateConfiguration& config) {
   IntensityGateOutcome outcome;
   outcome.input_points = src.size();
   outcome.kept_points = src.size();
@@ -241,7 +251,8 @@ IntensityGateOutcome filterCloudByIntensity(const PointCloud &src, PointCloud *d
 
   std::vector<double> intensities;
   intensities.reserve(src.size());
-  for (const auto &point : src) intensities.push_back(static_cast<double>(point.r));
+  for (const auto& point : src)
+    intensities.push_back(static_cast<double>(point.r));
   std::sort(intensities.begin(), intensities.end());
   const std::size_t middle = intensities.size() / 2;
   outcome.median_intensity = intensities.size() % 2 == 0
@@ -260,8 +271,9 @@ IntensityGateOutcome filterCloudByIntensity(const PointCloud &src, PointCloud *d
 
   PointCloud kept;
   kept.reserve(src.size());
-  for (const auto &point : src) {
-    if (static_cast<double>(point.r) >= outcome.cutoff) kept.push_back(point);
+  for (const auto& point : src) {
+    if (static_cast<double>(point.r) >= outcome.cutoff)
+      kept.push_back(point);
   }
 
   // Fail-safe 4: the threshold would leave too little to fit. A bad threshold must never empty
@@ -288,13 +300,13 @@ IntensityGateOutcome filterCloudByIntensity(const PointCloud &src, PointCloud *d
   return outcome;
 }
 
-std::optional<std::size_t> selectBestTemplateByIcp(const std::vector<TemplateIcpScore> &scores,
+std::optional<std::size_t> selectBestTemplateByIcp(const std::vector<TemplateIcpScore>& scores,
                                                    double minimum_score, double epsilon) {
   std::optional<std::size_t> best;
   double best_minimum = 0;
   double best_mean = 0;
   for (std::size_t index = 0; index < scores.size(); ++index) {
-    const auto &score = scores[index];
+    const auto& score = scores[index];
     if (!std::isfinite(score.left) || !std::isfinite(score.right) || score.left < minimum_score ||
         score.right < minimum_score) {
       continue;
@@ -305,7 +317,7 @@ std::optional<std::size_t> selectBestTemplateByIcp(const std::vector<TemplateIcp
     if (!replace && best && std::abs(minimum - best_minimum) <= epsilon) {
       replace = mean > best_mean + epsilon;
       if (!replace && std::abs(mean - best_mean) <= epsilon) {
-        const auto &current = scores[*best];
+        const auto& current = scores[*best];
         replace =
             score.configuration_order < current.configuration_order ||
             (score.configuration_order == current.configuration_order && score.id < current.id);
@@ -320,16 +332,17 @@ std::optional<std::size_t> selectBestTemplateByIcp(const std::vector<TemplateIcp
   return best;
 }
 
-unsigned int computeMeanAndCovarianceMatrix(const PointCloud &cloud,
-                                            const std::vector<int> &indices,
-                                            Eigen::Matrix2d *covariance_matrix,
-                                            Eigen::Vector3d *centroid) {
+unsigned int computeMeanAndCovarianceMatrix(const PointCloud& cloud,
+                                            const std::vector<int>& indices,
+                                            Eigen::Matrix2d* covariance_matrix,
+                                            Eigen::Vector3d* centroid) {
   Eigen::Matrix<double, 1, 5, Eigen::RowMajor> accu =
       Eigen::Matrix<double, 1, 5, Eigen::RowMajor>::Zero();
   std::size_t point_count = 0;
-  for (const int &index : indices) {
-    const auto &p = cloud[index];
-    if (!pcl::isFinite(p)) continue;
+  for (const int& index : indices) {
+    const auto& p = cloud[index];
+    if (!pcl::isFinite(p))
+      continue;
     ++point_count;
     accu[0] += p.x * p.x;
     accu[1] += p.x * p.y;
@@ -346,8 +359,8 @@ unsigned int computeMeanAndCovarianceMatrix(const PointCloud &cloud,
   return (static_cast<unsigned int>(point_count));
 }
 
-bool EstimateNormal(const PointCloud &cloud, pcl::PointCloud<pcl::Normal> *normal,
-                    const pcl::search::Search<PointT> &tree, int neighbors, bool flip_flag) {
+bool EstimateNormal(const PointCloud& cloud, pcl::PointCloud<pcl::Normal>* normal,
+                    const pcl::search::Search<PointT>& tree, int neighbors, bool flip_flag) {
   int num = cloud.size();
   if (neighbors < 2) {
     return false;
@@ -379,7 +392,8 @@ bool EstimateNormal(const PointCloud &cloud, pcl::PointCloud<pcl::Normal> *norma
 
       double curvature = 0;
       double eig_sum = covariance_matrix.coeff(0) + covariance_matrix.coeff(3);
-      if (eig_sum != 0) curvature = std::abs(eigen_value / eig_sum);
+      if (eig_sum != 0)
+        curvature = std::abs(eigen_value / eig_sum);
       n = pcl::Normal(eigen_vector[0], eigen_vector[1], 0, curvature);
       if (flip_flag && n.normal_y < 0) {
         n.normal_x *= -1;
@@ -391,7 +405,7 @@ bool EstimateNormal(const PointCloud &cloud, pcl::PointCloud<pcl::Normal> *norma
   return true;
 }
 
-void getCloudsOverlap(const PointCloud &cloud1, const PointCloud &cloud2, PointCloud *overlap) {
+void getCloudsOverlap(const PointCloud& cloud1, const PointCloud& cloud2, PointCloud* overlap) {
   pcl::registration::CorrespondenceEstimation<PointT, PointT> core;
   core.setInputSource(cloud1.makeShared());
   core.setInputTarget(cloud2.makeShared());
@@ -403,9 +417,9 @@ void getCloudsOverlap(const PointCloud &cloud1, const PointCloud &cloud2, PointC
   }
 }
 
-unsigned int splitAndExtractCloud(const PointCloud &cloud, PointCloud *cloud_left,
-                                  PointCloud *cloud_right, int neighbor, double cluster_angle,
-                                  const std::string &save_prefix) {
+unsigned int splitAndExtractCloud(const PointCloud& cloud, PointCloud* cloud_left,
+                                  PointCloud* cloud_right, int neighbor, double cluster_angle,
+                                  const std::string& save_prefix) {
   // estimate normal
   pcl::search::Search<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
   pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
@@ -443,32 +457,37 @@ unsigned int splitAndExtractCloud(const PointCloud &cloud, PointCloud *cloud_lef
   // choose the two largest cloud, and get left and right cluster according to x_avg;
 
   std::sort(clusters.begin(), clusters.end(),
-            [&](pcl::PointIndices &x, pcl::PointIndices &y) -> bool {
+            [&](pcl::PointIndices& x, pcl::PointIndices& y) -> bool {
               return x.indices.size() > y.indices.size();
             });
   std::vector<double> x_avg(n, 0);
   for (int i = 0; i < n; i++) {
-    for (auto &p : clusters[i].indices) x_avg[i] += cloud[p].x;
+    for (auto& p : clusters[i].indices)
+      x_avg[i] += cloud[p].x;
     x_avg[i] /= clusters[i].indices.size();
   }
   bool left_bigger = x_avg[0] < x_avg[1];
   int left_cluster = left_bigger ? 0 : 1;
   int right_cluster = left_bigger ? 1 : 0;
 
-  if (cloud_left != nullptr) copyPointCloud(*color, clusters[left_cluster], *cloud_left);
-  if (cloud_right != nullptr) copyPointCloud(*color, clusters[right_cluster], *cloud_right);
+  if (cloud_left != nullptr)
+    copyPointCloud(*color, clusters[left_cluster], *cloud_left);
+  if (cloud_right != nullptr)
+    copyPointCloud(*color, clusters[right_cluster], *cloud_right);
   return n;
 }
 
-bool cloudsIdentical2D(const PointCloud &a, const PointCloud &b) {
-  if (a.size() != b.size()) return false;
+bool cloudsIdentical2D(const PointCloud& a, const PointCloud& b) {
+  if (a.size() != b.size())
+    return false;
   for (std::size_t i = 0; i < a.size(); ++i) {
-    if (a[i].x != b[i].x || a[i].y != b[i].y) return false;
+    if (a[i].x != b[i].x || a[i].y != b[i].y)
+      return false;
   }
   return true;
 }
 
-void removeRadiusOutlier(const PointCloud &src_cloud, PointCloud *dst_cloud, double r,
+void removeRadiusOutlier(const PointCloud& src_cloud, PointCloud* dst_cloud, double r,
                          int neighbor) {
   pcl::RadiusOutlierRemoval<PointT> outlier_removal;
   outlier_removal.setInputCloud(src_cloud.makeShared());
@@ -478,17 +497,19 @@ void removeRadiusOutlier(const PointCloud &src_cloud, PointCloud *dst_cloud, dou
 }
 
 std::string classifyRadiusMode(double radius, double minimum, double maximum, bool is_fixed) {
-  if (is_fixed) return "fixed";
+  if (is_fixed)
+    return "fixed";
   const auto is_close = [](double value, double limit) {
     return std::fabs(value - limit) <= 1e-6 * std::max(1.0, std::fabs(limit));
   };
-  if (is_close(radius, minimum) || is_close(radius, maximum)) return "clamped";
+  if (is_close(radius, minimum) || is_close(radius, maximum))
+    return "clamped";
   return "free";
 }
 
-bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
-                                    const FixedRadiusCircleOptions &options,
-                                    FixedRadiusCircleResult *result) {
+bool fitFixedRadiusCircleComponents(const PointCloud& cloud,
+                                    const FixedRadiusCircleOptions& options,
+                                    FixedRadiusCircleResult* result) {
   if (result == nullptr || cloud.size() < 3 || options.radius <= 0 ||
       options.maximum_center_shift <= 0 || options.maximum_point_gap <= 0 ||
       options.inlier_distance <= 0 || options.minimum_inliers < 3 ||
@@ -499,7 +520,8 @@ bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
   FixedRadiusCircleResult best;
   bool found = false;
   auto evaluate_component = [&](std::size_t begin, std::size_t end) {
-    if (end - begin < static_cast<std::size_t>(options.minimum_inliers)) return;
+    if (end - begin < static_cast<std::size_t>(options.minimum_inliers))
+      return;
     for (std::size_t first = begin; first + 1 < end; ++first) {
       const Eigen::Vector2d first_point(cloud[first].x, cloud[first].y);
       for (std::size_t second = first + 1; second < end; ++second) {
@@ -516,7 +538,8 @@ bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
         for (const double direction : {-1.0, 1.0}) {
           const Eigen::Vector2d center = midpoint + direction * height * perpendicular;
           const double center_shift = (center.cast<float>() - options.nominal_center).norm();
-          if (center_shift > options.maximum_center_shift) continue;
+          if (center_shift > options.maximum_center_shift)
+            continue;
 
           pcl::Indices inliers;
           std::vector<double> angles;
@@ -525,24 +548,29 @@ bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
             const double delta_x = cloud[index].x - center.x();
             const double delta_y = cloud[index].y - center.y();
             const double residual = std::fabs(std::hypot(delta_x, delta_y) - options.radius);
-            if (residual > options.inlier_distance) continue;
+            if (residual > options.inlier_distance)
+              continue;
             inliers.push_back(static_cast<int>(index));
             square_sum += residual * residual;
             double angle = std::atan2(delta_y, delta_x);
-            if (angle < 0) angle += 2 * M_PI;
+            if (angle < 0)
+              angle += 2 * M_PI;
             angles.push_back(angle);
           }
-          if (inliers.size() < static_cast<std::size_t>(options.minimum_inliers)) continue;
+          if (inliers.size() < static_cast<std::size_t>(options.minimum_inliers))
+            continue;
 
           const double rms = std::sqrt(square_sum / inliers.size());
-          if (rms > options.maximum_rms_residual) continue;
+          if (rms > options.maximum_rms_residual)
+            continue;
           std::sort(angles.begin(), angles.end());
           double largest_gap = angles.front() + 2 * M_PI - angles.back();
           for (std::size_t index = 1; index < angles.size(); ++index) {
             largest_gap = std::max(largest_gap, angles[index] - angles[index - 1]);
           }
           const double coverage = (2 * M_PI - largest_gap) * 180.0 / M_PI;
-          if (coverage < options.minimum_arc_coverage_deg) continue;
+          if (coverage < options.minimum_arc_coverage_deg)
+            continue;
 
           const bool better =
               !found || inliers.size() > best.inliers.size() ||
@@ -551,7 +579,8 @@ bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
                 (std::fabs(coverage - best.arc_coverage_deg) <= 1e-9 &&
                  (rms < best.rms_residual - 1e-12 || (std::fabs(rms - best.rms_residual) <= 1e-12 &&
                                                       center_shift < best.center_shift)))));
-          if (!better) continue;
+          if (!better)
+            continue;
 
           best.circle = Eigen::VectorXf(3);
           best.circle << static_cast<float>(center.x()), static_cast<float>(center.y()),
@@ -578,19 +607,20 @@ bool fitFixedRadiusCircleComponents(const PointCloud &cloud,
     }
   }
 
-  if (!found) return false;
+  if (!found)
+    return false;
   *result = std::move(best);
   return true;
 }
 
-Eigen::Vector2f rotatePoint(const Eigen::Vector2f &pt, const Eigen::Vector2f &center,
+Eigen::Vector2f rotatePoint(const Eigen::Vector2f& pt, const Eigen::Vector2f& center,
                             double angle) {
   Eigen::Rotation2D<float> rotation(angle * M_PI / 180.0);
   return rotation * (pt - center) + center;
 }
 
-double lineCircleDistance(const Eigen::VectorXf &line, const Eigen::VectorXf &circle,
-                          Eigen::Vector2f *start_pt, Eigen::Vector2f *end_pt) {
+double lineCircleDistance(const Eigen::VectorXf& line, const Eigen::VectorXf& circle,
+                          Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
   float px = line[0];
   float py = line[1];
   float vx = line[3];
@@ -604,15 +634,16 @@ double lineCircleDistance(const Eigen::VectorXf &line, const Eigen::VectorXf &ci
   Eigen::Vector2f p{px, py};
   n.normalize();
   Eigen::Vector2f v = c - p;
-  if (n.dot(v) < 0) n = -n;
+  if (n.dot(v) < 0)
+    n = -n;
   double dist = n.dot(v) - cr;
   *start_pt = c - n.dot(v) * n;
   *end_pt = c - cr * n;
   return dist;
 }
 
-double pointLineDistance(const Eigen::VectorXf &line, const Eigen::Vector2f &start_pt,
-                         Eigen::Vector2f *end_pt) {
+double pointLineDistance(const Eigen::VectorXf& line, const Eigen::Vector2f& start_pt,
+                         Eigen::Vector2f* end_pt) {
   float cx = line[0];
   float cy = line[1];
   float vx = line[3];
@@ -621,14 +652,15 @@ double pointLineDistance(const Eigen::VectorXf &line, const Eigen::Vector2f &sta
   Eigen::Vector2f n{vy, -vx};
   Eigen::Vector2f c{cx, cy};
   n.normalize();
-  if (n[1] > 0) n = -n;
+  if (n[1] > 0)
+    n = -n;
   double dist = n.dot(start_pt - c);
   *end_pt = start_pt - dist * n;
   return dist;
 }
 
-double circleCircleDistance(const Eigen::VectorXf &circle1, const Eigen::VectorXf &circle2,
-                            Eigen::Vector2f *start_pt, Eigen::Vector2f *end_pt) {
+double circleCircleDistance(const Eigen::VectorXf& circle1, const Eigen::VectorXf& circle2,
+                            Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
   Eigen::Vector2f c1{circle1[0], circle1[1]};
   Eigen::Vector2f c2{circle2[0], circle2[1]};
   Eigen::Vector2f v = (c2 - c1).normalized();
@@ -638,8 +670,8 @@ double circleCircleDistance(const Eigen::VectorXf &circle1, const Eigen::VectorX
   return (c2 - c1).norm() - (r1 + r2);
 }
 
-double pointCircleDistance(const Eigen::VectorXf &circle, const Eigen::Vector2f &start_pt,
-                           Eigen::Vector2f *end_pt) {
+double pointCircleDistance(const Eigen::VectorXf& circle, const Eigen::Vector2f& start_pt,
+                           Eigen::Vector2f* end_pt) {
   Eigen::Vector2f c{circle[0], circle[1]};
   Eigen::Vector2f v = (c - start_pt).normalized();
   auto r = circle[2];
@@ -647,8 +679,8 @@ double pointCircleDistance(const Eigen::VectorXf &circle, const Eigen::Vector2f 
   return (c - start_pt).norm() - r;
 }
 
-double lineCloudDistance(const Eigen::VectorXf &line, const PointCloud &cloud,
-                         Eigen::Vector2f *start_pt, Eigen::Vector2f *end_pt) {
+double lineCloudDistance(const Eigen::VectorXf& line, const PointCloud& cloud,
+                         Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
   float px = line[0];
   float py = line[1];
   float vx = line[3];
@@ -669,8 +701,8 @@ double lineCloudDistance(const Eigen::VectorXf &line, const PointCloud &cloud,
   return -pointLineDistance(line, *end_pt, start_pt);
 }
 
-double circleCloudDistance(const Eigen::VectorXf &circle, const PointCloud &cloud,
-                           Eigen::Vector2f *start_pt, Eigen::Vector2f *end_pt) {
+double circleCloudDistance(const Eigen::VectorXf& circle, const PointCloud& cloud,
+                           Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
   Eigen::Vector2f c{circle[0], circle[1]};
   float r = circle[2];
 
@@ -688,8 +720,8 @@ double circleCloudDistance(const Eigen::VectorXf &circle, const PointCloud &clou
   return -pointCircleDistance(circle, *end_pt, start_pt);
 }
 
-double pointCloudDistance(const PointCloud &cloud, const Eigen::Vector2f &start_pt,
-                          Eigen::Vector2f *end_pt) {
+double pointCloudDistance(const PointCloud& cloud, const Eigen::Vector2f& start_pt,
+                          Eigen::Vector2f* end_pt) {
   double min_dist = std::numeric_limits<double>::max();
   int idx_near = 0;
   for (std::size_t i = 0; i < cloud.size(); ++i) {
@@ -703,8 +735,8 @@ double pointCloudDistance(const PointCloud &cloud, const Eigen::Vector2f &start_
   return min_dist;
 }
 
-double cloudCloudDistance(const PointCloud &cloud1, const PointCloud &cloud2,
-                          Eigen::Vector2f *start_pt, Eigen::Vector2f *end_pt) {
+double cloudCloudDistance(const PointCloud& cloud1, const PointCloud& cloud2,
+                          Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(cloud1.makeShared());
 
@@ -725,11 +757,11 @@ double cloudCloudDistance(const PointCloud &cloud1, const PointCloud &cloud2,
   return std::sqrt(min_dist_sqr);
 }
 
-double pointPointDistance(const Eigen::Vector2f &start_pt, const Eigen::Vector2f &end_pt) {
+double pointPointDistance(const Eigen::Vector2f& start_pt, const Eigen::Vector2f& end_pt) {
   return (end_pt - start_pt).norm();
 }
 
-Eigen::Matrix2f getIntersectionRL(const Eigen::Matrix2f &roi, const Eigen::VectorXf &line) {
+Eigen::Matrix2f getIntersectionRL(const Eigen::Matrix2f& roi, const Eigen::VectorXf& line) {
   Eigen::Matrix2f diagonal = roi;
   Eigen::Matrix2f clinodiagonal = diagonal;
   std::swap(clinodiagonal(1, 0), clinodiagonal(1, 1));
@@ -751,7 +783,7 @@ Eigen::Matrix2f getIntersectionRL(const Eigen::Matrix2f &roi, const Eigen::Vecto
         res(0, j) = x;
         res(1, j) = y;
         j++;
-      } else {  // intersect with horizontal line
+      } else { // intersect with horizontal line
         double y = corners[i][1];
         double x = (y - line[1]) / line[4] * line[3] + line[0];
         res(0, j) = x;
@@ -763,7 +795,7 @@ Eigen::Matrix2f getIntersectionRL(const Eigen::Matrix2f &roi, const Eigen::Vecto
   return res;
 }
 
-Eigen::VectorXf getLinefrom2Points(const Eigen::Vector2f &pt1, const Eigen::Vector2f &pt2) {
+Eigen::VectorXf getLinefrom2Points(const Eigen::Vector2f& pt1, const Eigen::Vector2f& pt2) {
   Eigen::VectorXf line(6);
   Eigen::Vector2f center = (pt2 + pt2) / 2;
   Eigen::Vector2f direction = pt2 - pt1;
@@ -771,28 +803,32 @@ Eigen::VectorXf getLinefrom2Points(const Eigen::Vector2f &pt1, const Eigen::Vect
   return line;
 }
 
-Eigen::Matrix2f insertPoint2Segment(const Eigen::Matrix2f &segment, const Eigen::Vector2f &point) {
+Eigen::Matrix2f insertPoint2Segment(const Eigen::Matrix2f& segment, const Eigen::Vector2f& point) {
   Eigen::Matrix2f res(segment);
   double len = (res.col(1) - res.col(0)).norm();
   double len1 = (point - res.col(0)).norm();
   double len2 = (point - res.col(1)).norm();
   int replace_index = len1 > len2 ? 1 : 0;
-  if (len1 > len || len2 > len) res.col(replace_index) = point;
+  if (len1 > len || len2 > len)
+    res.col(replace_index) = point;
   return res;
 }
 
-Eigen::Matrix2f insertPoint2Segment(const Eigen::Matrix2f &segment, const PointT &point) {
+Eigen::Matrix2f insertPoint2Segment(const Eigen::Matrix2f& segment, const PointT& point) {
   Eigen::Vector2f pt(point.x, point.y);
   return insertPoint2Segment(segment, pt);
 }
 
-PointT getEndPointofCloud(const PointCloud &cloud, bool is_left_end, std::vector<int> *indices) {
-  if (cloud.empty()) throw std::runtime_error("Empty input cloud");
-  if (!indices) return is_left_end ? cloud[0] : cloud.back();
-  if (indices->empty()) throw std::runtime_error("Empty input indices");
+PointT getEndPointofCloud(const PointCloud& cloud, bool is_left_end, std::vector<int>* indices) {
+  if (cloud.empty())
+    throw std::runtime_error("Empty input cloud");
+  if (!indices)
+    return is_left_end ? cloud[0] : cloud.back();
+  if (indices->empty())
+    throw std::runtime_error("Empty input indices");
   bool ascend = cloud[0].x <= cloud.back().x;
   std::sort(indices->begin(), indices->end());
   int index = ascend == is_left_end ? indices->at(0) : indices->back();
   return cloud[index];
 }
-}  // namespace detection::utils
+} // namespace detection::utils

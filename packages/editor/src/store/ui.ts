@@ -1,13 +1,13 @@
 // UI store —— 选中、视口、搜索面板、剪贴板这些**不该进撤销栈、不该进文件**的
 // 状态（ADR-0002）。混进 GraphDoc 会同时污染文件格式和撤销栈。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import type { PathSegment, SubPath } from "../lib/subgraph";
-import type { ViewerContent } from "../lib/viewRule";
-import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from "../lib/viewPrefs";
-import type { ParamClipboard } from "../lib/paramClipboard";
-import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
+import type { PathSegment, SubPath } from '../lib/subgraph';
+import type { ViewerContent } from '../lib/viewRule';
+import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from '../lib/viewPrefs';
+import type { ParamClipboard } from '../lib/paramClipboard';
+import type { GraphDoc, GraphNode, PortRef } from '../types/graph';
 
 export interface SearchPopup {
   /** 屏幕坐标，用来定位弹层 */
@@ -18,7 +18,7 @@ export interface SearchPopup {
    *  选中算子后会自动把新节点接上去；M1 先把数据通路留好。 */
   pendingFrom?: PortRef;
   /** pendingFrom 是它自己节点上的哪一侧。output = 新节点接在它下游。 */
-  pendingSide?: "input" | "output";
+  pendingSide?: 'input' | 'output';
   /** 选中的算子插到这条线中间（连线右键「插入算子…」、只选中一条连线时按 Tab）。 */
   insertEdge?: string;
   /** 把这个节点（当前层的本地 id）换成选中的算子（节点右键「换成别的算子…」）。 */
@@ -31,25 +31,25 @@ export interface SearchPopup {
 
 export interface Clipboard {
   nodes: GraphNode[];
-  edges: GraphDoc["edges"];
+  edges: GraphDoc['edges'];
   /** 这些节点用到的子图定义（lib/nodeClipboard）。 */
-  subgraphs?: GraphDoc["subgraphs"];
+  subgraphs?: GraphDoc['subgraphs'];
 }
 
 /** 正在拖出的那一端。side 是这一端在自己节点上的方向。 */
 export interface PendingConnection {
   node: string;
   port: string;
-  side: "input" | "output";
+  side: 'input' | 'output';
 }
 
-export type DrawerTab = "log" | "diagnostics" | "runs" | "cache";
+export type DrawerTab = 'log' | 'diagnostics' | 'runs' | 'cache';
 
 /** 参数面板的三个页签（param-recipe P2.2）。配方矩阵与配方管理在 P3 填内容。 */
-export type ParamPanelTab = "nodes" | "matrix" | "recipes";
+export type ParamPanelTab = 'nodes' | 'matrix' | 'recipes';
 
 /** 3D 视图的相机（G7）。放在 store 里是因为参数面板的 ROI 行要能把它切到 2D 拖框（P2.7）。 */
-export type ViewerMode = "3d" | "2d";
+export type ViewerMode = '3d' | '2d';
 
 /** 鼠标指着的那条连线的两端（docs/motion-plan.md H3）。 */
 export interface HoverEdge {
@@ -81,7 +81,7 @@ interface UiState {
   /** 最近一次复制节点没写进系统剪贴板（不安全上下文、没授权）：粘贴时只能靠应用内的那一份。 */
   clipboardOnlyInApp: boolean;
   /** 短暂提示（连线被拒绝的原因、保存成功之类）。 */
-  toast: { text: string; kind: "info" | "warn" } | null;
+  toast: { text: string; kind: 'info' | 'warn' } | null;
   /** 面板里高亮的算子，用于在没选中节点时展示算子说明。 */
   inspectedOperator: string | null;
 
@@ -171,11 +171,15 @@ interface UiState {
   openSearch(popup: SearchPopup): void;
   closeSearch(): void;
   setClipboard(c: Clipboard): void;
-  showToast(text: string, kind?: "info" | "warn"): void;
+  showToast(text: string, kind?: 'info' | 'warn'): void;
   hideToast(): void;
   setInspectedOperator(id: string | null): void;
   setPinnedNode(id: string | null): void;
-  beginConnection(from: PendingConnection, compatible: ReadonlySet<string>, replaceable?: ReadonlySet<string>): void;
+  beginConnection(
+    from: PendingConnection,
+    compatible: ReadonlySet<string>,
+    replaceable?: ReadonlySet<string>,
+  ): void;
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
   setRenamingNode(id: string | null): void;
@@ -209,7 +213,7 @@ function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
 
 const NO_PATH: SubPath = [];
 
-const RECENT_OPS_KEY = "lyflow.recentOperators";
+const RECENT_OPS_KEY = 'lyflow.recentOperators';
 export const RECENT_OPS_MAX = 8;
 
 function loadRecentOps(): string[] {
@@ -217,7 +221,7 @@ function loadRecentOps(): string[] {
     const raw = globalThis.localStorage?.getItem(RECENT_OPS_KEY);
     const v: unknown = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(v)) return [];
-    return v.filter((s): s is string => typeof s === "string").slice(0, RECENT_OPS_MAX);
+    return v.filter((s): s is string => typeof s === 'string').slice(0, RECENT_OPS_MAX);
   } catch {
     return [];
   }
@@ -246,15 +250,15 @@ export const useUiStore = create<UiState>((set, get) => ({
   hoverPaused: false,
   drawer: null,
   renamingNode: null,
-  paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
-  viewerMode: "3d",
+  paramPanel: { open: false, maximized: false, tab: 'nodes', viewerOpen: false },
+  viewerMode: '3d',
   viewerMeasuring: false,
   viewerMaximized: false,
   viewerContentPick: null,
   viewerPortPick: new Map(),
   helpOpen: false,
   finderOpen: false,
-  finderSeed: "",
+  finderSeed: '',
   recentOps: loadRecentOps(),
   focusedDiagnostic: null,
   revealRequest: null,
@@ -275,7 +279,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setHoverPaused(paused) {
     if (get().hoverPaused === paused) return;
     // 暂停时顺手清掉：拖完松手时鼠标多半已经不在原来那个节点上了
-    set(paused ? { hoverPaused: true, hoverNodeId: null, hoverEdge: null } : { hoverPaused: false });
+    set(
+      paused ? { hoverPaused: true, hoverNodeId: null, hoverEdge: null } : { hoverPaused: false },
+    );
   },
 
   setRoiFrame(nodeId, key) {
@@ -323,7 +329,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   setClipboard(c) {
     set({ clipboard: c });
   },
-  showToast(text, kind = "info") {
+  showToast(text, kind = 'info') {
     set({ toast: { text, kind } });
   },
   hideToast() {
@@ -349,15 +355,15 @@ export const useUiStore = create<UiState>((set, get) => ({
   toggleDrawer(tab) {
     const current = get().drawer;
     // 点同一个页签是收起，点别的页签是切过去
-    if (tab === undefined) set({ drawer: current ? null : "log" });
+    if (tab === undefined) set({ drawer: current ? null : 'log' });
     else set({ drawer: current === tab ? null : tab });
   },
   setHelpOpen(open) {
     set({ helpOpen: open });
   },
-  setFinderOpen(open, seed = "") {
+  setFinderOpen(open, seed = '') {
     if (get().finderOpen === open && (!open || get().finderSeed === seed)) return;
-    set({ finderOpen: open, finderSeed: open ? seed : "" });
+    set({ finderOpen: open, finderSeed: open ? seed : '' });
   },
   noteOperatorUsed(opId) {
     const cur = get().recentOps;
@@ -380,7 +386,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = open ?? !cur.open;
     if (next === cur.open) return;
     // 打开参数面板：预览最大化着就还原（面板在预览下面，最大化时看不见）
-    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false }, ...(next ? { viewerMaximized: false } : {}) });
+    set({
+      paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false },
+      ...(next ? { viewerMaximized: false } : {}),
+    });
   },
   setParamPanelMaximized(on) {
     const cur = get().paramPanel;
@@ -419,7 +428,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setViewerContentPick(pick) {
     const cur = get().viewerContentPick;
-    if (cur === pick || (cur && pick && cur.nodeId === pick.nodeId && cur.content === pick.content)) {
+    if (
+      cur === pick ||
+      (cur && pick && cur.nodeId === pick.nodeId && cur.content === pick.content)
+    ) {
       return;
     }
     set({ viewerContentPick: pick });
@@ -430,10 +442,13 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   revealNode(path, localId, paramPath) {
     const same =
-      path.length === get().path.length && path.every((seg, i) => seg.nodeId === get().path[i]?.nodeId);
+      path.length === get().path.length &&
+      path.every((seg, i) => seg.nodeId === get().path[i]?.nodeId);
     set({
       // 同一层就不换路径对象：换了的话订阅 path 的组件全要重算
-      ...(same ? {} : { path: [...path], selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null }),
+      ...(same
+        ? {}
+        : { path: [...path], selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null }),
       selectedNodes: new Set([localId]),
       focusedDiagnostic: { nodeId: localId, paramPath },
       revealRequest: { nodeId: localId, seq: (get().revealRequest?.seq ?? 0) + 1 },
@@ -483,7 +498,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setPath(path) {
     // 换了一层：那一层的改名框跟着节点一起卸掉了，不留一个「正在改名」
-    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null, renamingNode: null });
+    set({
+      path,
+      selectedNodes: new Set(),
+      selectedEdges: new Set(),
+      hoverNodeId: null,
+      hoverEdge: null,
+      renamingNode: null,
+    });
   },
   setAutoRun(on) {
     set({ autoRun: on });

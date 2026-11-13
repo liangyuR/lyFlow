@@ -130,7 +130,7 @@
 
 .app .op-row.is-active .op-row__id {
   color: var(--on-primary-container);
-  opacity: .75;
+  opacity: 0.75;
 }
 
 .app .palette__tip {
@@ -166,7 +166,7 @@
 .app .canvas__empty-eyebrow {
   color: var(--primary);
   font: var(--text-label);
-  letter-spacing: .12em;
+  letter-spacing: 0.12em;
 }
 
 .app .canvas__empty-title {

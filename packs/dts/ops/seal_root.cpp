@@ -48,7 +48,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerSealRoot(Registry& r) {
   OperatorDesc op;
@@ -56,17 +56,22 @@ void registerSealRoot(Registry& r) {
   op.version = "1.0.0";
   op.label = "胶条根部定位";
   op.category = "DTS/胶条";
-  op.keywords = {
-      "seal root localization", "seal foot detection", "root point",
-      "胶条根部", "底部特征", "谷底检测",
-      "特征点定位", "root", "foot",
-      "bump", "根部", "底部",
-      "凸起"
-  };
-  op.doc =
-      "在「基准面朝胶条那一端 → 胶条顶点」这段区间里找底部：\n"
-      "优先取「凹-凸-凹」里的凸起顶点（有多个取离胶条最近的），没有凸起就取区间里的谷底。\n"
-      "区间不再锚在胶条凸包的端点上 —— 那个端点会滑进台肩，窗口整个偏到钣金上去。";
+  op.keywords = {"seal root localization",
+                 "seal foot detection",
+                 "root point",
+                 "胶条根部",
+                 "底部特征",
+                 "谷底检测",
+                 "特征点定位",
+                 "root",
+                 "foot",
+                 "bump",
+                 "根部",
+                 "底部",
+                 "凸起"};
+  op.doc = "在「基准面朝胶条那一端 → 胶条顶点」这段区间里找底部：\n"
+           "优先取「凹-凸-凹」里的凸起顶点（有多个取离胶条最近的），没有凸起就取区间里的谷底。\n"
+           "区间不再锚在胶条凸包的端点上 —— 那个端点会滑进台肩，窗口整个偏到钣金上去。";
   op.inputs = {Port{"clean", "PointCloud", "Clean", "清理过的轮廓。", true},
                Port{"faces", "Record", "Faces", "面表（取分片）。", true},
                Port{"dome", "Record", "Dome", "胶条主体。", true},
@@ -103,9 +108,8 @@ void registerSealRoot(Registry& r) {
   reach.name = "footReachMm";
   reach.type = ParamType::Float;
   reach.label = "脚下范围";
-  reach.doc =
-      "凸起必须落在胶条圆的钣金侧边缘再往外这么远以内 —— 「凹-凸-凹」是胶条脚下那一个，"
-      "不是远处外板大弧的顶。用圆的边缘而不是凸包端点：圆稳，端点会滑。";
+  reach.doc = "凸起必须落在胶条圆的钣金侧边缘再往外这么远以内 —— 「凹-凸-凹」是胶条脚下那一个，"
+              "不是远处外板大弧的顶。用圆的边缘而不是凸包端点：圆稳，端点会滑。";
   reach.def = Value::number(3.0);
   reach.min = 0.0;
   reach.unit = "mm";
@@ -116,4 +120,4 @@ void registerSealRoot(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

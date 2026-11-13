@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 
 #include "algo/bead.h"
+#include "algo/color.h"
 #include "lyflow/data.h"
 #include "lyflow/operator.h"
 #include "lyflow/overlay.h"
@@ -33,11 +34,22 @@ inline constexpr const char* kVerdictType = "glue.Verdict";
 inline constexpr const char* kSynthType = "glue.SynthBreak";
 inline constexpr const char* kPoseType = "glue.Pose2D";
 inline constexpr const char* kStationMeasureType = "glue.StationMeasure";
+// 1.2 的测量算子（docs/glue-measure-ops.md）
+inline constexpr const char* kResponseMapsKind = "glue.ResponseMaps";
+inline constexpr const char* kFrameType = "glue.Frame";
+inline constexpr const char* kFanScanType = "glue.FanScan";
+inline constexpr const char* kTrackType = "glue.Track";
+inline constexpr const char* kLateralRunsType = "glue.LateralRuns";
+inline constexpr const char* kPartEdgesType = "glue.PartEdges";
+// 1.3 的彩色测量算子（docs/glue-measure-ops.md「1.3 彩色测量算子」）
+inline constexpr const char* kColorMapsKind = "glue.ColorMaps";
+inline constexpr const char* kColorModelType = "glue.ColorModel";
 /// 胶路没找到时，bead_path 的 info.message 与 judge 的 verdict.message 都是这一句（§2.3 失败语义）。
 inline constexpr const char* kNoBeadMessage = "检测区内没找到胶";
 
 void registerBundles(Registry& r);
 void registerBeadPath(Registry& r);
+void registerTaughtPath(Registry& r);
 void registerBeadWidth(Registry& r);
 void registerBeadBreaks(Registry& r);
 void registerEdgeDistance(Registry& r);
@@ -46,20 +58,67 @@ void registerSynthBreak(Registry& r);
 void registerLocate(Registry& r);
 void registerStationCalipers(Registry& r);
 void registerSnippets(Registry& r);
+void registerResponse(Registry& r);
+void registerFanScan(Registry& r);
+void registerTrackPath(Registry& r);
+void registerLateralRuns(Registry& r);
+void registerPartEdges(Registry& r);
+void registerPolyline(Registry& r);
+void registerColorModel(Registry& r);
+void registerColorMap(Registry& r);
+void registerColorFan(Registry& r);
+void registerColorTrack(Registry& r);
+void registerColorRuns(Registry& r);
 
 // ------------------------------------------------------------------ 图像
 
 /// 端口上的 Image → 8 位单通道 Mat（三通道先按 BT.601 转灰度，与 image.to_gray 同一条路）。
 cv::Mat grayOf(const Data& image);
+/// 单通道 f32 的 cv::Mat → Image Data（零拷贝）。
+Data f32Image(cv::Mat m);
+
+/// glue.response 的 maps（Bundle<glue.ResponseMaps>）读成三张按 frame 摆回图像坐标的采样场（零拷贝，Bundle 要活得比它们久）。
+struct MapsView {
+  Field response, gray, level;
+  cv::Rect frame;
+};
+Data mapsBundle(ResponseMaps maps, cv::Size image);
+/// 不是完整的 glue.ResponseMaps（字段缺、不是单通道 f32、尺寸与 frame 对不上）返回 false。
+bool readMaps(const Data& d, MapsView* out);
+/// 输入图不合格时的执行错误（指到端口）。
+Status badImage(const char* port, bool maps);
+
+/// 端口上的 Image → 8 位三通道 RGB Mat（RGBA 去掉 alpha）。单通道、其他位深、预览缩小图返回空 Mat。
+cv::Mat rgbOf(const Data& image);
+/// 彩色算子的输入图不合格（不是全分辨率 u8 RGB / RGBA）。
+Status badColorImage(const char* port);
+
+/// glue.color_map 的 maps（Bundle<glue.ColorMaps>）：score 是按 frame 摆回图像坐标的采样场，state / luma 是块本身。
+struct ColorMapsView {
+  Field score;
+  cv::Mat state, luma;
+  cv::Rect frame;
+  cv::Size image;
+};
+Data colorMapsBundle(ColorMaps maps, cv::Size image);
+bool readColorMaps(const Data& d, ColorMapsView* out);
+
+/// glue.fan_scan 的参数、计算与校验；glue.color_fan 在得分图上原样复用。
+std::vector<Param> fanScanParams();
+Status fanScanCompute(const Field& R, const ParamView& params, Outputs& outputs);
+std::vector<Issue> fanScanValidate(const ParamView& params, const std::set<std::string>&);
 
 // ------------------------------------------------------------------ JSON 小工具
 
 /// 坐标保留三位小数：下游拿它再算，0.001 px 的舍入无所谓，事件里的 JSON 却小一半。
 double round3(double v);
 Json pxJson(P2 p);
-P2 pxOf(const Json& j);  ///< 不是两个数的数组时返回 (NaN, NaN)
+P2 pxOf(const Json& j); ///< 不是两个数的数组时返回 (NaN, NaN)
 Json numOrNull(double v, int decimals = 3);
-double numOf(const Json& j);  ///< null / 缺 → NaN
+/// 1.2 测量算子的输出不舍入（宿主拿它们做判定，舍入会让门限上的判断与 1.1 不一致）：有限值原样，否则 null。
+Json exact(double v);
+Json exactPx(P2 p);
+double numOf(const Json& j); ///< null / 缺 → NaN
 
 // ------------------------------------------------------------------ 胶路（glue.Polyline）
 
@@ -76,6 +135,16 @@ struct Polyline {
 Data polylineRecord(const std::vector<double>& s, const std::vector<P2>& points,
                     const std::vector<P2>& tangents);
 bool readPolyline(const Data& d, Polyline* out);
+/// 1.2 测量算子的 line 端口：Record 类型必须是 glue.Polyline，允许 count = 0（空胶路）。
+bool readLine(const Data& d, Polyline* out);
+
+/// 沿胶路布站（glue-measure-ops「约定 / 布站」）：range = [0, 0] 是整条胶路，否则与胶路求交。
+struct StationPose {
+  double s = 0;
+  P2 c, t, n;
+};
+std::vector<StationPose> layStations(const Polyline& line, double step, double rangeA,
+                                     double rangeB, double* usedA, double* usedB);
 
 // ------------------------------------------------------------------ Bundle
 
@@ -122,14 +191,19 @@ Data measurement(double value, const std::string& unit, const std::string& messa
 
 // ------------------------------------------------------------------ 参数
 
-Param floatParam(const char* name, const char* label, double def, const char* unit,
-                 const char* doc, bool advanced = false);
+Param floatParam(const char* name, const char* label, double def, const char* unit, const char* doc,
+                 bool advanced = false);
 Param vec2Param(const char* name, const char* label, double a, double b, const char* unit,
                 std::vector<std::string> components, const char* doc, bool advanced = false);
 Param enumParam(const char* name, const char* label, const char* def, const char* doc,
                 std::vector<EnumOption> options, bool advanced = false);
 Param boolParam(const char* name, const char* label, bool def, const char* doc,
                 bool advanced = false);
+Param intParam(const char* name, const char* label, int def, const char* doc, int lo, int hi,
+               bool advanced = false);
+/// 带硬边界的 float 参数（lo / hi 给 NaN 表示那一侧不限）。
+Param rangedFloat(const char* name, const char* label, double def, const char* unit,
+                  const char* doc, double lo, double hi, bool advanced = false);
 Param visibleWhen(Param p, const char* param, const char* eq);
 
 // ------------------------------------------------------------------ 叠画
@@ -138,4 +212,4 @@ Param visibleWhen(Param p, const char* param, const char* eq);
 std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<Station>& st);
 std::string fmt(double v, int decimals = 1);
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

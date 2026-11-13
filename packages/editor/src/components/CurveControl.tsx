@@ -2,7 +2,7 @@
 // （与 core 的 checkCurveValue / evaluateCurve 同一套）。撤销粒度与滑块相同：拖一个点从按下到松手一条撤销，
 // 列表里改数、加点、删点、换插值方式各一条。参数面板与 Inspector 用的都是这一份。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 
 import {
   asCurve,
@@ -15,11 +15,11 @@ import {
   yRange,
   type CurveInterp,
   type CurvePoint,
-} from "../lib/curve";
-import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
-import { useGraphStore } from "../store/graph";
-import type { ControlProps } from "./ParamControls";
-import { NumberInput } from "./NumberInput";
+} from '../lib/curve';
+import { beginPreview, endPreview, schedulePreview } from '../lib/preview';
+import { useGraphStore } from '../store/graph';
+import type { ControlProps } from './ParamControls';
+import { NumberInput } from './NumberInput';
 
 const HEIGHT = 120;
 const PAD = 8;
@@ -52,14 +52,16 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
   const toData = (clientX: number, clientY: number): [number, number] => {
     const r = svgRef.current!.getBoundingClientRect();
     const x = (clientX - r.left - PAD) / Math.max(1, r.width - 2 * PAD);
-    const y = range[0] + (1 - (clientY - r.top - PAD) / Math.max(1, r.height - 2 * PAD)) * (range[1] - range[0]);
+    const y =
+      range[0] +
+      (1 - (clientY - r.top - PAD) / Math.max(1, r.height - 2 * PAD)) * (range[1] - range[0]);
     return [x, y];
   };
 
   const path = Array.from({ length: SAMPLES + 1 }, (_, i) => {
     const x = i / SAMPLES;
-    return `${i === 0 ? "M" : "L"}${sx(x).toFixed(1)},${sy(evaluate(curve, x)).toFixed(1)}`;
-  }).join(" ");
+    return `${i === 0 ? 'M' : 'L'}${sx(x).toFixed(1)},${sy(evaluate(curve, x)).toFixed(1)}`;
+  }).join(' ');
 
   const onPointDown = (e: React.PointerEvent<SVGCircleElement>, index: number) => {
     if (disabled || e.button !== 0) return;
@@ -83,8 +85,9 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    useGraphStore.getState().commit("拖动曲线控制点");
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    useGraphStore.getState().commit('拖动曲线控制点');
     endPreview(nodeId);
   };
 
@@ -97,10 +100,14 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
   };
 
   return (
-    <div className="ctl-curve" data-testid={`curve-${param.name}`} data-points={curve.points.length}>
+    <div
+      className="ctl-curve"
+      data-testid={`curve-${param.name}`}
+      data-points={curve.points.length}
+    >
       <svg
         ref={svgRef}
-        className={`ctl-curve__canvas${disabled ? " is-disabled" : ""}`}
+        className={`ctl-curve__canvas${disabled ? ' is-disabled' : ''}`}
         data-testid={`curve-canvas-${param.name}`}
         data-range={`${range[0]},${range[1]}`}
         data-pad={PAD}
@@ -110,9 +117,22 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
           if (!disabled) addAt(e.clientX, e.clientY);
         }}
       >
-        <rect className="ctl-curve__frame" x={PAD} y={PAD} width={width - 2 * PAD} height={HEIGHT - 2 * PAD} />
+        <rect
+          className="ctl-curve__frame"
+          x={PAD}
+          y={PAD}
+          width={width - 2 * PAD}
+          height={HEIGHT - 2 * PAD}
+        />
         {[0.25, 0.5, 0.75].map((g) => (
-          <line key={`gx${g}`} className="ctl-curve__grid" x1={sx(g)} x2={sx(g)} y1={PAD} y2={HEIGHT - PAD} />
+          <line
+            key={`gx${g}`}
+            className="ctl-curve__grid"
+            x1={sx(g)}
+            x2={sx(g)}
+            y1={PAD}
+            y2={HEIGHT - PAD}
+          />
         ))}
         {[0.25, 0.5, 0.75].map((g) => (
           <line
@@ -128,7 +148,7 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
         {curve.points.map(([x, y], i) => (
           <circle
             key={i}
-            className={`ctl-curve__pt${selected === i ? " is-selected" : ""}`}
+            className={`ctl-curve__pt${selected === i ? ' is-selected' : ''}`}
             data-testid={`curve-pt-${param.name}-${i}`}
             data-x={x}
             data-y={y}
@@ -158,7 +178,7 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
           className="ctl ctl--select ctl-curve__interp"
           data-testid={`curve-interp-${param.name}`}
           disabled={disabled}
-          value={interp ?? "linear"}
+          value={interp ?? 'linear'}
           onChange={(e) => write(curve.points, e.target.value as CurveInterp)}
         >
           <option value="linear">线性</option>
@@ -184,13 +204,13 @@ export function CurveControl({ param, value, disabled, onChange, nodeId }: Contr
         <div className="ctl-curve__row ctl-curve__row--head" aria-hidden>
           <span />
           <span>x（0–1）</span>
-          <span>y{param.unit ? `（${param.unit}）` : ""}</span>
+          <span>y{param.unit ? `（${param.unit}）` : ''}</span>
           <span />
         </div>
         {curve.points.map(([x, y], i) => (
           <div
             key={i}
-            className={`ctl-curve__row${selected === i ? " is-selected" : ""}`}
+            className={`ctl-curve__row${selected === i ? ' is-selected' : ''}`}
             data-testid={`curve-row-${param.name}-${i}`}
             onFocus={() => setSelected(i)}
           >

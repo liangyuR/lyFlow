@@ -20,6 +20,7 @@
       ]
     },
     "boost-filesystem",
-    "eigen3"
+    "eigen3",
+    "yaml-cpp"
   ]
 }

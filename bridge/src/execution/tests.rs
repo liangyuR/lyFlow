@@ -41,7 +41,8 @@ impl LiveRun for FakeRun {
         &self.id
     }
     fn cancel(&self) {
-        self.cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         if self.behaves == Behaves::Cooperative {
             self.finish();
         }
@@ -107,7 +108,10 @@ impl Script {
 }
 
 fn finished_id(manager: &RunManager) -> Option<String> {
-    lock(&manager.inner).finished.as_ref().map(|r| r.run_id().to_string())
+    lock(&manager.inner)
+        .finished
+        .as_ref()
+        .map(|r| r.run_id().to_string())
 }
 
 /// 收尾线程是异步的：轮询到条件成立，2 s 还不成立就失败。
@@ -137,11 +141,21 @@ fn preempting_a_stuck_run_returns_at_once_and_only_the_latest_request_runs_after
         started.elapsed()
     );
     assert!(s.run("a").was_cancelled(), "被抢占的要收到取消");
-    assert_eq!(s.launched(), ["a"], "a 退出之前一个都不开跑：同一时刻最多一个 run 在算");
+    assert_eq!(
+        s.launched(),
+        ["a"],
+        "a 退出之前一个都不开跑：同一时刻最多一个 run 在算"
+    );
 
     s.run("a").finish();
-    eventually("a 退出后开跑最后一个请求", || s.launched() == ["a", "d"]);
-    assert!(s.notified().is_empty(), "被顶掉的请求不补发事件：{:?}", s.notified());
+    eventually("a 退出后开跑最后一个请求", || {
+        s.launched() == ["a", "d"]
+    });
+    assert!(
+        s.notified().is_empty(),
+        "被顶掉的请求不补发事件：{:?}",
+        s.notified()
+    );
     assert_eq!(manager.active_run_id().as_deref(), Some("d"));
 
     // d 正常跑完进 finished；再来一个不用排队，当场开跑
@@ -158,7 +172,9 @@ fn preempting_a_cooperative_run_starts_the_new_one_as_soon_as_it_exits() {
     let s = Arc::new(Script::default());
     s.submit(&manager, "a", Behaves::Cooperative);
     s.submit(&manager, "b", Behaves::Cooperative);
-    eventually("a 一取消就退出，b 随即开跑", || s.launched() == ["a", "b"]);
+    eventually("a 一取消就退出，b 随即开跑", || {
+        s.launched() == ["a", "b"]
+    });
     assert!(s.run("a").was_cancelled());
     assert!(s.notified().is_empty());
 }
@@ -184,7 +200,10 @@ fn cancelling_a_queued_request_drops_it_and_reports_it_cancelled() {
     s.submit(&manager, "c", Behaves::Cooperative);
     manager.cancel("c");
     drop(paused);
-    assert_eq!(s.notified().last(), Some(&("c".to_string(), "cancelled", None)));
+    assert_eq!(
+        s.notified().last(),
+        Some(&("c".to_string(), "cancelled", None))
+    );
     assert_eq!(s.launched(), ["a"]);
     assert!(manager.is_idle());
 }
@@ -209,15 +228,25 @@ fn a_pause_queues_requests_until_it_ends_and_then_runs_only_the_latest() {
         paused
     });
     std::thread::sleep(Duration::from_millis(30));
-    assert!(!waiter.is_finished(), "drain 要等停不下来的那个真的退出（它还握着算子描述）");
+    assert!(
+        !waiter.is_finished(),
+        "drain 要等停不下来的那个真的退出（它还握着算子描述）"
+    );
     s.run("a").finish();
     let paused = waiter.join().unwrap();
     assert_eq!(s.launched(), ["a"], "等完了也还在窗口里：重扫这一步还没做");
 
     drop(paused);
     assert_eq!(s.launched(), ["a", "c"], "窗口结束，最新的那个开跑");
-    assert!(s.notified().is_empty(), "被顶掉的 b 不补发（与抢占同一条规矩）");
-    assert_eq!(finished_id(&manager).as_deref(), Some("a"), "被停掉的那一次留作上一次完成的");
+    assert!(
+        s.notified().is_empty(),
+        "被顶掉的 b 不补发（与抢占同一条规矩）"
+    );
+    assert_eq!(
+        finished_id(&manager).as_deref(),
+        Some("a"),
+        "被停掉的那一次留作上一次完成的"
+    );
 }
 
 /// 热重载的窗口：上一次完成的也放掉（只要还有一个 RunHandle 活着，旧 DLL 就卸载不掉），
@@ -228,7 +257,9 @@ fn a_hot_reload_pause_releases_every_run_and_starts_the_queued_one_afterwards() 
     let s = Arc::new(Script::default());
     s.submit(&manager, "done", Behaves::Cooperative);
     s.run("done").finish();
-    eventually("done 进 finished", || finished_id(&manager).as_deref() == Some("done"));
+    eventually("done 进 finished", || {
+        finished_id(&manager).as_deref() == Some("done")
+    });
     s.submit(&manager, "a", Behaves::Stuck);
     s.submit(&manager, "b", Behaves::Cooperative);
 
@@ -238,7 +269,9 @@ fn a_hot_reload_pause_releases_every_run_and_starts_the_queued_one_afterwards() 
     // 除了测试自己记的那一份（和这里临时借的一份），没有人再握着它们。收尾线程 join 返回之后
     // 才放掉它那一份，所以等一下：真 DLL 的最后一个引用同样是在那里落下的
     for id in ["done", "a"] {
-        eventually(&format!("{id} 被放掉"), || Arc::strong_count(&s.run(id)) == 2);
+        eventually(&format!("{id} 被放掉"), || {
+            Arc::strong_count(&s.run(id)) == 2
+        });
     }
     assert_eq!(s.launched(), ["done", "a"], "排队的 b 不作废，也还没开跑");
     drop(paused);
@@ -327,10 +360,7 @@ struct Fixture {
 
 impl Fixture {
     fn kind(&self, kind: &str) -> Vec<&serde_json::Value> {
-        self.events
-            .iter()
-            .filter(|e| e["kind"] == kind)
-            .collect()
+        self.events.iter().filter(|e| e["kind"] == kind).collect()
     }
     fn final_state(&self, node: &str) -> String {
         self.events
@@ -358,11 +388,7 @@ fn run(doc: serde_json::Value, base_dir: &str) -> Fixture {
     run_with(doc, base_dir, |_| {})
 }
 
-fn run_with(
-    doc: serde_json::Value,
-    base_dir: &str,
-    during: impl FnOnce(&RunHandle),
-) -> Fixture {
+fn run_with(doc: serde_json::Value, base_dir: &str, during: impl FnOnce(&RunHandle)) -> Fixture {
     run_spec(doc, base_dir, &[], &[], 0, during)
 }
 
@@ -386,8 +412,8 @@ fn run_spec(
     spec.isolate = isolate;
     spec.force = force;
     spec.mode = mode;
-    let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }
-        .expect("启动运行失败");
+    let handle =
+        unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }.expect("启动运行失败");
     during(&handle);
     handle.join();
     // join 返回后回调保证不再被触发，这时候读收集到的事件才是安全的。
@@ -433,18 +459,34 @@ fn run_summary_comes_back_over_the_abi_and_in_the_event() {
         .events
         .iter()
         .filter(|e| e["kind"] == "node_state")
-        .map(|e| format!("{}:{}", e["nodeId"].as_str().unwrap(), e["state"].as_str().unwrap()))
+        .map(|e| {
+            format!(
+                "{}:{}",
+                e["nodeId"].as_str().unwrap(),
+                e["state"].as_str().unwrap()
+            )
+        })
         .collect();
     assert_eq!(
         trace,
-        vec!["g:pending", "g:running", "g:done", "v:pending", "v:running", "v:done"]
+        vec![
+            "g:pending",
+            "g:running",
+            "g:done",
+            "v:pending",
+            "v:running",
+            "v:done"
+        ]
     );
     assert_eq!(f.events.first().unwrap()["kind"], "run_started");
     assert_eq!(f.events.last().unwrap()["kind"], "run_finished");
 
     let finished = *f.kind("run_finished").last().expect("没有 run_finished");
     let in_event = finished["summary"].clone();
-    assert!(in_event.is_object(), "run_finished 没带 summary: {finished}");
+    assert!(
+        in_event.is_object(),
+        "run_finished 没带 summary: {finished}"
+    );
     assert_eq!(in_event["status"], "ok");
     assert_eq!(in_event["runId"], f.run_id.as_str());
     assert_eq!(in_event["nodes"]["g"]["state"], "done");
@@ -480,9 +522,7 @@ fn output_cloud_binary_header_is_correct() {
     assert!(view.has_intensity());
 
     let bytes = encode_cloud(&view);
-    let u32_at = |off: usize| {
-        u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
-    };
+    let u32_at = |off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
     let f32_at = |off: usize| f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
 
     assert_eq!(u32_at(0), CLOUD_MAGIC, "magic 不对");
@@ -492,11 +532,18 @@ fn output_cloud_binary_header_is_correct() {
 
     // 16..40 是 bounds；合成云是有体积的，min 必须小于 max
     for i in 0..3 {
-        assert!(f32_at(16 + i * 4) < f32_at(16 + (i + 3) * 4), "bounds[{i}] 不合法");
+        assert!(
+            f32_at(16 + i * 4) < f32_at(16 + (i + 3) * 4),
+            "bounds[{i}] 不合法"
+        );
     }
 
     let n = view.point_count() as usize;
-    assert_eq!(bytes.len(), 16 + 24 + n * 12 + n * 4, "载荷长度与头部对不上");
+    assert_eq!(
+        bytes.len(),
+        16 + 24 + n * 12 + n * 4,
+        "载荷长度与头部对不上"
+    );
 
     // 降采样之后点数必须变少，但不能变成 0 —— 这两条一起才说明算子真的跑了
     let voxel = f.core.output_cloud(&f.run_id, "v", "cloud", 0).unwrap();
@@ -579,7 +626,10 @@ DATA ascii
 
     let bytes = encode_cloud(&view);
     let flags = u32_at(&bytes, 12);
-    assert_eq!(flags & crate::core_ffi::CLOUD_HAS_RGB, crate::core_ffi::CLOUD_HAS_RGB);
+    assert_eq!(
+        flags & crate::core_ffi::CLOUD_HAS_RGB,
+        crate::core_ffi::CLOUD_HAS_RGB
+    );
     // 头 40 + xyz 36 + rgb 9 补齐到 12；这片云没有强度与法线
     assert_eq!(bytes.len(), 40 + 36 + 12, "rgb 块没放在最后或没补齐");
     assert_eq!(&bytes[76..85], view.rgb());
@@ -649,10 +699,16 @@ fn indices_paging_keeps_total_and_clips_at_the_tail() {
     let f = run(passthrough_graph(4102, 1200), "");
     assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
 
-    let all = f.core.output_indices(&f.run_id, "p", "indices", 0, 0).unwrap();
+    let all = f
+        .core
+        .output_indices(&f.run_id, "p", "indices", 0, 0)
+        .unwrap();
     assert_eq!(all.count(), 1_200);
 
-    let page = f.core.output_indices(&f.run_id, "p", "indices", 500, 64).unwrap();
+    let page = f
+        .core
+        .output_indices(&f.run_id, "p", "indices", 500, 64)
+        .unwrap();
     assert_eq!(page.count(), 64);
     assert_eq!(page.total(), 1_200, "total 是全量，不随切片变");
     assert_eq!(page.source_cloud_id(), all.source_cloud_id());
@@ -663,11 +719,17 @@ fn indices_paging_keeps_total_and_clips_at_the_tail() {
     assert_eq!(u32_at(&page_bytes, 8), 1_200);
     assert_eq!(i32_at(&page_bytes, 24), all.values()[500]);
 
-    let tail = f.core.output_indices(&f.run_id, "p", "indices", 1_190, 64).unwrap();
+    let tail = f
+        .core
+        .output_indices(&f.run_id, "p", "indices", 1_190, 64)
+        .unwrap();
     assert_eq!(tail.count(), 10, "尾巴上要多少给多少，不越界");
     assert_eq!(tail.values(), &all.values()[1_190..1_200]);
 
-    let past = f.core.output_indices(&f.run_id, "p", "indices", 9_999, 16).unwrap();
+    let past = f
+        .core
+        .output_indices(&f.run_id, "p", "indices", 9_999, 16)
+        .unwrap();
     assert_eq!(past.count(), 0);
     assert!(past.values().is_empty(), "count=0 时 C 侧给的是 nullptr");
     assert_eq!(past.total(), 1_200);
@@ -677,10 +739,19 @@ fn indices_paging_keeps_total_and_clips_at_the_tail() {
 
     // 端口类型不对、端口不存在、run 不存在：都是错误，不是空切片
     assert!(f.core.output_tensor(&f.run_id, "p", "cloud", 0, 0).is_err());
-    assert!(f.core.output_tensor(&f.run_id, "p", "indices", 0, 0).is_err());
-    assert!(f.core.output_indices(&f.run_id, "p", "cloud", 0, 0).is_err());
+    assert!(f
+        .core
+        .output_tensor(&f.run_id, "p", "indices", 0, 0)
+        .is_err());
+    assert!(f
+        .core
+        .output_indices(&f.run_id, "p", "cloud", 0, 0)
+        .is_err());
     assert!(f.core.output_indices(&f.run_id, "p", "nope", 0, 0).is_err());
-    assert!(f.core.output_tensor("no-such-run", "p", "tensor", 0, 0).is_err());
+    assert!(f
+        .core
+        .output_tensor("no-such-run", "p", "tensor", 0, 0)
+        .is_err());
 }
 
 #[test]
@@ -711,7 +782,11 @@ fn encode_tensor_frame_matches_the_documented_layout() {
     for (i, expected) in data.iter().enumerate() {
         assert_eq!(f32_at(&bytes, 32 + 3 * 8 + i * 4), *expected, "data[{i}]");
     }
-    assert_eq!(32 % 8, 0, "shape 必须 8 字节对齐，前端才能零拷贝开 BigInt64Array");
+    assert_eq!(
+        32 % 8,
+        0,
+        "shape 必须 8 字节对齐，前端才能零拷贝开 BigInt64Array"
+    );
     assert_eq!((32 + 3 * 8) % 4, 0, "数据必须 4 字节对齐");
 
     let empty = unsafe { core_ffi::TensorView::borrowed(core, 24, 24, &shape, &[]) };
@@ -728,16 +803,23 @@ fn encode_image_frame_matches_the_documented_layout() {
     let core = crate::core_ffi::core().expect("加载 core 失败");
     // 3x2 RGB u8 的第 1 行（9 字节）：载荷补齐到 12
     let row: Vec<u8> = (0..9).collect();
-    let view = unsafe {
-        core_ffi::ImageView::borrowed(Arc::clone(&core), 3, 2, 3, 1, 1, (6, 4), 1, &row)
-    };
+    let view =
+        unsafe { core_ffi::ImageView::borrowed(Arc::clone(&core), 3, 2, 3, 1, 1, (6, 4), 1, &row) };
     assert_eq!(view.row_count(), 1);
     let bytes = encode_image(&view);
     let head: Vec<u32> = (0..12).map(|i| u32_at(&bytes, i * 4)).collect();
-    assert_eq!(head, vec![IMAGE_MAGIC, 3, 2, 3, 1, 1, 6, 4, 1, 1, 9, 0], "帧头逐项");
+    assert_eq!(
+        head,
+        vec![IMAGE_MAGIC, 3, 2, 3, 1, 1, 6, 4, 1, 1, 9, 0],
+        "帧头逐项"
+    );
     assert_eq!(&bytes[48..57], &row[..]);
     assert_eq!(bytes.len(), 48 + 12, "像素补齐到 4 字节");
-    assert_eq!(IMAGE_HEADER_BYTES % 4, 0, "像素必须 4 字节对齐，前端才能零拷贝开 Float32Array");
+    assert_eq!(
+        IMAGE_HEADER_BYTES % 4,
+        0,
+        "像素必须 4 字节对齐，前端才能零拷贝开 Float32Array"
+    );
 
     let empty = unsafe { core_ffi::ImageView::borrowed(core, 3, 2, 3, 1, 0, (3, 2), 9, &[]) };
     assert_eq!(encode_image(&empty).len(), 48, "空切片只有帧头");
@@ -860,17 +942,32 @@ fn isolate_reruns_only_that_node_over_the_abi() {
     assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
     let started = f.kind("run_started")[0].clone();
     assert_eq!(started["isolate"], serde_json::json!(["v"]));
-    assert_eq!(started["targets"], serde_json::json!(["v"]), "给了 isolate，targets 取同一组 id");
+    assert_eq!(
+        started["targets"],
+        serde_json::json!(["v"]),
+        "给了 isolate，targets 取同一组 id"
+    );
     assert_eq!(started["mode"], "full");
     assert_eq!(started["force"], serde_json::json!(["v"]));
 
     let g = f.node_event("g", "skipped");
     assert_eq!(g["stats"]["cached"], true, "上游只取缓存: {g}");
     let v = f.node_event("v", "done");
-    assert!(v.is_object(), "v 应当真跑一遍（done 而不是 skipped）: {:#?}", f.events);
-    assert!(v["stats"]["cached"].is_null(), "强制重算的节点不带 cached: {v}");
     assert!(
-        !started["plan"].as_array().unwrap().iter().any(|id| id == "p"),
+        v.is_object(),
+        "v 应当真跑一遍（done 而不是 skipped）: {:#?}",
+        f.events
+    );
+    assert!(
+        v["stats"]["cached"].is_null(),
+        "强制重算的节点不带 cached: {v}"
+    );
+    assert!(
+        !started["plan"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "p"),
         "下游不进计划: {started}"
     );
     assert_eq!(f.final_state("p"), "", "下游一条事件都不该有");
@@ -895,17 +992,33 @@ fn isolate_is_refused_before_running_anything() {
     let f = run_spec(two_node_graph(7302), "", &isolate, &[], 0, |_| {});
     assert_eq!(f.run_status(), "error");
     let finished = f.kind("run_finished")[0].clone();
-    assert_eq!(finished["error"]["code"], "upstream_not_ready", "{finished}");
-    let diags = finished["diagnostics"].as_array().expect("run_finished 应带 diagnostics");
+    assert_eq!(
+        finished["error"]["code"], "upstream_not_ready",
+        "{finished}"
+    );
+    let diags = finished["diagnostics"]
+        .as_array()
+        .expect("run_finished 应带 diagnostics");
     assert_eq!(diags.len(), 1, "{finished}");
     assert_eq!(diags[0]["nodeId"], "g");
     assert_eq!(diags[0]["code"], "upstream_not_ready");
-    assert!(f.kind("node_state").is_empty(), "一个节点都不该动: {:#?}", f.events);
+    assert!(
+        f.kind("node_state").is_empty(),
+        "一个节点都不该动: {:#?}",
+        f.events
+    );
 
     let preview = run_spec(two_node_graph(7303), "", &isolate, &[], 1, |_| {});
     assert_eq!(preview.run_status(), "error");
-    assert_eq!(preview.kind("run_finished")[0]["error"]["code"], "bad_input");
-    assert!(preview.kind("node_state").is_empty(), "{:#?}", preview.events);
+    assert_eq!(
+        preview.kind("run_finished")[0]["error"]["code"],
+        "bad_input"
+    );
+    assert!(
+        preview.kind("node_state").is_empty(),
+        "{:#?}",
+        preview.events
+    );
 }
 
 /// 修订一 V2：「运行到此」（只给 targets）也把计划外、仍有当前结果的下游挂进来。
@@ -926,11 +1039,16 @@ fn run_to_node_attaches_unplanned_downstream() {
     });
     let full = run(doc.clone(), "");
     assert_eq!(full.run_status(), "ok");
-    assert!(full.kind("run_finished")[0].get("attached").is_none(), "全图运行不带 attached");
+    assert!(
+        full.kind("run_finished")[0].get("attached").is_none(),
+        "全图运行不带 attached"
+    );
 
     let core = crate::core_ffi::core().expect("加载 core 失败");
     let run_id = ulid::new();
-    let ctx = Box::new(Collector { events: Mutex::new(Vec::new()) });
+    let ctx = Box::new(Collector {
+        events: Mutex::new(Vec::new()),
+    });
     let ptr = &*ctx as *const Collector;
     let graph = doc.to_string();
     let targets = vec!["v".to_string()];
@@ -941,7 +1059,9 @@ fn run_to_node_attaches_unplanned_downstream() {
     let finished = events.iter().find(|e| e["kind"] == "run_finished").unwrap();
     assert_eq!(finished["status"], "ok");
     assert_eq!(finished["attached"], serde_json::json!(["p"]), "{finished}");
-    let view = core.output_cloud(&run_id, "p", "cloud", 0).expect("挂上的 p 按新 runId 取得到");
+    let view = core
+        .output_cloud(&run_id, "p", "cloud", 0)
+        .expect("挂上的 p 按新 runId 取得到");
     assert!(view.total_points() > 0);
     drop(handle);
 }
@@ -991,7 +1111,9 @@ fn graph_param_values_reach_the_core_through_params_json() {
     assert_eq!(bad.run_status(), "error");
     assert_eq!(bad.kind("run_finished")[0]["error"]["code"], "bad_param");
     assert!(
-        !bad.kind("node_state").iter().any(|e| e["state"] == "running"),
+        !bad.kind("node_state")
+            .iter()
+            .any(|e| e["state"] == "running"),
         "越界的图参数值不该让任何节点开跑"
     );
 }
@@ -1013,8 +1135,7 @@ fn library_rescan_keeps_the_finished_run_readable() {
         let ptr = &*ctx as *const Collector;
         let graph = two_node_graph(7401).to_string();
         let spec = RunSpec::new(&graph, &run_id, "", &[]);
-        let handle =
-            unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }.unwrap();
+        let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }.unwrap();
         handle.join();
         let events = unsafe { (*ptr).events.lock().unwrap().clone() };
         (run_id, handle, events)

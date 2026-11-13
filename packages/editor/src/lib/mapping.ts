@@ -1,11 +1,11 @@
 // GraphDoc ↔ React Flow 的映射层（ADR-0002 的落地点）。**整个前端只有这里
 // （加上直接渲染画布的组件）允许出现 React Flow 类型**，换库时改的就是这一个文件。
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from '@xyflow/react';
 
-import { subgraphIdOf, type GraphDoc, type GraphNode } from "../types/graph";
-import type { AnyTypes, GraphContext } from "./typecheck";
-import { ANY, findPort, inferAnyTypes } from "./typecheck";
+import { subgraphIdOf, type GraphDoc, type GraphNode } from '../types/graph';
+import type { AnyTypes, GraphContext } from './typecheck';
+import { ANY, findPort, inferAnyTypes } from './typecheck';
 
 /** 节点上只放 op id 和 UI 状态。算子描述由节点组件按 op 现查 —— 热重载的前提。 */
 export interface OperatorNodeData extends Record<string, unknown> {
@@ -23,7 +23,7 @@ export interface OperatorNodeData extends Record<string, unknown> {
   library: boolean;
 }
 
-export type LyNode = Node<OperatorNodeData, "operator">;
+export type LyNode = Node<OperatorNodeData, 'operator'>;
 /** `data.lazy` 供自定义边组件挂 tooltip 用（components/FlowEdge.tsx）。
  *  流动、hover、生长这些动效状态**不进 data**：边组件从 store 现查（docs/motion-plan.md E1/E3），
  *  放进来的话每条事件都得重建整批连线，还要同步进 sameEdge。 */
@@ -82,14 +82,14 @@ export function toReactFlow(
       bypass: n.bypass === true,
       anyType: anyTypes.get(n.id) ?? null,
       subgraphId: subgraphIdOf(n.op),
-      library: n.op.startsWith("lib."),
+      library: n.op.startsWith('lib.'),
     };
     // 只挪了位置的节点沿用上一轮的 data 对象：节点组件（OperatorNode）按引用比 data，
     // 拖着几百个节点时每帧换一份新的 data，就是几百个节点每帧整个重渲
     const prev = cache?.nodes.get(n.id)?.data;
     return {
       id: n.id,
-      type: "operator" as const,
+      type: 'operator' as const,
       position: n.ui?.position ?? { x: 0, y: 0 },
       selected: selection.nodes.has(n.id),
       data: prev && sameNodeData(prev, data) ? prev : data,
@@ -114,11 +114,11 @@ export function toReactFlow(
       targetHandle: e.to.port,
       selected: selection.edges.has(e.id),
       // 拖离输入端时另一端跟着鼠标走，而不是直接删掉（交互清单 P1 #19）
-      reconnectable: "target",
+      reconnectable: 'target',
       // 连线按源端口类型着色 —— 让类型系统「看得见」（交互清单 P0 #8）。
       // 线宽不写在这里：inline 的 strokeWidth 会压过选中、hover、关联高亮的 CSS 加粗，
       // 默认 2px 在 styles.motion.css 里。
-      style: lazy ? { stroke: color, strokeDasharray: "6 4" } : { stroke: color },
+      style: lazy ? { stroke: color, strokeDasharray: '6 4' } : { stroke: color },
       data: { lazy },
     };
   });
@@ -205,10 +205,10 @@ function edgeColor(
 ): string {
   const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
-  const port = findPort(op, portName, "output");
-  if (!port) return "#6b7280";
+  const port = findPort(op, portName, 'output');
+  if (!port) return '#6b7280';
   const type = port.type === ANY ? (anyTypes.get(nodeId) ?? ANY) : port.type;
-  return ctx.typesByName.get(type)?.color ?? "#6b7280";
+  return ctx.typesByName.get(type)?.color ?? '#6b7280';
 }
 
 /** 一条边是不是惰性的，只看目标节点的目标输入端口（ADR-0016）：
@@ -221,7 +221,7 @@ function isLazyInput(
 ): boolean {
   const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
-  return findPort(op, portName, "input")?.lazy === true;
+  return findPort(op, portName, 'input')?.lazy === true;
 }
 
 /** 点到线段的距离。拖节点到连线上要用（交互清单 P1 #21）。 */
@@ -248,7 +248,11 @@ export interface Rect {
 
 /** 线段有没有穿过这个矩形。「把节点拖到线上」这个手势的字面意思就是它 ——
  *  只判中心距离的话，画布缩到一半时容差就只剩几个屏幕像素，够不着。 */
-export function segmentHitsRect(a: { x: number; y: number }, b: { x: number; y: number }, r: Rect): boolean {
+export function segmentHitsRect(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  r: Rect,
+): boolean {
   const inside = (p: { x: number; y: number }) =>
     p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   const steps = 32;
@@ -265,7 +269,7 @@ export function extractSizes(
 ): { id: string; width: number; height: number }[] {
   const out: { id: string; width: number; height: number }[] = [];
   for (const c of changes) {
-    if (c.type === "dimensions" && c.dimensions) {
+    if (c.type === 'dimensions' && c.dimensions) {
       out.push({ id: c.id, width: c.dimensions.width, height: c.dimensions.height });
     }
   }
@@ -279,7 +283,7 @@ export function extractMoves(
 ): { id: string; position: { x: number; y: number } }[] {
   const moves: { id: string; position: { x: number; y: number } }[] = [];
   for (const c of changes) {
-    if (c.type === "position" && c.position) {
+    if (c.type === 'position' && c.position) {
       moves.push({ id: c.id, position: c.position });
     }
   }

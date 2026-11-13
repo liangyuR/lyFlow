@@ -1,4 +1,4 @@
-import type { CloudPayload } from "../types/execution";
+import type { CloudPayload } from '../types/execution';
 
 /** 已取回的点云缓存。键是 runId+node+port+maxPoints，少任何一段都会串味：
  *  少 runId 会在重跑后拿到上次结果，少 maxPoints 会让滑块拖了没反应。 */
@@ -36,7 +36,7 @@ export function unpinRun(runId: string): void {
 }
 
 function runIdOf(key: string): string {
-  const bar = key.indexOf("|");
+  const bar = key.indexOf('|');
   return bar < 0 ? key : key.slice(0, bar);
 }
 
@@ -86,4 +86,3 @@ export function fetchCloud(key: string, load: () => Promise<CloudPayload>): Prom
   inflight.set(key, p);
   return p;
 }
-

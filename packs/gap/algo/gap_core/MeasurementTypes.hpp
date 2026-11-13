@@ -244,4 +244,4 @@ std::string formatFittedCircleRadiusMm(const DebugGeometry& geometry, const std:
 
 FailureCode classifyFailureCode(const std::string& message);
 
-}  // namespace gap::core
+} // namespace gap::core

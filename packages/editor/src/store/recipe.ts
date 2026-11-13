@@ -9,13 +9,13 @@
 //
 // 读值一律经 runParamsOf / useGraphParamOverrides。这个模块不 import graph store：graph store 要反过来读它。
 
-import { useMemo } from "react";
-import { create } from "zustand";
+import { useMemo } from 'react';
+import { create } from 'zustand';
 
-import { effectiveGraphValues } from "../lib/graphParams";
-import { EMPTY_SET, findRecipe, KIND_LABEL, recipeReport, type RecipeSet } from "../lib/recipes";
-import type { SubPath } from "../lib/subgraph";
-import type { GraphDoc } from "../types/graph";
+import { effectiveGraphValues } from '../lib/graphParams';
+import { EMPTY_SET, findRecipe, KIND_LABEL, recipeReport, type RecipeSet } from '../lib/recipes';
+import type { SubPath } from '../lib/subgraph';
+import type { GraphDoc } from '../types/graph';
 
 const NONE: Readonly<Record<string, unknown>> = Object.freeze({});
 
@@ -31,7 +31,7 @@ export interface BaseEdit {
   recipe: string;
 }
 
-export type RecipeStatus = "none" | "loading" | "ready" | "error";
+export type RecipeStatus = 'none' | 'loading' | 'ready' | 'error';
 
 interface RecipeState {
   /** 内存里的配方集合（进撤销栈，K7）。 */
@@ -42,7 +42,7 @@ interface RecipeState {
   currentId: string | null;
   /** 最近一次当前配方是怎么变的：user = 人在下拉框、矩阵、管理页里切的；auto = 打开图时选默认配方、
    *  撤销把当前配方撤没了之类。「自动运行」只跟着 user 的切换跑（P3.8），打开一张图不该自己跑起来。 */
-  switchedBy: "user" | "auto";
+  switchedBy: 'user' | 'auto';
   /** 当前配方存的值 { 图参数名: 值 }（就是那个配方的 values 对象本身）。基础下是空。 */
   overrides: Readonly<Record<string, unknown>>;
   /** 配方目录（图文件同目录的 `<图名>.recipes/`）。null = 图还没存过盘，不能建配方（P3.2）。 */
@@ -65,10 +65,10 @@ export const useRecipeStore = create<RecipeState>(() => ({
   set: EMPTY_SET,
   current: null,
   currentId: null,
-  switchedBy: "auto",
+  switchedBy: 'auto',
   overrides: NONE,
   dir: null,
-  status: "none",
+  status: 'none',
   problems: [],
   saved: EMPTY_SET,
   savedFiles: new Map(),
@@ -96,13 +96,13 @@ export function applyRecipeSet(set: RecipeSet): void {
     current,
     currentId: entry?.id ?? null,
     overrides: overridesOf(set, current),
-    ...(current !== s.current ? { switchedBy: "auto" as const } : {}),
+    ...(current !== s.current ? { switchedBy: 'auto' as const } : {}),
   });
 }
 
 /** 切换当前配方（P3.3 / P3.8）。不进撤销栈、不改 doc、不弹窗；未保存的改动留在内存里（K6 ③）。
  *  有效值总是从基础重新叠（K4）：overrides 换成新配方自己的 values，不叠在上一个上。 */
-export function selectRecipe(name: string | null, by: "user" | "auto" = "user"): void {
+export function selectRecipe(name: string | null, by: 'user' | 'auto' = 'user'): void {
   const s = useRecipeStore.getState();
   const entry = findRecipe(s.set, name);
   const current = entry?.name ?? null;
@@ -148,14 +148,16 @@ export function currentRecipeBlocker(doc: GraphDoc): string | null {
   if (!entry) return null;
   const report = recipeReport(doc, entry);
   if (report.blocking === 0) return null;
-  const first = report.items.filter((m) => m.kind !== "spec").slice(0, 3);
-  const detail = first.map((m) => `${m.param}（${KIND_LABEL[m.kind]}：${m.message}）`).join("；");
-  const more = report.blocking > first.length ? ` 等 ${report.blocking} 处` : "";
+  const first = report.items.filter((m) => m.kind !== 'spec').slice(0, 3);
+  const detail = first.map((m) => `${m.param}（${KIND_LABEL[m.kind]}：${m.message}）`).join('；');
+  const more = report.blocking > first.length ? ` 等 ${report.blocking} 处` : '';
   return `配方「${entry.name}」有 ${report.blocking} 处失配，不能运行：${detail}${more}。到「配方管理」按建议修复，或切到别的配方`;
 }
 
 /** 每个配方的失配报告，按 doc 与 set 缓存（面板、下拉框、矩阵都要，doc 每变一次各算一遍不划算）。 */
-export function useRecipeReports(doc: GraphDoc): ReadonlyMap<string, ReturnType<typeof recipeReport>> {
+export function useRecipeReports(
+  doc: GraphDoc,
+): ReadonlyMap<string, ReturnType<typeof recipeReport>> {
   const set = useRecipeStore((s) => s.set);
   return useMemo(() => {
     const out = new Map<string, ReturnType<typeof recipeReport>>();
@@ -170,7 +172,7 @@ export function resetRecipes(dir: string | null, status: RecipeStatus): void {
     set: EMPTY_SET,
     current: null,
     currentId: null,
-    switchedBy: "auto",
+    switchedBy: 'auto',
     overrides: NONE,
     dir,
     status,

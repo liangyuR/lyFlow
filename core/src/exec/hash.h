@@ -13,20 +13,18 @@ namespace lyflow::exec {
 /// 把若干段字节喂进去，得到 32 位十六进制串。
 /// 每段之间插一个 '\0' 分隔：不这样的话 ("ab","c") 和 ("a","bc") 会同键。
 class Hasher {
- public:
+public:
   void add(const std::string& s) {
     buffer_.insert(buffer_.end(), s.begin(), s.end());
     buffer_.push_back('\0');
   }
 
   /// 大块二进制（注入的点云缓冲）先摘要再入队，免得整片云被拷进 buffer_。
-  void addBytes(const void* data, std::size_t bytes) {
-    add(toHex(XXH3_128bits(data, bytes)));
-  }
+  void addBytes(const void* data, std::size_t bytes) { add(toHex(XXH3_128bits(data, bytes))); }
 
   std::string hex() const { return toHex(XXH3_128bits(buffer_.data(), buffer_.size())); }
 
- private:
+private:
   static std::string toHex(const XXH128_hash_t& h) {
     static const char* kDigits = "0123456789abcdef";
     std::string out;
@@ -43,4 +41,4 @@ class Hasher {
   std::vector<char> buffer_;
 };
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

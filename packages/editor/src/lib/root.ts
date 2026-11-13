@@ -3,5 +3,5 @@
 // 类名带 lyflow- 前缀，不和宿主的样式撞（docs/multi-instance-research.md）。
 
 export function rootOf(el: Element | null | undefined): HTMLElement | null {
-  return el?.closest<HTMLElement>("[data-lyflow-editor]") ?? null;
+  return el?.closest<HTMLElement>('[data-lyflow-editor]') ?? null;
 }

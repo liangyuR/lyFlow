@@ -1,23 +1,16 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { newLocalId } from "../lib/ids";
-import { levelOf, type SubPath } from "../lib/subgraph";
-import { useUiStore } from "./ui";
-import type { RampName } from "../lib/ramps";
-import type { ShadingMode } from "../lib/cloudScene";
-import type { GraphDoc, PortRef } from "../types/graph";
+import { newLocalId } from '../lib/ids';
+import { levelOf, type SubPath } from '../lib/subgraph';
+import { useUiStore } from './ui';
+import type { RampName } from '../lib/ramps';
+import type { ShadingMode } from '../lib/cloudScene';
+import type { GraphDoc, PortRef } from '../types/graph';
 
 /** fields = Bundle 的字段表（m8-plan L17）：先列字段，点进字段再按字段类型换视图。 */
-export type PeekView =
-  | "cloud3d"
-  | "cloud2d"
-  | "tensor"
-  | "image"
-  | "value"
-  | "indices"
-  | "fields";
+export type PeekView = 'cloud3d' | 'cloud2d' | 'tensor' | 'image' | 'value' | 'indices' | 'fields';
 
-export type TensorLayout = "auto" | "HWC" | "CHW" | "NHWC" | "NCHW";
+export type TensorLayout = 'auto' | 'HWC' | 'CHW' | 'NHWC' | 'NCHW';
 
 export interface PeekOpts {
   maxPoints: number;
@@ -27,8 +20,8 @@ export interface PeekOpts {
   pointSize: number;
   layout: TensorLayout;
   sliceIndex: number;
-  channel: number | "rgb";
-  range: [number, number] | "auto";
+  channel: number | 'rgb';
+  range: [number, number] | 'auto';
 }
 
 export interface PeekWindow {
@@ -49,18 +42,18 @@ export interface PeekWindow {
 
 export type PeekOpenRequest = Omit<
   PeekWindow,
-  "id" | "z" | "locked" | "size" | "opts" | "viewAuto" | "field"
+  'id' | 'z' | 'locked' | 'size' | 'opts' | 'viewAuto' | 'field'
 > &
-  Partial<Pick<PeekWindow, "size" | "opts" | "locked" | "viewAuto" | "field">>;
+  Partial<Pick<PeekWindow, 'size' | 'opts' | 'locked' | 'viewAuto' | 'field'>>;
 
-export const PEEK_FROZEN = "快照已冻结：这次运行的结果已被后端回收（见 ADR-0019）";
+export const PEEK_FROZEN = '快照已冻结：这次运行的结果已被后端回收（见 ADR-0019）';
 
 export const PEEK_MAX_WINDOWS = 6;
 export const PEEK_MAX_WEBGL = 4;
 export const PEEK_DEFAULT_SIZE = { w: 360, h: 280 };
 
 export function isWebglView(view: PeekView): boolean {
-  return view === "cloud3d" || view === "cloud2d";
+  return view === 'cloud3d' || view === 'cloud2d';
 }
 
 function countWebgl(windows: readonly PeekWindow[], exceptId?: string): number {
@@ -73,13 +66,13 @@ function countWebgl(windows: readonly PeekWindow[], exceptId?: string): number {
 
 export const PEEK_DEFAULT_OPTS: PeekOpts = {
   maxPoints: 200_000,
-  shading: "intensity",
-  ramp: "viridis",
+  shading: 'intensity',
+  ramp: 'viridis',
   pointSize: 1.6,
-  layout: "auto",
+  layout: 'auto',
   sliceIndex: 0,
   channel: 0,
-  range: "auto",
+  range: 'auto',
 };
 
 interface PeekState {
@@ -142,7 +135,7 @@ export function findWindowForEdge(
 
 /** 新窗口沿用主预览的着色、色带、点大小：以前固定是强度 / viridis，主预览里选好的要一个窗口一个窗口重选。
  *  显示点数仍是查看器自己的 200k（最多 4 个窗口同时占 WebGL）。 */
-function mainViewerLook(): Pick<PeekOpts, "shading" | "ramp" | "pointSize"> {
+function mainViewerLook(): Pick<PeekOpts, 'shading' | 'ramp' | 'pointSize'> {
   const { shading, ramp, pointSize } = useUiStore.getState().viewerPrefs;
   return { shading, ramp, pointSize };
 }
@@ -157,7 +150,7 @@ export const usePeekStore = create<PeekState>((set, get) => ({
     if (windows.length >= PEEK_MAX_WINDOWS) {
       const victim = windows.find((w) => w.locked === null);
       if (!victim) {
-        useUiStore.getState().showToast("窗口太多了，先关掉几个", "warn");
+        useUiStore.getState().showToast('窗口太多了，先关掉几个', 'warn');
         return null;
       }
       windows = windows.filter((w) => w.id !== victim.id);
@@ -174,13 +167,13 @@ export const usePeekStore = create<PeekState>((set, get) => ({
           .getState()
           .showToast(`3D 窗口最多 ${PEEK_MAX_WEBGL} 个，关掉了最早打开的那个（锁定的不会被关）`);
       } else {
-        useUiStore.getState().showToast("3D 窗口太多了，先关掉几个", "warn");
-        view = "value";
+        useUiStore.getState().showToast('3D 窗口太多了，先关掉几个', 'warn');
+        view = 'value';
         viewAuto = false;
       }
     }
     const taken = new Set(windows.map((w) => w.id));
-    const id = newLocalId("peek", taken);
+    const id = newLocalId('peek', taken);
     const z = state.topZ + 1;
     const created: PeekWindow = {
       id,
@@ -225,9 +218,7 @@ export const usePeekStore = create<PeekState>((set, get) => ({
   move(id, screen) {
     set({
       windows: get().windows.map((w) =>
-        w.id === id && (w.screen.x !== screen.x || w.screen.y !== screen.y)
-          ? { ...w, screen }
-          : w,
+        w.id === id && (w.screen.x !== screen.x || w.screen.y !== screen.y) ? { ...w, screen } : w,
       ),
     });
   },
@@ -244,12 +235,8 @@ export const usePeekStore = create<PeekState>((set, get) => ({
     const windows = get().windows;
     const win = windows.find((w) => w.id === id);
     if (!win) return;
-    if (
-      isWebglView(view) &&
-      !isWebglView(win.view) &&
-      countWebgl(windows, id) >= PEEK_MAX_WEBGL
-    ) {
-      useUiStore.getState().showToast("3D 窗口太多了，先关掉几个", "warn");
+    if (isWebglView(view) && !isWebglView(win.view) && countWebgl(windows, id) >= PEEK_MAX_WEBGL) {
+      useUiStore.getState().showToast('3D 窗口太多了，先关掉几个', 'warn');
       return;
     }
     if (win.view === view && !win.viewAuto) return;
@@ -262,11 +249,7 @@ export const usePeekStore = create<PeekState>((set, get) => ({
     const windows = get().windows;
     const win = windows.find((w) => w.id === id);
     if (!win || win.view === view) return;
-    if (
-      isWebglView(view) &&
-      !isWebglView(win.view) &&
-      countWebgl(windows, id) >= PEEK_MAX_WEBGL
-    ) {
+    if (isWebglView(view) && !isWebglView(win.view) && countWebgl(windows, id) >= PEEK_MAX_WEBGL) {
       return;
     }
     set({ windows: windows.map((w) => (w.id === id ? { ...w, view } : w)) });

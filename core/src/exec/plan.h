@@ -16,8 +16,8 @@
 namespace lyflow::exec {
 
 struct InputBinding {
-  std::string port;        ///< 本节点的输入端口名
-  int fromNode = -1;       ///< 上游在 Plan::nodes 里的下标
+  std::string port;  ///< 本节点的输入端口名
+  int fromNode = -1; ///< 上游在 Plan::nodes 里的下标
   std::string fromPort;
   bool acceptsError = false;
   bool lazy = false;
@@ -25,10 +25,10 @@ struct InputBinding {
 
 struct PlanNode {
   std::string id;
-  const OperatorDesc* op = nullptr;   ///< 未知算子时为 nullptr
-  int level = 0;                      ///< 同层可并行，就绪队列按它排序
-  bool valid = true;                  ///< false = 该节点自身校验没过，执行时直接标 error
-  bool bypass = false;                ///< 静音：不调 compute，输出从输入透传（E5）
+  const OperatorDesc* op = nullptr; ///< 未知算子时为 nullptr
+  int level = 0;                    ///< 同层可并行，就绪队列按它排序
+  bool valid = true;                ///< false = 该节点自身校验没过，执行时直接标 error
+  bool bypass = false;              ///< 静音：不调 compute，输出从输入透传（E5）
   /// 只被惰性端口依赖：不进初始就绪队列，被 demand 时才调度（ADR-0016）。
   bool deferred = false;
   /// 该节点的输出由 RunOptions::inputs 注入：不调 compute（ADR-0017）。
@@ -40,8 +40,8 @@ struct PlanNode {
   bool isolated = false;
   /// 在 BuildOptions::force 里（按路径前缀展开后）：跳过缓存查找、强制执行、结果覆盖写回（修订一 V1）。
   bool forced = false;
-  std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
-  ParamMap params;                    ///< 已合并默认值（迁移之后的）
+  std::vector<Diagnostic> errors; ///< 该节点的全部阻塞性诊断（D5）
+  ParamMap params;                ///< 已合并默认值（迁移之后的）
   /// 图里**显式写了**的参数键，**跑完迁移之后**的那一份。`lyflow params` 的
   /// source 靠它分开「用户填的」与「合进来的默认值」。不能回头去看 RawNode：
   /// 迁移会改名（v1 的 count 在 v2 叫 keepCount），那时两边对不上。
@@ -75,9 +75,9 @@ struct PlanOutput {
 
 struct Plan {
   std::string runId;
-  std::vector<PlanNode> nodes;  ///< 拓扑序
+  std::vector<PlanNode> nodes; ///< 拓扑序
   std::vector<PlanOutput> outputs;
-  bool ok = false;              ///< false = 整图级失败（有环 / 解析失败 / 目标不存在）
+  bool ok = false; ///< false = 整图级失败（有环 / 解析失败 / 目标不存在）
 };
 
 struct BuildOptions {
@@ -124,4 +124,4 @@ std::string canonicalParamsJson(const ParamMap& params);
 const std::string& effectiveType(const std::unordered_map<std::string, std::string>& resolved,
                                  const std::string& port, const std::string& declared);
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

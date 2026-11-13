@@ -13,10 +13,11 @@ namespace lyflow::test {
 
 void registerE2eOps(Registry& r) {
   const char* flag = std::getenv("LYFLOW_TEST_OPS");
-  if (flag == nullptr || std::strcmp(flag, "1") != 0) return;
+  if (flag == nullptr || std::strcmp(flag, "1") != 0)
+    return;
   registerParamShowcase(r);
   registerImageTestOps(r);
   registerStallTestOp(r);
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

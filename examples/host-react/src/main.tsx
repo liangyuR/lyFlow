@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from "react";
-import ReactDOM from "react-dom/client";
+import React, { useEffect, useState } from 'react';
+import ReactDOM from 'react-dom/client';
 
-import { HttpTransport, LyFlowEditor, useUiStore } from "@lyflow/editor";
+import { HttpTransport, LyFlowEditor, useUiStore } from '@lyflow/editor';
 
-import { installHostBridge } from "./bridge";
-import "./host.css";
+import { installHostBridge } from './bridge';
+import './host.css';
 
-const API = import.meta.env["VITE_LYFLOW_API"] ?? "http://127.0.0.1:8787";
-const TOKEN = import.meta.env["VITE_LYFLOW_TOKEN"] ?? "";
+const API = import.meta.env['VITE_LYFLOW_API'] ?? 'http://127.0.0.1:8787';
+const TOKEN = import.meta.env['VITE_LYFLOW_TOKEN'] ?? '';
 
 const transport = new HttpTransport(API, TOKEN || undefined);
 
@@ -21,7 +21,7 @@ function ReactInstanceProbe() {
     setOk(true);
   }, [depth]);
   return (
-    <span data-testid="host-probe" data-hook-ok={ok ? "1" : "0"} data-react={React.version}>
+    <span data-testid="host-probe" data-hook-ok={ok ? '1' : '0'} data-react={React.version}>
       React {React.version} · 层级 {depth}
     </span>
   );
@@ -29,7 +29,7 @@ function ReactInstanceProbe() {
 
 function Host() {
   const [dirty, setDirty] = useState(false);
-  const [name, setName] = useState("未命名");
+  const [name, setName] = useState('未命名');
   // 宿主可以关掉画布动效（animations prop）。放一个开关在这里，既是示范也是 e2e:http 的入口
   const [animations, setAnimations] = useState(true);
 
@@ -39,7 +39,7 @@ function Host() {
         <strong>宿主示例</strong>
         <span data-testid="host-doc">
           {name}
-          {dirty ? " *" : ""}
+          {dirty ? ' *' : ''}
         </span>
         <span data-testid="host-api">{API}</span>
         <ReactInstanceProbe />
@@ -59,7 +59,7 @@ function Host() {
           animations={animations}
           onDocChange={(doc, isDirty) => {
             setDirty(isDirty);
-            setName(doc.name ?? "未命名");
+            setName(doc.name ?? '未命名');
           }}
         />
       </div>
@@ -73,8 +73,8 @@ declare global {
   }
 }
 
-const root = document.getElementById("root");
-if (!root) throw new Error("找不到 #root");
+const root = document.getElementById('root');
+if (!root) throw new Error('找不到 #root');
 
 installHostBridge(transport);
 

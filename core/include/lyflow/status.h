@@ -72,15 +72,15 @@ struct Issue {
 
   static Issue error(std::string code, std::string message, std::string paramPath = {},
                      std::string portName = {}) {
-    return Issue{Severity::Error, Status::Error(Phase::Validate, std::move(code),
-                                                std::move(message), std::move(paramPath),
-                                                std::move(portName))};
+    return Issue{Severity::Error,
+                 Status::Error(Phase::Validate, std::move(code), std::move(message),
+                               std::move(paramPath), std::move(portName))};
   }
   static Issue warning(std::string code, std::string message, std::string paramPath = {},
                        std::string portName = {}) {
-    return Issue{Severity::Warning, Status::Error(Phase::Validate, std::move(code),
-                                                  std::move(message), std::move(paramPath),
-                                                  std::move(portName))};
+    return Issue{Severity::Warning,
+                 Status::Error(Phase::Validate, std::move(code), std::move(message),
+                               std::move(paramPath), std::move(portName))};
   }
 };
 
@@ -107,7 +107,7 @@ struct Diagnostic {
 
 /// 校验/编译的产物。顺序即产生顺序，前端按顺序展示。
 class Diagnostics {
- public:
+public:
   void add(std::string nodeId, Status status, Severity severity = Severity::Error) {
     items_.push_back(Diagnostic{std::move(nodeId), severity, std::move(status), nullptr});
   }
@@ -133,7 +133,8 @@ class Diagnostics {
 
   bool hasErrors() const {
     for (const auto& d : items_) {
-      if (d.severity == Severity::Error) return true;
+      if (d.severity == Severity::Error)
+        return true;
     }
     return false;
   }
@@ -147,8 +148,8 @@ class Diagnostics {
   /// 序列化成 JSON 数组。lyflow_validate 的返回值就是它。
   std::string toJson() const;
 
- private:
+private:
   std::vector<Diagnostic> items_;
 };
 
-}  // namespace lyflow
+} // namespace lyflow

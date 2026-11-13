@@ -2,9 +2,9 @@
 // 在同一片底图的坐标系里（locate_template：一个模板槽的四个框 = 一组，底图是那个槽的左右模板）。
 // 视图一次只画一组，切换条列出所有组；Inspector 里所选组所在的参数组展开。纯逻辑，不碰 DOM。
 
-import type { GraphNode } from "../types/graph";
-import type { OperatorDesc, Param } from "../types/manifest";
-import { effectiveParams, isVisible } from "./params";
+import type { GraphNode } from '../types/graph';
+import type { OperatorDesc, Param } from '../types/manifest';
+import { effectiveParams, isVisible } from './params';
 
 export interface RoiFrame {
   /** 组的标识：底图 = `<dir 参数>|<files 参数…>`，数据坐标系 = "data"。 */
@@ -21,19 +21,19 @@ export interface RoiFrame {
 
 export function frameKeyOf(p: Param): string {
   const b = p.roiBackdrop;
-  if (!b) return "data";
-  if (b.inputs && b.inputs.length > 0) return `inputs|${b.inputs.join(",")}`;
-  return `${b.dir ?? ""}|${(b.files ?? []).join(",")}`;
+  if (!b) return 'data';
+  if (b.inputs && b.inputs.length > 0) return `inputs|${b.inputs.join(',')}`;
+  return `${b.dir ?? ''}|${(b.files ?? []).join(',')}`;
 }
 
 function joinPath(dir: string, file: string): string {
-  if (/^[a-zA-Z]:[\\/]/.test(file) || file.startsWith("/") || file.startsWith("\\\\")) return file;
+  if (/^[a-zA-Z]:[\\/]/.test(file) || file.startsWith('/') || file.startsWith('\\\\')) return file;
   return /[\\/]$/.test(dir) ? dir + file : `${dir}/${file}`;
 }
 
 /** 点云上的框（米 / 毫米，画在 2D 剖面里）。像素框另走 imageRoiParams —— 两种坐标系不混。 */
 function isRoi(p: Param): boolean {
-  return p.semantic === "roi" && p.type === "vec4f" && p.unit !== "px";
+  return p.semantic === 'roi' && p.type === 'vec4f' && p.unit !== 'px';
 }
 
 /** 像素框（unit = px，docs/image-plan.md 阶段 3）：画在节点输入的那张图上，主预览的图像模式里拖。
@@ -42,7 +42,7 @@ export function imageRoiParams(op: OperatorDesc | undefined, node: GraphNode | u
   if (!op || !node) return [];
   const eff = effectiveParams(op, node);
   return op.params.filter(
-    (p) => p.semantic === "roi" && p.type === "vec4f" && p.unit === "px" && isVisible(p, eff),
+    (p) => p.semantic === 'roi' && p.type === 'vec4f' && p.unit === 'px' && isVisible(p, eff),
   );
 }
 
@@ -77,25 +77,28 @@ export function roiFramesOf(op: OperatorDesc | undefined, node: GraphNode | unde
 
 function frameLabel(p: Param, eff: Record<string, unknown>): string {
   const b = p.roiBackdrop;
-  if (!b) return "";
-  const base = b.label ?? p.group ?? "";
-  const extra = b.labelParam ? String(eff[b.labelParam] ?? "") : "";
+  if (!b) return '';
+  const base = b.label ?? p.group ?? '';
+  const extra = b.labelParam ? String(eff[b.labelParam] ?? '') : '';
   return extra ? (base ? `${base} · ${extra}` : extra) : base;
 }
 
 function backdropFiles(p: Param, eff: Record<string, unknown>): string[] {
   const b = p.roiBackdrop;
   if (!b || !b.dir) return [];
-  const dir = String(eff[b.dir] ?? "");
+  const dir = String(eff[b.dir] ?? '');
   if (!dir) return [];
   return (b.files ?? [])
-    .map((f) => String(eff[f] ?? ""))
+    .map((f) => String(eff[f] ?? ''))
     .filter(Boolean)
     .map((f) => joinPath(dir, f));
 }
 
 /** 当前该画哪一组：选过且还在（槽还启用着）就是它，否则第一组。 */
-export function pickFrame(frames: readonly RoiFrame[], selected: string | undefined): RoiFrame | null {
+export function pickFrame(
+  frames: readonly RoiFrame[],
+  selected: string | undefined,
+): RoiFrame | null {
   return frames.find((f) => f.key === selected) ?? frames[0] ?? null;
 }
 
@@ -145,7 +148,7 @@ export interface LabelSpot {
   dx: number;
   dy: number;
   /** above = 框上方（默认）、inside = 框内左上、stack = 上方再错开几行、below = 框下方。 */
-  where: "above" | "inside" | "stack" | "below";
+  where: 'above' | 'inside' | 'stack' | 'below';
 }
 
 interface Rect {
@@ -163,7 +166,7 @@ function overlaps(a: Rect, b: Rect): boolean {
  *  「上方错开一到三行」「框下方」，取第一个与已放好的标签都不相交的；都不行就退回上方。
  *  相邻的框（Seam Right 挨着 Target）就这样一个在上、一个在内侧，或者上下错开。 */
 export function placeLabels(boxes: readonly LabelBox[]): LabelSpot[] {
-  const spots: LabelSpot[] = boxes.map(() => ({ dx: -1, dy: 0, where: "above" }));
+  const spots: LabelSpot[] = boxes.map(() => ({ dx: -1, dy: 0, where: 'above' }));
   const order = boxes.map((_, i) => i).sort((a, b) => boxes[a]!.left - boxes[b]!.left || a - b);
   const placed: Rect[] = [];
   for (const i of order) {
@@ -171,12 +174,12 @@ export function placeLabels(boxes: readonly LabelBox[]): LabelSpot[] {
     const w = b.labelWidth;
     const h = b.labelHeight;
     const tries: LabelSpot[] = [
-      { dx: -1, dy: -h, where: "above" },
-      { dx: 1, dy: 1, where: "inside" },
-      { dx: -1, dy: -h - (h + 1), where: "stack" },
-      { dx: -1, dy: -h - 2 * (h + 1), where: "stack" },
-      { dx: -1, dy: -h - 3 * (h + 1), where: "stack" },
-      { dx: -1, dy: b.height, where: "below" },
+      { dx: -1, dy: -h, where: 'above' },
+      { dx: 1, dy: 1, where: 'inside' },
+      { dx: -1, dy: -h - (h + 1), where: 'stack' },
+      { dx: -1, dy: -h - 2 * (h + 1), where: 'stack' },
+      { dx: -1, dy: -h - 3 * (h + 1), where: 'stack' },
+      { dx: -1, dy: b.height, where: 'below' },
     ];
     const rectOf = (s: LabelSpot): Rect => ({
       x0: b.left + s.dx,
@@ -186,7 +189,7 @@ export function placeLabels(boxes: readonly LabelBox[]): LabelSpot[] {
     });
     const fits = (s: LabelSpot) => {
       // 框内放不下（框比标签还窄/矮）就不算这一格
-      if (s.where === "inside" && (w + 2 > b.width || h + 2 > b.height)) return false;
+      if (s.where === 'inside' && (w + 2 > b.width || h + 2 > b.height)) return false;
       const r = rectOf(s);
       return placed.every((q) => !overlaps(r, q));
     };

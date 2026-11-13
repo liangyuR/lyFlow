@@ -1,11 +1,11 @@
 // 一级图像按段取齐（lib/imageFetch）：桥接层按 16 MB 收行数，大图要分几段取。
 // 这条路以前没有测试覆盖（image-acceptance「留到以后」）—— 真 app 里的图都一段取完。这里用假的取数函数，
 // 每段只给 4 行，验拼接位置、类型化数组的位深与「照帧头的 rowCount 接着要」。
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 
-import { FetchAbandoned, fetchImageLevel } from "../src/lib/imageFetch.ts";
-import { IMAGE_HEADER_BYTES, IMAGE_MAGIC } from "../src/types/execution.ts";
+import { FetchAbandoned, fetchImageLevel } from '../src/lib/imageFetch.ts';
+import { IMAGE_HEADER_BYTES, IMAGE_MAGIC } from '../src/types/execution.ts';
 
 /** 一段 LYIM 载荷：值 = 行号 × 100 + 列号 × channels + 通道（与像素位置一一对应，拼错一行就对不上）。 */
 function segment({ width, height, channels, depth, level = 0 }, rowOffset, rowCount) {
@@ -14,9 +14,20 @@ function segment({ width, height, channels, depth, level = 0 }, rowOffset, rowCo
   const padded = (rows * rowBytes + 3) & ~3;
   const buffer = new ArrayBuffer(IMAGE_HEADER_BYTES + padded);
   const head = new DataView(buffer);
-  [IMAGE_MAGIC, width, height, channels, depth, level, width, height, rowOffset, rows, rowBytes, 0].forEach((v, i) =>
-    head.setUint32(i * 4, v, true),
-  );
+  [
+    IMAGE_MAGIC,
+    width,
+    height,
+    channels,
+    depth,
+    level,
+    width,
+    height,
+    rowOffset,
+    rows,
+    rowBytes,
+    0,
+  ].forEach((v, i) => head.setUint32(i * 4, v, true));
   const n = rows * width * channels;
   const Typed = depth === 1 ? Uint8Array : depth === 2 ? Uint16Array : Float32Array;
   const px = new Typed(buffer, IMAGE_HEADER_BYTES, n);
@@ -44,26 +55,43 @@ function fakeGet(spec, maxRows) {
   return { get, asked };
 }
 
-test("图像分段载荷：u8/u16/f32逐通道拼接、按帧头行数续取及实际级别回退", async () => {
+test('图像分段载荷：u8/u16/f32逐通道拼接、按帧头行数续取及实际级别回退', async () => {
   for (const [name, spec, maxRows, requestedLevel, rows] of [
-    ["u8单通道分三段", { width: 5, height: 10, channels: 1, depth: 1 }, 4, 0, [0, 4, 8]],
-    ["u16三通道分三段", { width: 3, height: 10, channels: 3, depth: 2 }, 4, 0, [0, 4, 8]],
-    ["f32单通道分三段", { width: 4, height: 10, channels: 1, depth: 4 }, 4, 0, [0, 4, 8]],
-    ["一段取完并采用帧头级别", { width: 2, height: 3, channels: 1, depth: 1, level: 7 }, 100, 9, [0]],
+    ['u8单通道分三段', { width: 5, height: 10, channels: 1, depth: 1 }, 4, 0, [0, 4, 8]],
+    ['u16三通道分三段', { width: 3, height: 10, channels: 3, depth: 2 }, 4, 0, [0, 4, 8]],
+    ['f32单通道分三段', { width: 4, height: 10, channels: 1, depth: 4 }, 4, 0, [0, 4, 8]],
+    [
+      '一段取完并采用帧头级别',
+      { width: 2, height: 3, channels: 1, depth: 1, level: 7 },
+      100,
+      9,
+      [0],
+    ],
   ]) {
     const { get, asked } = fakeGet(spec, maxRows);
-    const img = await fetchImageLevel(get, "r", "n", "image", requestedLevel);
+    const img = await fetchImageLevel(get, 'r', 'n', 'image', requestedLevel);
     assert.deepEqual(
-      { size: [img.width, img.height, img.channels], rows: asked.map((a) => a.row), level: img.level, firstLevel: asked[0].level, type: img.pixels.constructor.name },
-      { size: [spec.width, spec.height, spec.channels], rows, level: spec.level ?? 0, firstLevel: requestedLevel,
-        type: spec.depth === 1 ? "Uint8Array" : spec.depth === 2 ? "Uint16Array" : "Float32Array" },
+      {
+        size: [img.width, img.height, img.channels],
+        rows: asked.map((a) => a.row),
+        level: img.level,
+        firstLevel: asked[0].level,
+        type: img.pixels.constructor.name,
+      },
+      {
+        size: [spec.width, spec.height, spec.channels],
+        rows,
+        level: spec.level ?? 0,
+        firstLevel: requestedLevel,
+        type: spec.depth === 1 ? 'Uint8Array' : spec.depth === 2 ? 'Uint16Array' : 'Float32Array',
+      },
       name,
     );
     assert.deepEqual(Array.from(img.pixels), expected(spec), name);
   }
 });
 
-test("作废了就不再要后面几段：取第一段之后作废，抛 FetchAbandoned、只要过一次", async () => {
+test('作废了就不再要后面几段：取第一段之后作废，抛 FetchAbandoned、只要过一次', async () => {
   // review 修正：从预览切回正式结果时，旧的那次取图（二十兆像素的 RGB 原图要四段）不该把剩下几段也要完
   const spec = { width: 5, height: 10, channels: 1, depth: 1 };
   const { get, asked } = fakeGet(spec, 4);
@@ -74,9 +102,9 @@ test("作废了就不再要后面几段：取第一段之后作废，抛 FetchAb
       gone = true;
       return buf;
     },
-    "r",
-    "n",
-    "image",
+    'r',
+    'n',
+    'image',
     0,
     () => gone,
   );

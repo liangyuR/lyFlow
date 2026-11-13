@@ -1,5 +1,5 @@
-import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc, SubgraphDef } from "../types/graph";
+import type { CoreInfo, OperatorManifestBundle } from '../types/manifest';
+import type { GraphDoc, SubgraphDef } from '../types/graph';
 import type {
   CacheStats,
   EvictResult,
@@ -8,7 +8,7 @@ import type {
   OutputInfo,
   RunOutputs,
   PlanNode,
-} from "../types/execution";
+} from '../types/execution';
 import type {
   BackupStatus,
   CoreReloadFailed,
@@ -23,7 +23,7 @@ import type {
   Transport,
   TransportKind,
   Unlisten,
-} from "./types";
+} from './types';
 
 /** 浏览器模式下所有执行相关的入口都走这里。 */
 function browserOnly(what: string): never {
@@ -33,10 +33,10 @@ function browserOnly(what: string): never {
 /** 只读的静态快照：读一份 dump 出来的 manifest，什么都跑不了。
  *  没有后端时也能把编辑器渲染出来（宿主集成的第一步）。 */
 export class StaticTransport implements Transport {
-  readonly kind: TransportKind = "static";
+  readonly kind: TransportKind = 'static';
   readonly manifestUrl: string;
 
-  constructor(manifestUrl = "/manifest.dev.json") {
+  constructor(manifestUrl = '/manifest.dev.json') {
     this.manifestUrl = manifestUrl;
   }
 
@@ -53,7 +53,7 @@ export class StaticTransport implements Transport {
   async getCoreInfo(): Promise<CoreInfo> {
     const m = await this.getManifest();
     return {
-      version: (m.generatedBy ?? "unknown").split("/")[1] ?? "unknown",
+      version: (m.generatedBy ?? 'unknown').split('/')[1] ?? 'unknown',
       operatorCount: m.operators.length,
       typeCount: m.types.length,
       generation: 0,
@@ -61,50 +61,50 @@ export class StaticTransport implements Transport {
     };
   }
   async saveGraph(): Promise<void> {
-    throw new Error("静态模式不能存盘，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式不能存盘，请用 Tauri 壳或 HttpTransport');
   }
   async loadGraph(): Promise<LoadedGraph> {
-    throw new Error("静态模式不能读盘，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式不能读盘，请用 Tauri 壳或 HttpTransport');
   }
   async validateGraph(): Promise<GraphDiagnostic[]> {
-    return browserOnly("做权威校验");
+    return browserOnly('做权威校验');
   }
   async planGraph(): Promise<PlanNode[]> {
-    return browserOnly("编译计划");
+    return browserOnly('编译计划');
   }
   async clearCache(): Promise<void> {
-    return browserOnly("清缓存");
+    return browserOnly('清缓存');
   }
   async evictCache(): Promise<EvictResult> {
-    return browserOnly("清节点缓存");
+    return browserOnly('清节点缓存');
   }
   async cacheStats(): Promise<CacheStats> {
-    return browserOnly("看缓存统计");
+    return browserOnly('看缓存统计');
   }
   async runGraph(_doc: GraphDoc, _graphPath: string | null, options?: RunOptions): Promise<string> {
     // 单节点运行（docs/node-run-plan.md）同样要 core：说清楚是哪个入口被拦下的
-    return browserOnly(options?.isolate?.length ? "只运行单个节点" : "运行");
+    return browserOnly(options?.isolate?.length ? '只运行单个节点' : '运行');
   }
   async cancelRun(): Promise<void> {
-    return browserOnly("运行");
+    return browserOnly('运行');
   }
   async getOutputInfo(): Promise<OutputInfo[]> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async getRunOutputs(): Promise<RunOutputs> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async getOutputCloud(): Promise<ArrayBuffer> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async getOutputTensor(): Promise<ArrayBuffer> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async getOutputIndices(): Promise<ArrayBuffer> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async getOutputImage(): Promise<ArrayBuffer> {
-    return browserOnly("取运行结果");
+    return browserOnly('取运行结果');
   }
   async onExecutionEvent(_cb: (e: ExecutionEvent) => void): Promise<Unlisten> {
     // 这几个不抛：界面启动时无条件订阅，静态模式下静默给个空的取消函数
@@ -133,7 +133,7 @@ export class StaticTransport implements Transport {
     return { exists: false, newer: false, backupModified: null, fileModified: null };
   }
   async readBackup(): Promise<LoadedGraph> {
-    throw new Error("静态模式不能读盘，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式不能读盘，请用 Tauri 壳或 HttpTransport');
   }
   async discardBackup(): Promise<void> {
     /* 同上 */
@@ -148,38 +148,38 @@ export class StaticTransport implements Transport {
     return res.text();
   }
   async writeRecipeFile(): Promise<void> {
-    throw new Error("静态模式只读：配方文件不能写，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式只读：配方文件不能写，请用 Tauri 壳或 HttpTransport');
   }
   async deleteRecipeFile(): Promise<void> {
-    throw new Error("静态模式只读：配方文件不能删，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式只读：配方文件不能删，请用 Tauri 壳或 HttpTransport');
   }
   async renameRecipeFile(): Promise<void> {
-    throw new Error("静态模式只读：配方文件不能改名，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式只读：配方文件不能改名，请用 Tauri 壳或 HttpTransport');
   }
   async writeFileBytes(): Promise<void> {
-    throw new Error("静态模式不能写盘，请用 Tauri 壳或 HttpTransport");
+    throw new Error('静态模式不能写盘，请用 Tauri 壳或 HttpTransport');
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     return { dirs: [], count: 0, problems: [] };
   }
   async getLibrarySettings(): Promise<LibrarySettings> {
     // 静态宿主没有库目录
-    return { defaultDir: "", extraDirs: [], envDirs: [], editable: false };
+    return { defaultDir: '', extraDirs: [], envDirs: [], editable: false };
   }
   async setLibraryDirs(): Promise<LibraryRefresh> {
-    return browserOnly("设置库目录");
+    return browserOnly('设置库目录');
   }
   async getLibraryDefinition(): Promise<SubgraphDef | null> {
     // 静态宿主没有库目录，也就没有库算子
     return null;
   }
   async refreshLibrary(): Promise<LibraryRefresh> {
-    return browserOnly("刷新库算子");
+    return browserOnly('刷新库算子');
   }
   async saveAsLibrary(): Promise<LibraryStatus> {
-    return browserOnly("保存到库");
+    return browserOnly('保存到库');
   }
   async importGraph(): Promise<GraphDoc> {
-    return browserOnly("导入");
+    return browserOnly('导入');
   }
 }

@@ -1,9 +1,9 @@
 // Bundle 的字段表（m8-plan L17）：先列字段，点进一个字段再按字段类型复用现有视图
 // （点云 / 框 / 下标 …）。字段的值从 `<port>.<field>` 那一项输出统计里取，与取数同一套寻址。
 
-import { formatOutputValue } from "../../lib/outputs";
-import type { PeekSource } from "../../lib/peekSource";
-import { useManifestStore } from "../../store/manifest";
+import { formatOutputValue } from '../../lib/outputs';
+import type { PeekSource } from '../../lib/peekSource';
+import { useManifestStore } from '../../store/manifest';
 
 export function FieldsView({ src, onPick }: { src: PeekSource; onPick: (field: string) => void }) {
   const typesByName = useManifestStore((s) => s.typesByName);
@@ -24,7 +24,7 @@ export function FieldsView({ src, onPick }: { src: PeekSource; onPick: (field: s
       <ul className="peek-fields__list">
         {bundle.fields.map((f) => {
           const stat = src.outputs?.find((o) => o.port === `${port}.${f.name}`);
-          const color = typesByName.get(f.type)?.color ?? "#6b7280";
+          const color = typesByName.get(f.type)?.color ?? '#6b7280';
           return (
             <li key={f.name}>
               <button
@@ -44,8 +44,8 @@ export function FieldsView({ src, onPick }: { src: PeekSource; onPick: (field: s
                   {stat
                     ? stat.value
                       ? formatOutputValue(stat)
-                      : `${stat.elementCount.toLocaleString()} ${f.type === "PointCloud" ? "点" : "个"}`
-                    : "—"}
+                      : `${stat.elementCount.toLocaleString()} ${f.type === 'PointCloud' ? '点' : '个'}`
+                    : '—'}
                 </span>
                 <span className="peek-fields__go" aria-hidden>
                   ›

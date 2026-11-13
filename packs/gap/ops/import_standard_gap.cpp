@@ -18,13 +18,13 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr const char* kSafe =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+constexpr const char* kSafe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 
 std::string safeId(const std::string& text) {
   std::string out;
   out.reserve(text.size());
-  for (char c : text) out.push_back(std::string(kSafe).find(c) == std::string::npos ? '_' : c);
+  for (char c : text)
+    out.push_back(std::string(kSafe).find(c) == std::string::npos ? '_' : c);
   return out;
 }
 
@@ -37,7 +37,8 @@ Status badParam(const std::string& message) {
 }
 
 YAML::Node child(const YAML::Node& node, const char* key) {
-  if (!node || !node.IsMap()) return YAML::Node(YAML::NodeType::Undefined);
+  if (!node || !node.IsMap())
+    return YAML::Node(YAML::NodeType::Undefined);
   return node[key];
 }
 
@@ -67,12 +68,14 @@ using Roi = std::array<double, 4>;
 
 bool roiList(const YAML::Node& node, Roi* out, std::string* problem) {
   *out = {0.0, 0.0, 0.0, 0.0};
-  if (!present(node)) return true;
+  if (!present(node))
+    return true;
   if (!node.IsSequence() || node.size() != 4) {
     *problem = "ROI 必须是四个数";
     return false;
   }
-  for (std::size_t i = 0; i < 4; ++i) (*out)[i] = node[i].as<double>(0.0);
+  for (std::size_t i = 0; i < 4; ++i)
+    (*out)[i] = node[i].as<double>(0.0);
   return true;
 }
 
@@ -87,18 +90,21 @@ std::string opVersionOf(const char* op) {
 }
 
 class Builder {
- public:
+public:
   std::string node(const std::string& id, const char* op, nlohmann::json params, int column,
                    int row, const std::string& title) {
     nlohmann::json entry;
     entry["id"] = id;
     entry["op"] = op;
-    if (const std::string version = opVersionOf(op); !version.empty()) entry["opVersion"] = version;
+    if (const std::string version = opVersionOf(op); !version.empty())
+      entry["opVersion"] = version;
     nlohmann::json ui;
     ui["position"] = nlohmann::json{{"x", column * 280}, {"y", row * 130}};
-    if (!title.empty()) ui["title"] = title;
+    if (!title.empty())
+      ui["title"] = title;
     entry["ui"] = std::move(ui);
-    if (!params.is_null() && !params.empty()) entry["params"] = std::move(params);
+    if (!params.is_null() && !params.empty())
+      entry["params"] = std::move(params);
     nodes.push_back(std::move(entry));
     return id;
   }
@@ -143,16 +149,20 @@ enum class Mode { Template, Model, Auto };
 // 就不必在 baseDir 边上放一个 setting.yml。真实的 StandardGap.yml 没有这个键，行为不变。
 YAML::Node modelRoiSetting(const fs::path& baseDir, const YAML::Node& cfg) {
   const YAML::Node inline_ = child(cfg, "model_roi");
-  if (present(inline_)) return inline_;
+  if (present(inline_))
+    return inline_;
   for (const fs::path& dir : {baseDir, baseDir.parent_path()}) {
-    if (dir.empty()) continue;
+    if (dir.empty())
+      continue;
     const fs::path candidate = dir / "setting.yml";
     std::error_code ec;
-    if (!fs::is_regular_file(candidate, ec)) continue;
+    if (!fs::is_regular_file(candidate, ec))
+      continue;
     try {
       const YAML::Node root = YAML::LoadFile(candidate.string());
       const YAML::Node section = child(root, "model_roi");
-      if (present(section)) return section;
+      if (present(section))
+        return section;
     } catch (const std::exception&) {
       continue;
     }
@@ -164,9 +174,11 @@ bool uniqueOnnx(const fs::path& baseDir, fs::path* out) {
   std::error_code ec;
   std::vector<fs::path> hits;
   for (const auto& entry : fs::directory_iterator(baseDir, ec)) {
-    if (entry.path().extension() == ".onnx") hits.push_back(entry.path());
+    if (entry.path().extension() == ".onnx")
+      hits.push_back(entry.path());
   }
-  if (hits.size() != 1) return false;
+  if (hits.size() != 1)
+    return false;
   *out = hits.front();
   return true;
 }
@@ -176,19 +188,12 @@ struct Config {
   // YAML::Node 的赋值是「把值写进那个节点」而不是换绑，对缺席的键（zombie 节点）会抛 ——
   // 所以一律在构造时拷一次，之后只读。
   explicit Config(const YAML::Node& cfg)
-      : common(child(cfg, "common_settings")),
-        flush(child(cfg, "flush")),
-        gap(child(cfg, "gap")),
-        align(child(cfg, "align")),
-        icp(child(align, "ICP")),
-        robustness(child(align, "robustness")),
-        trust(child(robustness, "trust_region")),
-        filter(child(common, "filter")),
-        guard(child(common, "camera_guard")),
-        roll(child(common, "roll_anchored_crop")),
-        band(child(gap, "center_band")),
-        radius(child(gap, "radius")),
-        weak(child(gap, "weak_fit")) {}
+      : common(child(cfg, "common_settings")), flush(child(cfg, "flush")), gap(child(cfg, "gap")),
+        align(child(cfg, "align")), icp(child(align, "ICP")),
+        robustness(child(align, "robustness")), trust(child(robustness, "trust_region")),
+        filter(child(common, "filter")), guard(child(common, "camera_guard")),
+        roll(child(common, "roll_anchored_crop")), band(child(gap, "center_band")),
+        radius(child(gap, "radius")), weak(child(gap, "weak_fit")) {}
 
   const YAML::Node common, flush, gap, align, icp, robustness, trust, filter, guard, roll, band,
       radius, weak;
@@ -199,7 +204,7 @@ struct Config {
   std::string modelPath;
   std::string refType;
   std::vector<Candidate> candidates;
-  Roi top[4]{};  // flushBase / flushRef / gapLeft / gapRight
+  Roi top[4]{}; // flushBase / flushRef / gapLeft / gapRight
   /// 基准件在缝的哪一侧：由框推出（m8-plan L7），flush.base_side 不再参与。
   bool datumRight = false;
   bool usingRemoval = false;
@@ -223,7 +228,8 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
   c.sampleId = baseDir.filename().string();
 
   const std::string segMode = textOr(c.common, "seg_mode", "ROI");
-  if (segMode != "ROI") return badInput("只支持 seg_mode: ROI，这份配置是 '" + segMode + "'");
+  if (segMode != "ROI")
+    return badInput("只支持 seg_mode: ROI，这份配置是 '" + segMode + "'");
   if (!boolOr(c.align, "align_cloud", false)) {
     return badInput("align_cloud 为 false 时是 label 模式，不产生测量结果");
   }
@@ -248,11 +254,11 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
     return badInput("flush.base_type 目前只支持直线类，拿到 '" + baseType + "'");
   }
   if (c.refType != "line end" && c.refType != "selected point" && c.refType != "nearest point") {
-    return badInput(
-        "flush.ref_type 目前只支持 line end / selected point / nearest point，拿到 '" + c.refType +
-        "'");
+    return badInput("flush.ref_type 目前只支持 line end / selected point / nearest point，拿到 '" +
+                    c.refType + "'");
   }
-  if (leftType != "circle" || rightType != "circle") return badInput("gap 两侧目前只支持 circle");
+  if (leftType != "circle" || rightType != "circle")
+    return badInput("gap 两侧目前只支持 circle");
 
   const YAML::Node setting = modelRoiSetting(baseDir, cfg);
   if (mode == Mode::Auto) {
@@ -262,12 +268,12 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
     c.modelPath = textOr(setting, "model_path", "");
     if (c.modelPath.empty()) {
       fs::path found;
-      if (uniqueOnnx(baseDir, &found)) c.modelPath = found.string();
+      if (uniqueOnnx(baseDir, &found))
+        c.modelPath = found.string();
     }
     if (c.modelPath.empty()) {
-      return badParam(
-          "模型模式要一个 ONNX：setting.yml 的 model_roi.model_path 没有，"
-          "baseDir 下也没有唯一的 *.onnx");
+      return badParam("模型模式要一个 ONNX：setting.yml 的 model_roi.model_path 没有，"
+                      "baseDir 下也没有唯一的 *.onnx");
     }
   }
   c.useModel = mode == Mode::Model;
@@ -312,7 +318,8 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
       }
       c.candidates.push_back(std::move(cand));
     }
-    if (c.candidates.empty()) return badInput("模板候选的框全是 0，没有一个能用");
+    if (c.candidates.empty())
+      return badInput("模板候选的框全是 0，没有一个能用");
   } else {
     Candidate cand;
     cand.id = "primary";
@@ -391,16 +398,15 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
                     c.bandRef + "'");
   }
   if (c.wantBand && c.bandRef == "flush_ref" && c.refType != "line end") {
-    return badInput(
-        "gap.center_band.reference 是 flush_ref，但 flush.ref_type 不是 'line end'，"
-        "图里没有参考线可接");
+    return badInput("gap.center_band.reference 是 flush_ref，但 flush.ref_type 不是 'line end'，"
+                    "图里没有参考线可接");
   }
   for (int i = 0; i < 2; ++i) {
     const char* key = i == 0 ? "left_mode" : "right_mode";
     const std::string m = textOr(c.band, key, "always");
     if (bandTol[i] > 0 && m != "always" && m != "guard") {
-      return badInput(std::string("gap.center_band.") + key + " 只能是 always 或 guard，这份写的是 '" +
-                      m + "'");
+      return badInput(std::string("gap.center_band.") + key +
+                      " 只能是 always 或 guard，这份写的是 '" + m + "'");
     }
   }
   c.definition = textOr(c.gap, "definition", "B");
@@ -497,8 +503,10 @@ nlohmann::json guardParams(const Config& c) {
 }
 
 const char* refMethod(const std::string& refType) {
-  if (refType == "line end") return "line_end";
-  if (refType == "selected point") return "selected_point";
+  if (refType == "line end")
+    return "line_end";
+  if (refType == "selected point")
+    return "selected_point";
   return "nearest_point";
 }
 
@@ -527,7 +535,8 @@ void judges(Builder& g, const Config& c, const std::string& flushNode, const std
 nlohmann::json bundleParams(const Config& c) {
   nlohmann::json p;
   // 模板路径上配了跟随裁剪窗却用不上，原算法记 skipped:no_model_roi。
-  if (!c.useModel && boolOr(c.roll, "enabled", false)) p["cropStatus"] = "skipped:no_model_roi";
+  if (!c.useModel && boolOr(c.roll, "enabled", false))
+    p["cropStatus"] = "skipped:no_model_roi";
   return p;
 }
 
@@ -535,10 +544,11 @@ std::string finish(Builder& g, const Config& c, const Tail& t, bool fine) {
   nlohmann::json doc;
   doc["schemaVersion"] = 1;
   doc["id"] = safeId("gap_" + c.sampleId);
-  doc["name"] = c.sampleId + " · StandardGap" + (c.useModel ? " · 模型" : "") +
-                (fine ? " · 细粒度" : "");
+  doc["name"] =
+      c.sampleId + " · StandardGap" + (c.useModel ? " · 模型" : "") + (fine ? " · 细粒度" : "");
   nlohmann::json meta{{"app", "StandardGap.yml importer"}, {"style", fine ? "fine" : "blocks"}};
-  if (!c.notes.empty()) meta["importNotes"] = c.notes;
+  if (!c.notes.empty())
+    meta["importNotes"] = c.notes;
   doc["meta"] = std::move(meta);
   doc["nodes"] = std::move(g.nodes);
   doc["edges"] = std::move(g.edges);
@@ -558,11 +568,11 @@ std::string finish(Builder& g, const Config& c, const Tail& t, bool fine) {
       {"binds", nlohmann::json::array({t.gapNode + ".offset", t.circlesNode + ".offset"})},
       {"doc", "间隙偏置（毫米），同时进间隙读数与相机候选的打分（gap.offset）。"}};
   if (c.useModel) {
-    graphParams["modelPath"] = nlohmann::json{
-        {"type", "path"},
-        {"default", c.modelPath},
-        {"binds", t.modelPathBinds},
-        {"doc", "模型 ROI 用的 ONNX（setting.yml 的 model_roi.model_path）。"}};
+    graphParams["modelPath"] =
+        nlohmann::json{{"type", "path"},
+                       {"default", c.modelPath},
+                       {"binds", t.modelPathBinds},
+                       {"doc", "模型 ROI 用的 ONNX（setting.yml 的 model_roi.model_path）。"}};
   }
   // 图文件的 sha256（docs/result-bundle-plan.md (a)）：执行器没有注入口子，宿主经 params_json 传；
   // 值进 cacheKey，换了图不会命中旧的汇总
@@ -582,8 +592,8 @@ struct Located {
   Ref scan;
 };
 
-std::string blockLocateTemplate(Builder& g, const Config& c, const std::string& id,
-                                const Ref& scan, int column, int row, const char* title) {
+std::string blockLocateTemplate(Builder& g, const Config& c, const std::string& id, const Ref& scan,
+                                int column, int row, const char* title) {
   nlohmann::json p = icpParams(c);
   p["templateDir"] = c.templateDir;
   p["overallRoi"] = overallRoiOf(c);
@@ -594,7 +604,8 @@ std::string blockLocateTemplate(Builder& g, const Config& c, const std::string& 
   for (std::size_t i = 0; i < 4 && i < c.candidates.size(); ++i) {
     const std::string prefix = "template" + std::to_string(i + 1);
     const Candidate& cand = c.candidates[i];
-    if (i > 0) p[prefix + "Enabled"] = true;
+    if (i > 0)
+      p[prefix + "Enabled"] = true;
     p[prefix + "Id"] = cand.id;
     p[prefix + "Left"] = cand.left;
     p[prefix + "Right"] = cand.right;
@@ -621,8 +632,7 @@ std::string datumRole(const Config& c) {
 
 /// 方向基准：写得成积木就是一个 gap.datum_direction；写不成（锚与侧显式配成了别的组合）
 /// 就退回细粒度的「窗 → 裁 → 拟」，经 split_* 从 Bundle 里取框和云 —— 两种算子混用在一张图里。
-Ref blockDatum(Builder& g, const Config& c, const std::string& prefix, const Located& at,
-               int row) {
+Ref blockDatum(Builder& g, const Config& c, const std::string& prefix, const Located& at, int row) {
   const YAML::Node cfg = child(c.flush, "base_direction");
   const std::string role = datumRole(c);
   if (!role.empty()) {
@@ -632,15 +642,16 @@ Ref blockDatum(Builder& g, const Config& c, const std::string& prefix, const Loc
     p["heightMm"] = numberOr(cfg, "height_mm", 2.5);
     p["distThresh"] = numberOr(cfg, "fit_distance", 0.35);
     p["minInliers"] = intOr(cfg, "min_inliers", 60);
-    if (role != "datum") p["role"] = role;
+    if (role != "datum")
+      p["role"] = role;
     const std::string node =
         g.node(prefix + "n_datum", "gap.datum_direction", p, 3, row, "方向基准");
     g.edge(at.scan.node, at.scan.port, node, "scan");
     g.edge(at.rois.node, at.rois.port, node, "rois");
     return Ref{node, "line"};
   }
-  const std::string rois = g.node(prefix + "n_split_rois", "gap.split_roi_set", nullptr, 3, row,
-                                  "拆角色框（方向基准）");
+  const std::string rois =
+      g.node(prefix + "n_split_rois", "gap.split_roi_set", nullptr, 3, row, "拆角色框（方向基准）");
   g.edge(at.rois.node, at.rois.port, rois, "rois");
   const std::string scan = g.node(prefix + "n_split_scan", "gap.split_scan_pair", nullptr, 3,
                                   row + 1, "拆剖面对（方向基准）");
@@ -714,7 +725,8 @@ FlushChain blockFlush(Builder& g, const Config& c, const std::string& prefix, co
       g.node(prefix + "n_ref_point", "gap.ref_point", refParams, 4, row + 1, "取参考点");
   g.edge(at.scan.node, at.scan.port, ref, "scan");
   g.edge(at.rois.node, at.rois.port, ref, "rois");
-  if (c.refType == "nearest point") g.edge(line, "line", ref, "baseLine");
+  if (c.refType == "nearest point")
+    g.edge(line, "line", ref, "baseLine");
   out.point = Ref{ref, "point"};
   if (c.refType == "line end") {
     out.qualityRef = Ref{ref, "quality"};
@@ -744,7 +756,8 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
   }
   if (boolOr(c.guard, "enabled", false)) {
     nlohmann::json loadParams{{"dir", "."}};
-    if (c.useModel) loadParams["dropNonFinite"] = false;
+    if (c.useModel)
+      loadParams["dropNonFinite"] = false;
     const std::string load =
         g.node("n_load", "gap.load_profile_pair", loadParams, 0, 0, "读一对剖面");
     const std::string guard =
@@ -761,7 +774,7 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
   }
   const Ref raw{"n_scan", "scan"};
 
-  Located at;  // 量测用的那一份（带回退时是回退之后的）
+  Located at; // 量测用的那一份（带回退时是回退之后的）
   FlushChain flush;
   if (!c.useModel) {
     const std::string locate = blockLocateTemplate(g, c, "n_locate", raw, 2, 1, "模板定位");
@@ -794,13 +807,12 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
       at.scan = fallbackOf(g, "n_fb_scan", byModel.scan, byTemplate.scan, 3, 5, "回退剖面对");
       const FlushChain backup = blockFlush(g, c, "b_", byTemplate, "roi_intersection", 6);
       flush.line = fallbackOf(g, "n_fb_line", flush.line, backup.line, 5, 0, "回退基准线");
-      flush.point =
-          fallbackOf(g, "n_fb_ref_point", flush.point, backup.point, 5, 1, "回退参考点");
-      flush.qualityBase = fallbackOf(g, "n_fb_quality_base", flush.qualityBase,
-                                     backup.qualityBase, 5, 2, "回退基准线质量");
+      flush.point = fallbackOf(g, "n_fb_ref_point", flush.point, backup.point, 5, 1, "回退参考点");
+      flush.qualityBase = fallbackOf(g, "n_fb_quality_base", flush.qualityBase, backup.qualityBase,
+                                     5, 2, "回退基准线质量");
       if (!flush.qualityRef.empty()) {
-        flush.qualityRef = fallbackOf(g, "n_fb_quality_ref", flush.qualityRef, backup.qualityRef,
-                                      5, 3, "回退参考线质量");
+        flush.qualityRef = fallbackOf(g, "n_fb_quality_ref", flush.qualityRef, backup.qualityRef, 5,
+                                      3, "回退参考线质量");
         if (c.wantBand && c.bandRef == "flush_ref") {
           flush.refLine =
               fallbackOf(g, "n_fb_ref_line", flush.refLine, backup.refLine, 5, 4, "回退参考线");
@@ -815,8 +827,7 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
   g.edge(flush.line.node, flush.line.port, tail.flushNode, "baseLine");
   g.edge(flush.point.node, flush.point.port, tail.flushNode, "refPoint");
 
-  tail.circlesNode =
-      g.node("n_circles", "gap.seam_circles", circleParams(c), 4, 3, "拟合缝两侧圆");
+  tail.circlesNode = g.node("n_circles", "gap.seam_circles", circleParams(c), 4, 3, "拟合缝两侧圆");
   g.edge(at.scan.node, at.scan.port, tail.circlesNode, "scan");
   g.edge(at.rois.node, at.rois.port, tail.circlesNode, "rois");
   if (c.wantBand) {
@@ -829,7 +840,8 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
   tail.gapNode = g.node("n_gap", "gap.gap", gapParams, 6, 3, "间隙");
   g.edge(tail.circlesNode, "left", tail.gapNode, "left");
   g.edge(tail.circlesNode, "right", tail.gapNode, "right");
-  if (c.definition == "A") g.edge(tail.flushNode, "baseLine", tail.gapNode, "baseLine");
+  if (c.definition == "A")
+    g.edge(tail.flushNode, "baseLine", tail.gapNode, "baseLine");
 
   judges(g, c, tail.flushNode, tail.gapNode, 7);
 
@@ -843,7 +855,8 @@ Status buildBlocks(const Config& c, std::string& graphJson) {
   if (!flush.qualityRef.empty()) {
     g.edge(flush.qualityRef.node, flush.qualityRef.port, tail.bundleNode, "fitRef");
   }
-  if (c.withFallback) g.edge("n_fb_rois", "choice", tail.bundleNode, "fallback");
+  if (c.withFallback)
+    g.edge("n_fb_rois", "choice", tail.bundleNode, "fallback");
 
   graphJson = finish(g, c, tail, /*fine=*/false);
   return Status::Ok();
@@ -898,8 +911,8 @@ FineTemplate fineTemplateBranch(Builder& g, const Config& c, const std::string& 
     ap["roiFlushRef"] = cand.flushRef;
     ap["roiGapRight"] = cand.gapRight;
     ap["roisFrom"] = cand.ownRois ? "template" : "config";
-    const std::string node = g.node(prefix + "n_align_" + cid, "gap.align_template", ap,
-                                    column + 3, 3 + static_cast<int>(order) * 2, "ICP " + cid);
+    const std::string node = g.node(prefix + "n_align_" + cid, "gap.align_template", ap, column + 3,
+                                    3 + static_cast<int>(order) * 2, "ICP " + cid);
     g.edge(b.cropM, "cloud", node, "cloud");
     g.edge(tpl, "left", node, "tplLeft");
     g.edge(tpl, "right", node, "tplRight");
@@ -908,8 +921,8 @@ FineTemplate fineTemplateBranch(Builder& g, const Config& c, const std::string& 
 
   nlohmann::json selectParams;
   selectParams["minScore"] = c.minScore;
-  b.select = g.node(prefix + "n_select", "gap.select_alignment", selectParams, column + 4, 3,
-                    "选模板");
+  b.select =
+      g.node(prefix + "n_select", "gap.select_alignment", selectParams, column + 4, 3, "选模板");
   static const char* kPorts[4] = {"a", "b", "c", "d"};
   for (std::size_t i = 0; i < alignNodes.size() && i < 4; ++i) {
     g.edge(alignNodes[i], "alignment", b.select, kPorts[i]);
@@ -937,7 +950,7 @@ FineTemplate fineTemplateBranch(Builder& g, const Config& c, const std::string& 
 
 /// 一组四个框的来源：flushBase / flushRef / gapLeft / gapRight / seam 各一个端口。
 struct FineRois {
-  Ref box[4];  // flushBase, flushRef, gapLeft, gapRight
+  Ref box[4]; // flushBase, flushRef, gapLeft, gapRight
   Ref seam;
 };
 
@@ -973,7 +986,7 @@ Ref fineDatum(Builder& g, const Config& c, const std::string& prefix, const Fine
   g.edge(win, "box", crop, "box");
   nlohmann::json fitParams;
   fitParams["distThresh"] = numberOr(cfg, "fit_distance", 0.35);
-  fitParams["segmentPoints"] = 0;  // 长面整条都要，不截
+  fitParams["segmentPoints"] = 0; // 长面整条都要，不截
   fitParams["endpoints"] = "inlier_ends";
   fitParams["minInliers"] = intOr(cfg, "min_inliers", 60);
   const std::string fit =
@@ -989,12 +1002,12 @@ FlushChain fineFlush(Builder& g, const Config& c, const std::string& prefix, con
                      const Ref& cloud, const char* endpoints, int row) {
   FlushChain out;
   nlohmann::json cropOpen{{"bounds", "open"}};
-  const std::string cropBase = g.node(prefix + "n_crop_flushBase", "filter.crop_box2d", cropOpen,
-                                      9, row, "裁 flush_base");
+  const std::string cropBase =
+      g.node(prefix + "n_crop_flushBase", "filter.crop_box2d", cropOpen, 9, row, "裁 flush_base");
   g.edge(cloud.node, cloud.port, cropBase, "cloud");
   g.edge(rois.box[0].node, rois.box[0].port, cropBase, "box");
-  const std::string cropRef = g.node(prefix + "n_crop_flushRef", "filter.crop_box2d", cropOpen, 9,
-                                     row + 1, "裁 flush_ref");
+  const std::string cropRef =
+      g.node(prefix + "n_crop_flushRef", "filter.crop_box2d", cropOpen, 9, row + 1, "裁 flush_ref");
   g.edge(cloud.node, cloud.port, cropRef, "cloud");
   g.edge(rois.box[1].node, rois.box[1].port, cropRef, "box");
 
@@ -1055,8 +1068,10 @@ Status buildFine(const Config& c, std::string& graphJson) {
   Tail tail;
 
   nlohmann::json loadParams{{"dir", "."}};
-  if (c.useModel) loadParams["dropNonFinite"] = false;
-  const std::string load = g.node("n_load", "gap.load_profile_pair", loadParams, 0, 1, "读一对剖面");
+  if (c.useModel)
+    loadParams["dropNonFinite"] = false;
+  const std::string load =
+      g.node("n_load", "gap.load_profile_pair", loadParams, 0, 1, "读一对剖面");
 
   // 双相机闸：两台看到的不是同一个面时（玻璃二次反射、标定漂），模型的两行输入和合并云
   // 会一起被带偏，而拟合残差照样很小。闸站在 load 之后、模型之前。配置里开了才有这个节点。
@@ -1091,7 +1106,8 @@ Status buildFine(const Config& c, std::string& graphJson) {
   }
 
   // 合并（secondary 在前）→ 去噪，在整片云上做，裁剪在后面（与 gap.read_scan 相同）。
-  const std::string merge = g.node("n_merge", "util.merge", nullptr, 2, 4, "合并（secondary 在前）");
+  const std::string merge =
+      g.node("n_merge", "util.merge", nullptr, 2, 4, "合并（secondary 在前）");
   g.edge(finiteS.node, finiteS.port, merge, "a");
   g.edge(finiteP.node, finiteP.port, merge, "b");
   Ref mergedFull{merge, "cloud"};
@@ -1109,8 +1125,8 @@ Status buildFine(const Config& c, std::string& graphJson) {
   FineRois rois;
   FlushChain flush;
   if (!c.useModel) {
-    const FineTemplate b = fineTemplateBranch(g, c, "", Ref{frameP, "cloud"},
-                                              Ref{frameS, "cloud"}, mergedFull, 3);
+    const FineTemplate b =
+        fineTemplateBranch(g, c, "", Ref{frameP, "cloud"}, Ref{frameS, "cloud"}, mergedFull, 3);
     merged = Ref{b.cropM, "cloud"};
     cropP = Ref{b.cropP, "cloud"};
     cropS = Ref{b.cropS, "cloud"};
@@ -1126,8 +1142,7 @@ Status buildFine(const Config& c, std::string& graphJson) {
     const std::string infer = g.node("n_infer", "ml.onnx_run", nullptr, 2, 6, "ONNX 推理");
     tail.modelPathBinds.push_back(infer + ".modelPath");
     g.edge(tensor, "tensor", infer, "input");
-    const std::string seg =
-        g.node("n_seg", "gap.labels_from_logits", nullptr, 3, 6, "逐槽 argmax");
+    const std::string seg = g.node("n_seg", "gap.labels_from_logits", nullptr, 3, 6, "逐槽 argmax");
     g.edge(infer, "output", seg, "tensor");
     nlohmann::json coloredParams{{"row", "primary"}};
     const std::string colored =
@@ -1191,17 +1206,16 @@ Status buildFine(const Config& c, std::string& graphJson) {
                          "回退 primary");
       cropS = fallbackOf(g, "n_fb_crop_s", Ref{roll, "secondary"}, Ref{b.cropS, "cloud"}, 7, 6,
                          "回退 secondary");
-      roiSetRef = fallbackOf(g, "n_fb_roi_set", Ref{modelSet, "rois"}, Ref{b.roiSet, "rois"}, 7,
-                             7, "回退角色框");
-      scanSetRef = fallbackOf(g, "n_fb_scan_set", Ref{modelScan, "scan"},
-                              Ref{b.scanSet, "scan"}, 7, 8, "回退剖面对");
+      roiSetRef = fallbackOf(g, "n_fb_roi_set", Ref{modelSet, "rois"}, Ref{b.roiSet, "rois"}, 7, 7,
+                             "回退角色框");
+      scanSetRef = fallbackOf(g, "n_fb_scan_set", Ref{modelScan, "scan"}, Ref{b.scanSet, "scan"}, 7,
+                              8, "回退剖面对");
       const FlushChain backup =
           fineFlush(g, c, "b_", roisFrom(b.rois), Ref{b.cropM, "cloud"}, "roi_intersection", 9);
       flush.line = fallbackOf(g, "n_fb_line", flush.line, backup.line, 11, 5, "回退基准线");
-      flush.point =
-          fallbackOf(g, "n_fb_ref_point", flush.point, backup.point, 11, 6, "回退参考点");
-      flush.qualityBase = fallbackOf(g, "n_fb_quality_base", flush.qualityBase,
-                                     backup.qualityBase, 11, 7, "回退基准线质量");
+      flush.point = fallbackOf(g, "n_fb_ref_point", flush.point, backup.point, 11, 6, "回退参考点");
+      flush.qualityBase = fallbackOf(g, "n_fb_quality_base", flush.qualityBase, backup.qualityBase,
+                                     11, 7, "回退基准线质量");
       if (!flush.qualityRef.empty()) {
         flush.qualityRef = fallbackOf(g, "n_fb_quality_ref", flush.qualityRef, backup.qualityRef,
                                       11, 8, "回退参考线质量");
@@ -1236,7 +1250,8 @@ Status buildFine(const Config& c, std::string& graphJson) {
   tail.gapNode = g.node("n_gap", "gap.gap", gapParams, 11, 2, "间隙");
   g.edge(tail.circlesNode, "left", tail.gapNode, "left");
   g.edge(tail.circlesNode, "right", tail.gapNode, "right");
-  if (c.definition == "A") g.edge(tail.flushNode, "baseLine", tail.gapNode, "baseLine");
+  if (c.definition == "A")
+    g.edge(tail.flushNode, "baseLine", tail.gapNode, "baseLine");
 
   judges(g, c, tail.flushNode, tail.gapNode, 12);
 
@@ -1250,7 +1265,8 @@ Status buildFine(const Config& c, std::string& graphJson) {
   if (!flush.qualityRef.empty()) {
     g.edge(flush.qualityRef.node, flush.qualityRef.port, tail.bundleNode, "fitRef");
   }
-  if (c.withFallback) g.edge("n_fb_roi_set", "choice", tail.bundleNode, "fallback");
+  if (c.withFallback)
+    g.edge("n_fb_roi_set", "choice", tail.bundleNode, "fallback");
 
   graphJson = finish(g, c, tail, /*fine=*/true);
   return Status::Ok();
@@ -1264,9 +1280,11 @@ Status build(const std::string& text, const fs::path& baseDir, Mode mode, bool f
   } catch (const std::exception& e) {
     return badInput(std::string("StandardGap.yml 解析失败: ") + e.what());
   }
-  if (!cfg || !cfg.IsMap()) return badInput("StandardGap.yml 不是一个映射");
+  if (!cfg || !cfg.IsMap())
+    return badInput("StandardGap.yml 不是一个映射");
   Config c(cfg);
-  if (Status s = parseConfig(cfg, baseDir, mode, c); !s.ok) return s;
+  if (Status s = parseConfig(cfg, baseDir, mode, c); !s.ok)
+    return s;
   return fine ? buildFine(c, out) : buildBlocks(c, out);
 }
 
@@ -1289,7 +1307,7 @@ Status importModelFine(const std::string& t, const fs::path& d, std::string& o) 
   return build(t, d, Mode::Model, true, o);
 }
 
-}  // namespace
+} // namespace
 
 void registerStandardGapImporter(Registry& r) {
   const char* kBlocks =
@@ -1332,4 +1350,4 @@ void registerStandardGapImporter(Registry& r) {
   }
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

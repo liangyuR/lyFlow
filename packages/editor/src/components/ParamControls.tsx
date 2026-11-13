@@ -1,28 +1,28 @@
 // 参数控件。**前端唯一的「算子知识」**：一张 param.type -> React 控件的映射表（docs/operator-manifest.md）。
 // 撤销粒度贯穿全文件：输入框失焦/回车才提交，滑块与数字框拖动用 begin()/commit() 包住一整段（见 README）。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { useMenuPlacement } from "../hooks/useMenuPlacement";
-import { copyText, readClipboard } from "../lib/clipboard";
-import { stepFor } from "../lib/params";
-import { curveProblem } from "../lib/curve";
-import { dialogs } from "../lib/dialogs";
-import { joinBind, type GraphBinding } from "../lib/graphParams";
-import { fullId, type SubPath } from "../lib/subgraph";
-import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
-import { cleanPathText } from "../lib/params";
-import { graphParamPreviewId } from "../lib/preview";
-import { joinPath } from "../lib/recipes";
-import { useGraphStore } from "../store/graph";
-import { useUiStore } from "../store/ui";
-import type { EnumOption, Param } from "../types/manifest";
+import { useMenuPlacement } from '../hooks/useMenuPlacement';
+import { copyText, readClipboard } from '../lib/clipboard';
+import { stepFor } from '../lib/params';
+import { curveProblem } from '../lib/curve';
+import { dialogs } from '../lib/dialogs';
+import { joinBind, type GraphBinding } from '../lib/graphParams';
+import { fullId, type SubPath } from '../lib/subgraph';
+import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from '../lib/numExpr';
+import { cleanPathText } from '../lib/params';
+import { graphParamPreviewId } from '../lib/preview';
+import { joinPath } from '../lib/recipes';
+import { useGraphStore } from '../store/graph';
+import { useUiStore } from '../store/ui';
+import type { EnumOption, Param } from '../types/manifest';
 
-import { CurveControl } from "./CurveControl";
-import { NumberInput, Slider } from "./NumberInput";
-import { TransformControl } from "./TransformControl";
+import { CurveControl } from './CurveControl';
+import { NumberInput, Slider } from './NumberInput';
+import { TransformControl } from './TransformControl';
 
-import "../styles.params.css";
+import '../styles.params.css';
 
 export interface ControlProps {
   param: Param;
@@ -51,7 +51,7 @@ function relativeEach(
   lim: { integer: boolean; min?: number | undefined; max?: number | undefined },
   map: (cur: unknown, apply: (n: number) => number) => unknown,
 ) {
-  return (edit: Extract<NumEdit, { kind: "rel" }>) => {
+  return (edit: Extract<NumEdit, { kind: 'rel' }>) => {
     const results: NumApplied[] = [];
     const apply = (n: number) => {
       const r = applyNumEdit(edit, n, lim);
@@ -60,18 +60,19 @@ function relativeEach(
     };
     onChangeEach((cur) => map(cur, apply));
     const note = numEditNote(label, results, lim);
-    if (note) useUiStore.getState().showToast(note, "warn");
+    if (note) useUiStore.getState().showToast(note, 'warn');
   };
 }
 
 // ---------------------------------------------------------------- 数值
 
 function NumberControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
-  const integer = param.type === "int";
-  const num = typeof value === "number" ? value : 0;
+  const integer = param.type === 'int';
+  const num = typeof value === 'number' ? value : 0;
   const sMin = param.softMin ?? param.min;
   const sMax = param.softMax ?? param.max;
-  const hasSlider = sMin !== undefined && sMax !== undefined && Number.isFinite(sMin) && Number.isFinite(sMax);
+  const hasSlider =
+    sMin !== undefined && sMax !== undefined && Number.isFinite(sMin) && Number.isFinite(sMax);
 
   return (
     <div className="ctl-row">
@@ -85,8 +86,11 @@ function NumberControl({ param, value, disabled, onChange, nodeId, onChangeEach 
         label={param.label || param.name}
         onRelative={
           onChangeEach
-            ? relativeEach(onChangeEach, param.label || param.name, { integer, min: param.min, max: param.max }, (cur, apply) =>
-                typeof cur === "number" ? apply(cur) : cur,
+            ? relativeEach(
+                onChangeEach,
+                param.label || param.name,
+                { integer, min: param.min, max: param.max },
+                (cur, apply) => (typeof cur === 'number' ? apply(cur) : cur),
               )
             : undefined
         }
@@ -114,10 +118,10 @@ function NumberControl({ param, value, disabled, onChange, nodeId, onChangeEach 
 
 // ---------------------------------------------------------------- 向量
 
-const DEFAULT_COMPONENTS = ["X", "Y", "Z", "W"];
+const DEFAULT_COMPONENTS = ['X', 'Y', 'Z', 'W'];
 
 function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
-  const size = param.type === "vec2f" ? 2 : param.type === "vec3f" ? 3 : 4;
+  const size = param.type === 'vec2f' ? 2 : param.type === 'vec3f' ? 3 : 4;
   const vec = Array.isArray(value) ? (value as number[]) : new Array<number>(size).fill(0);
   const labels = param.componentLabels ?? DEFAULT_COMPONENTS;
 
@@ -146,19 +150,22 @@ function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach 
               label={`${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`}
               onRelative={
                 onChangeEach
-                  ? relativeEach(onChangeEach, `${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`,
+                  ? relativeEach(
+                      onChangeEach,
+                      `${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`,
                       { integer: false, min: param.min, max: param.max },
                       (cur, apply) => {
                         if (!Array.isArray(cur)) return cur;
                         // 锁着：按改的那个分量算一次，其余分量跟它一样（与单选时锁着的行为一致）
                         if (locked) {
                           const c = cur[i];
-                          if (typeof c !== "number") return cur;
+                          if (typeof c !== 'number') return cur;
                           const v = apply(c);
                           return cur.map(() => v);
                         }
-                        return cur.map((c, j) => (j === i && typeof c === "number" ? apply(c) : c));
-                      })
+                        return cur.map((c, j) => (j === i && typeof c === 'number' ? apply(c) : c));
+                      },
+                    )
                   : undefined
               }
               dragStep={(ref) => stepFor(param, false, ref)}
@@ -171,12 +178,12 @@ function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach 
       </div>
       <button
         type="button"
-        className={`ctl-lock${locked ? " is-on" : ""}`}
+        className={`ctl-lock${locked ? ' is-on' : ''}`}
         disabled={disabled}
-        title={locked ? "已锁定：改一个分量，其余跟随" : "锁定分量联动"}
+        title={locked ? '已锁定：改一个分量，其余跟随' : '锁定分量联动'}
         onClick={() => setLocked((v) => !v)}
       >
-        {locked ? "🔗" : "⛓"}
+        {locked ? '🔗' : '⛓'}
       </button>
       {param.unit && <span className="ctl-unit">{param.unit}</span>}
     </div>
@@ -206,7 +213,7 @@ function EnumControl({ param, value, disabled, onChange }: ControlProps) {
       <select
         className="ctl ctl--select"
         disabled={disabled}
-        value={String(value ?? "")}
+        value={String(value ?? '')}
         onChange={(e) => {
           // manifest 里 enum 的 value 可能是数字，选择框只会给字符串，
           // 按原始选项的类型还原，否则写回 GraphDoc 的类型会漂移。
@@ -227,18 +234,18 @@ function EnumControl({ param, value, disabled, onChange }: ControlProps) {
 
 function FlagsControl({ param, value, disabled, onChange }: ControlProps) {
   const options: EnumOption[] = param.options ?? [];
-  const bits = typeof value === "number" ? value : 0;
+  const bits = typeof value === 'number' ? value : 0;
   return (
     <div className="ctl-flags">
       {options.map((o) => {
         // 老的 manifest 把位写成了字符串（"4"），按数认，否则按位与永远是 0
-        const bit = typeof o.value === "number" ? o.value : Number(o.value) || 0;
+        const bit = typeof o.value === 'number' ? o.value : Number(o.value) || 0;
         const on = (bits & bit) !== 0;
         return (
           <button
             key={String(o.value)}
             type="button"
-            className={`ctl-chip${on ? " is-on" : ""}`}
+            className={`ctl-chip${on ? ' is-on' : ''}`}
             disabled={disabled}
             title={o.doc}
             onClick={() => onChange(on ? bits & ~bit : bits | bit)}
@@ -258,19 +265,19 @@ function TextishControl({
   onChange,
   normalize,
 }: ControlProps & { normalize?: (text: string) => string }) {
-  const [text, setText] = useState(String(value ?? ""));
+  const [text, setText] = useState(String(value ?? ''));
   const editing = useRef(false);
   /** Esc 撤回：接着的 blur 不提交（同 NumberInput —— onBlur 拿到的还是打进去的那个 text） */
   const cancelled = useRef(false);
   useEffect(() => {
-    if (!editing.current) setText(String(value ?? ""));
+    if (!editing.current) setText(String(value ?? ''));
   }, [value]);
 
   const commit = () => {
     editing.current = false;
     if (cancelled.current) {
       cancelled.current = false;
-      setText(String(value ?? ""));
+      setText(String(value ?? ''));
       return;
     }
     // 没动过：照旧什么都不做。存着的值带空格、引号（老图、CLI --set）时点进去再点出来不该悄悄改掉它，
@@ -293,7 +300,7 @@ function TextishControl({
     onBlur: commit,
   };
 
-  if (param.type === "text") {
+  if (param.type === 'text') {
     return <textarea className="ctl ctl--text" rows={param.rows ?? 3} {...shared} />;
   }
   return (
@@ -303,8 +310,8 @@ function TextishControl({
       placeholder={param.placeholder}
       {...shared}
       onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') {
           cancelled.current = true;
           e.currentTarget.blur();
         }
@@ -321,31 +328,42 @@ function PathControl({ param, value, disabled, onChange }: ControlProps) {
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
     // 对话框从框里的那个路径开：绝对路径照原样；相对路径是相对图文件所在目录的（gap-inspector-integration-design §2.8，
     // 整个目录拷走不用改图）—— 拼上那个目录给它，没存过盘的图不给
-    const current = typeof value === "string" ? cleanPathText(value) : "";
+    const current = typeof value === 'string' ? cleanPathText(value) : '';
     const absolute = /^([A-Za-z]:[\\/]|[\\/])/.test(current);
     const graphPath = useGraphStore.getState().filePath;
-    const cut = graphPath ? Math.max(graphPath.lastIndexOf("/"), graphPath.lastIndexOf("\\")) : -1;
+    const cut = graphPath ? Math.max(graphPath.lastIndexOf('/'), graphPath.lastIndexOf('\\')) : -1;
     const graphDir = graphPath && cut >= 0 ? graphPath.slice(0, cut + 1) : null;
-    const start = current === "" ? undefined : absolute ? current : graphDir ? joinPath(graphDir, current) : undefined;
+    const start =
+      current === ''
+        ? undefined
+        : absolute
+          ? current
+          : graphDir
+            ? joinPath(graphDir, current)
+            : undefined;
     try {
       const picked = await pickPath({
-        mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
+        mode: param.mode === 'save' ? 'save' : param.mode === 'dir' ? 'dir' : 'open',
         filters,
         ...(start ? { defaultPath: start } : {}),
       });
-      if (typeof picked !== "string" || picked === "") return;
+      if (typeof picked !== 'string' || picked === '') return;
       // 原来是相对路径、选的又在图所在的目录下面：照旧存相对的（不然这一个节点换了目录就找不到，别的还找得到）
-      const keepRelative = current !== "" && !absolute && graphDir !== null && picked.toLowerCase().startsWith(graphDir.toLowerCase());
-      onChange(keepRelative ? picked.slice(graphDir.length).replace(/\\/g, "/") : picked);
+      const keepRelative =
+        current !== '' &&
+        !absolute &&
+        graphDir !== null &&
+        picked.toLowerCase().startsWith(graphDir.toLowerCase());
+      onChange(keepRelative ? picked.slice(graphDir.length).replace(/\\/g, '/') : picked);
     } catch (e) {
-      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn');
     }
   };
 
   return (
     <div className="ctl-row">
       <TextishControl
-        param={{ ...param, type: "string" }}
+        param={{ ...param, type: 'string' }}
         value={value}
         disabled={disabled}
         onChange={onChange}
@@ -361,12 +379,12 @@ function PathControl({ param, value, disabled, onChange }: ControlProps) {
 }
 
 function toHex(v: unknown): string {
-  if (!Array.isArray(v)) return "#000000";
+  if (!Array.isArray(v)) return '#000000';
   const [r = 0, g = 0, b = 0] = v as number[];
   const c = (x: number) =>
     Math.round(Math.min(Math.max(x, 0), 1) * 255)
       .toString(16)
-      .padStart(2, "0");
+      .padStart(2, '0');
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
@@ -392,9 +410,9 @@ function ColorControl({ param, value, disabled, onChange, nodeId }: ControlProps
   }, [param.label, param.name]);
   useEffect(() => {
     const el = input.current;
-    el?.addEventListener("change", finish);
+    el?.addEventListener('change', finish);
     return () => {
-      el?.removeEventListener("change", finish);
+      el?.removeEventListener('change', finish);
       finish();
     };
   }, [finish]);
@@ -452,15 +470,15 @@ type Coerced = { ok: true; value: unknown } | { ok: false; msg: string };
 /** 数组类型能接受的长度。color 的 alpha 可有可无，transform 以默认值的长度为准。 */
 function arrayLengths(param: Param): number[] {
   switch (param.type) {
-    case "vec2f":
+    case 'vec2f':
       return [2];
-    case "vec3f":
+    case 'vec3f':
       return [3];
-    case "vec4f":
+    case 'vec4f':
       return [4];
-    case "color":
+    case 'color':
       return [3, 4];
-    case "transform":
+    case 'transform':
       return [16];
     default:
       return [];
@@ -476,48 +494,48 @@ function clampToParam(param: Param, v: number): number {
 
 /** 粘贴的形状校验。对不上就退回一条人话，绝不往 GraphDoc 里塞坏值。 */
 function coerceValue(param: Param, raw: unknown): Coerced {
-  const isNum = typeof raw === "number" && Number.isFinite(raw);
+  const isNum = typeof raw === 'number' && Number.isFinite(raw);
   switch (param.type) {
-    case "bool":
-      return typeof raw === "boolean"
+    case 'bool':
+      return typeof raw === 'boolean'
         ? { ok: true, value: raw }
         : { ok: false, msg: `粘贴失败：${param.name} 需要 true / false` };
-    case "int":
-    case "flags":
+    case 'int':
+    case 'flags':
       return isNum
         ? { ok: true, value: clampToParam(param, Math.round(raw)) }
         : { ok: false, msg: `粘贴失败：${param.name} 需要一个整数` };
-    case "float":
+    case 'float':
       return isNum
         ? { ok: true, value: clampToParam(param, raw) }
         : { ok: false, msg: `粘贴失败：${param.name} 需要一个数字` };
-    case "enum": {
+    case 'enum': {
       const hit = (param.options ?? []).some((o) => o.value === raw);
       return hit
         ? { ok: true, value: raw }
         : { ok: false, msg: `粘贴失败：${JSON.stringify(raw)} 不是 ${param.name} 的合法选项` };
     }
-    case "string":
-    case "text":
-    case "path":
-      return typeof raw === "string"
+    case 'string':
+    case 'text':
+    case 'path':
+      return typeof raw === 'string'
         ? { ok: true, value: raw }
         : { ok: false, msg: `粘贴失败：${param.name} 需要一个字符串` };
-    case "vec2f":
-    case "vec3f":
-    case "vec4f":
-    case "color":
-    case "transform": {
+    case 'vec2f':
+    case 'vec3f':
+    case 'vec4f':
+    case 'color':
+    case 'transform': {
       const want = arrayLengths(param);
       const ok =
         Array.isArray(raw) &&
         want.includes(raw.length) &&
-        raw.every((v) => typeof v === "number" && Number.isFinite(v));
+        raw.every((v) => typeof v === 'number' && Number.isFinite(v));
       return ok
         ? { ok: true, value: raw }
-        : { ok: false, msg: `粘贴失败：${param.name} 需要长度 ${want.join(" 或 ")} 的数字数组` };
+        : { ok: false, msg: `粘贴失败：${param.name} 需要长度 ${want.join(' 或 ')} 的数字数组` };
     }
-    case "curve": {
+    case 'curve': {
       const problem = curveProblem(raw, param.min, param.max);
       return problem === null
         ? { ok: true, value: raw }
@@ -525,7 +543,6 @@ function coerceValue(param: Param, raw: unknown): Coerced {
     }
   }
 }
-
 
 function ParamMenu({
   param,
@@ -561,23 +578,23 @@ function ParamMenu({
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== 'Escape') return;
       e.stopPropagation(); // Esc 先关菜单，不要顺带触发全局快捷键
       onClose();
     };
-    document.addEventListener("mousedown", onDown, true);
-    document.addEventListener("keydown", onKey, true);
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
     return () => {
-      document.removeEventListener("mousedown", onDown, true);
-      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [onClose]);
 
   const copy = (text: string, what: string) => {
     onClose();
     void copyText(text).then((ok) => {
-      const msg = ok ? `已复制${what}` : "剪贴板不可用，复制失败";
-      useUiStore.getState().showToast(msg, ok ? "info" : "warn");
+      const msg = ok ? `已复制${what}` : '剪贴板不可用，复制失败';
+      useUiStore.getState().showToast(msg, ok ? 'info' : 'warn');
     });
   };
 
@@ -586,7 +603,7 @@ function ParamMenu({
     void readClipboard().then((text) => {
       const ui = useUiStore.getState();
       if (text === null) {
-        ui.showToast("剪贴板不可用，粘贴失败", "warn");
+        ui.showToast('剪贴板不可用，粘贴失败', 'warn');
         return;
       }
       let raw: unknown;
@@ -594,17 +611,18 @@ function ParamMenu({
         raw = JSON.parse(text) as unknown;
       } catch {
         // 路径参数：资源管理器「复制文件地址」给的 "D:\data\x.pcd" 不是合法 JSON，按路径收
-        if (param.type !== "path") {
-          ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
+        if (param.type !== 'path') {
+          ui.showToast('粘贴失败：剪贴板内容不是合法 JSON', 'warn');
           return;
         }
         raw = cleanPathText(text);
       }
       // "D:\track\frame.pcd" 恰好是合法 JSON，\t、\f 却解成了控制字符：按原文当路径收（「复制值」复制出来的是转义过的，解出来没有控制字符）
-      if (param.type === "path" && typeof raw === "string" && /[\u0000-\u001f]/.test(raw)) raw = cleanPathText(text);
+      if (param.type === 'path' && typeof raw === 'string' && /[\u0000-\u001f]/.test(raw))
+        raw = cleanPathText(text);
       const r = coerceValue(param, raw);
       if (!r.ok) {
-        ui.showToast(r.msg, "warn");
+        ui.showToast(r.msg, 'warn');
         return;
       }
       onChange(r.value);
@@ -658,8 +676,8 @@ function ParamMenu({
           data-testid="param-menu-include"
           title={
             inSubgraph
-              ? "逐层提升：内参 → 子图参数 → 这个实例上绑成图参数；同一子图的其它实例行为不变"
-              : "提升为顶层图参数：当前值成为它的默认值，这一行此后改的是图参数"
+              ? '逐层提升：内参 → 子图参数 → 这个实例上绑成图参数；同一子图的其它实例行为不变'
+              : '提升为顶层图参数：当前值成为它的默认值，这一行此后改的是图参数'
           }
           onClick={() => {
             const name = useGraphStore.getState().promoteToGraphParam(nodeId, param.name, at);
@@ -722,30 +740,30 @@ function ParamMenu({
 
 function ParamWidget(props: ControlProps) {
   switch (props.param.type) {
-    case "bool":
+    case 'bool':
       return <BoolControl {...props} />;
-    case "int":
-    case "float":
+    case 'int':
+    case 'float':
       return <NumberControl {...props} />;
-    case "vec2f":
-    case "vec3f":
-    case "vec4f":
+    case 'vec2f':
+    case 'vec3f':
+    case 'vec4f':
       return <VectorControl {...props} />;
-    case "enum":
+    case 'enum':
       return <EnumControl {...props} />;
-    case "flags":
+    case 'flags':
       return <FlagsControl {...props} />;
-    case "string":
-    case "text":
+    case 'string':
+    case 'text':
       return <TextishControl {...props} />;
-    case "path":
+    case 'path':
       return <PathControl {...props} />;
-    case "color":
+    case 'color':
       return <ColorControl {...props} />;
     // 显式列全 14 种而不是落到 default，这样 manifest 新增类型时 TS 会报错提醒。
-    case "transform":
+    case 'transform':
       return <TransformControl {...props} />;
-    case "curve":
+    case 'curve':
       return <CurveControl {...props} />;
   }
 }
@@ -759,21 +777,21 @@ export function ParamControl(props: ControlProps) {
   const previewId = props.previewGraphParam
     ? graphParamPreviewId(props.previewGraphParam)
     : props.nodeId && props.path && props.path.length > uiPath.length
-      ? [...props.path.slice(uiPath.length).map((seg) => seg.nodeId), props.nodeId].join("/")
+      ? [...props.path.slice(uiPath.length).map((seg) => seg.nodeId), props.nodeId].join('/')
       : props.nodeId;
 
   // 右键挂到整行（Inspector 的 .insp-param、参数面板的 .prow）上而不是控件上：标签那一片也要能
   // 唤出菜单，而那一行由外面渲染，这里只能顺着 DOM 往上找。
   useEffect(() => {
-    const host = wrap.current?.closest(".insp-param, .prow") ?? wrap.current;
+    const host = wrap.current?.closest('.insp-param, .prow') ?? wrap.current;
     if (!host) return;
     const onCtx = (e: Event) => {
       e.preventDefault();
       const me = e as MouseEvent;
       setMenu({ x: me.clientX, y: me.clientY });
     };
-    host.addEventListener("contextmenu", onCtx);
-    return () => host.removeEventListener("contextmenu", onCtx);
+    host.addEventListener('contextmenu', onCtx);
+    return () => host.removeEventListener('contextmenu', onCtx);
   }, []);
 
   const close = useCallback(() => setMenu(null), []);

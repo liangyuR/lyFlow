@@ -76,10 +76,7 @@ impl Default for HostConfig {
 ///
 /// **它占用了 `Builder::setup`**（tauri 的 `setup` 是整份替换，不是追加）。宿主要有
 /// 自己的 setup 就别再调 `.setup()`，改成在自己的 setup 里调 [`setup`]。
-pub fn attach<R: tauri::Runtime>(
-    builder: tauri::Builder<R>,
-    cfg: HostConfig,
-) -> tauri::Builder<R> {
+pub fn attach<R: tauri::Runtime>(builder: tauri::Builder<R>, cfg: HostConfig) -> tauri::Builder<R> {
     builder
         .manage(crate::execution::RunManager::new())
         .manage(Arc::new(cfg))

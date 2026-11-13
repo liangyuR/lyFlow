@@ -19,7 +19,7 @@ constexpr const char* kLibraryIdPrefix = "lib.";
 constexpr const char* kLibraryCategoryPrefix = "Library/";
 
 class Library {
- public:
+public:
   static Library& instance();
 
   /// 重新扫描这些目录，替换掉全部库算子。返回人类可读的问题列表（空 = 干净）。
@@ -37,7 +37,7 @@ class Library {
   std::size_t size() const;
   std::vector<std::string> dirs() const;
 
- private:
+private:
   Library() = default;
 
   mutable std::mutex mu_;
@@ -48,4 +48,4 @@ class Library {
   std::vector<std::filesystem::path> dirs_;
 };
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

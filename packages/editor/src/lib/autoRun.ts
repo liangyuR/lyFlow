@@ -2,12 +2,12 @@
 // 敲回车、下拉框、勾选框、↺、右键粘贴值、恢复这组参数、撤销都不跑，画面停在上一次的结果上。
 // 这里只放纯函数：一步提交前后，哪些节点的参数（有效值）、静音，哪些图参数的取值变了。调度在 lib/preview。
 
-import { listGraphNodes } from "./findNodes";
-import { splitBind } from "./graphParams";
-import { effectiveParams, valueEquals } from "./params";
-import { levelOf } from "./subgraph";
-import type { GraphDoc } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+import { listGraphNodes } from './findNodes';
+import { splitBind } from './graphParams';
+import { effectiveParams, valueEquals } from './params';
+import { levelOf } from './subgraph';
+import type { GraphDoc } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 export interface ParamEditTargets {
   /** 参数（有效值）或静音变了的节点，完整 id。子图定义里改的：每个实例各一个。 */
@@ -50,15 +50,25 @@ export function paramEditTargets(
       if (!op) continue;
       const pa = effectiveParams(op, a);
       const pb = effectiveParams(op, b);
-      const scope = now.path.length > 0 ? now.path[now.path.length - 1]!.subgraphId : "";
-      if (op.params.some((p) => !moved(scope, now.localId, p.name) && !valueEquals(pa[p.name], pb[p.name]))) nodes.push(now.id);
+      const scope = now.path.length > 0 ? now.path[now.path.length - 1]!.subgraphId : '';
+      if (
+        op.params.some(
+          (p) => !moved(scope, now.localId, p.name) && !valueEquals(pa[p.name], pb[p.name]),
+        )
+      )
+        nodes.push(now.id);
     }
   }
   // 图参数：前后都在、绑的还是那几个，取值变了才算（新纳入的、删掉的、改了绑定的是搬家）
   const graphParams = Object.keys(after.params ?? {}).filter((name) => {
     const was = before.params?.[name];
     const now = after.params?.[name];
-    return !!was && !!now && valueEquals(was.binds, now.binds) && !valueEquals(paramsBefore?.[name], paramsAfter?.[name]);
+    return (
+      !!was &&
+      !!now &&
+      valueEquals(was.binds, now.binds) &&
+      !valueEquals(paramsBefore?.[name], paramsAfter?.[name])
+    );
   });
   return { nodes, graphParams };
 }
@@ -66,9 +76,11 @@ export function paramEditTargets(
 /** 「节点.参数」由谁提供：顶层的 "|a.k" → 图参数名；子图定义里的 "<子图 id>|in.k" → 提升出来的子图参数名。 */
 function providers(doc: GraphDoc): Map<string, string> {
   const out = new Map<string, string>();
-  for (const [name, gp] of Object.entries(doc.params ?? {})) for (const b of gp.binds) out.set(`|${b}`, name);
+  for (const [name, gp] of Object.entries(doc.params ?? {}))
+    for (const b of gp.binds) out.set(`|${b}`, name);
   for (const [id, def] of Object.entries(doc.subgraphs ?? {})) {
-    for (const p of def.params ?? []) for (const b of p.binds) out.set(`${id}|${b.node}.${b.param}`, p.name);
+    for (const p of def.params ?? [])
+      for (const b of p.binds) out.set(`${id}|${b.node}.${b.param}`, p.name);
   }
   return out;
 }
@@ -82,7 +94,7 @@ export function autoRunTargetsReady(
 ): ParamEditTargets {
   const ran = (id: string): boolean => {
     for (const [key, n] of states) {
-      if ((key === id || key.startsWith(`${id}/`)) && n.state !== "idle") return true;
+      if ((key === id || key.startsWith(`${id}/`)) && n.state !== 'idle') return true;
     }
     return false;
   };

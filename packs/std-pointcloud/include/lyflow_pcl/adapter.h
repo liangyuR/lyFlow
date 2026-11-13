@@ -29,4 +29,4 @@ PointCloud fromBlob(const pcl::PCLPointCloud2& blob);
 /// LyFlow 点云 → PCLPointCloud2，只写实际存在的通道。
 void toBlob(const PointCloud& cloud, pcl::PCLPointCloud2& blob);
 
-}  // namespace lyflow::ops::adapter
+} // namespace lyflow::ops::adapter

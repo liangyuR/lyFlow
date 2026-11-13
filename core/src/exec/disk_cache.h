@@ -26,7 +26,7 @@ bool decodeNode(const std::string& bytes, PortData& out);
 bool persistable(const Data& d);
 
 class DiskCache {
- public:
+public:
   static DiskCache& instance();
 
   /// dir 为空 = 关。返回空串 = 成功，否则一句人话的原因。
@@ -36,7 +36,8 @@ class DiskCache {
   /// 这个 cacheKey 在盘上有没有、端口是不是齐的（只读文件头）。
   bool has(const std::string& cacheKey, const std::vector<std::string>& ports) const;
   /// 读回全部端口。坏文件当未命中并删掉。
-  bool load(const std::string& cacheKey, const std::vector<std::string>& ports, PortData& out) const;
+  bool load(const std::string& cacheKey, const std::vector<std::string>& ports,
+            PortData& out) const;
   /// 写一个节点（临时文件 + 原子改名，多个进程并发写同一目录不会读到半个文件）。
   /// 有端口不能落盘就什么都不写。
   void store(const std::string& cacheKey, const PortData& ports) const;
@@ -45,13 +46,13 @@ class DiskCache {
   void setMinDurationMs(double ms);
   double minDurationMs() const;
 
- private:
+private:
   DiskCache() = default;
   std::filesystem::path fileOf(const std::string& cacheKey) const;
 
   mutable std::mutex mu_;
-  std::filesystem::path root_;  // <dir>/<fingerprint>；空 = 关
+  std::filesystem::path root_; // <dir>/<fingerprint>；空 = 关
   double minDurationMs_ = 20.0;
 };
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

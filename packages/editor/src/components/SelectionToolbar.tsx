@@ -1,7 +1,7 @@
-import { memo, type KeyboardEvent } from "react";
-import { NodeToolbar, Position } from "@xyflow/react";
+import { memo, type KeyboardEvent } from 'react';
+import { NodeToolbar, Position } from '@xyflow/react';
 
-import "../styles.selection.css";
+import '../styles.selection.css';
 
 export interface SelectionToolbarProps {
   selectedNodeIds: string[];
@@ -12,22 +12,35 @@ export interface SelectionToolbarProps {
   onClear: () => void;
 }
 
-function SelectionToolbarView({ selectedNodeIds, visible, disabled, onRun, onLayout, onClear }: SelectionToolbarProps) {
+function SelectionToolbarView({
+  selectedNodeIds,
+  visible,
+  disabled,
+  onRun,
+  onLayout,
+  onClear,
+}: SelectionToolbarProps) {
   if (!visible || selectedNodeIds.length < 2) return null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
+    if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       onClear();
       return;
     }
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const buttons = [
+      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+    ];
     if (buttons.length === 0) return;
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-      : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    const index =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? buttons.length - 1
+          : (current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
     event.preventDefault();
     event.stopPropagation();
     buttons[index]?.focus();
@@ -58,7 +71,9 @@ function SelectionToolbarView({ selectedNodeIds, visible, disabled, onRun, onLay
         title="运行选中节点及所需上游，不运行未选中的下游"
         onClick={onRun}
       >
-        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" /></svg>
+        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m8 5 11 7-11 7V5Z" />
+        </svg>
         运行选中
       </button>
       <span className="selection-toolbar__divider" aria-hidden="true" />
@@ -70,7 +85,11 @@ function SelectionToolbarView({ selectedNodeIds, visible, disabled, onRun, onLay
         title="整理布局"
         onClick={onLayout}
       >
-        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M14 6h7M17.5 3v7M3 17.5h7M6.5 14v7" /></svg>
+        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="2" />
+          <rect x="14" y="14" width="7" height="7" rx="2" />
+          <path d="M14 6h7M17.5 3v7M3 17.5h7M6.5 14v7" />
+        </svg>
       </button>
       <button
         type="button"
@@ -80,7 +99,9 @@ function SelectionToolbarView({ selectedNodeIds, visible, disabled, onRun, onLay
         title="取消选择 (Esc)"
         onClick={onClear}
       >
-        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
       </button>
     </NodeToolbar>
   );

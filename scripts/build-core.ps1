@@ -4,6 +4,7 @@
 param(
   [string]$Configuration = "RelWithDebInfo",
   [switch]$NoTests,
+  [switch]$ReleaseBuild,
   [string]$BuildDir
 )
 $ErrorActionPreference = "Stop"
@@ -65,7 +66,9 @@ if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
-$releaseArgs = ""
+$releaseBuildFlag = if ($ReleaseBuild) { "ON" } else { "OFF" }
+$testingFlag = if ($runTests) { "ON" } else { "OFF" }
+$releaseArgs = " -DLYFLOW_RELEASE_BUILD=$releaseBuildFlag -DBUILD_TESTING=$testingFlag"
 foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT')) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }
@@ -76,7 +79,8 @@ $line = "call `"$vcvars`" >nul 2>&1" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
         " -DLYFLOW_OP_PACKS=`"$packs`" -DLYFLOW_STD_PACKS=`"$stdPacks`"" +
         " -DLYFLOW_PACKS=`"$repoPacks`"" + $releaseArgs +
-        " && `"$cmake`" --build `"$build`""
+        " && `"$cmake`" --build `"$build`" --target lyflow_core lyflow-dump-manifest"
+if ($runTests) { $line += " lyflow-core-tests" }
 
 cmd /c $line
 if ($LASTEXITCODE -ne 0) { throw "core 构建失败 (exit $LASTEXITCODE)" }
@@ -89,9 +93,11 @@ $dump = Join-Path $bin "lyflow-dump-manifest.exe"
 if ($LASTEXITCODE -ne 0) { throw "算子描述自检失败" }
 
 if ($runTests) {
-  $tests = Join-Path $bin "lyflow-core-tests.exe"
-  & $tests
-  if ($LASTEXITCODE -ne 0) { throw "core 测试失败" }
+  $ctest = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
+  if (-not (Test-Path -LiteralPath $ctest)) { $ctest = "ctest" }
+  & $ctest --test-dir $build -C $config --output-on-failure --no-tests=error --output-junit (Join-Path $build 'ctest-results.xml')
+  $testExit = $LASTEXITCODE
+  if ($testExit -ne 0) { throw "core 测试失败 (exit $testExit)" }
 }
 
 Write-Host "core ok -> $bin" -ForegroundColor Green

@@ -16,7 +16,7 @@ namespace gap::ml {
 // are kept out of this file on purpose (pimpl) so consumers of RoiFeatures/RoiBoxes don't need to
 // see them.
 class OnnxRoiPredictor {
- public:
+public:
   // Loads and validates the model at construction time; throws std::runtime_error if the file is
   // missing or onnxruntime fails to load it.
   explicit OnnxRoiPredictor(const std::filesystem::path& model);
@@ -48,9 +48,9 @@ class OnnxRoiPredictor {
   const std::string& modelSha256() const;
   const std::filesystem::path& modelPath() const;
 
- private:
+private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gap::ml
+} // namespace gap::ml

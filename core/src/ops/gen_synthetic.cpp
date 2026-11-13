@@ -25,12 +25,14 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
   const std::size_t planePoints = inliers * 6 / 10;
 
   PointCloud cloud;
-  if (withIntensity) cloud.intensity.reserve(total);
+  if (withIntensity)
+    cloud.intensity.reserve(total);
   cloud.xyz.reserve(total * 3);
 
   Ticker ticker(ctx, total);
   for (std::size_t i = 0; i < total; ++i) {
-    if (ticker.tick(i)) return Status::Ok();
+    if (ticker.tick(i))
+      return Status::Ok();
 
     float x, y, z, intensity;
     if (i < planePoints) {
@@ -46,12 +48,36 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
       const float a = unit(rng) * half;
       const float b = unit(rng) * half;
       switch (face) {
-        case 0: x = half;  y = a;     z = cz + b;    break;
-        case 1: x = -half; y = a;     z = cz + b;    break;
-        case 2: x = a;     y = half;  z = cz + b;    break;
-        case 3: x = a;     y = -half; z = cz + b;    break;
-        case 4: x = a;     y = b;     z = cz + half; break;
-        default: x = a;    y = b;     z = cz - half; break;
+      case 0:
+        x = half;
+        y = a;
+        z = cz + b;
+        break;
+      case 1:
+        x = -half;
+        y = a;
+        z = cz + b;
+        break;
+      case 2:
+        x = a;
+        y = half;
+        z = cz + b;
+        break;
+      case 3:
+        x = a;
+        y = -half;
+        z = cz + b;
+        break;
+      case 4:
+        x = a;
+        y = b;
+        z = cz + half;
+        break;
+      default:
+        x = a;
+        y = b;
+        z = cz - half;
+        break;
       }
       x += gauss(rng);
       y += gauss(rng);
@@ -65,14 +91,15 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
     }
 
     cloud.push(x, y, z);
-    if (withIntensity) cloud.intensity.push_back(intensity);
+    if (withIntensity)
+      cloud.intensity.push_back(intensity);
   }
 
   outputs.set("cloud", Data::cloud(std::move(cloud)));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerGenSynthetic(Registry& r) {
   OperatorDesc op;
@@ -80,13 +107,19 @@ void registerGenSynthetic(Registry& r) {
   op.version = "1.0.0";
   op.label = "点云合成";
   op.category = "生成";
-  op.keywords = {
-      "synthetic point cloud", "point cloud generation", "synthetic",
-      "test data", "生成点云", "合成数据",
-      "测试点云", "test", "demo",
-      "sample", "生成", "测试",
-      "合成"
-  };
+  op.keywords = {"synthetic point cloud",
+                 "point cloud generation",
+                 "synthetic",
+                 "test data",
+                 "生成点云",
+                 "合成数据",
+                 "测试点云",
+                 "test",
+                 "demo",
+                 "sample",
+                 "生成",
+                 "测试",
+                 "合成"};
   op.doc = "生成一片测试点云：地面 + 立方体 + 高斯噪声 + 离群点。不依赖任何数据文件。";
 
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "生成的点云。", true}};
@@ -145,4 +178,4 @@ void registerGenSynthetic(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

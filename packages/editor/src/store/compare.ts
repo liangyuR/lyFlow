@@ -2,14 +2,14 @@
 // A 跟随选中 / 钉住的节点，不在这里；这里只有 B —— 一个显式的槽，外加可选的冻结快照。
 // 单独一个 store 而不塞进 ui：快照里挂着几十兆的 Float32Array，不该让每个订阅 ui 的组件跟着比对引用。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { levelOf, pathIsValid, type SubPath } from "../lib/subgraph";
-import { useUiStore } from "./ui";
-import type { BaseCloud } from "../lib/basecloud";
-import type { ViewerContent } from "../lib/viewRule";
-import type { CloudPayload, OutputStat } from "../types/execution";
-import type { GraphDoc } from "../types/graph";
+import { levelOf, pathIsValid, type SubPath } from '../lib/subgraph';
+import { useUiStore } from './ui';
+import type { BaseCloud } from '../lib/basecloud';
+import type { ViewerContent } from '../lib/viewRule';
+import type { CloudPayload, OutputStat } from '../types/execution';
+import type { GraphDoc } from '../types/graph';
 
 export interface CompareSlot {
   path: SubPath;
@@ -35,9 +35,9 @@ export interface CompareSnapshot {
  *  还没结果、或 Viewer3D 没挂着时返回 null。 */
 export type CompareCapture = (slot: CompareSlot) => CompareSnapshot | null;
 
-export const COMPARE_NO_RESULT = "B 还没有结果，运行一次后可以冻结";
-export const COMPARE_NO_NODE = "先选中一个节点再对比";
-export const COMPARE_B_GONE = "对比基准节点已删除，已退出对比";
+export const COMPARE_NO_RESULT = 'B 还没有结果，运行一次后可以冻结';
+export const COMPARE_NO_NODE = '先选中一个节点再对比';
+export const COMPARE_B_GONE = '对比基准节点已删除，已退出对比';
 
 interface CompareState {
   on: boolean;
@@ -115,7 +115,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   prune(doc) {
     const b = get().b;
     if (!b) return;
-    const alive = pathIsValid(doc, b.path) && levelOf(doc, b.path).nodes.some((n) => n.id === b.nodeId);
+    const alive =
+      pathIsValid(doc, b.path) && levelOf(doc, b.path).nodes.some((n) => n.id === b.nodeId);
     if (alive) return;
     get().exit();
     useUiStore.getState().showToast(COMPARE_B_GONE);

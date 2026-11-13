@@ -67,5 +67,5 @@ export function sha256Hex(text: string): string {
     h[6] = (h[6]! + g) >>> 0;
     h[7] = (h[7]! + k) >>> 0;
   }
-  return Array.from(h, (x) => x.toString(16).padStart(8, "0")).join("");
+  return Array.from(h, (x) => x.toString(16).padStart(8, '0')).join('');
 }

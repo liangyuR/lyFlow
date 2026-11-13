@@ -31,11 +31,11 @@ struct Circle2DFitOptions {
 
 /// fitCircle2D 的半径最后是怎么定下来的。
 enum class Circle2DRadiusOutcome {
-  Free,        ///< 细化后半径在界内，照常
-  Prior,       ///< 走了带先验的细化，半径在界内
-  ClampedMin,  ///< 细化把半径推到下界以外，钉在下界上只重定圆心
-  ClampedMax,  ///< 同上，上界
-  Unrefined,   ///< 细化发散（非有限值），用 RANSAC 的原始圆
+  Free,       ///< 细化后半径在界内，照常
+  Prior,      ///< 走了带先验的细化，半径在界内
+  ClampedMin, ///< 细化把半径推到下界以外，钉在下界上只重定圆心
+  ClampedMax, ///< 同上，上界
+  Unrefined,  ///< 细化发散（非有限值），用 RANSAC 的原始圆
 };
 
 struct Circle2DFitReport {
@@ -66,4 +66,4 @@ bool fitCircle2D(const Cloud2D& cloud, Eigen::VectorXf* circle, pcl::Indices* in
 bool fitCircleFixedRadius2D(const Cloud2D& cloud, double fixedRadius, Eigen::VectorXf* circle,
                             pcl::Indices* inliers, const Circle2DFitOptions& options = {});
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

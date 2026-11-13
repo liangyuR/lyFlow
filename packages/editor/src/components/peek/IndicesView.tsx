@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { PEEK_FROZEN } from "../../store/peek";
-import { transport } from "../../transport";
-import { decodeIndices } from "../../types/execution";
-import type { PeekViewProps } from "./types";
+import { PEEK_FROZEN } from '../../store/peek';
+import { transport } from '../../transport';
+import { decodeIndices } from '../../types/execution';
+import type { PeekViewProps } from './types';
 
 const PAGE = 10_000;
 const ROW_H = 18;
@@ -97,7 +97,7 @@ export function IndicesView({ win, src }: PeekViewProps) {
       );
       const payload = decodeIndices(buffer);
       if (payload.values.length === 0) {
-        setError("后端没有再返回下标，这一段到此为止");
+        setError('后端没有再返回下标，这一段到此为止');
         return;
       }
       setLoaded((prev) =>
@@ -137,7 +137,7 @@ export function IndicesView({ win, src }: PeekViewProps) {
       <div
         className="peek-indices__head"
         data-total={total}
-        data-source-cloud={loaded?.sourceCloudId ?? ""}
+        data-source-cloud={loaded?.sourceCloudId ?? ''}
       >
         {loaded ? (
           <>
@@ -150,7 +150,7 @@ export function IndicesView({ win, src }: PeekViewProps) {
             <span className="peek-indices__shown">已取 {values.length.toLocaleString()}</span>
           </>
         ) : (
-          <span>{loading ? "正在取下标…" : (error ?? "无下标数据")}</span>
+          <span>{loading ? '正在取下标…' : (error ?? '无下标数据')}</span>
         )}
       </div>
 

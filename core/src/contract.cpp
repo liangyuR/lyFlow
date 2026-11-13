@@ -9,7 +9,8 @@ namespace {
 
 bool isKnownKey(const std::string& key) {
   for (const char* k : kPortContractKeys) {
-    if (key == k) return true;
+    if (key == k)
+      return true;
   }
   return false;
 }
@@ -17,7 +18,8 @@ bool isKnownKey(const std::string& key) {
 std::string knownKeyList() {
   std::string out;
   for (const char* k : kPortContractKeys) {
-    if (!out.empty()) out += " / ";
+    if (!out.empty())
+      out += " / ";
     out += k;
   }
   return out;
@@ -33,7 +35,8 @@ bool isCount(const nlohmann::json& j) {
 /// 而所有几何算子读的都是 xyz。
 bool cloudFinite(const PointCloud& c) {
   for (float v : c.xyz) {
-    if (!std::isfinite(v)) return false;
+    if (!std::isfinite(v))
+      return false;
   }
   return true;
 }
@@ -42,24 +45,27 @@ bool cloudFinite(const PointCloud& c) {
 std::size_t countNonFinite(const std::vector<float>& v) {
   std::size_t n = 0;
   for (float x : v) {
-    if (!std::isfinite(x)) n += 1;
+    if (!std::isfinite(x))
+      n += 1;
   }
   return n;
 }
 
-}  // namespace
+} // namespace
 
 std::vector<std::string> validatePortContract(const nlohmann::json& contract,
                                               const std::string& where) {
   std::vector<std::string> problems;
   auto fail = [&](const std::string& msg) { problems.push_back(where + " contract: " + msg); };
 
-  if (contract.is_null()) return problems;
+  if (contract.is_null())
+    return problems;
   if (!contract.is_object()) {
     fail("必须是一个 JSON 对象");
     return problems;
   }
-  if (contract.empty()) return problems;
+  if (contract.empty())
+    return problems;
 
   for (auto it = contract.begin(); it != contract.end(); ++it) {
     if (!isKnownKey(it.key())) {
@@ -119,10 +125,11 @@ std::vector<std::string> validatePortContract(const nlohmann::json& contract,
   return problems;
 }
 
-bool checkPortContract(const nlohmann::json& contract, const Data& value,
-                       nlohmann::json& expected, nlohmann::json& actual, std::string& message) {
+bool checkPortContract(const nlohmann::json& contract, const Data& value, nlohmann::json& expected,
+                       nlohmann::json& actual, std::string& message) {
   // 没声明契约的端口：这里立刻返回，连 value 都不碰（默认零开销）。
-  if (!contract.is_object() || contract.empty()) return true;
+  if (!contract.is_object() || contract.empty())
+    return true;
 
   auto reject = [&](nlohmann::json want, nlohmann::json got, std::string why) {
     expected = std::move(want);
@@ -171,7 +178,8 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
     bool okShape = dims.size() == shape->size();
     for (std::size_t i = 0; okShape && i < shape->size(); ++i) {
       const auto want = (*shape)[i].is_number_integer() ? (*shape)[i].get<std::int64_t>() : -1;
-      if (want >= 0 && dims[i] != want) okShape = false;
+      if (want >= 0 && dims[i] != want)
+        okShape = false;
     }
     if (!okShape) {
       return reject({{"shape", *shape}}, {{"shape", got}},
@@ -200,7 +208,7 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
     // O(n) 一遍，只在声明了 finite 的端口上跑（m6-plan §9）。
     if (const PointCloud* c = value.asCloud()) {
       if (!cloudFinite(*c)) {
-        const std::size_t bad = countNonFinite(c->xyz) ;
+        const std::size_t bad = countNonFinite(c->xyz);
         return reject({{"finite", true}}, {{"nonFiniteCoords", bad}},
                       "端口契约：坐标必须全是有限值，实际有 " + std::to_string(bad) +
                           " 个非有限分量（共 " + std::to_string(c->xyz.size()) + " 个）");
@@ -221,7 +229,8 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
         for (std::size_t i = 0; i < n; ++i) {
           float v;
           std::memcpy(&v, p + i * sizeof(float), sizeof v);
-          if (!std::isfinite(v)) bad += 1;
+          if (!std::isfinite(v))
+            bad += 1;
         }
       }
       if (bad != 0) {
@@ -241,4 +250,4 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
   return true;
 }
 
-}  // namespace lyflow
+} // namespace lyflow

@@ -13,7 +13,7 @@ const SCORE_CAMEL_START = 10;
 const PENALTY_GAP = -1;
 
 function isWordSeparator(c: string): boolean {
-  return c === " " || c === "." || c === "_" || c === "-" || c === "/";
+  return c === ' ' || c === '.' || c === '_' || c === '-' || c === '/';
 }
 
 function isUpper(c: string): boolean {
@@ -21,11 +21,11 @@ function isUpper(c: string): boolean {
 }
 
 export function normalizeSearchText(text: string): string {
-  return text.normalize("NFKC").toLowerCase();
+  return text.normalize('NFKC').toLowerCase();
 }
 
 function normalizedSource(text: string): { text: string; indices: number[] } {
-  let normalized = "";
+  let normalized = '';
   const indices: number[] = [];
   let offset = 0;
   for (const character of text) {
@@ -73,7 +73,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
     }
 
     const originalIndex = source.indices[found]!;
-    const prev = originalIndex > 0 ? text[originalIndex - 1]! : "";
+    const prev = originalIndex > 0 ? text[originalIndex - 1]! : '';
     if (found === 0 || isWordSeparator(prev)) {
       score += SCORE_WORD_START;
     } else if (isUpper(text[originalIndex]!) && !isUpper(prev)) {

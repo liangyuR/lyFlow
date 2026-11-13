@@ -7,7 +7,10 @@ project(lyflow_consumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(lyflow CONFIG REQUIRED)
+if(NOT DEFINED LYFLOW_CONSUMER_VERSION OR NOT LYFLOW_CONSUMER_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR "LYFLOW_CONSUMER_VERSION must explicitly specify X.Y.Z")
+endif()
+find_package(lyflow ${LYFLOW_CONSUMER_VERSION} EXACT CONFIG REQUIRED)
 
 foreach(sample embed_minimal embed_concurrent embed_inject)
   add_executable(${sample} "${LYFLOW_EXAMPLES_DIR}/${sample}.cpp")

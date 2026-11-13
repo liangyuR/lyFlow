@@ -17,7 +17,7 @@ struct Piece {
 };
 
 class View {
- public:
+public:
   View() = default;
   View(const Profile& p, std::vector<int> idx) : p_(&p), idx_(std::move(idx)) {}
 
@@ -30,7 +30,7 @@ class View {
   int lowerBound(double xv) const;
   int upperBound(double xv) const;
 
- private:
+private:
   const Profile* p_ = nullptr;
   std::vector<int> idx_;
 };
@@ -143,4 +143,4 @@ int sealSide(const View& all, const Dome& dome);
 
 double normalizeDeg(double a);
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

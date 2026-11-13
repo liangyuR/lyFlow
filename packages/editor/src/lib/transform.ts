@@ -3,7 +3,9 @@
 // 控件显示成「平移 xyz + 旋转 xyz（度）」，旋转是内旋 X→Y→Z，即 R = Rz·Ry·Rx，与 transform.make 同一约定。
 // 纯函数，不碰 DOM（node --test 直接测）。
 
-export const IDENTITY: readonly number[] = Object.freeze([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+export const IDENTITY: readonly number[] = Object.freeze([
+  1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+]);
 
 export interface TR {
   /** 平移，参数自己的单位（通常是米）。 */
@@ -22,7 +24,11 @@ export function clean(v: number): number {
 
 /** 取一份能用的 16 个数。形状不对（老文件、手改坏了）退回单位阵，控件不崩。 */
 export function asMatrix(value: unknown): number[] {
-  if (Array.isArray(value) && value.length === 16 && value.every((v) => typeof v === "number" && Number.isFinite(v))) {
+  if (
+    Array.isArray(value) &&
+    value.length === 16 &&
+    value.every((v) => typeof v === 'number' && Number.isFinite(v))
+  ) {
     return value as number[];
   }
   return [...IDENTITY];
@@ -31,14 +37,29 @@ export function asMatrix(value: unknown): number[] {
 /** 由平移与欧拉角合成刚体矩阵。 */
 export function compose({ t, r }: TR): number[] {
   const [rx, ry, rz] = r.map((d) => d * DEG) as [number, number, number];
-  const cx = Math.cos(rx), sx = Math.sin(rx);
-  const cy = Math.cos(ry), sy = Math.sin(ry);
-  const cz = Math.cos(rz), sz = Math.sin(rz);
+  const cx = Math.cos(rx),
+    sx = Math.sin(rx);
+  const cy = Math.cos(ry),
+    sy = Math.sin(ry);
+  const cz = Math.cos(rz),
+    sz = Math.sin(rz);
   const m = [
-    cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx, t[0],
-    sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx, t[1],
-    -sy, cy * sx, cy * cx, t[2],
-    0, 0, 0, 1,
+    cz * cy,
+    cz * sy * sx - sz * cx,
+    cz * sy * cx + sz * sx,
+    t[0],
+    sz * cy,
+    sz * sy * sx + cz * cx,
+    sz * sy * cx - cz * sx,
+    t[1],
+    -sy,
+    cy * sx,
+    cy * cx,
+    t[2],
+    0,
+    0,
+    0,
+    1,
   ];
   return m.map(clean);
 }
@@ -47,7 +68,12 @@ export function compose({ t, r }: TR): number[] {
  *  带缩放或切变的矩阵拆不成 T·R，控件只让它在矩阵视图里改。 */
 export function isRigid(m: readonly number[], tol = 1e-6): boolean {
   if (m.length !== 16) return false;
-  if (Math.abs(m[12]!) > tol || Math.abs(m[13]!) > tol || Math.abs(m[14]!) > tol || Math.abs(m[15]! - 1) > tol) {
+  if (
+    Math.abs(m[12]!) > tol ||
+    Math.abs(m[13]!) > tol ||
+    Math.abs(m[14]!) > tol ||
+    Math.abs(m[15]! - 1) > tol
+  ) {
     return false;
   }
   const row = (i: number) => [m[i * 4]!, m[i * 4 + 1]!, m[i * 4 + 2]!];
@@ -88,8 +114,8 @@ export function decompose(m: readonly number[]): TR {
 /** 面板行上的一行摘要：T[x, y, z] R[rx, ry, rz]°；不是刚体时说一声。 */
 export function summarize(value: unknown): string {
   const m = asMatrix(value);
-  if (!isRigid(m)) return "4×4 矩阵（含缩放或切变）";
+  if (!isRigid(m)) return '4×4 矩阵（含缩放或切变）';
   const { t, r } = decompose(m);
   const f = (v: number) => String(Number(v.toPrecision(4)));
-  return `T[${t.map(f).join(", ")}] R[${r.map(f).join(", ")}]°`;
+  return `T[${t.map(f).join(', ')}] R[${r.map(f).join(', ')}]°`;
 }

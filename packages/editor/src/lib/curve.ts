@@ -4,7 +4,7 @@
 // 判据与取值算法和 core 的 checkCurveValue / evaluateCurve（manifest.h）逐条对应 —— 两边画出、算出同一条线。
 // 纯函数，不碰 DOM（node --test 直接测）。
 
-export type CurveInterp = "linear" | "smooth";
+export type CurveInterp = 'linear' | 'smooth';
 export type CurvePoint = [number, number];
 
 export interface CurveValue {
@@ -20,27 +20,32 @@ export const IDENTITY_CURVE: CurveValue = Object.freeze({
     [0, 0],
     [1, 1],
   ],
-  interp: "linear",
+  interp: 'linear',
 }) as CurveValue;
 
 /** 同 core 的 checkCurveValue：合法返回 null，否则返回一句原因。 */
 export function curveProblem(value: unknown, min?: number, max?: number): string | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return '应当是 {"points": [[x, y], …], "interp": …} 这样的对象';
   }
   for (const k of Object.keys(value)) {
-    if (k !== "points" && k !== "interp") return `不认识的字段 '${k}'（只有 points 与 interp）`;
+    if (k !== 'points' && k !== 'interp') return `不认识的字段 '${k}'（只有 points 与 interp）`;
   }
   const v = value as { points?: unknown; interp?: unknown };
-  if (v.interp !== undefined && v.interp !== "linear" && v.interp !== "smooth") {
+  if (v.interp !== undefined && v.interp !== 'linear' && v.interp !== 'smooth') {
     return 'interp 只能是 "linear" 或 "smooth"';
   }
-  if (!Array.isArray(v.points) || v.points.length < 2) return "points 至少要有两个控制点";
+  if (!Array.isArray(v.points) || v.points.length < 2) return 'points 至少要有两个控制点';
   let prev = 0;
   for (let i = 0; i < v.points.length; i += 1) {
     const pt: unknown = v.points[i];
     const at = `第 ${i + 1} 个控制点`;
-    if (!Array.isArray(pt) || pt.length !== 2 || typeof pt[0] !== "number" || typeof pt[1] !== "number") {
+    if (
+      !Array.isArray(pt) ||
+      pt.length !== 2 ||
+      typeof pt[0] !== 'number' ||
+      typeof pt[1] !== 'number'
+    ) {
       return `${at}应当是 [x, y] 两个数`;
     }
     const [x, y] = pt as [number, number];
@@ -62,7 +67,10 @@ export function asCurve(value: unknown, fallback?: unknown): CurveValue {
 }
 
 /** 写回用的规范形：points 深拷一份、数抹掉浮点尾巴。interp 原样保留（没写就不写）。 */
-export function normalized(points: readonly CurvePoint[], interp: CurveInterp | undefined): CurveValue {
+export function normalized(
+  points: readonly CurvePoint[],
+  interp: CurveInterp | undefined,
+): CurveValue {
   const out: CurveValue = {
     points: points.map(([x, y]) => [round(x), round(y)] as CurvePoint),
   };
@@ -87,12 +95,15 @@ export function evaluate(curve: CurveValue, x: number): number {
   const [x1, y1] = pts[k + 1]!;
   const h = x1 - x0;
   const t = (x - x0) / h;
-  if (curve.interp !== "smooth") return y0 + (y1 - y0) * t;
+  if (curve.interp !== 'smooth') return y0 + (y1 - y0) * t;
   const m = tangents(pts);
   const t2 = t * t;
   const t3 = t2 * t;
   return (
-    (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m[k]! + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m[k + 1]!
+    (2 * t3 - 3 * t2 + 1) * y0 +
+    (t3 - 2 * t2 + t) * h * m[k]! +
+    (-2 * t3 + 3 * t2) * y1 +
+    (t3 - t2) * h * m[k + 1]!
   );
 }
 
@@ -100,7 +111,8 @@ export function evaluate(curve: CurveValue, x: number): number {
 function tangents(pts: readonly CurvePoint[]): number[] {
   const n = pts.length;
   const delta: number[] = [];
-  for (let i = 0; i + 1 < n; i += 1) delta.push((pts[i + 1]![1] - pts[i]![1]) / (pts[i + 1]![0] - pts[i]![0]));
+  for (let i = 0; i + 1 < n; i += 1)
+    delta.push((pts[i + 1]![1] - pts[i]![1]) / (pts[i + 1]![0] - pts[i]![0]));
   const m = new Array<number>(n).fill(0);
   m[0] = delta[0]!;
   m[n - 1] = delta[n - 2]!;
@@ -146,7 +158,10 @@ export function movePoint(
 }
 
 /** 在 x 处插一个点，y 取曲线当前在那里的值（插完线形不变）。x 太挨着已有的点就不插，返回 null。 */
-export function insertAt(curve: CurveValue, x: number): { points: CurvePoint[]; index: number } | null {
+export function insertAt(
+  curve: CurveValue,
+  x: number,
+): { points: CurvePoint[]; index: number } | null {
   const cx = Math.min(Math.max(x, 0), 1);
   if (curve.points.some((p) => Math.abs(p[0] - cx) < MIN_GAP)) return null;
   const points = curve.points.map((p) => [p[0], p[1]] as CurvePoint);
@@ -157,7 +172,9 @@ export function insertAt(curve: CurveValue, x: number): { points: CurvePoint[]; 
 }
 
 /** 在最宽的那一段正中间插一个点（「+ 控制点」按钮）。 */
-export function insertInWidestGap(curve: CurveValue): { points: CurvePoint[]; index: number } | null {
+export function insertInWidestGap(
+  curve: CurveValue,
+): { points: CurvePoint[]; index: number } | null {
   let best = 0;
   let at = -1;
   for (let i = 0; i + 1 < curve.points.length; i += 1) {
@@ -180,7 +197,12 @@ export function removePoint(points: readonly CurvePoint[], i: number): CurvePoin
 /** 画图用的 y 范围：softMin/softMax 优先，其次 min/max，缺省 [0, 1]；再撑开到包住所有点。 */
 export function yRange(
   curve: CurveValue,
-  spec: { min?: number | undefined; max?: number | undefined; softMin?: number | undefined; softMax?: number | undefined },
+  spec: {
+    min?: number | undefined;
+    max?: number | undefined;
+    softMin?: number | undefined;
+    softMax?: number | undefined;
+  },
 ): [number, number] {
   let lo = spec.softMin ?? spec.min ?? 0;
   let hi = spec.softMax ?? spec.max ?? 1;
@@ -195,5 +217,5 @@ export function yRange(
 /** 面板行上的摘要：「3 点 · smooth」。 */
 export function summarize(value: unknown): string {
   const c = asCurve(value);
-  return `${c.points.length} 点 · ${c.interp === "smooth" ? "平滑" : "线性"}`;
+  return `${c.points.length} 点 · ${c.interp === 'smooth' ? '平滑' : '线性'}`;
 }

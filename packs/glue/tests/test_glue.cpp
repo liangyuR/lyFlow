@@ -6,8 +6,10 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -39,20 +41,58 @@ struct Scene {
   P2 nozzle{150, 500};
   double headingDeg = -60;
   bool swirl = false;
-  double beadWidth = 20;  ///< 直胶是胶宽；螺旋胶是外包络的宽度
-  double rope = 0;        ///< 螺旋胶：一股胶沿法向的宽度
-  double amp = 0;         ///< 螺旋胶：这股胶左右摆的幅度（外包络 = 2·amp + rope）
+  double beadWidth = 20; ///< 直胶是胶宽；螺旋胶是外包络的宽度
+  double rope = 0;       ///< 螺旋胶：一股胶沿法向的宽度
+  double amp = 0;        ///< 螺旋胶：这股胶左右摆的幅度（外包络 = 2·amp + rope）
   double pitch = 24;
-  double phase = 2;       ///< 摆动的极值落在 s ≡ 0 (mod 4) 上，与站对齐
-  double edgeGap = 35;    ///< 胶的近边 → 零件边
-  int partSide = +1;      ///< 零件边在胶的哪一侧（+1 = 法向那一侧）
-  std::vector<std::pair<double, double>> breaks;  ///< 沿胶路的断口 [a, b]
+  double phase = 2;                              ///< 摆动的极值落在 s ≡ 0 (mod 4) 上，与站对齐
+  double edgeGap = 35;                           ///< 胶的近边 → 零件边
+  int partSide = +1;                             ///< 零件边在胶的哪一侧（+1 = 法向那一侧）
+  std::vector<std::pair<double, double>> breaks; ///< 沿胶路的断口 [a, b]
   bool bead = true;
-  bool dent = false;      ///< 没有胶，只有一条边缘很缓的暗带（零件上的压痕）
-  double noise = 2;       ///< 高斯噪声的 σ（灰度级）；真实帧的翻边是过曝的 255，胶上的 JPEG 噪声约这么大
+  bool dent = false; ///< 没有胶，只有一条边缘很缓的暗带（零件上的压痕）
+  double noise = 2;  ///< 高斯噪声的 σ（灰度级）；真实帧的翻边是过曝的 255，胶上的 JPEG 噪声约这么大
   double blur = 1.0;
   unsigned seed = 7;
+  // 示教胶路（glue-plan §6）用的几样：名义中心线（示教线）可以是圆弧，胶可以横着偏开它，旁边可以有一条平行的暗线
+  double curvature =
+      0; ///< 名义中心线的曲率（1/px，正 = 往法向那一侧拐）；0 = 直线（原来的场景，一位不差）
+  double shift = 0;    ///< 胶中心相对名义中心线沿法向的偏移（px）
+  double lineAt = NAN; ///< 一条平行的暗线（零件暗边、阴影）在名义中心线法向上的位置；NaN = 没有
+  double lineWidth = 6;
 };
+
+/// 点 (x, y) 相对名义中心线的坐标：along = 从喷嘴沿中心线的弧长，across = 沿法向（右侧为正）的距离。
+/// 圆弧：圆心在喷嘴法向 R = 1/curvature 处，p(θ) = C + R·(cos θ·r̂0 + sin θ·û)，along = R·θ。
+void sceneCoords(const Scene& sc, double x, double y, double* along, double* across) {
+  const P2 u = glue::dirOfDeg(sc.headingDeg);
+  const P2 v = glue::perp(u);
+  const P2 d(x - sc.nozzle.x, y - sc.nozzle.y);
+  if (sc.curvature == 0) {
+    *along = glue::dot(d, u);
+    *across = glue::dot(d, v);
+    return;
+  }
+  const double R = 1.0 / std::fabs(sc.curvature);
+  const double sign = sc.curvature > 0 ? 1.0 : -1.0;
+  const P2 c = sc.nozzle + v * (sign * R);
+  const P2 r0 = v * -sign; // 圆心 → 喷嘴的单位向量
+  const P2 q(x - c.x, y - c.y);
+  *along = R * std::atan2(glue::dot(q, u), glue::dot(q, r0));
+  *across = sign * (R - glue::length(q));
+}
+
+/// 名义中心线上 along = a 处的点（示教线就沿它点）。
+P2 scenePoint(const Scene& sc, double a) {
+  const P2 u = glue::dirOfDeg(sc.headingDeg);
+  if (sc.curvature == 0)
+    return sc.nozzle + u * a;
+  const P2 v = glue::perp(u);
+  const double R = 1.0 / std::fabs(sc.curvature);
+  const double sign = sc.curvature > 0 ? 1.0 : -1.0;
+  const double t = a / R;
+  return sc.nozzle + v * (sign * R) + (v * -sign) * (R * std::cos(t)) + u * (R * std::sin(t));
+}
 
 /// 螺旋胶用「沿法向左右摆的一股胶」近似：一股宽 rope、摆幅 amp、螺距 24 px，外包络 W = 2·amp + rope。
 /// 摆幅不超过螺距的 0.2 倍（胶边最陡约 51°，与真实螺旋胶的边缘陡度相当）；直胶模式量这种胶只会量到
@@ -69,17 +109,16 @@ Scene swirlScene(double W) {
     s.amp = 4.8;
     s.rope = W - 2 * s.amp;
   }
-  s.partSide = -1;  // 螺旋胶的零件边放在另一侧：「自动判侧」两侧都要验到
+  s.partSide = -1; // 螺旋胶的零件边放在另一侧：「自动判侧」两侧都要验到
   return s;
 }
 
 double sceneValue(const Scene& sc, double x, double y) {
-  const P2 u = glue::dirOfDeg(sc.headingDeg);
-  const P2 v = glue::perp(u);
   const P2 d(x - sc.nozzle.x, y - sc.nozzle.y);
-  const double along = glue::dot(d, u);
-  const double across = glue::dot(d, v);
-  if (d.x * d.x + d.y * d.y <= 35.0 * 35.0) return 30.0;  // 喷嘴的阴影
+  double along = 0, across = 0;
+  sceneCoords(sc, x, y, &along, &across);
+  if (d.x * d.x + d.y * d.y <= 35.0 * 35.0)
+    return 30.0; // 喷嘴的阴影
   const double flange = 190.0 + 0.06 * (x - 320.0) - 0.04 * (y - 280.0);
   const double outside = 45.0 + 0.02 * (x - 320.0);
   const double edgeAt = 0.5 * sc.beadWidth + sc.edgeGap;
@@ -88,16 +127,22 @@ double sceneValue(const Scene& sc, double x, double y) {
     // 压痕 / 阴影：一条高斯剖面（σ = 20 px，半深宽约 47 px）的暗带，暗 70 个灰度，边缘是缓的
     value -= 70.0 * std::exp(-0.5 * across * across / 400.0);
   }
-  if (!sc.bead || along < 0 || along > 470) return value;
+  if (std::isfinite(sc.lineAt) && std::fabs(across - sc.lineAt) <= 0.5 * sc.lineWidth &&
+      along > -40 && along < 520) {
+    value = 70.0; // 平行的暗线：与胶一样暗、边缘一样陡
+  }
+  if (!sc.bead || along < 0 || along > 470)
+    return value;
   for (const auto& [a, b] : sc.breaks) {
-    if (along >= a && along <= b) return value;
+    if (along >= a && along <= b)
+      return value;
   }
   bool inBead;
   if (sc.swirl) {
     const double o = sc.amp * std::sin(2 * kPi * (along - sc.phase) / sc.pitch);
     inBead = std::fabs(across - o) <= 0.5 * sc.rope;
   } else {
-    inBead = std::fabs(across) <= 0.5 * sc.beadWidth;
+    inBead = std::fabs(across - sc.shift) <= 0.5 * sc.beadWidth;
   }
   return inBead ? 70.0 : value;
 }
@@ -143,15 +188,15 @@ struct Params {
 };
 
 Json inspectGraph(const Params& p) {
-  return makeGraph(
-      {N{"n_load", "io.load_image", Json{{"source", "inputs"}}}, N{"n_path", "glue.bead_path", p.path},
-       N{"n_width", "glue.bead_width", p.width}, N{"n_breaks", "glue.bead_breaks", p.breaks},
-       N{"n_edge", "glue.edge_distance", p.edge}, N{"n_judge", "glue.judge", p.judge}},
-      {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
-       E{"n_path.path", "n_width.path"}, E{"n_width.bead", "n_breaks.bead"},
-       E{"n_load.image", "n_edge.image"}, E{"n_width.bead", "n_edge.bead"},
-       E{"n_width.bead", "n_judge.bead"}, E{"n_breaks.breaks", "n_judge.breaks"},
-       E{"n_edge.edge", "n_judge.edge"}});
+  return makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                    N{"n_path", "glue.bead_path", p.path}, N{"n_width", "glue.bead_width", p.width},
+                    N{"n_breaks", "glue.bead_breaks", p.breaks},
+                    N{"n_edge", "glue.edge_distance", p.edge}, N{"n_judge", "glue.judge", p.judge}},
+                   {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
+                    E{"n_path.path", "n_width.path"}, E{"n_width.bead", "n_breaks.bead"},
+                    E{"n_load.image", "n_edge.image"}, E{"n_width.bead", "n_edge.bead"},
+                    E{"n_width.bead", "n_judge.bead"}, E{"n_breaks.breaks", "n_judge.breaks"},
+                    E{"n_edge.edge", "n_judge.edge"}});
 }
 
 Params sceneParams(const Scene& sc) {
@@ -188,7 +233,8 @@ Result run(const Json& doc, const cv::Mat& gray, std::vector<exec::InjectedInput
   r.status = log.runStatus();
   if (r.status != "ok") {
     for (const Json& e : log.ofKind("node_state")) {
-      if (e.value("state", "") == "error") MESSAGE(e.dump());
+      if (e.value("state", "") == "error")
+        MESSAGE(e.dump());
     }
     return r;
   }
@@ -215,7 +261,8 @@ Result run(const Json& doc, const cv::Mat& gray, std::vector<exec::InjectedInput
 std::vector<double> numbers(const Json& arr) {
   std::vector<double> out;
   for (const Json& v : arr) {
-    if (v.is_number()) out.push_back(v.get<double>());
+    if (v.is_number())
+      out.push_back(v.get<double>());
   }
   return out;
 }
@@ -226,7 +273,70 @@ double medianOf(std::vector<double> v) { return glue::median(std::move(v)); }
 const std::vector<std::pair<double, double>> kBreaks = {
     {142, 152}, {182, 202}, {234, 274}, {306, 386}};
 
-}  // namespace
+// ------------------------------------------------------------------ 示教胶路（glue-plan §6）
+
+/// 示教胶路的检测图：n_path 换成 glue.taught_path（它不吃图），其余与 inspectGraph 相同。
+Json taughtGraph(const Params& p) {
+  return makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                    N{"n_path", "glue.taught_path", p.path},
+                    N{"n_width", "glue.bead_width", p.width},
+                    N{"n_breaks", "glue.bead_breaks", p.breaks},
+                    N{"n_edge", "glue.edge_distance", p.edge}, N{"n_judge", "glue.judge", p.judge}},
+                   {E{"n_load.image", "n_width.image"}, E{"n_path.path", "n_width.path"},
+                    E{"n_width.bead", "n_breaks.bead"}, E{"n_load.image", "n_edge.image"},
+                    E{"n_width.bead", "n_edge.bead"}, E{"n_width.bead", "n_judge.bead"},
+                    E{"n_breaks.breaks", "n_judge.breaks"}, E{"n_edge.edge", "n_judge.edge"}});
+}
+
+/// 示教线：沿名义中心线从喷嘴（along = 0）点到胶尾（470），直线两头两个点，圆弧每 10 px 一个点。
+/// s 从第一个示教点量起，所以 s 就是 along —— 断口的真值与 bead_path 的那几个用例同一把尺子。
+std::string taughtPoints(const Scene& sc) {
+  Json pts = Json::array();
+  const double step = sc.curvature == 0 ? 470.0 : 10.0;
+  for (double a = 0; a <= 470.0 + 1e-9; a += step) {
+    const P2 p = scenePoint(sc, a);
+    pts.push_back({p.x, p.y});
+  }
+  return pts.dump();
+}
+
+Params taughtParams(const Scene& sc, double tolerance = 20) {
+  Params p;
+  p.path = Json{{"points", taughtPoints(sc)}, {"zone", {100, 400}}, {"tolerance", tolerance}};
+  p.width = Json{{"form", "straight"}};
+  return p;
+}
+
+/// 有胶各站的胶中心（沿法向相对示教线，px）。
+std::vector<double> mids(const Json& stations) {
+  std::vector<double> out;
+  for (std::size_t i = 0; i < stations["count"].get<std::size_t>(); ++i) {
+    if (!stations["present"][i].get<bool>())
+      continue;
+    out.push_back(0.5 * (stations["lo"][i].get<double>() + stations["hi"][i].get<double>()));
+  }
+  return out;
+}
+
+/// 「检测区内没找到胶」：只报一条 missing，判 NG，原因写在 bead.info.reason。
+void checkNoBead(const Result& r) {
+  REQUIRE(r.status == "ok");
+  CHECK(r.pathInfo["ok"] == true); // 示教胶路本身没毛病
+  CHECK(r.beadInfo["present"] == 0);
+  CHECK(r.beadInfo["message"] == glue::kNoBeadMessage);
+  CHECK(r.verdict["ok"] == false);
+  CHECK(r.verdict["message"] == glue::kNoBeadMessage);
+  REQUIRE(r.verdict["defects"].size() == 1);
+  CHECK(r.verdict["defects"][0]["type"] == "missing");
+  CHECK(r.ok.value == 0.0);
+  // 下游照常跑出「全段无胶」：断胶就是整个检测区
+  REQUIRE(r.breaks["breaks"].size() == 1);
+  CHECK(r.breaks["breaks"][0]["sStart"] == 100.0);
+  CHECK(r.breaks["breaks"][0]["sEnd"] == 400.0);
+  CHECK_FALSE(r.widthMean.ok);
+}
+
+} // namespace
 
 TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽、边距中位误差 ≤ 1.0 px，零误报") {
   for (const bool swirl : {false, true}) {
@@ -240,11 +350,12 @@ TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽
       CHECK(r.pathInfo.value("ok", false));
       CHECK(r.pathInfo.value("beadlike", false));
       const std::vector<double> widths = numbers(r.stations["width"]);
-      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());  // 每一站都有胶
+      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>()); // 每一站都有胶
       const double wMed = medianOf(widths);
       CHECK(std::fabs(wMed - W) <= 1.0);
-      MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 胶宽中位 " << wMed
-                      << " 边距中位 " << medianOf(numbers(r.edge["distance"])) << " 侧 " << r.edge["side"]);
+      MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 胶宽中位 "
+                      << wMed << " 边距中位 " << medianOf(numbers(r.edge["distance"])) << " 侧 "
+                      << r.edge["side"]);
       CHECK(r.edge["side"] == (sc.partSide > 0 ? "right" : "left"));
       const double dMed = medianOf(numbers(r.edge["distance"]));
       CHECK(std::fabs(dMed - sc.edgeGap) <= 1.0);
@@ -264,7 +375,8 @@ TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽
   }
 }
 
-TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报出 ≥ 20 的那几段，起止误差 ≤ stationStep，其余零误报") {
+TEST_CASE(
+    "glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报出 ≥ 20 的那几段，起止误差 ≤ stationStep，其余零误报") {
   // 一帧一个断口（产线上一帧里一般至多一处），两端落在两站正中间（s ≡ 2 mod 4）
   for (const bool swirl : {false, true}) {
     for (const double W : {8.0, 20.0, 40.0, 70.0}) {
@@ -280,9 +392,10 @@ TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报
         REQUIRE(r.pathInfo.value("ok", false));
         const Json& got = r.breaks["breaks"];
         std::string seen;
-        for (const Json& b : got) seen += "[" + b["sStart"].dump() + ", " + b["sEnd"].dump() + "] ";
-        MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 断口 [" << truth.first
-                        << ", " << truth.second << "] 报出 " << seen);
+        for (const Json& b : got)
+          seen += "[" + b["sStart"].dump() + ", " + b["sEnd"].dump() + "] ";
+        MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 断口 ["
+                        << truth.first << ", " << truth.second << "] 报出 " << seen);
         const bool expected = truth.second - truth.first >= 20.0;
         REQUIRE(got.size() == (expected ? 1u : 0u));
         if (expected) {
@@ -292,7 +405,7 @@ TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报
           CHECK(r.verdict["counts"]["break"] == 1);
           CHECK(r.verdict["message"].get<std::string>().rfind("NG：断胶 1 处", 0) == 0);
         } else {
-          CHECK(r.verdict["ok"] == true);  // 短于 minLength 的不报，也不判 NG
+          CHECK(r.verdict["ok"] == true); // 短于 minLength 的不报，也不判 NG
         }
       }
     }
@@ -334,7 +447,8 @@ TEST_CASE("glue：一片空白（连暗带都没有）也是「检测区内没�
   CHECK(r.verdict["message"] == glue::kNoBeadMessage);
 }
 
-TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 宽度、边距、断口长度按映射后两点的距离出 mm") {
+TEST_CASE(
+    "glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 宽度、边距、断口长度按映射后两点的距离出 mm") {
   // [X, Y, W] = H·[x, y, 1]：0.1 mm/px 的缩放，外加随 x、y 变化的透视（图的两头差约 4%）
   const std::array<double, 9> H = {0.1, 0.004, -3.0, -0.002, 0.1, 5.0, 4e-5, 3e-5, 1.0};
   std_image::PlaneCalib calib;
@@ -346,7 +460,7 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   sc.beadWidth = 40;
   sc.breaks = {{234, 274}};
   Params p = sceneParams(sc);
-  p.breaks = Json{{"minLength", 2.0}};  // 接了标定，minLength 跟着 bead 的单位走：mm
+  p.breaks = Json{{"minLength", 2.0}}; // 接了标定，minLength 跟着 bead 的单位走：mm
   const std::vector<exec::InjectedInput> inject = {
       exec::InjectedInput{"n_width", "calib", Data::record(rec)},
       exec::InjectedInput{"n_edge", "calib", Data::record(rec)}};
@@ -361,12 +475,14 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   // 宽度：每站 = 两边的像素点映射之后的距离（独立算一遍对照）
   std::size_t checked = 0;
   for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
-    if (!r.stations["present"][i].get<bool>()) continue;
+    if (!r.stations["present"][i].get<bool>())
+      continue;
     const P2 a = glue::pxOf(r.stations["left"][i]);
     const P2 b = glue::pxOf(r.stations["right"][i]);
     CHECK(r.stations["width"][i].get<double>() == doctest::Approx(mapDist(a, b)).epsilon(1e-3));
     // 与 px 宽度差一个随位置变的比例，量级是 0.1 mm/px
-    const double ratio = r.stations["width"][i].get<double>() / r.stations["widthPx"][i].get<double>();
+    const double ratio =
+        r.stations["width"][i].get<double>() / r.stations["widthPx"][i].get<double>();
     CHECK(ratio > 0.08);
     CHECK(ratio < 0.12);
     ++checked;
@@ -375,7 +491,8 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   // 边距：量起点 → 零件边点，映射之后的距离
   checked = 0;
   for (std::size_t i = 0; i < r.edge["count"].get<std::size_t>(); ++i) {
-    if (r.edge["status"][i] != "ok") continue;
+    if (r.edge["status"][i] != "ok")
+      continue;
     const P2 a = glue::pxOf(r.edge["from"][i]);
     const P2 b = glue::pxOf(r.edge["edge"][i]);
     CHECK(r.edge["distance"][i].get<double>() == doctest::Approx(mapDist(a, b)).epsilon(1e-3));
@@ -418,7 +535,8 @@ TEST_CASE("glue：加载期校验 —— zone / sector / widthRange 填反了、
   auto errors = [](const Json& doc) {
     std::vector<std::string> paths;
     for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
-      if (d.value("severity", "") == "error") paths.push_back(d.value("paramPath", ""));
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
     }
     return paths;
   };
@@ -428,7 +546,7 @@ TEST_CASE("glue：加载期校验 —— zone / sector / widthRange 填反了、
   CHECK(errors(inspectGraph(p)) == std::vector<std::string>{"zone"});
   p.path = Json{{"sector", {10, -10}}};
   CHECK(errors(inspectGraph(p)) == std::vector<std::string>{"sector"});
-  p.path = Json{{"sector", {10, -10}}, {"headingSource", "param"}};  // 给了方向就不看扇区
+  p.path = Json{{"sector", {10, -10}}, {"headingSource", "param"}}; // 给了方向就不看扇区
   CHECK(errors(inspectGraph(p)).empty());
   p.path = Json::object();
   p.width = Json{{"widthRange", {60, 20}}};
@@ -444,34 +562,36 @@ TEST_CASE("glue：响应图只算一块（ROI）时，块里的值与整幅图�
   Scene sc;
   const cv::Mat gray = render(sc);
   const cv::Rect roi(200, 150, 180, 160);
-  const glue::Field whole = glue::responseField(gray, false, 90, cv::Rect(0, 0, gray.cols, gray.rows));
+  const glue::Field whole =
+      glue::responseField(gray, false, 90, cv::Rect(0, 0, gray.cols, gray.rows));
   const glue::Field part = glue::responseField(gray, false, 90, roi);
   double maxDiff = 0;
   for (int y = roi.y; y < roi.y + roi.height - 1; y += 3) {
     for (int x = roi.x; x < roi.x + roi.width - 1; x += 3) {
-      maxDiff = std::max(maxDiff, std::fabs(whole.at(x + 0.25, y + 0.5) - part.at(x + 0.25, y + 0.5)));
+      maxDiff =
+          std::max(maxDiff, std::fabs(whole.at(x + 0.25, y + 0.5) - part.at(x + 0.25, y + 0.5)));
     }
   }
   CHECK(maxDiff == 0.0);
-  CHECK(part.at(roi.x - 1.0, roi.y + 5.0) == glue::kInvalid);  // 块外不可信
+  CHECK(part.at(roi.x - 1.0, roi.y + 5.0) == glue::kInvalid); // 块外不可信
 }
 
 TEST_CASE("glue：人造断胶 —— 源带取干净的一侧，另一条检测链查得出，起止误差 ≤ 5 px") {
   Scene sc;
   sc.beadWidth = 30;
-  const Json doc = makeGraph(
-      {N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
-       N{"n_path", "glue.bead_path", sceneParams(sc).path},
-       N{"n_width", "glue.bead_width", Json::object()},
-       N{"n_synth", "glue.synth_break", Json{{"sStart", 202}, {"length", 60}}},
-       N{"n_path2", "glue.bead_path", sceneParams(sc).path},
-       N{"n_width2", "glue.bead_width", Json::object()},
-       N{"n_breaks2", "glue.bead_breaks", Json::object()}},
-      {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
-       E{"n_path.path", "n_width.path"}, E{"n_load.image", "n_synth.image"},
-       E{"n_width.bead", "n_synth.bead"}, E{"n_synth.image", "n_path2.image"},
-       E{"n_synth.image", "n_width2.image"}, E{"n_path2.path", "n_width2.path"},
-       E{"n_width2.bead", "n_breaks2.bead"}});
+  const Json doc =
+      makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                 N{"n_path", "glue.bead_path", sceneParams(sc).path},
+                 N{"n_width", "glue.bead_width", Json::object()},
+                 N{"n_synth", "glue.synth_break", Json{{"sStart", 202}, {"length", 60}}},
+                 N{"n_path2", "glue.bead_path", sceneParams(sc).path},
+                 N{"n_width2", "glue.bead_width", Json::object()},
+                 N{"n_breaks2", "glue.bead_breaks", Json::object()}},
+                {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
+                 E{"n_path.path", "n_width.path"}, E{"n_load.image", "n_synth.image"},
+                 E{"n_width.bead", "n_synth.bead"}, E{"n_synth.image", "n_path2.image"},
+                 E{"n_synth.image", "n_width2.image"}, E{"n_path2.path", "n_width2.path"},
+                 E{"n_width2.bead", "n_breaks2.bead"}});
   std::vector<exec::InjectedInput> inject = {
       exec::InjectedInput{"n_load", "image", Data::image(imageOf(render(sc)))}};
   Session s(doc, {}, {}, false, 0, false, std::move(inject));
@@ -483,7 +603,7 @@ TEST_CASE("glue：人造断胶 —— 源带取干净的一侧，另一条检测
   const Json in = info.asRecord()->data;
   MESSAGE(in.dump());
   CHECK(in["ok"] == true);
-  CHECK(in["side"] == "left");  // 零件边在右侧：右边的源带里有零件边的暗区，不干净
+  CHECK(in["side"] == "left"); // 零件边在右侧：右边的源带里有零件边的暗区，不干净
   CHECK(image.asImage()->channels == 1);
   const Json& got = breaks.asRecord()->data["breaks"];
   REQUIRE(got.size() == 1);
@@ -500,7 +620,8 @@ TEST_CASE("glue：叠画是合格的 lyflow.overlay2d（顺手写一份样例给
   REQUIRE(r.overlay.is_object());
   CHECK(r.overlay["frame"] == "image");
   std::set<std::string> roles;
-  for (const Json& item : r.overlay["items"]) roles.insert(item.value("role", ""));
+  for (const Json& item : r.overlay["items"])
+    roles.insert(item.value("role", ""));
   for (const char* want : {"path", "edge.left", "edge.right", "part", "defect", "ng"}) {
     CHECK_MESSAGE(roles.count(want) == 1, "缺 role " << want);
   }
@@ -509,4 +630,868 @@ TEST_CASE("glue：叠画是合格的 lyflow.overlay2d（顺手写一份样例给
       std::filesystem::temp_directory_path() / "lyflow-glue-overlay-sample.json";
   std::ofstream out(sample, std::ios::binary);
   out << Json{{"kind", "Record"}, {"type", "lyflow.overlay2d"}, {"data", r.overlay}}.dump(2);
+}
+
+TEST_CASE(
+    "glue：示教胶路 —— 直线 / 圆弧上已知宽度；胶横着偏开示教线也量得出真宽，断口落在示教线上") {
+  // 胶中心相对示教线的偏移 {0, +12, −15}（tolerance 20），宽 {20, 40}；圆弧半径 400 px，整段拐 67°
+  for (const double curvature : {0.0, 1.0 / 400.0}) {
+    for (const auto& sw : std::vector<std::pair<double, double>>{{0, 20}, {12, 20}, {-15, 40}}) {
+      const double shift = sw.first, W = sw.second; // CAPTURE 是 lambda，C++17 抓不了结构化绑定
+      Scene sc;
+      sc.curvature = curvature;
+      sc.shift = shift;
+      sc.beadWidth = W;
+      CAPTURE(curvature);
+      CAPTURE(shift);
+      CAPTURE(W);
+      const Result r = run(taughtGraph(taughtParams(sc)), render(sc));
+      REQUIRE(r.status == "ok");
+      // PathInfo：是示教的，没有搜索过
+      CHECK(r.pathInfo["ok"] == true);
+      CHECK(r.pathInfo["lineSource"] == "taught");
+      CHECK(r.pathInfo["headingSource"] == "taught");
+      CHECK(r.pathInfo["coverage"].is_null());
+      CHECK(r.pathInfo["sharpness"].is_null());
+      CHECK(r.pathInfo["candidates"].empty());
+      CHECK(r.pathInfo["zone"] == Json::array({100.0, 400.0}));
+      CHECK(r.beadInfo["lineSource"] == "taught");
+      const std::vector<double> widths = numbers(r.stations["width"]);
+      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>()); // 每一站都有胶
+      CHECK(r.stations["s"][0] == 100.0);
+      const double wMed = medianOf(widths);
+      const double mMed = medianOf(mids(r.stations));
+      MESSAGE("曲率 " << curvature << " 偏移 " << shift << " W=" << W << " 胶宽中位 " << wMed
+                      << " 胶中心中位 " << mMed << " offset " << r.beadInfo["offset"] << " 陡度 "
+                      << r.beadInfo["sharpness"]);
+      CHECK(std::fabs(wMed - W) <= 1.0);
+      CHECK(std::fabs(mMed - shift) <= 1.0);
+      CHECK(std::fabs(r.beadInfo["offset"].get<double>() - shift) <= 1.0);
+      CHECK(r.breaks["count"] == 0);
+      CHECK(r.verdict["ok"] == true);
+      CHECK(r.ok.value == 1.0);
+
+      // 同一条胶断开 40 / 80 px：断口按示教线的 s 报出来，起止误差 ≤ stationStep
+      for (const auto& truth : {kBreaks[2], kBreaks[3]}) {
+        CAPTURE(truth.first);
+        Scene sb = sc;
+        sb.breaks = {truth};
+        const Result rb = run(taughtGraph(taughtParams(sb)), render(sb));
+        REQUIRE(rb.status == "ok");
+        const Json& got = rb.breaks["breaks"];
+        REQUIRE(got.size() == 1);
+        CHECK(std::fabs(got[0]["sStart"].get<double>() - truth.first) <= 4.0);
+        CHECK(std::fabs(got[0]["sEnd"].get<double>() - truth.second) <= 4.0);
+        CHECK(rb.verdict["ok"] == false);
+        CHECK(rb.verdict["counts"]["break"] == 1);
+      }
+    }
+  }
+
+  // 示教线绕喷嘴偏了 4°（胶在两件之间的方向变了）：胶相对示教线的偏移沿 s 线性变大，s = 400 处约 28 px。
+  // 偏移轨迹一遍最多挪一个 gate，逐遍细化到收敛才跟得上；断口照样落在示教线上
+  Scene sc;
+  sc.breaks = {kBreaks[2]};
+  Params p = taughtParams(sc, 40);
+  const P2 tip = sc.nozzle + glue::dirOfDeg(sc.headingDeg + 4.0) * 470.0;
+  p.path["points"] = Json::array({{sc.nozzle.x, sc.nozzle.y}, {tip.x, tip.y}}).dump();
+  const Result r = run(taughtGraph(p), render(sc));
+  REQUIRE(r.status == "ok");
+  const P2 n = glue::perp(glue::dirOfDeg(sc.headingDeg + 4.0));
+  const double slope =
+      glue::dot(glue::dirOfDeg(sc.headingDeg), n); // 胶上沿 s 每走 1 px，偏移变多少
+  std::size_t checked = 0;
+  for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
+    const double s = r.stations["s"][i].get<double>();
+    if (s >= kBreaks[2].first - 4 && s <= kBreaks[2].second + 4)
+      continue;
+    CAPTURE(s);
+    REQUIRE(r.stations["present"][i].get<bool>());
+    const double mid =
+        0.5 * (r.stations["lo"][i].get<double>() + r.stations["hi"][i].get<double>());
+    CHECK(std::fabs(mid - slope * s) <= 1.5);
+    ++checked;
+  }
+  CHECK(checked > 60);
+  REQUIRE(r.breaks["breaks"].size() == 1);
+  CHECK(std::fabs(r.breaks["breaks"][0]["sStart"].get<double>() - kBreaks[2].first) <= 4.0);
+  CHECK(std::fabs(r.breaks["breaks"][0]["sEnd"].get<double>() - kBreaks[2].second) <= 4.0);
+}
+
+TEST_CASE("glue：示教胶旁暗带由浅谷相连 -> 全站量到胶且宽度不含旁侧暗带") {
+  for (double gap : {6.0, 18.0}) {
+    for (double widthMax : {70.0, 100.0}) {
+      CAPTURE(gap);
+      CAPTURE(widthMax);
+      cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+      for (int y = 0; y < image.rows; ++y) {
+        for (int x = 0; x < image.cols; ++x) {
+          const double localGap = x >= 180 && x < 300 ? gap : 18;
+          if (y >= 185 && y < 215)
+            image.at<unsigned char>(y, x) = 40;
+          else if (y >= 215 && y < 215 + localGap)
+            image.at<unsigned char>(y, x) = 180;
+          else if (y >= 215 + localGap && y < 265 + localGap)
+            image.at<unsigned char>(y, x) = 60;
+        }
+      }
+      Params p;
+      p.path = Json{{"points", "[[80,200],[440,200]]"},
+                    {"zone", {0, 0}},
+                    {"tolerance", 100},
+                    {"widthMax", 100}};
+      p.width = Json{{"form", "straight"},
+                     {"widthRange", {10, widthMax}},
+                     {"searchHalf", 150},
+                     {"stationStep", 10},
+                     {"mergeGap", 8}};
+      const Result r = run(taughtGraph(p), image);
+      REQUIRE(r.status == "ok");
+      const auto widths = numbers(r.stations["widthPx"]);
+      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+      for (double width : widths)
+        CHECK(std::fabs(width - 30) <= 1.0);
+      for (double mid : mids(r.stations))
+        CHECK(std::fabs(mid) <= 1.0);
+    }
+  }
+}
+
+TEST_CASE("glue：示教胶内窄高光 -> 保留完整胶宽而非半条胶") {
+  for (const auto& [shift, highlight] :
+       std::vector<std::pair<double, double>>{{0, 0}, {12, 0}, {12, 4}, {12, 8}}) {
+    CAPTURE(shift);
+    CAPTURE(highlight);
+    cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+    for (int y = 0; y < image.rows; ++y) {
+      for (int x = 0; x < image.cols; ++x) {
+        const double across = y - 200 - shift;
+        if (across >= -20 && across < 20)
+          image.at<unsigned char>(y, x) = 40;
+        if (across >= highlight - 3 && across < highlight + 3)
+          image.at<unsigned char>(y, x) = 180;
+      }
+    }
+    Params p;
+    p.path = Json{
+        {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 100}};
+    p.width = Json{{"form", "straight"},
+                   {"widthRange", {10, 100}},
+                   {"searchHalf", 100},
+                   {"stationStep", 10},
+                   {"mergeGap", 8}};
+    const Result r = run(taughtGraph(p), image);
+    REQUIRE(r.status == "ok");
+    const auto widths = numbers(r.stations["widthPx"]);
+    REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+    for (double width : widths)
+      CHECK(std::fabs(width - 40) <= 1.0);
+    for (double mid : mids(r.stations))
+      CHECK(std::fabs(mid - shift) <= 1.0);
+  }
+}
+
+TEST_CASE(
+    "glue：示教胶沿线照明不均（一段旁边是暗背景，顶帽响应只剩亮处的两成）-> 暗处仍全站量到胶") {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int y = 0; y < image.rows; ++y) {
+    for (int x = 0; x < image.cols; ++x) {
+      if (x >= 300)
+        image.at<unsigned char>(y, x) = 70;
+      if (y >= 185 && y < 215)
+        image.at<unsigned char>(y, x) = 30;
+    }
+  }
+  Params p;
+  p.path = Json{
+      {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 60}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 60}},
+                 {"searchHalf", 60},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  const Result r = run(taughtGraph(p), image);
+  REQUIRE(r.status == "ok");
+  const auto widths = numbers(r.stations["widthPx"]);
+  REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+  for (double width : widths)
+    CHECK(std::fabs(width - 30) <= 1.5);
+}
+
+TEST_CASE(
+    "glue：示教胶长断口里有一条与胶同宽的淡带（同一背景上响应只有胶的一到两成）-> 报出完整断口") {
+  for (const auto& [faint, lo] :
+       std::vector<std::pair<int, int>>{{190, 185}, {175, 185}, {175, 235}}) {
+    CAPTURE(faint);
+    CAPTURE(lo);
+    cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+    for (int y = 185; y < 215; ++y) {
+      for (int x = 0; x < image.cols; ++x)
+        image.at<unsigned char>(y, x) = x >= lo && x < 385 ? faint : 30;
+    }
+    Params p;
+    p.path = Json{
+        {"points", "[[40,200],[480,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 60}};
+    p.width = Json{{"form", "straight"},
+                   {"widthRange", {10, 60}},
+                   {"searchHalf", 60},
+                   {"stationStep", 10},
+                   {"mergeGap", 8}};
+    const Result r = run(taughtGraph(p), image);
+    REQUIRE(r.status == "ok");
+    REQUIRE(r.breaks["breaks"].size() == 1);
+    CHECK(std::fabs(r.breaks["breaks"][0]["sStart"].get<double>() - (lo - 40)) <= 1.0);
+    CHECK(std::fabs(r.breaks["breaks"][0]["sEnd"].get<double>() - 345) <= 1.0);
+  }
+}
+
+TEST_CASE(
+    "glue：示教胶边外隔一条窄缝、时有时无地贴着一条淡肩（峰值只有胶的一成）-> 胶宽不把淡肩并进来") {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int y = 0; y < image.rows; ++y) {
+    for (int x = 0; x < image.cols; ++x) {
+      if (y >= 185 && y < 215)
+        image.at<unsigned char>(y, x) = 40;
+      else if ((x / 20) % 3 == 0 && y >= 221 && y < 232)
+        image.at<unsigned char>(y, x) = 200;
+    }
+  }
+  Params p;
+  p.path = Json{
+      {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 80}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 80}},
+                 {"searchHalf", 80},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  const Result r = run(taughtGraph(p), image);
+  REQUIRE(r.status == "ok");
+  const auto widths = numbers(r.stations["widthPx"]);
+  REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+  for (double width : widths)
+    CHECK(std::fabs(width - 30) <= 1.5);
+}
+
+TEST_CASE(
+    "glue：示教胶路 —— 没有胶、只有压痕、只有平行暗线、胶偏出 tolerance：都是「检测区内没找到胶」，从不判 OK") {
+  SUBCASE("一片干净的背景") {
+    Scene sc;
+    sc.bead = false;
+    const Result r = run(taughtGraph(taughtParams(sc)), render(sc));
+    checkNoBead(r);
+    CHECK(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["candidateLo"]).empty());
+    CHECK(numbers(r.stations["candidateHi"]).empty());
+    // 不判断胶（maxBreak < 0）也照样是 NG：整段没胶不靠断胶来判
+    Params p = taughtParams(sc);
+    p.judge = Json{{"maxBreak", -1}};
+    checkNoBead(run(taughtGraph(p), render(sc)));
+  }
+  SUBCASE("只有一条边缘很缓的压痕压在示教线上（D15）") {
+    Scene sc;
+    sc.bead = false;
+    sc.dent = true;
+    const Result r = run(taughtGraph(taughtParams(sc)), render(sc));
+    MESSAGE("reason: " << r.beadInfo["reason"] << " sharpness=" << r.beadInfo["sharpness"]);
+    checkNoBead(r);
+    CHECK(r.beadInfo["reason"].get<std::string>().find("太缓") != std::string::npos);
+    CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["widthPx"]).empty());
+    CHECK(r.beadInfo["coverage"] == 0);
+    for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
+      if (r.stations["candidateWidthPx"][i].is_null())
+        continue;
+      CHECK_FALSE(r.stations["present"][i].get<bool>());
+      CHECK(r.stations["candidateWidthPx"][i].get<double>() ==
+            doctest::Approx(r.stations["candidateHi"][i].get<double>() -
+                            r.stations["candidateLo"][i].get<double>())
+                .epsilon(0.001));
+    }
+  }
+  SUBCASE("只有一条平行的暗线，离示教线 30 px（tolerance 20 之外、卡尺之内）") {
+    Scene sc;
+    sc.bead = false;
+    sc.lineAt = 30;
+    checkNoBead(run(taughtGraph(taughtParams(sc)), render(sc)));
+  }
+  SUBCASE("暗线在 tolerance 之内，但比 widthRange 下限窄：示教时把胶宽范围收紧就挡在外面") {
+    Scene sc;
+    sc.bead = false;
+    sc.lineAt = -12;
+    Params p = taughtParams(sc);
+    p.width["widthRange"] = {12, 90};
+    const Result r = run(taughtGraph(p), render(sc));
+    checkNoBead(r);
+    CHECK(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["widthPx"]).empty());
+  }
+  SUBCASE("离线窄暗带和跨越示教线的宽阴影不作为失败站候选，居中超宽仍可诊断") {
+    for (const auto& [offset, width] :
+         std::vector<std::pair<double, double>>{{12, 6}, {-35, 90}, {0, 30}}) {
+      CAPTURE(offset);
+      CAPTURE(width);
+      Scene sc;
+      sc.bead = false;
+      sc.lineAt = offset;
+      sc.lineWidth = width;
+      sc.noise = 0;
+      Params p = taughtParams(sc);
+      p.path["widthMax"] = 120;
+      p.width["widthRange"] = {12, 20};
+      p.width["searchHalf"] = 100;
+      const Result r = run(taughtGraph(p), render(sc));
+      checkNoBead(r);
+      CHECK(numbers(r.stations["widthPx"]).empty());
+      if (offset == 0)
+        CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+      else
+        CHECK(numbers(r.stations["candidateWidthPx"]).empty());
+    }
+  }
+  SUBCASE("胶偏开示教线 35 px，超出 tolerance 20：不算这条胶") {
+    Scene sc;
+    sc.shift = 35;
+    checkNoBead(run(taughtGraph(taughtParams(sc)), render(sc)));
+  }
+}
+
+TEST_CASE(
+    "glue：示教胶路 —— 胶断了一截、旁边一条平行暗线一直在：断口照样报在示教线上，不被暗线接上") {
+  // 断口 [234, 314]（80 px）。暗线与胶一样暗：宽 6 px 的一条在 tolerance 20 之外 30 px；另一条在 tolerance 放宽到 30
+  // 之后的 −27 px，进了轨迹的候选，而且比断了一截的胶还长（票数更多）—— 投票让示教线附近的胶优先，断口里它离轨迹
+  // 太远不算胶；与胶同宽（20 px）的一条在 −45 px：断口里它像整段横移的胶，但两侧轨迹上也一直有它，不当横移跟过去
+  for (const auto& [lineAt, tolerance, lineWidth] :
+       std::vector<std::tuple<double, double, double>>{{30, 20, 6}, {-27, 30, 6}, {-45, 50, 20}}) {
+    CAPTURE(lineAt);
+    CAPTURE(tolerance);
+    CAPTURE(lineWidth);
+    Scene sc;
+    sc.lineAt = lineAt;
+    sc.lineWidth = lineWidth;
+    sc.breaks = {{234, 314}};
+    const Result r = run(taughtGraph(taughtParams(sc, tolerance)), render(sc));
+    REQUIRE(r.status == "ok");
+    std::string seen;
+    for (const Json& b : r.breaks["breaks"])
+      seen += "[" + b["sStart"].dump() + ", " + b["sEnd"].dump() + "] ";
+    MESSAGE("断口报出 " << seen << " offset " << r.beadInfo["offset"] << " trackSupport "
+                        << r.beadInfo["trackSupport"]);
+    const Json& got = r.breaks["breaks"];
+    REQUIRE(got.size() == 1);
+    CHECK(std::fabs(got[0]["sStart"].get<double>() - 234.0) <= 4.0);
+    CHECK(std::fabs(got[0]["sEnd"].get<double>() - 314.0) <= 4.0);
+    CHECK(std::fabs(r.beadInfo["offset"].get<double>()) <= 1.0);
+    CHECK(std::fabs(medianOf(numbers(r.stations["width"])) - sc.beadWidth) <= 1.0);
+    CHECK(r.verdict["ok"] == false);
+    CHECK(r.verdict["counts"]["break"] == 1);
+  }
+}
+
+/// 示教直胶：沿 x 走、宽 30 px；shift(x) 是胶中心相对示教线 y = 200 的横向偏移。
+cv::Mat shiftedBead(const std::function<double(int)>& shift) {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int x = 0; x < image.cols; ++x) {
+    for (int y = 0; y < image.rows; ++y) {
+      if (std::fabs(y - 200 - shift(x)) < 15)
+        image.at<unsigned char>(y, x) = 40;
+    }
+  }
+  return image;
+}
+
+Params shiftedParams() {
+  Params p;
+  p.path = Json{
+      {"points", "[[40,200],[480,200]]"}, {"zone", {0, 0}}, {"tolerance", 70}, {"widthMax", 60}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 60}},
+                 {"searchHalf", 100},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  return p;
+}
+
+TEST_CASE(
+    "glue：示教胶有一段在一个胶宽内整体横跳 26 / 52 px -> 这段照样量到胶、报横移后的中心，不当断胶") {
+  for (const double jump : {26.0, 52.0}) {
+    CAPTURE(jump);
+    const auto shift = [&](int x) {
+      if (x < 174 || x > 356)
+        return 0.0;
+      if (x < 200)
+        return jump * (x - 174) / 26.0;
+      if (x > 330)
+        return jump * (356 - x) / 26.0;
+      return jump;
+    };
+    const Result r = run(taughtGraph(shiftedParams()), shiftedBead(shift));
+    REQUIRE(r.status == "ok");
+    std::size_t missing = 0;
+    for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
+      const double x = 40 + r.stations["s"][i].get<double>();
+      CAPTURE(x);
+      if (!r.stations["present"][i].get<bool>()) {
+        CHECK((x > 170 && x < 360));
+        ++missing;
+        continue;
+      }
+      const double mid =
+          0.5 * (r.stations["lo"][i].get<double>() + r.stations["hi"][i].get<double>());
+      if (x >= 205 && x <= 325)
+        CHECK(std::fabs(mid - jump) <= 1.5);
+      else if (x < 170 || x > 360)
+        CHECK(std::fabs(mid) <= 1.5);
+    }
+    CHECK(missing <= 4);
+  }
+}
+
+TEST_CASE("glue：示教胶真断了一截、断口旁有一块只在这段出现的同宽暗块（孔、槽、紧固件阴影）-> "
+          "断口照报，不当整段横移跟过去") {
+  // 暗块与胶同宽、同样暗，相对示教线的偏移在 tolerance 以内，两侧轨迹上没有它；它和两头的胶之间没有斜着连过去的胶
+  struct Case {
+    int at, from, to, gapFrom, gapTo;
+  };
+  for (const Case& c : std::vector<Case>{
+           {30, 225, 325, 230, 320}, {-40, 250, 310, 230, 320}, {55, 245, 280, 240, 290}}) {
+    CAPTURE(c.at);
+    CAPTURE(c.from);
+    CAPTURE(c.gapFrom);
+    cv::Mat image = shiftedBead([](int) { return 0.0; });
+    image(cv::Range(185, 216), cv::Range(c.gapFrom, c.gapTo + 1)).setTo(220);
+    image(cv::Range(186 + c.at, 215 + c.at), cv::Range(c.from, c.to + 1)).setTo(40);
+    const Result r = run(taughtGraph(shiftedParams()), image);
+    REQUIRE(r.status == "ok");
+    const Json& got = r.breaks["breaks"];
+    REQUIRE(got.size() == 1);
+    CHECK(std::fabs(got[0]["sStart"].get<double>() - (c.gapFrom - 40)) <= 10.0);
+    CHECK(std::fabs(got[0]["sEnd"].get<double>() - (c.gapTo - 40)) <= 10.0);
+    CHECK(r.verdict["ok"] == false);
+    CHECK(r.verdict["counts"]["break"] == 1);
+  }
+}
+
+TEST_CASE(
+    "glue：示教胶路的加载期校验 —— points 不到两个 / 不是数 / 退化成一点、zone 超出折线，诊断指到参数") {
+  auto errors = [](const Json& path) {
+    std::vector<std::string> paths;
+    const Json doc = makeGraph({N{"n_path", "glue.taught_path", path}}, {});
+    for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
+    }
+    return paths;
+  };
+  const std::vector<std::string> points{"points"}, zone{"zone"};
+  CHECK(errors(Json::object()) == points); // 默认是空折线：宿主不给示教线，图就跑不起来
+  CHECK(errors(Json{{"points", "[[10, 10]]"}}) == points);
+  CHECK(errors(Json{{"points", "[[10, 10], [\"a\", 3]]"}}) == points);
+  CHECK(errors(Json{{"points", "不是 JSON"}}) == points);
+  CHECK(errors(Json{{"points", "[[10, 10], [10, 10], [12, 11]]"}}) == points); // 总长 2.2 px
+  const std::string line = "[[0, 0], [300, 0], [300, 100]]";                   // 总长 400
+  CHECK(errors(Json{{"points", line}}).empty());
+  CHECK(errors(Json{{"points", line}, {"zone", {50, 400}}}).empty());
+  CHECK(errors(Json{{"points", line}, {"zone", {50, 401}}}) == zone);
+  CHECK(errors(Json{{"points", line}, {"zone", {300, 200}}}) == zone);
+  CHECK(errors(Json{{"points", line}, {"zone", {396, 0}}}) == zone); // 到末端只剩 4 px
+
+  // 重采样：s 从第一个点量起，每 2 px 一个点，拐角处切向是两段的角平分线
+  std::vector<double> s;
+  std::vector<P2> pts, tangents;
+  REQUIRE(glue::resampleTaught({P2(0, 0), P2(300, 0), P2(300, 100)}, 50, 0, &s, &pts, &tangents));
+  CHECK(s.front() == 50.0);
+  CHECK(s.back() == 400.0);
+  CHECK(s.size() == 176);
+  CHECK(pts.back().x == doctest::Approx(300.0));
+  CHECK(pts.back().y == doctest::Approx(100.0));
+  CHECK(pts[125].x == doctest::Approx(300.0)); // s = 300：拐角
+  CHECK(tangents[125].x == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+  CHECK(tangents[125].y == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+  CHECK_FALSE(glue::resampleTaught({P2(0, 0), P2(300, 0)}, 0, 301, &s, &pts, &tangents));
+}
+
+// ------------------------------------------------------------------ 1.2 测量算子（docs/glue-measure-ops.md）
+
+namespace {
+
+/// 读图 → 响应图 → 扇形扫描 → 粗跟踪（取第 0 个峰）→ 横向卡尺 / 找零件边。参数按合成场景（与 sceneParams 同一组）。
+struct MeasureParams {
+  Json resp = Json::object();
+  Json fan = Json::object();
+  Json track = Json::object();
+  Json runs = Json::object();
+  Json edges = Json::object();
+};
+
+MeasureParams measureParams(const Scene& sc) {
+  MeasureParams p;
+  const Json anchor = {sc.nozzle.x, sc.nozzle.y};
+  p.fan = Json{{"anchor", anchor}, {"sector", {-120, 0}}, {"radial", {100, 250}}};
+  p.track = Json{{"anchor", anchor}, {"zone", {100, 400}}, {"bearingRange", {-120, 0}}};
+  return p;
+}
+
+Json measureGraph(const MeasureParams& p) {
+  return makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                    N{"n_resp", "glue.response", p.resp}, N{"n_fan", "glue.fan_scan", p.fan},
+                    N{"n_track", "glue.track_path", p.track},
+                    N{"n_runs", "glue.lateral_runs", p.runs},
+                    N{"n_edges", "glue.part_edges", p.edges}},
+                   {E{"n_load.image", "n_resp.image"}, E{"n_resp.maps", "n_fan.maps"},
+                    E{"n_resp.maps", "n_track.maps"}, E{"n_fan.scan", "n_track.fan"},
+                    E{"n_resp.maps", "n_runs.maps"}, E{"n_track.line", "n_runs.line"},
+                    E{"n_load.image", "n_edges.image"}, E{"n_track.line", "n_edges.line"}});
+}
+
+struct Measured {
+  std::string status;
+  Json scan, track, line, runs, edges;
+};
+
+Measured runMeasure(const Json& doc, const cv::Mat& gray) {
+  Session s(doc, {}, {}, /*keepCache=*/false, 0, false,
+            {exec::InjectedInput{"n_load", "image", Data::image(imageOf(gray))}});
+  Measured m;
+  m.status = s.wait().runStatus();
+  if (m.status != "ok")
+    return m;
+  auto get = [&](const char* node, const char* port) {
+    Data d;
+    REQUIRE(exec::ResultStore::instance().get(s.runId(), node, port, d));
+    return recordOf(d);
+  };
+  m.scan = get("n_fan", "scan");
+  m.track = get("n_track", "track");
+  m.line = get("n_track", "line");
+  m.runs = get("n_runs", "runs");
+  m.edges = get("n_edges", "edges");
+  return m;
+}
+
+/// 每站离胶路中心最近、且中心在 ±maxMid 以内的那一段的宽度。
+std::vector<double> centralWidths(const Json& runs, double maxMid) {
+  std::vector<double> out;
+  for (const Json& st : runs["stations"]) {
+    const Json* best = nullptr;
+    for (const Json& r : st["runs"]) {
+      if (!best || std::fabs(r["mid"].get<double>()) < std::fabs((*best)["mid"].get<double>()))
+        best = &r;
+    }
+    if (best && std::fabs((*best)["mid"].get<double>()) <= maxMid)
+      out.push_back((*best)["width"].get<double>());
+  }
+  return out;
+}
+
+/// 一行一行都一样的响应剖面：t 处（相对 x = 200）的值由 profile 给，法向 n = +x。
+glue::Field profileField(const std::function<double(double)>& profile) {
+  cv::Mat m(5, 401, CV_32F);
+  for (int x = 0; x < m.cols; ++x) {
+    for (int y = 0; y < m.rows; ++y)
+      m.at<float>(y, x) = static_cast<float>(profile(x - 200.0));
+  }
+  return glue::Field::whole(m);
+}
+
+} // namespace
+
+TEST_CASE(
+    "glue 测量算子：合成直胶 {8, 20, 40, 70} px —— 扇形峰、跟踪覆盖、每站中心一段胶宽、零件边") {
+  for (const double W : {8.0, 20.0, 40.0, 70.0}) {
+    CAPTURE(W);
+    Scene sc;
+    sc.beadWidth = W;
+    const Measured m = runMeasure(measureGraph(measureParams(sc)), render(sc));
+    REQUIRE(m.status == "ok");
+    const Json& peaks = m.scan["peaks"];
+    REQUIRE(peaks.size() == 3);
+    // 宽胶在 r0 处张开的半角以内，每条射线都整条落在胶上，均值最大的那条不一定正对胶的中线
+    const double halfAngle = std::atan(0.5 * W / 100.0) * 180.0 / kPi;
+    CHECK(std::fabs(peaks[0]["angle"].get<double>() - sc.headingDeg) <= std::max(2.0, halfAngle));
+    for (std::size_t i = 0; i < peaks.size(); ++i) {
+      for (std::size_t j = i + 1; j < peaks.size(); ++j)
+        CHECK(std::fabs(peaks[i]["angle"].get<double>() - peaks[j]["angle"].get<double>()) > 15.0);
+    }
+    CHECK(m.scan["angles"].size() == m.scan["scores"].size());
+    CHECK(m.track["valid"] == true);
+    CHECK(m.track["headingSource"] == "fan");
+    CHECK(m.track["fitted"] == true);
+    CHECK(m.track["coverage"].get<double>() >= 0.9);
+    CHECK(m.track["sharpness"].get<double>() >= 0.4);
+    CHECK(m.track["points"].size() == m.track["found"].get<std::size_t>());
+    CHECK(m.line["s"][0] == 100.0);
+    REQUIRE(m.runs["count"] == 76);
+    const std::vector<double> widths = centralWidths(m.runs, 3.0);
+    CHECK(widths.size() == 76);
+    CHECK(std::fabs(medianOf(widths) - W) <= 1.0);
+    for (const Json& r : m.runs["stations"][10]["runs"]) {
+      if (std::fabs(r["mid"].get<double>()) > 3.0)
+        continue;
+      CHECK(r["sharpness"].get<double>() >= 0.4);
+      CHECK(r["level"].get<double>() >= r["peak"].get<double>());
+      CHECK(r["loComplete"] == true);
+      CHECK(r["hiComplete"] == true);
+    }
+    // 零件边在法向那一侧、胶的近边外 35 px：从胶路中心量是 W/2 + 35
+    std::vector<double> err;
+    for (const Json& st : m.edges["stations"]) {
+      const Json& e = st["right"]["edges"];
+      if (!e.empty())
+        err.push_back(std::fabs(e[0]["t"].get<double>() - (0.5 * W + sc.edgeGap)));
+    }
+    CHECK(err.size() >= 72);
+    CHECK(medianOf(err) <= 1.0);
+  }
+}
+
+TEST_CASE(
+    "glue 测量算子：默认参数与 1.1 一致 —— 胶路逐位相同、bead_width 的每站胶边都在卡尺暗段里、"
+    "折线胶路与 taught_path 相同") {
+  Scene sc;
+  sc.beadWidth = 30;
+  sc.breaks = {{234, 274}};
+  const cv::Mat gray = render(sc);
+  // 扇区起点不是整数度：每个方向都是小数（现场的扇区就是示教方向 ± 容差）。峰方向若被舍入，粗跟踪起跑的方向就与 1.1 差一点
+  Params old11 = sceneParams(sc);
+  old11.path["sector"] = {-119.56, 0.44};
+  const Result old = run(inspectGraph(old11), gray);
+  REQUIRE(old.status == "ok");
+  MeasureParams p = measureParams(sc);
+  p.fan["sector"] = {-119.56, 0.44};
+  p.fan["includeInvalid"] = true;
+  p.track["bearingRange"] = {-119.56, 0.44};
+  p.runs = Json{{"split", "connected"}, {"mergePeakRatio", 0}};
+  const Measured m = runMeasure(measureGraph(p), gray);
+  REQUIRE(m.status == "ok");
+  // 1.1 在前三个峰里按覆盖率挑；干净的合成场景挑的是第 0 个峰。1.1 的 info 是舍入过的，新算子输出不舍入
+  const double heading = m.scan["peaks"][0]["angle"].get<double>();
+  CHECK(heading != std::round(heading));
+  REQUIRE(std::fabs(old.pathInfo["heading"].get<double>() - heading) <= 0.005);
+  CHECK(std::fabs(old.pathInfo["coverage"].get<double>() - m.track["coverage"].get<double>()) <=
+        5e-5);
+  CHECK(std::fabs(old.pathInfo["sharpness"].get<double>() - m.track["sharpness"].get<double>()) <=
+        5e-4);
+  CHECK(std::fabs(old.pathInfo["residual"].get<double>() - m.track["residual"].get<double>()) <=
+        5e-4);
+
+  Session s(inspectGraph(old11), {}, {}, false, 0, false,
+            {exec::InjectedInput{"n_load", "image", Data::image(imageOf(gray))}});
+  REQUIRE(s.wait().runStatus() == "ok");
+  Data path;
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_path", "path", path));
+  CHECK(recordOf(fieldOf(path, "line")) == m.line);
+
+  const Json& st = old.stations;
+  std::size_t present = 0, matched = 0;
+  for (std::size_t i = 0; i < st["count"].get<std::size_t>(); ++i) {
+    if (!st["present"][i].get<bool>())
+      continue;
+    ++present;
+    for (const Json& r : m.runs["stations"][i]["runs"]) {
+      if (std::fabs(r["lo"].get<double>() - st["lo"][i].get<double>()) <= 1e-3 &&
+          std::fabs(r["hi"].get<double>() - st["hi"][i].get<double>()) <= 1e-3)
+        ++matched;
+    }
+  }
+  CHECK(present >= 60);
+  CHECK(matched == present);
+
+  const std::string pts = taughtPoints(sc);
+  const Json doc =
+      makeGraph({N{"n_old", "glue.taught_path", Json{{"points", pts}, {"zone", {100, 400}}}},
+                 N{"n_new", "glue.polyline", Json{{"points", pts}, {"zone", {100, 400}}}}},
+                {});
+  Session t(doc, {}, {}, false, 0, false, {});
+  REQUIRE(t.wait().runStatus() == "ok");
+  Data a, b;
+  REQUIRE(exec::ResultStore::instance().get(t.runId(), "n_old", "path", a));
+  REQUIRE(exec::ResultStore::instance().get(t.runId(), "n_new", "line", b));
+  CHECK(recordOf(fieldOf(a, "line")) == recordOf(b));
+}
+
+TEST_CASE("glue 测量算子：卡尺拆分 —— 胶旁隔一道浅谷的灰暗区，半高拆得开，连通段连成一段，"
+          "分段门限高过谷底才断") {
+  // 胶 [−20, 20] 峰 60；浅谷 (20, 35) 响应 12（> segmentMin 8、< 半高 30）；灰暗区 [35, 85] 响应 40
+  const glue::Field R = profileField([](double t) {
+    if (t >= -20 && t <= 20)
+      return 60.0;
+    if (t > 20 && t < 35)
+      return 12.0;
+    if (t >= 35 && t <= 85)
+      return 40.0;
+    return 0.0;
+  });
+  const P2 c(200, 2), n(1, 0);
+  glue::RunSplitSpec spec;
+  spec.mergeWidthMax = 200;
+  SUBCASE("connected：胶与灰暗区连成一段（1.1 拟合胶路上的现象）") {
+    const auto runs = glue::caliperRuns(R, c, n, 100, spec);
+    REQUIRE(runs.size() == 1);
+    CHECK(runs[0].width() > 100);
+  }
+  SUBCASE("half_max：拆成两段，胶那一段（像素 −20…20，41 px）居中") {
+    spec.halfMax = true;
+    std::vector<glue::Run> raw;
+    double valid = 0;
+    const auto runs = glue::caliperRuns(R, c, n, 100, spec, &raw, &valid);
+    REQUIRE(runs.size() == 2);
+    CHECK(std::fabs(runs[0].width() - 41) <= 0.5);
+    CHECK(std::fabs(runs[0].mid()) <= 0.5);
+    CHECK(runs[0].peak == doctest::Approx(60));
+    CHECK(runs[0].loComplete);
+    CHECK(runs[0].hiComplete);
+    CHECK(runs[1].peak == doctest::Approx(40));
+    CHECK(raw.size() == 2);
+    CHECK(valid == 1.0);
+  }
+  SUBCASE("half_max + 合并缝 20：峰值比 0.4 并回去，0.8 不并") {
+    spec.halfMax = true;
+    spec.mergeGap = 20;
+    spec.mergePeakRatio = 0.4;
+    auto runs = glue::caliperRuns(R, c, n, 100, spec);
+    REQUIRE(runs.size() == 1);
+    CHECK(runs[0].parts == 2);
+    spec.mergePeakRatio = 0.8;
+    runs = glue::caliperRuns(R, c, n, 100, spec);
+    CHECK(runs.size() == 2);
+  }
+  SUBCASE("connected 但分段门限 13 高过谷底：两段（1.1 把 contrastMin 调到 32 的效果）") {
+    spec.segmentMin = 13;
+    CHECK(glue::caliperRuns(R, c, n, 100, spec).size() == 2);
+  }
+  SUBCASE("卡尺端点截断：灰暗区伸出 searchHalf 70，hi 一侧不完整") {
+    spec.halfMax = true;
+    const auto runs = glue::caliperRuns(R, c, n, 70, spec);
+    REQUIRE(runs.size() == 2);
+    CHECK(runs[1].loComplete);
+    CHECK_FALSE(runs[1].hiComplete);
+  }
+}
+
+TEST_CASE(
+    "glue 测量算子：响应图只给 roi 那一块、块里与整幅逐位相同、块外采样无效，与 1.1 的 responseField 相同；"
+    "亮胶的 gray 取反") {
+  Scene sc;
+  const cv::Mat gray = render(sc);
+  glue::ResponseSpec spec;
+  const glue::ResponseMaps whole = glue::responseMaps(gray, spec);
+  spec.roi = cv::Rect(200, 150, 180, 160);
+  const glue::ResponseMaps part = glue::responseMaps(gray, spec);
+  const glue::Field old = glue::responseField(gray, false, 90, spec.roi);
+  CHECK(whole.frame == cv::Rect(0, 0, gray.cols, gray.rows));
+  REQUIRE(part.frame == spec.roi);
+  REQUIRE(part.response.size() == spec.roi.size());
+  int diffs = 0;
+  for (int y = spec.roi.y; y < spec.roi.br().y; ++y) {
+    for (int x = spec.roi.x; x < spec.roi.br().x; ++x) {
+      const int py = y - spec.roi.y, px = x - spec.roi.x;
+      diffs += whole.response.at<float>(y, x) != part.response.at<float>(py, px);
+      diffs += whole.gray.at<float>(y, x) != part.gray.at<float>(py, px);
+      diffs += whole.level.at<float>(y, x) != part.level.at<float>(py, px);
+      if (x + 1 < spec.roi.br().x && y + 1 < spec.roi.br().y)
+        diffs += old.at(x, y) != part.response.at<float>(py, px);
+    }
+  }
+  CHECK(diffs == 0);
+  double lo = 0;
+  cv::minMaxLoc(whole.response, &lo);
+  CHECK(lo >= 0.0); // 贴图边处的形态学假象截到 0
+  const glue::Field f = part.field(part.response);
+  CHECK(f.at(spec.roi.x + 10.5, spec.roi.y + 20.25) ==
+        glue::Field::whole(whole.response).at(spec.roi.x + 10.5, spec.roi.y + 20.25));
+  CHECK(f.at(spec.roi.x - 1.0, spec.roi.y + 5.0) == glue::kInvalid);
+  spec.roi = cv::Rect(gray.cols + 10, 0, 50, 50);
+  CHECK(glue::responseMaps(gray, spec).frame.empty());
+  spec.roi = cv::Rect();
+  spec.bright = true;
+  const glue::ResponseMaps bright = glue::responseMaps(gray, spec);
+  CHECK(bright.gray.at<float>(100, 100) == doctest::Approx(255.0 - whole.gray.at<float>(100, 100)));
+}
+
+TEST_CASE("glue 测量算子：取不到的峰、没有胶都是值不是错 —— valid = false 时胶路为空、卡尺零站") {
+  Scene sc;
+  SUBCASE("第 5 个峰不存在") {
+    MeasureParams p = measureParams(sc);
+    p.track["peakIndex"] = 5;
+    const Measured m = runMeasure(measureGraph(p), render(sc));
+    REQUIRE(m.status == "ok");
+    CHECK(m.track["valid"] == false);
+    CHECK(m.track["lineSource"] == "none");
+    CHECK(m.track["coverage"].is_null());
+    CHECK(m.line["count"] == 0);
+    CHECK(m.runs["count"] == 0);
+    CHECK(m.edges["count"] == 0);
+  }
+  SUBCASE("扇区里没有一个有效方向：默认不出峰，includeInvalid 时按角度顺序补（1.1 的挑法）") {
+    const glue::Field none = glue::Field::whole(
+        cv::Mat(200, 200, CV_32F, cv::Scalar(std::numeric_limits<float>::quiet_NaN())));
+    glue::FanSpec spec;
+    spec.anchor = P2(100, 100);
+    spec.r0 = 10;
+    spec.r1 = 50;
+    CHECK(glue::fanScan(none, spec).peaks.empty());
+    spec.includeInvalid = true;
+    const glue::FanResult fan = glue::fanScan(none, spec);
+    REQUIRE(fan.peaks.size() == 3);
+    CHECK(fan.peaks[0].angle == -180.0);
+    CHECK(fan.peaks[1].angle == -164.0);
+    CHECK(fan.peaks[2].angle == -148.0);
+    CHECK(std::isnan(fan.peaks[0].score));
+  }
+  SUBCASE("roi 与图像不相交：bad_param 指到 roi（不是值）") {
+    MeasureParams p = measureParams(sc);
+    p.resp["roi"] = {5000, 5000, 100, 100};
+    CHECK(runMeasure(measureGraph(p), render(sc)).status != "ok");
+  }
+  SUBCASE("一片空白：照常输出，覆盖率 0、陡度 null、沿起始方向的直线") {
+    sc.bead = false;
+    const Measured m = runMeasure(measureGraph(measureParams(sc)), render(sc));
+    REQUIRE(m.status == "ok");
+    CHECK(m.track["valid"] == true);
+    CHECK(m.track["found"] == 0);
+    CHECK(m.track["sharpness"].is_null());
+    CHECK(m.track["lineSource"] == "ray");
+    CHECK(m.runs["count"] == 76);
+  }
+}
+
+TEST_CASE("glue 测量算子：加载期校验 —— 扇区 / 径向区间 / 检测区 / roi / 折线 / 找边长度填错，"
+          "图跑不起来") {
+  auto errors = [](const Json& doc) {
+    std::vector<std::string> paths;
+    for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
+    }
+    return paths;
+  };
+  Scene sc;
+  MeasureParams p = measureParams(sc);
+  CHECK(errors(measureGraph(p)).empty());
+  p.fan["sector"] = {10, -10};
+  CHECK(errors(measureGraph(p)) == std::vector<std::string>{"sector"});
+  p = measureParams(sc);
+  p.fan["radial"] = {200, 100};
+  CHECK(errors(measureGraph(p)) == std::vector<std::string>{"radial"});
+  p = measureParams(sc);
+  p.track["zone"] = {100, 104};
+  CHECK(errors(measureGraph(p)) == std::vector<std::string>{"zone"});
+  p = measureParams(sc);
+  p.resp["roi"] = {0, 0, 100, 0};
+  CHECK(errors(measureGraph(p)) == std::vector<std::string>{"roi"});
+  p = measureParams(sc);
+  p.edges["searchLength"] = 20;
+  CHECK(errors(measureGraph(p)) == std::vector<std::string>{"searchLength"});
+  const auto polyline = [&](const Json& params) {
+    return errors(makeGraph({N{"n_line", "glue.polyline", params}}, {}));
+  };
+  CHECK(polyline(Json{{"points", "[[0, 0]]"}}) == std::vector<std::string>{"points"});
+  CHECK(polyline(Json{{"points", "[[0, 0], [100, 0]]"}, {"zone", {10, 200}}}) ==
+        std::vector<std::string>{"zone"});
+  CHECK(polyline(Json{{"points", "[[0, 0], [100, 0]]"}}).empty());
+  // 随包的参考图（graphs/measure.lyflow.json）：默认参数下校验干净
+  std::ifstream in(std::filesystem::path(__FILE__).parent_path().parent_path() /
+                   "graphs/measure.lyflow.json");
+  REQUIRE(in.good());
+  CHECK(errors(Json::parse(in)).empty());
 }

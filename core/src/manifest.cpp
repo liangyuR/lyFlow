@@ -7,54 +7,83 @@
 namespace lyflow {
 
 Value Value::boolean(bool v) {
-  Value x; x.kind_ = Kind::Bool; x.bool_ = v; return x;
+  Value x;
+  x.kind_ = Kind::Bool;
+  x.bool_ = v;
+  return x;
 }
 Value Value::integer(std::int64_t v) {
-  Value x; x.kind_ = Kind::Int; x.int_ = v; return x;
+  Value x;
+  x.kind_ = Kind::Int;
+  x.int_ = v;
+  return x;
 }
 Value Value::number(double v) {
-  Value x; x.kind_ = Kind::Float; x.float_ = v; return x;
+  Value x;
+  x.kind_ = Kind::Float;
+  x.float_ = v;
+  return x;
 }
 Value Value::text(std::string v) {
-  Value x; x.kind_ = Kind::String; x.string_ = std::move(v); return x;
+  Value x;
+  x.kind_ = Kind::String;
+  x.string_ = std::move(v);
+  return x;
 }
 Value Value::vec(std::vector<double> v) {
-  Value x; x.kind_ = Kind::FloatVec; x.vec_ = std::move(v); return x;
+  Value x;
+  x.kind_ = Kind::FloatVec;
+  x.vec_ = std::move(v);
+  return x;
 }
 
 const Param* findParam(const OperatorDesc& op, const std::string& name) {
   for (const auto& p : op.params) {
-    if (p.name == name) return &p;
+    if (p.name == name)
+      return &p;
   }
   return nullptr;
 }
 
 const char* toString(ParamType t) {
   switch (t) {
-    case ParamType::Bool:      return "bool";
-    case ParamType::Int:       return "int";
-    case ParamType::Float:     return "float";
-    case ParamType::Vec2f:     return "vec2f";
-    case ParamType::Vec3f:     return "vec3f";
-    case ParamType::Vec4f:     return "vec4f";
-    case ParamType::Enum:      return "enum";
-    case ParamType::Flags:     return "flags";
-    case ParamType::String:    return "string";
-    case ParamType::Text:      return "text";
-    case ParamType::Path:      return "path";
-    case ParamType::Color:     return "color";
-    case ParamType::Transform: return "transform";
-    case ParamType::Curve:     return "curve";
+  case ParamType::Bool:
+    return "bool";
+  case ParamType::Int:
+    return "int";
+  case ParamType::Float:
+    return "float";
+  case ParamType::Vec2f:
+    return "vec2f";
+  case ParamType::Vec3f:
+    return "vec3f";
+  case ParamType::Vec4f:
+    return "vec4f";
+  case ParamType::Enum:
+    return "enum";
+  case ParamType::Flags:
+    return "flags";
+  case ParamType::String:
+    return "string";
+  case ParamType::Text:
+    return "text";
+  case ParamType::Path:
+    return "path";
+  case ParamType::Color:
+    return "color";
+  case ParamType::Transform:
+    return "transform";
+  case ParamType::Curve:
+    return "curve";
   }
   return "float";
 }
 
 bool parseParamType(const std::string& name, ParamType& out) {
   static const ParamType kAll[] = {
-      ParamType::Bool,   ParamType::Int,    ParamType::Float,     ParamType::Vec2f,
-      ParamType::Vec3f,  ParamType::Vec4f,  ParamType::Enum,      ParamType::Flags,
-      ParamType::String, ParamType::Text,   ParamType::Path,      ParamType::Color,
-      ParamType::Transform, ParamType::Curve,
+      ParamType::Bool,  ParamType::Int,   ParamType::Float,     ParamType::Vec2f,  ParamType::Vec3f,
+      ParamType::Vec4f, ParamType::Enum,  ParamType::Flags,     ParamType::String, ParamType::Text,
+      ParamType::Path,  ParamType::Color, ParamType::Transform, ParamType::Curve,
   };
   for (ParamType t : kAll) {
     if (name == toString(t)) {
@@ -111,8 +140,7 @@ bool checkCurveValue(const nlohmann::json& j, const Param& p, std::string& messa
     }
   }
   auto interp = j.find("interp");
-  if (interp != j.end() &&
-      !(interp->is_string() && (*interp == "linear" || *interp == "smooth"))) {
+  if (interp != j.end() && !(interp->is_string() && (*interp == "linear" || *interp == "smooth"))) {
     message = "interp 只能是 \"linear\" 或 \"smooth\"";
     return false;
   }
@@ -159,7 +187,8 @@ bool checkCurveValue(const nlohmann::json& j, const Param& p, std::string& messa
 double evaluateCurve(const nlohmann::json& curve, double x) {
   Param any;
   std::string ignored;
-  if (!checkCurveValue(curve, any, ignored)) return 0.0;
+  if (!checkCurveValue(curve, any, ignored))
+    return 0.0;
   const auto& pts = curve["points"];
   const std::size_t n = pts.size();
   std::vector<double> xs(n), ys(n);
@@ -167,19 +196,24 @@ double evaluateCurve(const nlohmann::json& curve, double x) {
     xs[i] = pts[i][0].get<double>();
     ys[i] = pts[i][1].get<double>();
   }
-  if (x <= xs.front()) return ys.front();
-  if (x >= xs.back()) return ys.back();
+  if (x <= xs.front())
+    return ys.front();
+  if (x >= xs.back())
+    return ys.back();
   std::size_t k = 0;
-  while (k + 1 < n && x > xs[k + 1]) ++k;
+  while (k + 1 < n && x > xs[k + 1])
+    ++k;
   const double h = xs[k + 1] - xs[k];
   const double t = (x - xs[k]) / h;
   const bool smooth = curve.value("interp", std::string("linear")) == "smooth";
-  if (!smooth) return ys[k] + (ys[k + 1] - ys[k]) * t;
+  if (!smooth)
+    return ys[k] + (ys[k + 1] - ys[k]) * t;
 
   // Fritsch–Carlson：先取各段割线斜率，端点用单侧差分，内点符号相反或有一段水平时取 0，
   // 再把 (α, β) 压进半径 3 的圆里 —— 这样插出来的线在每一段上单调、不冲过端点的 y。
   std::vector<double> delta(n - 1), m(n);
-  for (std::size_t i = 0; i + 1 < n; ++i) delta[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+  for (std::size_t i = 0; i + 1 < n; ++i)
+    delta[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
   m[0] = delta[0];
   m[n - 1] = delta[n - 2];
   for (std::size_t i = 1; i + 1 < n; ++i) {
@@ -206,4 +240,4 @@ double evaluateCurve(const nlohmann::json& curve, double x) {
          (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1];
 }
 
-}  // namespace lyflow
+} // namespace lyflow

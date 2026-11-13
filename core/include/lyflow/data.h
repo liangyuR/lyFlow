@@ -133,10 +133,23 @@ struct Tensor {
   std::vector<std::int64_t> shape;
   std::vector<float> data;
 
-  /// shape 各维之积。shape 为空时是 0（不是标量 1）。
+  /// shape 各维之积。空形状、非正维度或乘积溢出时为 0。
   std::size_t elementCount() const;
   /// data.size() 与 shape 对得上。
-  bool consistent() const { return data.size() == elementCount(); }
+  bool consistent() const {
+    if (shape.empty())
+      return data.empty();
+    bool emptyAxis = false;
+    for (std::int64_t d : shape) {
+      if (d < 0)
+        return false;
+      emptyAxis = emptyAxis || d == 0;
+    }
+    if (emptyAxis)
+      return data.empty();
+    const std::size_t count = elementCount();
+    return count != 0 && data.size() == count;
+  }
   std::string shapeString() const;
 };
 
@@ -193,10 +206,21 @@ struct Bundle;
 
 /// 端口上流动的值。类型标签必须和 manifest 的端口类型对得上。
 class Data {
- public:
+public:
   enum class Kind {
-    None, PointCloud, Indices, Transform, Plane,
-    Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor, Error,
+    None,
+    PointCloud,
+    Indices,
+    Transform,
+    Plane,
+    Box2D,
+    Line2D,
+    Circle2D,
+    Point2D,
+    Measurement,
+    Record,
+    Tensor,
+    Error,
     /// 一组有名字的字段（m8-plan L1）。端口类型写作 `Bundle<kind>`，追加在末尾不打乱既有序号。
     Bundle,
     /// 2D 图像（docs/image-plan.md），同样追加在末尾。
@@ -206,7 +230,9 @@ class Data {
   Data() = default;
 
   static Data cloud(std::shared_ptr<const PointCloud> c);
-  static Data cloud(PointCloud c) { return cloud(std::make_shared<const PointCloud>(std::move(c))); }
+  static Data cloud(PointCloud c) {
+    return cloud(std::make_shared<const PointCloud>(std::move(c)));
+  }
   static Data indices(std::shared_ptr<const Indices> i);
   static Data indices(Indices i) { return indices(std::make_shared<const Indices>(std::move(i))); }
   static Data transform(std::shared_ptr<const Transform> t);
@@ -272,11 +298,11 @@ class Data {
   std::size_t elementCount() const;
 
   /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
-  /// 图像的逐通道统计要扫整张图：只算一次，同一份 Data 的浅拷贝共用结果（Image 不可变）。
+  /// 图像与张量的统计只算一次，同一份 Data 的浅拷贝共用结果（载荷不可变）。
   std::string valueJson() const;
 
- private:
-  /// 图像 valueJson 的一次性缓存（PR #1 review 留下的一条：结果仓在锁里一遍遍重算整图统计）。
+private:
+  /// 图像 JSON 与张量统计的一次性缓存，浅拷贝共用。
   struct ValueCache;
   std::string valueJsonUncached() const;
 
@@ -329,4 +355,4 @@ std::string bundleTypeName(const std::string& bundleKind);
 /// Data::Kind -> manifest 端口类型名。
 const char* typeNameFromKind(Data::Kind kind);
 
-}  // namespace lyflow
+} // namespace lyflow

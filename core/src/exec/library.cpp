@@ -14,8 +14,8 @@ namespace {
 std::string stemOf(const std::filesystem::path& file) {
   std::string name = file.filename().u8string();
   const std::string suffix = kLibrarySuffix;
-  if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(),
-                                                  suffix) == 0) {
+  if (name.size() > suffix.size() &&
+      name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
     name.resize(name.size() - suffix.size());
   }
   return name;
@@ -24,12 +24,13 @@ std::string stemOf(const std::filesystem::path& file) {
 /// 单独校验一个合成算子。用一份只装了它的临时注册表，坏的那个不牵连其余。
 std::vector<std::string> validateAlone(const OperatorDesc& op) {
   Registry probe;
-  for (const auto& t : ensureRegistry().types()) probe.addType(t);
+  for (const auto& t : ensureRegistry().types())
+    probe.addType(t);
   probe.addOperator(op);
   return probe.validate();
 }
 
-}  // namespace
+} // namespace
 
 Library& Library::instance() {
   static Library lib;
@@ -44,10 +45,12 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
 
   for (const auto& dir : dirs) {
     std::error_code ec;
-    if (!std::filesystem::is_directory(dir, ec)) continue;
+    if (!std::filesystem::is_directory(dir, ec))
+      continue;
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-      if (!entry.is_regular_file()) continue;
+      if (!entry.is_regular_file())
+        continue;
       const std::string name = entry.path().filename().u8string();
       const std::string suffix = kLibrarySuffix;
       if (name.size() <= suffix.size() ||
@@ -73,7 +76,8 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
         continue;
       }
       std::string id = j.is_object() ? j.value("id", std::string()) : std::string();
-      if (id.empty()) id = stemOf(file);
+      if (id.empty())
+        id = stemOf(file);
       const std::string opId = kLibraryIdPrefix + id;
 
       SubgraphDef def;
@@ -82,7 +86,8 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
         problems.push_back(file.u8string() + ": " + error);
         continue;
       }
-      if (def.category.empty()) def.category = "General";
+      if (def.category.empty())
+        def.category = "General";
       def.category = kLibraryCategoryPrefix + def.category;
       if (defs.count(opId)) {
         problems.push_back("库算子 id 重复: " + opId + "（" + file.u8string() + "）");
@@ -91,7 +96,8 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
       OperatorDesc op = synthesizeOperator(def, opId);
       const auto bad = validateAlone(op);
       if (!bad.empty()) {
-        for (const auto& b : bad) problems.push_back(file.u8string() + ": " + b);
+        for (const auto& b : bad)
+          problems.push_back(file.u8string() + ": " + b);
         continue;
       }
       defs.emplace(opId, std::move(def));
@@ -132,8 +138,9 @@ std::size_t Library::size() const {
 std::vector<std::string> Library::dirs() const {
   std::lock_guard<std::mutex> lock(mu_);
   std::vector<std::string> out;
-  for (const auto& d : dirs_) out.push_back(d.u8string());
+  for (const auto& d : dirs_)
+    out.push_back(d.u8string());
   return out;
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

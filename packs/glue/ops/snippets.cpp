@@ -15,7 +15,7 @@ struct SnippetBlob {
 
 #include "glue_snippets.inc"
 
-}  // namespace
+} // namespace
 
 void registerSnippets(Registry& r) {
   for (const SnippetBlob* b = kSnippetBlobs; b->file; ++b) {
@@ -24,4 +24,4 @@ void registerSnippets(Registry& r) {
   }
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

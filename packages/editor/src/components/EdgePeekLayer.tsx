@@ -1,8 +1,8 @@
-import { useMemo } from "react";
+import { useMemo } from 'react';
 
-import { usePeekStore } from "../store/peek";
+import { usePeekStore } from '../store/peek';
 
-import { EdgePeek } from "./EdgePeek";
+import { EdgePeek } from './EdgePeek';
 
 export function EdgePeekLayer() {
   const windows = usePeekStore((s) => s.windows);

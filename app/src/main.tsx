@@ -1,22 +1,22 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
 
-import { LyFlowEditor, TauriTransport, StaticTransport, type Transport } from "@lyflow/editor";
+import { LyFlowEditor, TauriTransport, StaticTransport, type Transport } from '@lyflow/editor';
 
-import { installBrowserGuard } from "./browserGuard";
-import { installCloseGuard } from "./closeGuard";
-import { installDevBridge } from "./devbridge";
-import { DesktopEditor } from "./DesktopEditor";
-import { tauriDialogs } from "./dialogs";
-import { installWindowTitle } from "./title";
+import { installBrowserGuard } from './browserGuard';
+import { installCloseGuard } from './closeGuard';
+import { installDevBridge } from './devbridge';
+import { DesktopEditor } from './DesktopEditor';
+import { tauriDialogs } from './dialogs';
+import { installWindowTitle } from './title';
 
-import "./shell.css";
+import './shell.css';
 
-const root = document.getElementById("root");
-if (!root) throw new Error("找不到 #root");
+const root = document.getElementById('root');
+if (!root) throw new Error('找不到 #root');
 
 function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 const transport: Transport = inTauri() ? new TauriTransport() : new StaticTransport();
@@ -31,8 +31,10 @@ if (inTauri()) installBrowserGuard(window, { dev: import.meta.env.DEV });
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    {inTauri()
-      ? <DesktopEditor transport={transport} closeReady={closeReady} />
-      : <LyFlowEditor transport={transport} dialogs={tauriDialogs} />}
+    {inTauri() ? (
+      <DesktopEditor transport={transport} closeReady={closeReady} />
+    ) : (
+      <LyFlowEditor transport={transport} dialogs={tauriDialogs} />
+    )}
   </React.StrictMode>,
 );

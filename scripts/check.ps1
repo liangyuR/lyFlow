@@ -3,7 +3,7 @@
 # -> cargo test（DLL 加载、执行事件、二进制输出、中文路径）-> 前端 strict typecheck + build。
 param(
   # 只跑这几步（逗号分隔）：core、manifest、schema、bridge、client、cli、sdk、frontend、mcp。不给 = 全部，
-  # 本地照旧一条命令验全链路。CI（.github/workflows/ci.yml）按 job 分着点名，与本地走同一个入口
+  # 本地完整检查入口；日常 CI 直接调用语言标准命令。
   [string[]]$Steps
 )
 $ErrorActionPreference = "Stop"
@@ -177,6 +177,7 @@ if (Want "sdk") {
   if (-not (Test-Path $cmake)) { $cmake = "cmake" }
   if (-not (Test-Path $ninja)) { $ninja = "ninja" }
 
+  $consumerVersion = (Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
   $consumerSrc   = Join-Path $root "examples\consumer"
   $consumerBuild = Join-Path $env:TEMP "lyflow-consumer-build"
   if (Test-Path $consumerBuild) { Remove-Item -Recurse -Force $consumerBuild }
@@ -184,7 +185,7 @@ if (Want "sdk") {
   $line = "call `"$vcvars`" >nul 2>&1" +
           " && `"$cmake`" -S `"$consumerSrc`" -B `"$consumerBuild`" -G Ninja" +
           " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo" +
-          " -DCMAKE_PREFIX_PATH=`"$($prefix -replace '\\', '/')`"" +
+          " -DLYFLOW_CONSUMER_VERSION=$consumerVersion -DCMAKE_PREFIX_PATH=`"$($prefix -replace '\\', '/')`"" +
           " && `"$cmake`" --build `"$consumerBuild`""
   cmd /c $line
   if ($LASTEXITCODE -ne 0) { throw "examples/consumer 编译失败" }
@@ -201,6 +202,8 @@ if (Want "frontend") {
     # 漏掉的文件（比如只有宿主才用的入口）在这里才会暴露。
     pnpm --filter "@lyflow/editor" typecheck
     if ($LASTEXITCODE -ne 0) { throw "@lyflow/editor 类型检查失败" }
+    pnpm --filter "@lyflow/visualization" test
+    if ($LASTEXITCODE -ne 0) { throw "@lyflow/visualization tests failed" }
     pnpm --filter "@lyflow/editor" test
     if ($LASTEXITCODE -ne 0) { throw "@lyflow/editor 单测失败" }
     pnpm --filter lyflow-app build

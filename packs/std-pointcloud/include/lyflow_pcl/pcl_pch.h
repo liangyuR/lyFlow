@@ -8,8 +8,6 @@
 #include <pcl/common/io.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/filters/extract_indices.h>
-#include <pcl/filters/radius_outlier_removal.h>
-#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/kdtree/kdtree_flann.h>
@@ -17,3 +15,5 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/segmentation/sac_segmentation.h>
+
+#include <nlohmann/json.hpp>

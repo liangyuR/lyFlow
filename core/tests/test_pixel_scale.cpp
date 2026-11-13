@@ -51,8 +51,9 @@ Status probeCompute(const Inputs& in, const ParamView& p, Outputs& out, ExecCont
 
   const bool sized = p.choice("mode") == "size";
   const auto side = static_cast<std::int32_t>(p.integer("size"));
-  out.set("image", Data::image(sized ? Image::allocate(side, side, 1, PixelDepth::U8)
-                                     : Image::allocate(img->width, img->height, 1, PixelDepth::U8)));
+  out.set("image",
+          Data::image(sized ? Image::allocate(side, side, 1, PixelDepth::U8)
+                            : Image::allocate(img->width, img->height, 1, PixelDepth::U8)));
   return Status::Ok();
 }
 
@@ -65,10 +66,12 @@ const OperatorDesc& probeOp() {
     op.version = "1.0.0";
     op.label = "像素探针";
     op.category = "Test";
-    op.inputs = {Port{"image", "Image", "Image", "", true}, Port{"near", "Circle2D", "Near", "", false},
+    op.inputs = {Port{"image", "Image", "Image", "", true},
+                 Port{"near", "Circle2D", "Near", "", false},
                  Port{"other", "Image", "Other", "", false}};
-    op.outputs = {Port{"seen", "Record", "Seen", "", true}, Port{"circle", "Circle2D", "Circle", "", true},
-                  Port{"area", "Measurement", "Area", "", true}, Port{"image", "Image", "Image", "", true}};
+    op.outputs = {
+        Port{"seen", "Record", "Seen", "", true}, Port{"circle", "Circle2D", "Circle", "", true},
+        Port{"area", "Measurement", "Area", "", true}, Port{"image", "Image", "Image", "", true}};
     Param len;
     len.name = "len";
     len.type = ParamType::Float;
@@ -120,16 +123,20 @@ const OperatorDesc& probeOp() {
 Json outputValue(const RunLog& log, const std::string& node, const std::string& port) {
   const Json done = log.nodeEvent(node, "done");
   const auto stats = done.find("stats");
-  if (stats == done.end()) return Json();
+  if (stats == done.end())
+    return Json();
   for (const Json& o : stats->value("outputs", Json::array())) {
-    if (o.value("port", "") == port) return o.value("value", Json());
+    if (o.value("port", "") == port)
+      return o.value("value", Json());
   }
   return Json();
 }
 
-RunLog runIn(const Json& doc, exec::RunMode mode, std::uint32_t budgetMs = 0, bool keepCache = false) {
+RunLog runIn(const Json& doc, exec::RunMode mode, std::uint32_t budgetMs = 0,
+             bool keepCache = false) {
   static int counter = 0;
-  if (!keepCache) exec::ResultStore::instance().clear();
+  if (!keepCache)
+    exec::ResultStore::instance().clear();
   exec::RunOptions options;
   options.runId = "pixel-scale-" + std::to_string(counter++);
   options.mode = mode;
@@ -141,16 +148,18 @@ RunLog runIn(const Json& doc, exec::RunMode mode, std::uint32_t budgetMs = 0, bo
   return log;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("previewLevel：缩到不超过上限的最小 2 的幂，与 shrinkImage 同一种向上取整") {
-  const auto gray = [](std::int32_t w, std::int32_t h) { return Image::allocate(w, h, 1, PixelDepth::U8); };
-  CHECK(exec::previewLevel(gray(2048, 2048), exec::kPreviewMaxPixels) == 0);  // 正好 4 MP
+  const auto gray = [](std::int32_t w, std::int32_t h) {
+    return Image::allocate(w, h, 1, PixelDepth::U8);
+  };
+  CHECK(exec::previewLevel(gray(2048, 2048), exec::kPreviewMaxPixels) == 0); // 正好 4 MP
   CHECK(exec::previewLevel(gray(2049, 2048), exec::kPreviewMaxPixels) == 1);
-  CHECK(exec::previewLevel(gray(3, 3), 1) == 2);  // 3 → 2 → 1
+  CHECK(exec::previewLevel(gray(3, 3), 1) == 2); // 3 → 2 → 1
   CHECK(exec::previewLevel(Image{}, exec::kPreviewMaxPixels) == 0);
 
-  const Image camera = gray(5472, 3648);  // 20 MP → 1368 × 912
+  const Image camera = gray(5472, 3648); // 20 MP → 1368 × 912
   const unsigned level = exec::previewLevel(camera, exec::kPreviewMaxPixels);
   const Image small = shrinkImage(camera, level);
   CHECK(level == 2);
@@ -158,7 +167,8 @@ TEST_CASE("previewLevel：缩到不超过上限的最小 2 的幂，与 shrinkIm
   CHECK(small.scale == 4);
 }
 
-TEST_CASE("像素参数 ÷ s：浮点直接除、整数落回 min + n × step 再夹到边界、vec 逐分量、绝对尺寸不换") {
+TEST_CASE(
+    "像素参数 ÷ s：浮点直接除、整数落回 min + n × step 再夹到边界、vec 逐分量、绝对尺寸不换") {
   const OperatorDesc& op = probeOp();
   ParamMap params{{"len", Value::number(10)},
                   {"k", Value::integer(5)},
@@ -169,9 +179,9 @@ TEST_CASE("像素参数 ÷ s：浮点直接除、整数落回 min + n × step �
   SUBCASE("s = 2") {
     const ParamMap out = exec::scalePixelParams(op, params, 2);
     CHECK(out.at("len").floatValue() == doctest::Approx(5));
-    CHECK(out.at("k").intValue() == 3);  // 2.5 落回奇数
+    CHECK(out.at("k").intValue() == 3); // 2.5 落回奇数
     CHECK(out.at("roi").vecValue() == std::vector<double>{4, 8, 200, 400});
-    CHECK(out.at("size").intValue() == 640);  // 绝对尺寸
+    CHECK(out.at("size").intValue() == 640); // 绝对尺寸
     CHECK(out.at("mode").stringValue() == "size");
   }
   SUBCASE("s = 4：核缩到 min 还是奇数") {
@@ -184,9 +194,9 @@ TEST_CASE("像素参数 ÷ s：浮点直接除、整数落回 min + n × step �
           exec::canonicalParamsJson(params));
   }
 
-  CHECK(exec::hasActiveAbsoluteSize(op, params));  // mode = size：size 生效
+  CHECK(exec::hasActiveAbsoluteSize(op, params)); // mode = size：size 生效
   params["mode"] = Value::text("same");
-  CHECK_FALSE(exec::hasActiveAbsoluteSize(op, params));  // size 被 visibleWhen 藏起来了
+  CHECK_FALSE(exec::hasActiveAbsoluteSize(op, params)); // size 被 visibleWhen 藏起来了
 }
 
 TEST_CASE("像素几何与像素量测按比例换算：米制的、别的单位的原样，Bundle 逐字段") {
@@ -218,7 +228,7 @@ TEST_CASE("像素几何与像素量测按比例换算：米制的、别的单位
   const Line2D* sl = line.asLine2D();
   CHECK(sl->point[0] == 0.5f);
   CHECK(sl->end[1] == 2.5f);
-  CHECK(sl->dir[1] == 0.8f);  // 方向是单位向量，不变
+  CHECK(sl->dir[1] == 0.8f); // 方向是单位向量，不变
 
   Circle2D c;
   c.center[0] = 2;
@@ -268,8 +278,7 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
       {N{"src", "test.make_image", Json{{"width", 4100}, {"height", 2050}, {"channels", 1}}},
        N{"a", "test.px_probe", Json{{"len", 10}, {"k", 5}}},
        N{"b", "test.px_probe", Json{{"mode", "size"}, {"size", 640}}},
-       N{"c", "test.px_probe", Json::object()},
-       N{"d", "test.px_probe", Json::object()},
+       N{"c", "test.px_probe", Json::object()}, N{"d", "test.px_probe", Json::object()},
        N{"e", "test.px_probe", Json::object()}},
       {E{"src.image", "a.image"}, E{"a.image", "b.image"}, E{"b.image", "c.image"},
        E{"a.circle", "c.near"}, E{"a.image", "d.image"}, E{"a.circle", "d.near"},
@@ -282,8 +291,12 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
     CHECK(Json{src["width"], src["height"], src["scale"]} == Json{2050, 1025, 2});
 
     const Json a = outputValue(log, "a", "seen")["data"];
-    CHECK(a == Json{{"len", 5.0}, {"k", 3}, {"roi", {4, 8, 200, 400}}, {"size", 64},
-                    {"imageWidth", 2050}, {"imageScale", 2}});
+    CHECK(a == Json{{"len", 5.0},
+                    {"k", 3},
+                    {"roi", {4, 8, 200, 400}},
+                    {"size", 64},
+                    {"imageWidth", 2050},
+                    {"imageScale", 2}});
     // 圆在小图上是 5，出来换回原图坐标是 10；面积按 s² 换回，正好等于原图的像素数
     const Json circle = outputValue(log, "a", "circle");
     CHECK(Json{circle["center"][0], circle["radius"]} == Json{10.0, 10.0});
@@ -308,7 +321,8 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
     // 超预算的提示：点名最慢的节点；没抽稀点云就不提「降低预览点数」
     std::string warn;
     for (const Json& line : log.ofKind("log")) {
-      if (line.value("level", "") == "warn") warn = line.value("message", "");
+      if (line.value("level", "") == "warn")
+        warn = line.value("message", "");
     }
     CHECK(warn.find("最慢的是 ") != std::string::npos);
     CHECK(warn.find("图像已按 1/2 预览") != std::string::npos);
@@ -321,7 +335,8 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
     REQUIRE(again.finalState("src") == "skipped");
     std::string warnAgain;
     for (const Json& ev : again.ofKind("log")) {
-      if (ev.value("level", "") == "warn") warnAgain = ev.value("message", "");
+      if (ev.value("level", "") == "warn")
+        warnAgain = ev.value("message", "");
     }
     CHECK(warnAgain.find("图像已按 1/2 预览") != std::string::npos);
   }

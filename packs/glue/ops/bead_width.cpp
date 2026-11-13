@@ -30,7 +30,8 @@ StationSpec specOf(const ParamView& params) {
 std::vector<Px> pxList(const std::vector<P2>& pts) {
   std::vector<Px> out;
   out.reserve(pts.size());
-  for (const P2& p : pts) out.push_back(Px{p.x, p.y});
+  for (const P2& p : pts)
+    out.push_back(Px{p.x, p.y});
   return out;
 }
 
@@ -39,7 +40,10 @@ Px px(P2 p) { return Px{p.x, p.y}; }
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   Polyline line;
   Json pathInfo;
@@ -47,15 +51,26 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_input", "path 不是完整的 glue.Path", {}, "path");
   }
   Metric metric;
-  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok) return s;
+  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok)
+    return s;
 
-  const StationSpec spec = specOf(params);
+  StationSpec spec = specOf(params);
   const bool pathOk = pathInfo.value("ok", false);
   const bool bright = pathInfo.value("polarity", std::string("dark")) == "bright";
   const int widthMax = pathInfo.value("widthMax", 90);
+  // 示教胶路（glue.taught_path，T3）：胶不一定正好在线上，期望中心逐站估；容差与 D15 的门槛由它带过来
+  const std::string lineSource = pathInfo.value("lineSource", std::string());
+  const bool taught = lineSource == "taught";
+  if (taught) {
+    const double tol = numOf(pathInfo.value("tolerance", Json()));
+    spec.lateralTol = std::isfinite(tol) && tol >= 0 ? tol : 20.0;
+    const double sharpMin = numOf(pathInfo.value("sharpMin", Json()));
+    spec.sharpMin = std::isfinite(sharpMin) ? sharpMin : 0.4;
+  }
   double zoneStart = line.s.front();
   double zoneEnd = line.s.back();
-  if (const auto z = pathInfo.find("zone"); z != pathInfo.end() && z->is_array() && z->size() == 2) {
+  if (const auto z = pathInfo.find("zone");
+      z != pathInfo.end() && z->is_array() && z->size() == 2) {
     zoneStart = numOf((*z)[0]);
     zoneEnd = numOf((*z)[1]);
   }
@@ -65,14 +80,17 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   std::vector<double> widths;
   for (const Station& x : st) {
-    if (!x.present) continue;
+    if (!x.present)
+      continue;
     const double w = metric.distance(x.left(), x.right());
-    if (std::isfinite(w)) widths.push_back(w);
+    if (std::isfinite(w))
+      widths.push_back(w);
   }
-  const double coverage = st.empty() ? 0.0
-                                     : static_cast<double>(std::count_if(st.begin(), st.end(),
-                                                                         [](const Station& x) { return x.present; })) /
-                                           static_cast<double>(st.size());
+  const double coverage =
+      st.empty() ? 0.0
+                 : static_cast<double>(std::count_if(st.begin(), st.end(),
+                                                     [](const Station& x) { return x.present; })) /
+                       static_cast<double>(st.size());
   double mean = kNaN, lo = kNaN, hi = kNaN;
   if (!widths.empty()) {
     double sum = 0;
@@ -87,12 +105,15 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
 
   const std::string form = spec.swirl ? "swirl" : "straight";
+  // 示教胶路沿线一站都没量到胶，就是「检测区内没找到胶」（T4：与 bead_path 没找到胶同一句，judge 同样只报 missing）
+  const bool taughtNoBead = taught && pathOk && widths.empty();
   Json info;
   info["form"] = form;
   info["stationStep"] = spec.step;
   info["unit"] = metric.unit();
   info["pathOk"] = pathOk;
-  info["message"] = pathOk ? (widths.empty() ? "没有一站量到胶" : "") : kNoBeadMessage;
+  info["message"] =
+      !pathOk || taughtNoBead ? kNoBeadMessage : (widths.empty() ? "没有一站量到胶" : "");
   info["zone"] = Json::array({zoneStart, zoneEnd});
   info["stations"] = st.size();
   info["present"] = widths.size();
@@ -100,14 +121,24 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   info["wRef"] = numOrNull(res.wRef, 3);
   info["peakRef"] = numOrNull(res.peakRef, 1);
   info["envelopeHalf"] = spec.swirl ? numOrNull(res.envelopeHalf, 3) : Json();
-  info["searchHalf"] = spec.searchHalf;
+  // 示教胶路的卡尺至少够得着「离线 tolerance 处最宽的胶」（与 measureStations 里同一条式子）
+  info["searchHalf"] = taught
+                           ? std::max(spec.searchHalf, spec.lateralTol + 0.5 * spec.runs.widthMax)
+                           : spec.searchHalf;
   info["polarity"] = bright ? "bright" : "dark";
   info["widthMax"] = widthMax;
+  info["lineSource"] = lineSource.empty() ? Json() : Json(lineSource);
+  // 下面五个只有示教胶路才有（T3–T5），拟合的胶路是 null
+  info["tolerance"] = taught ? Json(spec.lateralTol) : Json();
+  info["offset"] = numOrNull(res.trackOffset, 2);
+  info["trackSupport"] = numOrNull(res.trackSupport, 4);
+  info["sharpness"] = numOrNull(res.trackSharpness, 3);
+  info["reason"] = taught && !res.trackReason.empty() ? Json(res.trackReason) : Json();
   info["calib"] = metric.calib ? std_image::planeCalibJson(*metric.calib) : Json();
   Json stations = stationsJson(st, spec.step, form, metric);
   outputs.set("bead", beadBundle(polylineRecord(line.s, line.points, line.tangents),
                                  std::move(stations), std::move(info)));
-  const std::string why = pathOk ? "没有一站量到胶" : kNoBeadMessage;
+  const std::string why = pathOk && !taught ? "没有一站量到胶" : kNoBeadMessage;
   outputs.set("widthMean", measurement(mean, metric.unit(), why));
   outputs.set("widthMin", measurement(lo, metric.unit(), why));
   outputs.set("widthMax", measurement(hi, metric.unit(), why));
@@ -115,7 +146,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   cov.value = coverage;
   cov.ok = true;
   cov.unit = "";
-  cov.message = pathOk ? "" : kNoBeadMessage;
+  cov.message = pathOk && !taughtNoBead ? "" : kNoBeadMessage;
   outputs.set("coverage", Data::measurement(std::move(cov)));
 
   // 叠画：胶路、有胶的站（两边连线）、无胶的站、两条胶边
@@ -131,7 +162,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
   }
   ov.segments("station", present);
-  ov.segments("missing", missing, missing.empty() ? "" : "无胶 " + std::to_string(missing.size()) + " 站");
+  ov.segments("missing", missing,
+              missing.empty() ? "" : "无胶 " + std::to_string(missing.size()) + " 站");
   for (const auto& [a, b] : presentRuns(st)) {
     std::vector<Px> left, right;
     for (std::size_t i = a; i <= b; ++i) {
@@ -150,24 +182,24 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   const auto range = params.vec2("widthRange");
   if (!(range[0] >= 0) || !(range[1] > range[0])) {
     issues.push_back(Issue::error("bad_param",
-                                  "widthRange 要满足 0 ≤ 下限 < 上限（现在是 [" + fmt(range[0]) + ", " +
-                                      fmt(range[1]) + "]）",
+                                  "widthRange 要满足 0 ≤ 下限 < 上限（现在是 [" + fmt(range[0]) +
+                                      ", " + fmt(range[1]) + "]）",
                                   "widthRange"));
   }
   const double half = params.number("searchHalf");
   if (half < 0.5 * range[1]) {
-    issues.push_back(Issue::warning("bad_param",
-                                    "searchHalf 比 widthRange 上限的一半还小：最宽的胶在卡尺里放不下",
-                                    "searchHalf"));
+    issues.push_back(Issue::warning(
+        "bad_param", "searchHalf 比 widthRange 上限的一半还小：最宽的胶在卡尺里放不下",
+        "searchHalf"));
   }
   if (params.choice("form") == "swirl" && params.number("window") < params.number("stationStep")) {
-    issues.push_back(Issue::warning("bad_param", "window 比 stationStep 还短：外包络只取到本站自己",
-                                    "window"));
+    issues.push_back(
+        Issue::warning("bad_param", "window 比 stationStep 还短：外包络只取到本站自己", "window"));
   }
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerBeadWidth(Registry& r) {
   OperatorDesc op;
@@ -175,12 +207,18 @@ void registerBeadWidth(Registry& r) {
   op.version = "1.0.0";
   op.label = "胶宽测量";
   op.category = "涂胶/积木";
-  op.keywords = {
-      "glue bead width measurement", "adhesive width", "caliper measurement",
-      "胶条宽度", "涂胶宽度", "卡尺测量",
-      "glue", "bead", "width",
-      "涂胶", "胶宽", "螺旋胶"
-  };
+  op.keywords = {"glue bead width measurement",
+                 "adhesive width",
+                 "caliper measurement",
+                 "胶条宽度",
+                 "涂胶宽度",
+                 "卡尺测量",
+                 "glue",
+                 "bead",
+                 "width",
+                 "涂胶",
+                 "胶宽",
+                 "螺旋胶"};
   op.doc =
       "沿胶路每隔 stationStep 布一站，站上的卡尺沿法向（行进方向右侧为正）量胶的两边：边取响应的半高处"
       "（每站按本站峰值自适应），暗段之间的缝小于 mergeGap 且合并后不宽于 widthRange 上限就合并（高光条不会"
@@ -188,12 +226,21 @@ void registerBeadWidth(Registry& r) {
       "有无胶逐站判（D16）：参考宽 / 参考峰值 = 全检测区候选暗段宽度 / 峰值的中位数；直胶要宽 ≥ presentRatio × 参考宽、"
       "中心偏离胶路 ≤ max(6, centerRatio × 参考宽)、峰值 ≥ contrastRatio × 参考峰值；螺旋胶（form = swirl）本站自己要有"
       "一个够宽、够浓、落在包络内的暗段，两边取 ±window/2 内所有暗段的并集（外包络，D5）。"
-      "胶路没找到（path.info.ok = false）时全部判无胶。";
+      "胶路没找到（path.info.ok = false）时全部判无胶。\n"
+      "胶路是示教的（glue.taught_path，info.lineSource = taught）时，胶不一定正好压在线上：期望的胶中心按"
+      "「偏移轨迹」逐站估 —— 离示教线不超过 tolerance 的暗段里投票定一个常数偏移（票数不低于最多那条一半的里取离示教线"
+      "最近的），再沿 s 取中位数细化（断口里按两头插值；轨迹外连续几站大多在同一相对偏移上有与轨迹胶同宽的暗段、两侧轨迹上"
+      "同一处却没有、并且过渡处有斜着的胶把两头接上时，认作胶整段横移，轨迹跟过去），上面 D16 的「中心偏离」量的是离这条轨迹多远；参考宽 / 参考峰值"
+      "只取落在轨迹上的站，对比度比的是峰值 / 局部亮度。卡尺半长至少 tolerance + widthRange 上限 / 2。轨迹上的站不到 3 站或 10%、或者轨迹上暗段边缘"
+      "陡度的 P25 低于 sharpMin（D15：压痕、阴影），就是沿示教线没有胶：全部判无胶，message 是「检测区内没找到胶」，"
+      "原因在 info.reason。";
   op.inputs = {
       Port{"image", "Image", "Image", "与 bead_path 同一帧。", true},
-      Port{"path", "Bundle<glue.Path>", "Path", "glue.bead_path 的胶路。", true},
+      Port{"path", "Bundle<glue.Path>", "Path",
+           "glue.bead_path 找到的胶路，或 glue.taught_path 的示教胶路。", true},
       withContract(Port{"calib", "Record", "Calib",
-                        "可选：image.PlaneCalib（图像 px → 工作平面 mm 的单应）。接了宽度出 mm。", false},
+                        "可选：image.PlaneCalib（图像 px → 工作平面 mm 的单应）。接了宽度出 mm。",
+                        false},
                    {{"recordType", std_image::kPlaneCalibType}}),
   };
   op.outputs = {
@@ -202,22 +249,31 @@ void registerBeadWidth(Registry& r) {
       Port{"widthMin", "Measurement", "Width Min", "有胶各站宽度的最小值。", true},
       Port{"widthMax", "Measurement", "Width Max", "有胶各站宽度的最大值。", true},
       Port{"coverage", "Measurement", "Coverage", "有胶的站占全部站的比例（0–1）。", true},
-      Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：每站两边（有胶 / 无胶两种 role）与两条胶边。", true},
+      Port{"overlay", "Record", "Overlay",
+           "lyflow.overlay2d：每站两边（有胶 / 无胶两种 role）与两条胶边。", true},
   };
-  Param form = enumParam("form", "Form", "straight", "直胶还是螺旋胶。螺旋胶的宽度取外包络。",
-                         {EnumOption{"straight", "直胶", ""}, EnumOption{"swirl", "螺旋胶", "取外包络。"}});
-  Param range = vec2Param("widthRange", "Width Range", 4.0, 90.0, "px", {"Min", "Max"},
-                          "认作胶的暗段宽度范围。上限别超过 bead_path 的 widthMax（结构元比胶窄，胶就没有响应）。");
+  Param form =
+      enumParam("form", "Form", "straight", "直胶还是螺旋胶。螺旋胶的宽度取外包络。",
+                {EnumOption{"straight", "直胶", ""}, EnumOption{"swirl", "螺旋胶", "取外包络。"}});
+  Param range = vec2Param(
+      "widthRange", "Width Range", 4.0, 90.0, "px", {"Min", "Max"},
+      "认作胶的暗段宽度范围。上限别超过 bead_path 的 widthMax（结构元比胶窄，胶就没有响应）。");
   Param step = floatParam("stationStep", "Station Step", 4.0, "px", "相邻两站沿胶路的间隔。", true);
   step.min = 1.0;
-  Param searchHalf = floatParam("searchHalf", "Search Half", 60.0, "px", "卡尺沿法向往两侧各伸多长。", true);
+  Param searchHalf = floatParam(
+      "searchHalf", "Search Half", 60.0, "px",
+      "卡尺沿法向往两侧各伸多长。示教胶路时至少取 tolerance + widthRange 上限 / 2。", true);
   searchHalf.min = 2.0;
-  Param mergeGap = floatParam("mergeGap", "Merge Gap", 8.0, "px",
-                              "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。", true);
+  Param mergeGap = floatParam(
+      "mergeGap", "Merge Gap", 8.0, "px",
+      "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。示教直胶还要两段一样浓：较淡一段的"
+      "峰值不到较浓一段的 0.4 倍就不并（紧贴胶边的淡肩）。",
+      true);
   mergeGap.min = 0.0;
-  Param window = visibleWhen(floatParam("window", "Window", 30.0, "px",
-                                        "螺旋胶取外包络的窗口长度（沿胶路，本站两侧各一半）。约一个螺距。", true),
-                             "form", "swirl");
+  Param window = visibleWhen(
+      floatParam("window", "Window", 30.0, "px",
+                 "螺旋胶取外包络的窗口长度（沿胶路，本站两侧各一半）。约一个螺距。", true),
+      "form", "swirl");
   window.min = 0.0;
   Param contrastMin = floatParam("contrastMin", "Contrast Min", 16.0, "",
                                  "卡尺上一段响应的峰值至少这么高才算胶（灰度级）。", true);
@@ -226,22 +282,25 @@ void registerBeadWidth(Registry& r) {
                                   "D16：一站的胶至少要有参考宽的这么多倍宽才算有胶。", true);
   presentRatio.min = 0.0;
   presentRatio.max = 1.0;
-  Param centerRatio = floatParam("centerRatio", "Center Ratio", 0.3, "",
-                                 "D16（直胶）：胶的中心偏离胶路不超过 max(6 px, 它 × 参考宽)。", true);
+  Param centerRatio =
+      floatParam("centerRatio", "Center Ratio", 0.3, "",
+                 "D16（直胶）：胶的中心偏离胶路不超过 max(6 px, 它 × 参考宽)。", true);
   centerRatio.min = 0.0;
   Param contrastRatio = floatParam(
       "contrastRatio", "Contrast Ratio", 0.3, "",
       "一站的胶至少要有参考峰值（全检测区候选暗段峰值的中位数）的这么多倍对比度才算有胶：断口两头模糊出来的"
-      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。",
+      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。"
+      "示教胶路比的是峰值 / 局部亮度（暗胶取胶旁背景），参考取它在全检测区的中位数：照明不均时暗处的胶不被当成"
+      "残影，同一背景上比胶淡得多的淡带也不被当成胶。",
       true);
   contrastRatio.min = 0.0;
   contrastRatio.max = 1.0;
-  op.params = {form,        range,        step,         searchHalf,   mergeGap,
-               window,      contrastMin,  presentRatio, centerRatio,  contrastRatio};
+  op.params = {form,   range,       step,         searchHalf,  mergeGap,
+               window, contrastMin, presentRatio, centerRatio, contrastRatio};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

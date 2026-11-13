@@ -14,17 +14,19 @@ enum class ApplicationLanguage {
 };
 
 inline std::optional<ApplicationLanguage> ParseApplicationLanguage(std::string_view value) {
-  if (value == "English") return ApplicationLanguage::kEnglish;
-  if (value == "Chinese") return ApplicationLanguage::kChinese;
+  if (value == "English")
+    return ApplicationLanguage::kEnglish;
+  if (value == "Chinese")
+    return ApplicationLanguage::kChinese;
   return std::nullopt;
 }
 
 inline std::string_view ApplicationLanguageStorageValue(ApplicationLanguage language) {
   switch (language) {
-    case ApplicationLanguage::kEnglish:
-      return "English";
-    case ApplicationLanguage::kChinese:
-      return "Chinese";
+  case ApplicationLanguage::kEnglish:
+    return "English";
+  case ApplicationLanguage::kChinese:
+    return "Chinese";
   }
   return {};
 }
@@ -35,17 +37,19 @@ enum class Theme {
 };
 
 inline std::optional<Theme> ParseTheme(std::string_view value) {
-  if (value == "White") return Theme::kWhite;
-  if (value == "Black") return Theme::kBlack;
+  if (value == "White")
+    return Theme::kWhite;
+  if (value == "Black")
+    return Theme::kBlack;
   return std::nullopt;
 }
 
 inline std::string_view ThemeStorageValue(Theme theme) {
   switch (theme) {
-    case Theme::kWhite:
-      return "White";
-    case Theme::kBlack:
-      return "Black";
+  case Theme::kWhite:
+    return "White";
+  case Theme::kBlack:
+    return "Black";
   }
   return {};
 }
@@ -57,20 +61,23 @@ enum class SegmentationMode {
 };
 
 inline std::optional<SegmentationMode> ParseSegmentationMode(std::string_view value) {
-  if (value == "Each") return SegmentationMode::kEach;
-  if (value == "Together") return SegmentationMode::kTogether;
-  if (value == "ROI") return SegmentationMode::kRoi;
+  if (value == "Each")
+    return SegmentationMode::kEach;
+  if (value == "Together")
+    return SegmentationMode::kTogether;
+  if (value == "ROI")
+    return SegmentationMode::kRoi;
   return std::nullopt;
 }
 
 inline std::string_view SegmentationModeStorageValue(SegmentationMode mode) {
   switch (mode) {
-    case SegmentationMode::kEach:
-      return "Each";
-    case SegmentationMode::kTogether:
-      return "Together";
-    case SegmentationMode::kRoi:
-      return "ROI";
+  case SegmentationMode::kEach:
+    return "Each";
+  case SegmentationMode::kTogether:
+    return "Together";
+  case SegmentationMode::kRoi:
+    return "ROI";
   }
   return {};
 }
@@ -82,20 +89,23 @@ enum class CameraSelection {
 };
 
 inline std::optional<CameraSelection> ParseCameraSelection(std::string_view value) {
-  if (value == "Both") return CameraSelection::kBoth;
-  if (value == "Left") return CameraSelection::kLeft;
-  if (value == "Right") return CameraSelection::kRight;
+  if (value == "Both")
+    return CameraSelection::kBoth;
+  if (value == "Left")
+    return CameraSelection::kLeft;
+  if (value == "Right")
+    return CameraSelection::kRight;
   return std::nullopt;
 }
 
 inline std::string_view CameraSelectionStorageValue(CameraSelection selection) {
   switch (selection) {
-    case CameraSelection::kBoth:
-      return "Both";
-    case CameraSelection::kLeft:
-      return "Left";
-    case CameraSelection::kRight:
-      return "Right";
+  case CameraSelection::kBoth:
+    return "Both";
+  case CameraSelection::kLeft:
+    return "Left";
+  case CameraSelection::kRight:
+    return "Right";
   }
   return {};
 }
@@ -108,14 +118,14 @@ enum class RetentionPeriod {
 
 inline std::optional<RetentionPeriod> ParseRetentionPeriod(int days) {
   switch (days) {
-    case 7:
-      return RetentionPeriod::kSevenDays;
-    case 15:
-      return RetentionPeriod::kFifteenDays;
-    case 30:
-      return RetentionPeriod::kThirtyDays;
-    default:
-      return std::nullopt;
+  case 7:
+    return RetentionPeriod::kSevenDays;
+  case 15:
+    return RetentionPeriod::kFifteenDays;
+  case 30:
+    return RetentionPeriod::kThirtyDays;
+  default:
+    return std::nullopt;
   }
 }
 
@@ -132,8 +142,10 @@ inline std::string_view TrimAsciiWhitespace(std::string_view value) {
   const auto is_space = [](char character) {
     return std::isspace(static_cast<unsigned char>(character)) != 0;
   };
-  while (!value.empty() && is_space(value.front())) value.remove_prefix(1);
-  while (!value.empty() && is_space(value.back())) value.remove_suffix(1);
+  while (!value.empty() && is_space(value.front()))
+    value.remove_prefix(1);
+  while (!value.empty() && is_space(value.back()))
+    value.remove_suffix(1);
   return value;
 }
 
@@ -141,14 +153,16 @@ inline std::string_view TrimAsciiWhitespace(std::string_view value) {
 // customer CSV parser. Only letters, digits, "_", "-" and the "{model}" placeholder are accepted.
 inline std::optional<std::string> ParseMeasPointPrefix(std::string_view value) {
   const auto trimmed = TrimAsciiWhitespace(value);
-  if (trimmed.size() > kMeasPointPrefixMaxLength) return std::nullopt;
+  if (trimmed.size() > kMeasPointPrefixMaxLength)
+    return std::nullopt;
   for (std::size_t index = 0; index < trimmed.size();) {
     if (trimmed.substr(index, kMeasPointModelPlaceholder.size()) == kMeasPointModelPlaceholder) {
       index += kMeasPointModelPlaceholder.size();
       continue;
     }
     const auto character = static_cast<unsigned char>(trimmed[index]);
-    if (std::isalnum(character) == 0 && character != '_' && character != '-') return std::nullopt;
+    if (std::isalnum(character) == 0 && character != '_' && character != '-')
+      return std::nullopt;
     ++index;
   }
   return std::string(trimmed);
@@ -170,4 +184,4 @@ inline std::string ExpandMeasPointPrefix(std::string_view prefix, std::string_vi
   return expanded;
 }
 
-}  // namespace domain::config
+} // namespace domain::config

@@ -26,7 +26,12 @@ pub(crate) fn read_extra(app_data: &Path) -> Vec<String> {
     };
     value["extraDirs"]
         .as_array()
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .map(|v: Vec<String>| normalize(&v))
         .unwrap_or_default()
 }
@@ -37,10 +42,12 @@ pub(crate) fn read_extra(app_data: &Path) -> Vec<String> {
 #[cfg(any(feature = "host", test))]
 pub(crate) fn write_extra(app_data: &Path, dirs: &[String]) -> Result<Vec<String>, String> {
     let dirs = normalize(dirs);
-    std::fs::create_dir_all(app_data).map_err(|e| format!("创建 {} 失败: {e}", app_data.display()))?;
+    std::fs::create_dir_all(app_data)
+        .map_err(|e| format!("创建 {} 失败: {e}", app_data.display()))?;
     let file = settings_file(app_data);
     let tmp = file.with_extension("json.tmp");
-    let mut text = serde_json::to_string_pretty(&serde_json::json!({ "extraDirs": dirs })).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string_pretty(&serde_json::json!({ "extraDirs": dirs }))
+        .map_err(|e| e.to_string())?;
     text.push('\n');
     std::fs::write(&tmp, text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &file).map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
@@ -50,7 +57,13 @@ pub(crate) fn write_extra(app_data: &Path, dirs: &[String]) -> Result<Vec<String
 /// 环境变量里的目录（分号分隔）。
 pub(crate) fn env_dirs() -> Vec<String> {
     std::env::var(ENV)
-        .map(|v| v.split(';').map(str::trim).filter(|d| !d.is_empty()).map(str::to_string).collect())
+        .map(|v| {
+            v.split(';')
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -95,13 +108,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(read_extra(&dir).is_empty(), "文件不在当空");
 
-        let written = write_extra(&dir, &[" D:/libs ".into(), "".into(), "d:\\LIBS\\".into(), "E:/more".into()])
-            .unwrap();
-        let expect_dedupe = if cfg!(windows) { vec!["D:/libs", "E:/more"] } else { vec!["D:/libs", "d:\\LIBS\\", "E:/more"] };
-        assert_eq!(written, expect_dedupe, "去空白、去空串、（Windows）不分大小写与斜杠去重");
+        let written = write_extra(
+            &dir,
+            &[
+                " D:/libs ".into(),
+                "".into(),
+                "d:\\LIBS\\".into(),
+                "E:/more".into(),
+            ],
+        )
+        .unwrap();
+        let expect_dedupe = if cfg!(windows) {
+            vec!["D:/libs", "E:/more"]
+        } else {
+            vec!["D:/libs", "d:\\LIBS\\", "E:/more"]
+        };
+        assert_eq!(
+            written, expect_dedupe,
+            "去空白、去空串、（Windows）不分大小写与斜杠去重"
+        );
         assert_eq!(read_extra(&dir), written);
 
-        let all = compose("C:/app/library", &written, &["E:/more".into(), "F:/env".into()]);
+        let all = compose(
+            "C:/app/library",
+            &written,
+            &["E:/more".into(), "F:/env".into()],
+        );
         let mut want = vec!["C:/app/library".to_string()];
         want.extend(written.iter().cloned());
         want.push("F:/env".to_string());

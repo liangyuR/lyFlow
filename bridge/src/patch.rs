@@ -178,9 +178,9 @@ pub(crate) fn apply_rewires(
     applied: &mut Applied,
 ) -> Result<(), String> {
     for spec in specs {
-        let (left, right) = spec.split_once('=').ok_or_else(|| {
-            format!("--rewire 的写法是 <节点>:<端口>=<节点>:<端口>，收到 {spec}")
-        })?;
+        let (left, right) = spec
+            .split_once('=')
+            .ok_or_else(|| format!("--rewire 的写法是 <节点>:<端口>=<节点>:<端口>，收到 {spec}"))?;
         let (from_node, from_port) = parse_port("--rewire", left, spec)?;
         let (to_node, to_port) = parse_port("--rewire", right, spec)?;
         for (id, what) in [(&from_node, "左端口"), (&to_node, "右端口")] {
@@ -244,11 +244,20 @@ pub(crate) fn apply_connects(
             }
         }
         let (from, to) = (
-            PortRef { node: from.0, port: from.1 },
-            PortRef { node: to.0, port: to.1 },
+            PortRef {
+                node: from.0,
+                port: from.1,
+            },
+            PortRef {
+                node: to.0,
+                port: to.1,
+            },
         );
         if doc.edges.iter().any(|e| {
-            e.from.node == from.node && e.from.port == from.port && e.to.node == to.node && e.to.port == to.port
+            e.from.node == from.node
+                && e.from.port == from.port
+                && e.to.node == to.node
+                && e.to.port == to.port
         }) {
             applied.noop(
                 "connect",
@@ -316,7 +325,10 @@ pub(crate) fn apply_recipes(
     applied: &mut Applied,
 ) -> Result<(), String> {
     if specs.len() > 1 {
-        return Err(format!("bad_recipe: --recipe 只能给一个（收到 {} 个）", specs.len()));
+        return Err(format!(
+            "bad_recipe: --recipe 只能给一个（收到 {} 个）",
+            specs.len()
+        ));
     }
     for spec in specs {
         let recipe = crate::recipe::load_checked(doc, Path::new(spec))?;
@@ -345,7 +357,12 @@ pub(crate) fn apply_params(
 ) -> Result<(), String> {
     for spec in specs {
         if crate::cli::apply_graph_param(doc, spec)? {
-            applied.params.push(spec.split_once('=').map(|(n, _)| n).unwrap_or(spec).to_string());
+            applied.params.push(
+                spec.split_once('=')
+                    .map(|(n, _)| n)
+                    .unwrap_or(spec)
+                    .to_string(),
+            );
         } else {
             applied.noop(
                 "param",
@@ -461,7 +478,8 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         flags: HashSet::new(),
     };
     if let Some(dir) = parsed.one("base-dir") {
-        bare.values.insert("base-dir".to_string(), vec![dir.to_string()]);
+        bare.values
+            .insert("base-dir".to_string(), vec![dir.to_string()]);
     }
     let before = match load_graph(&bare, &path, err) {
         Ok(l) => l,

@@ -28,16 +28,28 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
   const double m22 = cy * cx;
 
   Transform out;
-  out.m[0] = static_cast<float>(m00); out.m[1] = static_cast<float>(m01); out.m[2] = static_cast<float>(m02); out.m[3] = t[0];
-  out.m[4] = static_cast<float>(m10); out.m[5] = static_cast<float>(m11); out.m[6] = static_cast<float>(m12); out.m[7] = t[1];
-  out.m[8] = static_cast<float>(m20); out.m[9] = static_cast<float>(m21); out.m[10] = static_cast<float>(m22); out.m[11] = t[2];
-  out.m[12] = 0; out.m[13] = 0; out.m[14] = 0; out.m[15] = 1;
+  out.m[0] = static_cast<float>(m00);
+  out.m[1] = static_cast<float>(m01);
+  out.m[2] = static_cast<float>(m02);
+  out.m[3] = t[0];
+  out.m[4] = static_cast<float>(m10);
+  out.m[5] = static_cast<float>(m11);
+  out.m[6] = static_cast<float>(m12);
+  out.m[7] = t[1];
+  out.m[8] = static_cast<float>(m20);
+  out.m[9] = static_cast<float>(m21);
+  out.m[10] = static_cast<float>(m22);
+  out.m[11] = t[2];
+  out.m[12] = 0;
+  out.m[13] = 0;
+  out.m[14] = 0;
+  out.m[15] = 1;
 
   outputs.set("transform", Data::transform(out));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerTransformMake(Registry& r) {
   OperatorDesc op;
@@ -45,13 +57,21 @@ void registerTransformMake(Registry& r) {
   op.version = "1.0.0";
   op.label = "刚体变换构造";
   op.category = "变换";
-  op.keywords = {
-      "rigid transform construction", "pose matrix", "Euler angles",
-      "SE3", "位姿矩阵", "欧拉角",
-      "平移旋转", "transform", "pose",
-      "translate", "rotate", "变换",
-      "位姿", "平移", "旋转"
-  };
+  op.keywords = {"rigid transform construction",
+                 "pose matrix",
+                 "Euler angles",
+                 "SE3",
+                 "位姿矩阵",
+                 "欧拉角",
+                 "平移旋转",
+                 "transform",
+                 "pose",
+                 "translate",
+                 "rotate",
+                 "变换",
+                 "位姿",
+                 "平移",
+                 "旋转"};
   op.doc = "由平移和欧拉角构造 4x4 刚体变换。旋转顺序为内旋 X→Y→Z（R = Rz·Ry·Rx）。";
 
   op.outputs = {Port{"transform", "Transform", "Transform", "构造出的变换。", true}};
@@ -83,4 +103,4 @@ void registerTransformMake(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

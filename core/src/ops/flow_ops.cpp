@@ -23,7 +23,8 @@ Status fallbackCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
   const std::string reason =
       a.isError() ? a.asError()->code + ": " + a.asError()->message : "主路径没有产出";
 
-  if (!inputs.has("b")) return Status::Demand("b");
+  if (!inputs.has("b"))
+    return Status::Demand("b");
 
   const Data& b = inputs.get("b");
   if (b.empty() || b.isError()) {
@@ -57,7 +58,8 @@ bool condHolds(const Data& cond, const std::string& path, bool& out, std::string
         return false;
       }
       node = &node->at(key);
-      if (dot == std::string::npos) break;
+      if (dot == std::string::npos)
+        break;
       start = dot + 1;
     }
     if (node->is_boolean()) {
@@ -83,7 +85,8 @@ Status selectCompute(const Inputs& inputs, const ParamView& params, Outputs& out
     return Status::Error(Phase::Execute, "bad_input", why, "path", "cond");
   }
   const char* want = takeA ? "a" : "b";
-  if (!inputs.has(want)) return Status::Demand(want);
+  if (!inputs.has(want))
+    return Status::Demand(want);
   const Data& picked = inputs.get(want);
   if (picked.empty() || picked.isError()) {
     return Status::Error(Phase::Execute,
@@ -95,7 +98,7 @@ Status selectCompute(const Inputs& inputs, const ParamView& params, Outputs& out
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFlowOps(Registry& r) {
   {
@@ -104,15 +107,10 @@ void registerFlowOps(Registry& r) {
     op.version = "1.0.0";
     op.label = "容错回退";
     op.category = "流程";
-    op.keywords = {
-        "fallback", "error fallback", "lazy fallback",
-        "fault tolerance", "容错", "故障回退",
-        "备用分支", "惰性求值", "error",
-        "备用"
-    };
-    op.doc =
-        "a 成功就透传 a；a 失败（或没有产出）才调度 b 的上游闭包并透传 b。"
-        "b 的闭包在被 demand 之前不进计划，未被 demand 的节点报 skipped/not_demanded。";
+    op.keywords = {"fallback", "error fallback", "lazy fallback", "fault tolerance", "容错",
+                   "故障回退", "备用分支",       "惰性求值",      "error",           "备用"};
+    op.doc = "a 成功就透传 a；a 失败（或没有产出）才调度 b 的上游闭包并透传 b。"
+             "b 的闭包在被 demand 之前不进计划，未被 demand 的节点报 skipped/not_demanded。";
 
     Port a{"a", "Any", "A（主）", "主路径。它的上游失败时本节点收到一个 Error 而不是被连坐。",
            true};
@@ -137,15 +135,20 @@ void registerFlowOps(Registry& r) {
     op.version = "1.0.0";
     op.label = "条件选择";
     op.category = "流程";
-    op.keywords = {
-        "conditional selection", "conditional switch", "branch selection",
-        "if", "condition", "条件分支",
-        "条件路由", "惰性求值", "select",
-        "switch", "条件", "分支"
-    };
-    op.doc =
-        "按 cond 选一路：Measurement 看它的 ok，Record 看 path 指向的布尔字段。"
-        "两路都是惰性的，只有被选中的那一路才会被调度。";
+    op.keywords = {"conditional selection",
+                   "conditional switch",
+                   "branch selection",
+                   "if",
+                   "condition",
+                   "条件分支",
+                   "条件路由",
+                   "惰性求值",
+                   "select",
+                   "switch",
+                   "条件",
+                   "分支"};
+    op.doc = "按 cond 选一路：Measurement 看它的 ok，Record 看 path 指向的布尔字段。"
+             "两路都是惰性的，只有被选中的那一路才会被调度。";
 
     Port cond{"cond", "Any", "Cond", "Measurement（看 ok）或 Record（看 path 字段）。", true};
     cond.anyGroup = 1;
@@ -173,4 +176,4 @@ void registerFlowOps(Registry& r) {
   }
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

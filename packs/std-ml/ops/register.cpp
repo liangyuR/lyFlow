@@ -3,8 +3,6 @@
 
 namespace lyflow::packs::std_ml {
 
-void registerPackOps(Registry& r) {
-  ops::registerMlOnnxRun(r);
-}
+void registerPackOps(Registry& r) { ops::registerMlOnnxRun(r); }
 
-}  // namespace lyflow::packs::std_ml
+} // namespace lyflow::packs::std_ml

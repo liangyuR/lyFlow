@@ -39,7 +39,8 @@ Status thresholdCompute(const Inputs& inputs, const ParamView& params, Outputs& 
                     (invert ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY) | cv::THRESH_OTSU);
     } else {
       const int block = static_cast<int>(params.integer("blockSize"));
-      if (block % 2 == 0 || block < 3) return badParam("邻域大小要是 ≥ 3 的奇数", "blockSize");
+      if (block % 2 == 0 || block < 3)
+        return badParam("邻域大小要是 ≥ 3 的奇数", "blockSize");
       cv::adaptiveThreshold(src, out, 255.0,
                             method == "adaptive_gaussian" ? cv::ADAPTIVE_THRESH_GAUSSIAN_C
                                                           : cv::ADAPTIVE_THRESH_MEAN_C,
@@ -62,7 +63,7 @@ Status morphologyCompute(const Inputs& inputs, const ParamView& params, Outputs&
                                            : cv::MORPH_RECT;
   const cv::Mat kernel = cv::getStructuringElement(shape, cv::Size(k, k));
   const std::string& opName = params.choice("op");
-  const int op = opName == "erode"   ? cv::MORPH_ERODE
+  const int op = opName == "erode"    ? cv::MORPH_ERODE
                  : opName == "dilate" ? cv::MORPH_DILATE
                  : opName == "close"  ? cv::MORPH_CLOSE
                                       : cv::MORPH_OPEN;
@@ -82,16 +83,20 @@ Status findCircleCompute(const Inputs& inputs, const ParamView& params, Outputs&
   }
   const double minR = params.number("minRadius");
   const double maxR = params.number("maxRadius");
-  if (maxR > 0 && maxR < minR) return badParam("最大半径比最小半径还小", "maxRadius");
+  if (maxR > 0 && maxR < minR)
+    return badParam("最大半径比最小半径还小", "maxRadius");
   // 预览里半径按比例缩过（ADR-0028）：截断会把 0.75 变成 0 —— 对 OpenCV 那是「不限」。四舍五入，正数至少 1
-  const auto radius = [](double r) { return r > 0 ? std::max(1, static_cast<int>(std::lround(r))) : 0; };
+  const auto radius = [](double r) {
+    return r > 0 ? std::max(1, static_cast<int>(std::lround(r))) : 0;
+  };
   std::vector<cv::Vec3f> circles;
   cv::HoughCircles(cvx::view(in), circles, cv::HOUGH_GRADIENT, params.number("dp"),
                    params.number("minDist"), params.number("edgeThreshold"),
                    params.number("accumulatorThreshold"), radius(minR), radius(maxR));
   if (circles.empty()) {
     return Status::Error(Phase::Execute, "circle_not_found",
-                         "没找到圆：调低累加阈值、放宽半径范围，或先平滑去噪", "accumulatorThreshold");
+                         "没找到圆：调低累加阈值、放宽半径范围，或先平滑去噪",
+                         "accumulatorThreshold");
   }
   // HoughCircles 按累加值从高到低排，第一个就是最强的
   Circle2D c;
@@ -111,7 +116,8 @@ Measurement measured(double value, const char* unit) {
   m.value = value;
   m.ok = std::isfinite(value);
   m.unit = unit;
-  if (!m.ok) m.message = "区域是空的";
+  if (!m.ok)
+    m.message = "区域是空的";
   return m;
 }
 
@@ -155,17 +161,20 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
                       "mask");
     }
     if (mk.channels != 1) {
-      return badInput("掩膜要是单通道图（收到 " + std::to_string(mk.channels) + " 通道）；先接 image.to_gray",
+      return badInput("掩膜要是单通道图（收到 " + std::to_string(mk.channels) +
+                          " 通道）；先接 image.to_gray",
                       "mask");
     }
     // 非零处算区域：直接比较原值，f32 掩膜里 0 < v < 0.5 的也算（先转 u8 会舍成 0）；NaN 不算
     const cv::Mat mv = cvx::view(mk);
     mask = mv != 0;
-    if (mk.depth == PixelDepth::F32) mask &= (mv == mv);
+    if (mk.depth == PixelDepth::F32)
+      mask &= (mv == mv);
   } else {
     mask = cv::Mat(plane.size(), CV_8U, cv::Scalar(255));
   }
-  if (plane.depth() == CV_32F) mask &= (plane == plane);  // NaN 不算进区域
+  if (plane.depth() == CV_32F)
+    mask &= (plane == plane); // NaN 不算进区域
 
   const int area = cv::countNonZero(mask);
   double mean = nan;
@@ -187,7 +196,7 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerImageThreshold(Registry& r) {
   OperatorDesc op;
@@ -195,13 +204,19 @@ void registerImageThreshold(Registry& r) {
   op.version = "1.0.0";
   op.label = "图像二值化";
   op.category = "图像/分割";
-  op.keywords = {
-      "image thresholding", "binary segmentation", "Otsu",
-      "adaptive threshold", "阈值分割", "自适应阈值",
-      "掩膜生成", "threshold", "binary",
-      "adaptive", "mask", "阈值",
-      "掩膜"
-  };
+  op.keywords = {"image thresholding",
+                 "binary segmentation",
+                 "Otsu",
+                 "adaptive threshold",
+                 "阈值分割",
+                 "自适应阈值",
+                 "掩膜生成",
+                 "threshold",
+                 "binary",
+                 "adaptive",
+                 "mask",
+                 "阈值",
+                 "掩膜"};
   op.doc = "单通道图 → u8 掩膜（0 / 255）。固定阈值任何位深都行；Otsu 自动选阈值、自适应按邻域算，"
            "这两种只收 u8。";
   op.inputs = {img::grayIn()};
@@ -234,13 +249,20 @@ void registerImageMorphology(Registry& r) {
   op.version = "1.0.0";
   op.label = "形态学运算";
   op.category = "图像/分割";
-  op.keywords = {
-      "morphological operations", "erosion", "dilation",
-      "opening", "closing", "腐蚀",
-      "膨胀", "开运算", "闭运算",
-      "morphology", "erode", "dilate",
-      "open", "close"
-  };
+  op.keywords = {"morphological operations",
+                 "erosion",
+                 "dilation",
+                 "opening",
+                 "closing",
+                 "腐蚀",
+                 "膨胀",
+                 "开运算",
+                 "闭运算",
+                 "morphology",
+                 "erode",
+                 "dilate",
+                 "open",
+                 "close"};
   op.doc = "腐蚀 / 膨胀 / 开 / 闭。开运算去掉小亮点，闭运算填掉小暗洞，通常接在二值化后面。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
@@ -249,7 +271,8 @@ void registerImageMorphology(Registry& r) {
   op.params = {
       img::enumParam("op", "Operation", "open",
                      {EnumOption{"erode", "腐蚀", ""}, EnumOption{"dilate", "膨胀", ""},
-                      EnumOption{"open", "开", "先腐蚀后膨胀"}, EnumOption{"close", "闭", "先膨胀后腐蚀"}},
+                      EnumOption{"open", "开", "先腐蚀后膨胀"},
+                      EnumOption{"close", "闭", "先膨胀后腐蚀"}},
                      "做哪一种。"),
       img::enumParam("shape", "Shape", "rect",
                      {EnumOption{"rect", "矩形", ""}, EnumOption{"ellipse", "椭圆", ""},
@@ -269,12 +292,18 @@ void registerImageFindCircle(Registry& r) {
   op.version = "1.0.0";
   op.label = "霍夫圆检测";
   op.category = "图像/测量";
-  op.keywords = {
-      "Hough circle detection", "circle detection", "Hough gradient",
-      "圆检测", "圆形检测", "霍夫变换",
-      "孔检测", "circle", "hough",
-      "find", "霍夫", "孔"
-  };
+  op.keywords = {"Hough circle detection",
+                 "circle detection",
+                 "Hough gradient",
+                 "圆检测",
+                 "圆形检测",
+                 "霍夫变换",
+                 "孔检测",
+                 "circle",
+                 "hough",
+                 "find",
+                 "霍夫",
+                 "孔"};
   op.doc = "霍夫梯度法找圆，取累加值最高的一个。输出像素坐标的 Circle2D（unit = px）。"
            "边缘噪声多时先接 image.blur。";
   op.inputs = {img::grayIn("image", "单通道 u8 图像。")};
@@ -287,8 +316,9 @@ void registerImageFindCircle(Registry& r) {
   minDist.min = 1.0;
   Param edge = img::floatParam("edgeThreshold", "Edge Threshold", 100.0, "Canny 的高阈值。");
   edge.advanced = true;
-  Param acc = img::floatParam("accumulatorThreshold", "Accumulator", 30.0,
-                              "累加阈值：越小找到的（假）圆越多。票数约等于圆周上的边缘像素数，所以按像素计。");
+  Param acc = img::floatParam(
+      "accumulatorThreshold", "Accumulator", 30.0,
+      "累加阈值：越小找到的（假）圆越多。票数约等于圆周上的边缘像素数，所以按像素计。");
   // 票数随圆周长度变：预览缩小 s 倍时阈值也 ÷ s，正式运行找得到的小圆预览里才不会漏掉（ADR-0028，review 修正）
   acc.unit = "px";
   Param minR = img::floatParam("minRadius", "Min Radius", 0.0, "最小半径；0 = 不限。");
@@ -309,18 +339,27 @@ void registerImageRegionStats(Registry& r) {
   op.version = "1.0.0";
   op.label = "区域统计";
   op.category = "图像/测量";
-  op.keywords = {
-      "region statistics", "region measurements", "mean intensity",
-      "pixel area", "区域均值", "像素面积",
-      "外接矩形", "灰度统计", "stats",
-      "mean", "area", "region",
-      "统计", "面积", "均值",
-      "灰度"
-  };
+  op.keywords = {"region statistics",
+                 "region measurements",
+                 "mean intensity",
+                 "pixel area",
+                 "区域均值",
+                 "像素面积",
+                 "外接矩形",
+                 "灰度统计",
+                 "stats",
+                 "mean",
+                 "area",
+                 "region",
+                 "统计",
+                 "面积",
+                 "均值",
+                 "灰度"};
   op.doc = "掩膜里（没接掩膜就是整张图）某个通道的均值、像素面积与外接框。"
            "外接框是像素坐标的 Box2D，可以直接接给 image.crop。";
   op.inputs = {img::imageIn(),
-               Port{"mask", "Image", "Mask", "可选：与图像一样大，非零处算区域（通常来自 image.threshold）。", false}};
+               Port{"mask", "Image", "Mask",
+                    "可选：与图像一样大，非零处算区域（通常来自 image.threshold）。", false}};
   op.outputs = {Port{"mean", "Measurement", "Mean", "区域内的均值（原值）。", true},
                 Port{"area", "Measurement", "Area", "区域的像素数。", true},
                 Port{"bbox", "Box2D", "BBox", "区域的外接框，像素坐标。", true}};
@@ -330,4 +369,4 @@ void registerImageRegionStats(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

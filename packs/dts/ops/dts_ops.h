@@ -25,4 +25,4 @@ void registerSealRoot(Registry& r);
 void registerFlush(Registry& r);
 void registerProfileBundle(Registry& r);
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

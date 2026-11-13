@@ -16,7 +16,7 @@ struct SnippetBlob {
 
 #include "gap_snippets.inc"
 
-}  // namespace
+} // namespace
 
 void registerSnippets(Registry& r) {
   for (const SnippetBlob* b = kSnippetBlobs; b->file; ++b) {
@@ -25,4 +25,4 @@ void registerSnippets(Registry& r) {
   }
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

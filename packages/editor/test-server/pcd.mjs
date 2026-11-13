@@ -1,7 +1,7 @@
 // 把 `lyflow dump --format ascii` 写出来的 PCD 变成 ADR-0006 的二进制点云载荷。
 // 布局与 bridge/src/execution.rs 的 encode_cloud 一致。
 
-import fs from "node:fs";
+import fs from 'node:fs';
 
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
@@ -11,7 +11,7 @@ export const CLOUD_HAS_RGB = 4;
 /** PCD 的 rgb 列：PCL 习惯把 0x00RRGGBB 按位塞进一个 float 写出来（TYPE F），也有人写成整数（TYPE U）。 */
 function unpackRgb(text, type) {
   let packed;
-  if (type === "F") {
+  if (type === 'F') {
     const f = new Float32Array([Number(text)]);
     packed = new Uint32Array(f.buffer)[0];
   } else {
@@ -27,39 +27,39 @@ function parseAsciiPcd(text) {
   let points = 0;
   let start = -1;
   for (let i = 0; i < lines.length; i += 1) {
-    const line = (lines[i] ?? "").trim();
-    if (!line || line.startsWith("#")) continue;
+    const line = (lines[i] ?? '').trim();
+    if (!line || line.startsWith('#')) continue;
     const [key, ...rest] = line.split(/\s+/);
-    if (key === "FIELDS") fields = rest;
-    else if (key === "TYPE") types = rest;
-    else if (key === "POINTS") points = Number(rest[0]);
-    else if (key === "WIDTH" && points === 0) points = Number(rest[0]);
-    else if (key === "DATA") {
-      if (rest[0] !== "ascii") throw new Error(`只支持 ascii PCD，拿到 ${rest[0]}`);
+    if (key === 'FIELDS') fields = rest;
+    else if (key === 'TYPE') types = rest;
+    else if (key === 'POINTS') points = Number(rest[0]);
+    else if (key === 'WIDTH' && points === 0) points = Number(rest[0]);
+    else if (key === 'DATA') {
+      if (rest[0] !== 'ascii') throw new Error(`只支持 ascii PCD，拿到 ${rest[0]}`);
       start = i + 1;
       break;
     }
   }
-  if (start < 0) throw new Error("PCD 里没有 DATA 段");
+  if (start < 0) throw new Error('PCD 里没有 DATA 段');
 
-  const ix = fields.indexOf("x");
-  const iy = fields.indexOf("y");
-  const iz = fields.indexOf("z");
-  if (ix < 0 || iy < 0 || iz < 0) throw new Error(`PCD 缺 x/y/z：FIELDS = ${fields.join(" ")}`);
-  const ii = fields.indexOf("intensity");
-  const inx = fields.indexOf("normal_x");
-  const iny = fields.indexOf("normal_y");
-  const inz = fields.indexOf("normal_z");
+  const ix = fields.indexOf('x');
+  const iy = fields.indexOf('y');
+  const iz = fields.indexOf('z');
+  if (ix < 0 || iy < 0 || iz < 0) throw new Error(`PCD 缺 x/y/z：FIELDS = ${fields.join(' ')}`);
+  const ii = fields.indexOf('intensity');
+  const inx = fields.indexOf('normal_x');
+  const iny = fields.indexOf('normal_y');
+  const inz = fields.indexOf('normal_z');
   const hasNormals = inx >= 0 && iny >= 0 && inz >= 0;
-  let irgb = fields.indexOf("rgb");
-  if (irgb < 0) irgb = fields.indexOf("rgba");
+  let irgb = fields.indexOf('rgb');
+  if (irgb < 0) irgb = fields.indexOf('rgba');
 
   const xyz = [];
   const intensity = [];
   const normals = [];
   const rgb = [];
   for (let i = start; i < lines.length && xyz.length / 3 < points; i += 1) {
-    const line = (lines[i] ?? "").trim();
+    const line = (lines[i] ?? '').trim();
     if (!line) continue;
     const cols = line.split(/\s+/);
     const x = Number(cols[ix]);
@@ -91,14 +91,15 @@ function stride(cloud, maxPoints) {
   for (let i = 0; i < cloud.count; i += step) {
     xyz.push(cloud.xyz[i * 3], cloud.xyz[i * 3 + 1], cloud.xyz[i * 3 + 2]);
     if (intensity) intensity.push(cloud.intensity[i]);
-    if (normals) normals.push(cloud.normals[i * 3], cloud.normals[i * 3 + 1], cloud.normals[i * 3 + 2]);
+    if (normals)
+      normals.push(cloud.normals[i * 3], cloud.normals[i * 3 + 1], cloud.normals[i * 3 + 2]);
     if (rgb) rgb.push(cloud.rgb[i * 3], cloud.rgb[i * 3 + 1], cloud.rgb[i * 3 + 2]);
   }
   return { count: xyz.length / 3, xyz, intensity, normals, rgb };
 }
 
 export function encodeCloudFromPcd(file, maxPoints) {
-  const full = parseAsciiPcd(fs.readFileSync(file, "utf8"));
+  const full = parseAsciiPcd(fs.readFileSync(file, 'utf8'));
   const totalPoints = full.count;
   const cloud = stride(full, maxPoints);
   const n = cloud.count;

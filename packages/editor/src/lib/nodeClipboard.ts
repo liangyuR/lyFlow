@@ -3,34 +3,42 @@
 // 应用内的剪贴板（ui.clipboard）照旧留着：系统剪贴板读不到时用它。
 // 复制的里面有子图节点：它用到的子图定义一起带上（subgraphs），粘进另一张图才认得出来。
 
-import type { GraphDoc, GraphEdge, GraphNode, SubgraphDef } from "../types/graph";
+import type { GraphDoc, GraphEdge, GraphNode, SubgraphDef } from '../types/graph';
 
-export const NODE_CLIPBOARD_KIND = "lyflow.nodes";
+export const NODE_CLIPBOARD_KIND = 'lyflow.nodes';
 
 export interface NodeClipboard {
   nodes: GraphNode[];
-  edges: GraphDoc["edges"];
+  edges: GraphDoc['edges'];
   /** 这些节点（连同里面）用到的子图定义。没有子图节点时不写。 */
   subgraphs?: Record<string, SubgraphDef>;
 }
 
 export function encodeNodeClipboard(clip: NodeClipboard): string {
-  const subgraphs = clip.subgraphs && Object.keys(clip.subgraphs).length > 0 ? { subgraphs: clip.subgraphs } : {};
-  return JSON.stringify({ kind: NODE_CLIPBOARD_KIND, version: 1, nodes: clip.nodes, edges: clip.edges, ...subgraphs });
+  const subgraphs =
+    clip.subgraphs && Object.keys(clip.subgraphs).length > 0 ? { subgraphs: clip.subgraphs } : {};
+  return JSON.stringify({
+    kind: NODE_CLIPBOARD_KIND,
+    version: 1,
+    nodes: clip.nodes,
+    edges: clip.edges,
+    ...subgraphs,
+  });
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 function isNode(v: unknown): v is GraphNode {
-  return isRecord(v) && typeof v["id"] === "string" && typeof v["op"] === "string";
+  return isRecord(v) && typeof v['id'] === 'string' && typeof v['op'] === 'string';
 }
 
 function isPortRef(v: unknown): boolean {
-  return isRecord(v) && typeof v["node"] === "string" && typeof v["port"] === "string";
+  return isRecord(v) && typeof v['node'] === 'string' && typeof v['port'] === 'string';
 }
 
 function isEdge(v: unknown): v is GraphEdge {
-  return isRecord(v) && isPortRef(v["from"]) && isPortRef(v["to"]);
+  return isRecord(v) && isPortRef(v['from']) && isPortRef(v['to']);
 }
 
 /** 子图定义：至少得有节点与连线两张表；入口、出口、参数缺了按空的补上。不像样的那一份丢掉。 */
@@ -38,7 +46,7 @@ function subgraphsOf(v: unknown): Record<string, SubgraphDef> | null {
   if (!isRecord(v)) return null;
   const out: Record<string, SubgraphDef> = {};
   for (const [id, def] of Object.entries(v)) {
-    if (!isRecord(def) || !Array.isArray(def["nodes"]) || !Array.isArray(def["edges"])) continue;
+    if (!isRecord(def) || !Array.isArray(def['nodes']) || !Array.isArray(def['edges'])) continue;
     out[id] = { inputs: [], outputs: [], params: [], ...def } as unknown as SubgraphDef;
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -54,16 +62,16 @@ export function decodeNodeClipboard(text: string): NodeClipboard | null {
     return null;
   }
   if (!isRecord(value)) return null;
-  const ours = value["kind"] === NODE_CLIPBOARD_KIND;
-  const graphDoc = typeof value["schemaVersion"] === "number";
+  const ours = value['kind'] === NODE_CLIPBOARD_KIND;
+  const graphDoc = typeof value['schemaVersion'] === 'number';
   if (!ours && !graphDoc) return null;
-  const rawNodes = value["nodes"];
-  const rawEdges = value["edges"] ?? [];
+  const rawNodes = value['nodes'];
+  const rawEdges = value['edges'] ?? [];
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
   const nodes = rawNodes.filter(isNode);
   if (nodes.length === 0) return null;
   const ids = new Set(nodes.map((n) => n.id));
   const edges = rawEdges.filter(isEdge).filter((e) => ids.has(e.from.node) && ids.has(e.to.node));
-  const subgraphs = subgraphsOf(value["subgraphs"]);
+  const subgraphs = subgraphsOf(value['subgraphs']);
   return { nodes, edges, ...(subgraphs ? { subgraphs } : {}) };
 }

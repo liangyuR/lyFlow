@@ -23,7 +23,7 @@ namespace {
 
 nlohmann::json parse(const char* text) { return nlohmann::json::parse(text); }
 
-}  // namespace
+} // namespace
 
 nlohmann::json fitQuality() {
   return parse(R"json({
@@ -264,4 +264,4 @@ nlohmann::json resultBundle() {
   })json");
 }
 
-}  // namespace lyflow::packs::gap::examples
+} // namespace lyflow::packs::gap::examples

@@ -1,9 +1,9 @@
 // 连线的右键菜单：插入算子、查看内容、在此插入 Reroute、删除连线。
 
-import { useRef } from "react";
+import { useRef } from 'react';
 
-import { useMenuPlacement } from "../hooks/useMenuPlacement";
-import { useGraphStore } from "../store/graph";
+import { useMenuPlacement } from '../hooks/useMenuPlacement';
+import { useGraphStore } from '../store/graph';
 
 export interface EdgeMenuState {
   edgeId: string;
@@ -28,11 +28,19 @@ export function EdgeContextMenu({
   const box = useRef<HTMLDivElement>(null);
   const style = useMenuPlacement(box, { x: menu.x, y: menu.y });
   const at = { x: menu.x, y: menu.y };
+  const locked = useGraphStore((s) => s.topologyLocked);
   return (
-    <div ref={box} className="qs-popover ctxmenu" style={style} data-testid="edge-context-menu" onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={box}
+      className="qs-popover ctxmenu"
+      style={style}
+      data-testid="edge-context-menu"
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         data-testid="edge-ctx-insert"
+        disabled={locked}
         onClick={() => {
           onClose();
           onInsertOp(menu.edgeId, at);
@@ -53,6 +61,7 @@ export function EdgeContextMenu({
       <button
         type="button"
         data-testid="edge-ctx-reroute"
+        disabled={locked}
         onClick={() => {
           onReroute(menu.edgeId, at);
           onClose();
@@ -63,6 +72,7 @@ export function EdgeContextMenu({
       <button
         type="button"
         data-testid="edge-ctx-delete"
+        disabled={locked}
         onClick={() => {
           useGraphStore.getState().disconnect([menu.edgeId]);
           onClose();

@@ -32,11 +32,33 @@ body {
   cursor: default;
 }
 
-.window-controls button:hover { background: var(--state-hover); color: var(--on-surface); }
-.window-controls button:active { background: var(--state-pressed); }
-.window-controls .window-controls__close:hover { background: var(--ng); color: var(--on-ng); }
-.window-controls .window-controls__close:active { background: color-mix(in srgb, var(--ng) 85%, var(--on-ng)); }
-.window-controls svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1; }
-.flow-tabs--titlebar[data-window-focused="false"] .window-controls button { color: var(--on-surface-disabled); }
-.flow-tabs--titlebar[data-window-focused="false"] .window-controls button:hover { color: var(--on-surface); }
-.flow-tabs--titlebar[data-window-focused="false"] .window-controls__close:hover { color: var(--on-ng); }
+.window-controls button:hover {
+  background: var(--state-hover);
+  color: var(--on-surface);
+}
+.window-controls button:active {
+  background: var(--state-pressed);
+}
+.window-controls .window-controls__close:hover {
+  background: var(--ng);
+  color: var(--on-ng);
+}
+.window-controls .window-controls__close:active {
+  background: color-mix(in srgb, var(--ng) 85%, var(--on-ng));
+}
+.window-controls svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}
+.flow-tabs--titlebar[data-window-focused='false'] .window-controls button {
+  color: var(--on-surface-disabled);
+}
+.flow-tabs--titlebar[data-window-focused='false'] .window-controls button:hover {
+  color: var(--on-surface);
+}
+.flow-tabs--titlebar[data-window-focused='false'] .window-controls__close:hover {
+  color: var(--on-ng);
+}

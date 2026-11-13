@@ -19,7 +19,7 @@
 namespace lyflow::packs::gap {
 void registerPackOps(Registry& r);
 void registerStandardGapImporter(Registry& r);
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap
 
 namespace {
 
@@ -87,7 +87,8 @@ struct Fixture {
     point = root / "R4";
     std::filesystem::create_directories(point);
     std::ofstream(point / "StandardGap.yml") << kConfig;
-    if (settingBody != nullptr) std::ofstream(root / "setting.yml") << settingBody;
+    if (settingBody != nullptr)
+      std::ofstream(root / "setting.yml") << settingBody;
   }
   ~Fixture() {
     std::error_code ec;
@@ -113,14 +114,17 @@ nlohmann::json import(const std::string& kind, const std::filesystem::path& base
   REQUIRE(desc != nullptr);
   std::string out;
   const Status s = desc->fn(kConfig, baseDir, out);
-  if (status != nullptr) *status = s;
-  if (!s.ok) return nlohmann::json();
+  if (status != nullptr)
+    *status = s;
+  if (!s.ok)
+    return nlohmann::json();
   return nlohmann::json::parse(out);
 }
 
 bool hasOp(const nlohmann::json& doc, const char* op) {
   for (const auto& n : doc["nodes"]) {
-    if (n["op"] == op) return true;
+    if (n["op"] == op)
+      return true;
   }
   return false;
 }
@@ -128,7 +132,8 @@ bool hasOp(const nlohmann::json& doc, const char* op) {
 std::vector<std::string> idsWithOp(const nlohmann::json& doc, const char* op) {
   std::vector<std::string> ids;
   for (const auto& n : doc["nodes"]) {
-    if (n["op"] == op) ids.push_back(n["id"].get<std::string>());
+    if (n["op"] == op)
+      ids.push_back(n["id"].get<std::string>());
   }
   std::sort(ids.begin(), ids.end());
   return ids;
@@ -143,13 +148,14 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
   return b;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("导入器注册了六种 kind；导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
+TEST_CASE(
+    "导入器注册了六种 kind；导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
   // 六种 kind 都注册了：三种模式 × 积木 / 细粒度
-  for (const char* kind : {"StandardGap.yml", "StandardGap.yml:template", "StandardGap.yml:model",
-                           "StandardGap.yml:fine", "StandardGap.yml:template:fine",
-                           "StandardGap.yml:model:fine"}) {
+  for (const char* kind :
+       {"StandardGap.yml", "StandardGap.yml:template", "StandardGap.yml:model",
+        "StandardGap.yml:fine", "StandardGap.yml:template:fine", "StandardGap.yml:model:fine"}) {
     CAPTURE(kind);
     const ImporterDesc* d = importer(kind);
     REQUIRE(d != nullptr);
@@ -255,15 +261,18 @@ bool hasEdgeFrom(const nlohmann::json& doc, const char* fromNode, const char* to
 /// 备用闭包（b_ 开头的节点）只能经 flow.fallback 的 b 端口流进主图。
 void checkBackupOnlyViaB(const nlohmann::json& doc) {
   std::unordered_map<std::string, std::string> opOf;
-  for (const auto& n : doc["nodes"]) opOf[n["id"].get<std::string>()] = n["op"].get<std::string>();
+  for (const auto& n : doc["nodes"])
+    opOf[n["id"].get<std::string>()] = n["op"].get<std::string>();
   bool sawBackup = false;
   for (const auto& e : doc["edges"]) {
     const auto from = e["from"]["node"].get<std::string>();
     const auto to = e["to"]["node"].get<std::string>();
     const auto port = e["to"]["port"].get<std::string>();
-    if (from.rfind("b_", 0) != 0) continue;
+    if (from.rfind("b_", 0) != 0)
+      continue;
     sawBackup = true;
-    if (to.rfind("b_", 0) == 0) continue;
+    if (to.rfind("b_", 0) == 0)
+      continue;
     CHECK(opOf[to] == "flow.fallback");
     CHECK(port == "b");
   }
@@ -272,24 +281,26 @@ void checkBackupOnlyViaB(const nlohmann::json& doc) {
   CHECK(doc["outputs"].contains("bundle"));
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("带 flow.fallback 的细粒度图：备用闭包只经 b 端口流出") {
   Fixture f("fallback", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   const nlohmann::json doc = import("StandardGap.yml:model:fine", f.point);
   const std::vector<std::string> fallbacks = idsWithOp(doc, "flow.fallback");
-  CHECK(fallbacks == std::vector<std::string>{
-                         "n_fb_crop_p", "n_fb_crop_s", "n_fb_flushBase", "n_fb_flushRef",
-                         "n_fb_gapLeft", "n_fb_gapRight", "n_fb_line", "n_fb_merged",
-                         "n_fb_quality_base", "n_fb_quality_ref", "n_fb_ref_point",
-                         "n_fb_roi_set", "n_fb_scan_set"});
+  CHECK(fallbacks == std::vector<std::string>{"n_fb_crop_p", "n_fb_crop_s", "n_fb_flushBase",
+                                              "n_fb_flushRef", "n_fb_gapLeft", "n_fb_gapRight",
+                                              "n_fb_line", "n_fb_merged", "n_fb_quality_base",
+                                              "n_fb_quality_ref", "n_fb_ref_point", "n_fb_roi_set",
+                                              "n_fb_scan_set"});
   const std::vector<std::string> backupFits = idsWithOp(doc, "gap.fit_line");
-  CHECK(backupFits == std::vector<std::string>{"b_n_fit_base", "b_n_fit_ref", "n_fit_base",
-                                               "n_fit_ref"});
+  CHECK(backupFits ==
+        std::vector<std::string>{"b_n_fit_base", "b_n_fit_ref", "n_fit_base", "n_fit_ref"});
   for (const auto& n : doc["nodes"]) {
     const auto id = n["id"].get<std::string>();
-    if (n["op"] != "gap.fit_line") continue;
-    CHECK(n["params"]["endpoints"] == (id.rfind("b_", 0) == 0 ? "roi_intersection" : "inlier_ends"));
+    if (n["op"] != "gap.fit_line")
+      continue;
+    CHECK(n["params"]["endpoints"] ==
+          (id.rfind("b_", 0) == 0 ? "roi_intersection" : "inlier_ends"));
   }
   // 备用闭包不再自己读一遍文件：与模型那一支共用剔过 NaN 的两片云与去噪之后的合并云
   CHECK(idsWithOp(doc, "gap.load_profile_pair") == std::vector<std::string>{"n_load"});
@@ -307,8 +318,10 @@ TEST_CASE("带 flow.fallback 的积木图：两个定位节点并联，rois / sc
   CHECK(idsWithOp(doc, "gap.role_line") == std::vector<std::string>{"b_n_line", "n_line"});
   for (const auto& n : doc["nodes"]) {
     const auto id = n["id"].get<std::string>();
-    if (n["op"] != "gap.role_line") continue;
-    CHECK(n["params"]["endpoints"] == (id.rfind("b_", 0) == 0 ? "roi_intersection" : "inlier_ends"));
+    if (n["op"] != "gap.role_line")
+      continue;
+    CHECK(n["params"]["endpoints"] ==
+          (id.rfind("b_", 0) == 0 ? "roi_intersection" : "inlier_ends"));
   }
   // 圆拟合与结果汇总接回退之后的那一份；备用定位也吃同一个 read_scan
   CHECK(hasEdgeFrom(doc, "n_fb_rois", "n_circles", "rois"));
@@ -325,23 +338,22 @@ TEST_CASE("导入器把 Python 生成器的 SystemExit 换成 Validate 诊断") 
   std::string out;
 
   SUBCASE("seg_mode 不是 ROI") {
-    const Status s = desc->fn("common_settings: {seg_mode: Each}\nalign: {align_cloud: true}\n",
-                              f.point, out);
+    const Status s =
+        desc->fn("common_settings: {seg_mode: Each}\nalign: {align_cloud: true}\n", f.point, out);
     CHECK_FALSE(s.ok);
     CHECK(s.code == "bad_input");
     CHECK((s.phase == Phase::Validate));
   }
   SUBCASE("align_cloud 为假") {
-    const Status s = desc->fn("common_settings: {seg_mode: ROI}\nalign: {align_cloud: false}\n",
-                              f.point, out);
+    const Status s =
+        desc->fn("common_settings: {seg_mode: ROI}\nalign: {align_cloud: false}\n", f.point, out);
     CHECK_FALSE(s.ok);
     CHECK(s.code == "bad_input");
   }
   SUBCASE("不支持的几何类型") {
-    const Status s = desc->fn(
-        "common_settings: {seg_mode: ROI}\nalign: {align_cloud: true}\n"
-        "flush: {base_type: 2-points line}\n",
-        f.point, out);
+    const Status s = desc->fn("common_settings: {seg_mode: ROI}\nalign: {align_cloud: true}\n"
+                              "flush: {base_type: 2-points line}\n",
+                              f.point, out);
     CHECK_FALSE(s.ok);
     CHECK(s.code == "bad_input");
   }
@@ -351,7 +363,8 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
   const OperatorDesc* op = packRegistry().find("gap.result_bundle");
   REQUIRE(op != nullptr);
   ParamMap params;
-  for (const Param& p : op->params) params[p.name] = p.def;
+  for (const Param& p : op->params)
+    params[p.name] = p.def;
   params["cropStatus"] = Value::text("skipped:no_model_roi");
 
   Measurement gap;
@@ -363,21 +376,23 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
 
   Record fitBase;
   fitBase.type = "GapFitQuality";
-  fitBase.data = {{"model", "line"}, {"pointCount", 136}, {"inlierCount", 85},
+  fitBase.data = {{"model", "line"},      {"pointCount", 136},     {"inlierCount", 85},
                   {"inlierRatio", 0.625}, {"rmsResidualMm", 0.04}, {"maxResidualMm", 0.09},
                   {"linePointXMm", 31.7}, {"linePointYMm", 165.9}, {"lineDirX", 1.0},
                   {"lineDirY", 0.0}};
   Record circles;
   circles.type = "GapFitQualityPair";
-  circles.data["left"] = {{"model", "circle"}, {"radiusMode", "free"}, {"pointCount", 114},
-                          {"inlierCount", 20}, {"radiusMm", 1.05}, {"centerXMm", 35.3},
+  circles.data["left"] = {{"model", "circle"},  {"radiusMode", "free"},   {"pointCount", 114},
+                          {"inlierCount", 20},  {"radiusMm", 1.05},       {"centerXMm", 35.3},
                           {"centerYMm", 165.9}, {"arcCoverageDeg", 199.1}};
-  circles.data["right"] = {{"model", "circle"}, {"radiusMode", "free"}, {"pointCount", 94},
-                           {"inlierCount", 24}, {"radiusMm", 1.9}, {"centerXMm", 43.9},
+  circles.data["right"] = {{"model", "circle"},  {"radiusMode", "free"},   {"pointCount", 94},
+                           {"inlierCount", 24},  {"radiusMm", 1.9},        {"centerXMm", 43.9},
                            {"centerYMm", 167.7}, {"arcCoverageDeg", 110.8}};
   Record alignment;
   alignment.type = "GapAlignment";
-  alignment.data = {{"templateId", "f1"}, {"globalCoarse", true}, {"globalSucceeded", true},
+  alignment.data = {{"templateId", "f1"},
+                    {"globalCoarse", true},
+                    {"globalSucceeded", true},
                     {"rois", nlohmann::json::object()},
                     {"left", {{"score", 88.0}, {"success", true}}},
                     {"right", {{"score", 91.0}, {"success", true}}}};
@@ -393,8 +408,11 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
   rois.set("seamRight", Data::box2d(box(0.034f, 0.163f, 0.038f, 0.17f)));
   Record info;
   info.type = "GapRoiInfo";
-  info.data = {{"datumSide", "left"}, {"source", "template"}, {"alignment", nullptr},
-               {"overallMm", {1, 2, 3, 4}}, {"cropStatus", nullptr}};
+  info.data = {{"datumSide", "left"},
+               {"source", "template"},
+               {"alignment", nullptr},
+               {"overallMm", {1, 2, 3, 4}},
+               {"cropStatus", nullptr}};
   rois.set("info", Data::record(info));
   inputs["rois"] = Data::bundle(std::move(rois));
   inputs["roiOverall"] = Data::box2d(box(-0.1f, 0.03f, 0.2f, 0.29f));
@@ -452,8 +470,10 @@ nlohmann::json importText(const std::string& kind, const std::string& yaml, Stat
   REQUIRE(desc != nullptr);
   std::string out;
   const Status s = desc->fn(yaml, std::filesystem::path(), out);
-  if (status != nullptr) *status = s;
-  if (!s.ok) return nlohmann::json();
+  if (status != nullptr)
+    *status = s;
+  if (!s.ok)
+    return nlohmann::json();
   return nlohmann::json::parse(out);
 }
 
@@ -468,7 +488,8 @@ std::string withGapKeys(const std::string& lines) {
 
 const nlohmann::json& nodeById(const nlohmann::json& doc, const char* id) {
   for (const auto& n : doc["nodes"]) {
-    if (n["id"] == id) return n;
+    if (n["id"] == id)
+      return n;
   }
   FAIL("图里没有 " << id);
   static const nlohmann::json empty;
@@ -477,12 +498,13 @@ const nlohmann::json& nodeById(const nlohmann::json& doc, const char* id) {
 
 bool hasEdge(const nlohmann::json& doc, const char* toNode, const char* toPort) {
   for (const auto& e : doc["edges"]) {
-    if (e["to"]["node"] == toNode && e["to"]["port"] == toPort) return true;
+    if (e["to"]["node"] == toNode && e["to"]["port"] == toPort)
+      return true;
   }
   return false;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("圆心高度带：没配时不接 refLine，配了接的是 flush_ref 的那条线，ref_type 不对就报错") {
   SUBCASE("没配时不接 refLine，配了才接参考线") {
@@ -500,8 +522,8 @@ TEST_CASE("圆心高度带：没配时不接 refLine，配了接的是 flush_ref
   }
 
   SUBCASE("接的是 flush_ref 的那条线，ref_type 不对就报错") {
-    const std::string banded = withGapKeys(
-        "  center_band: {right_above: 0.25, right_tolerance: 0.45}\n");
+    const std::string banded =
+        withGapKeys("  center_band: {right_above: 0.25, right_tolerance: 0.45}\n");
     const nlohmann::json doc = importText("StandardGap.yml:template:fine", banded, nullptr);
     bool seen = false;
     for (const auto& e : doc["edges"]) {
@@ -530,7 +552,8 @@ TEST_CASE("YAML 的逐侧相机、圆心高度带 mode、weak_fit 地板落到 n
     std::vector<std::pair<const char*, nlohmann::json>> expected;
   };
   const std::vector<Case> cases = {
-      {"逐侧相机", withGapKeys("  right_circle_camera: Secondary\n"),
+      {"逐侧相机",
+       withGapKeys("  right_circle_camera: Secondary\n"),
        {{"leftCamera", "Both"}, {"rightCamera", "Secondary"}}},
       {"圆心高度带的 mode",
        withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4, left_mode: guard}\n"),
@@ -569,9 +592,10 @@ std::string withFlushKeys(const std::string& lines) {
   return yaml;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("方向基准：默认不生成节点；配了 long_plane 就长出「窗 → 裁 → 拟」；锚可分别指定；写错就报错") {
+TEST_CASE(
+    "方向基准：默认不生成节点；配了 long_plane 就长出「窗 → 裁 → 拟」；锚可分别指定；写错就报错") {
   SUBCASE("默认不生成任何节点") {
     const nlohmann::json doc = importText("StandardGap.yml:template:fine", kConfig, nullptr);
     CHECK_FALSE(hasOp(doc, "gap.datum_window"));
@@ -581,11 +605,11 @@ TEST_CASE("方向基准：默认不生成节点；配了 long_plane 就长出「
   }
 
   SUBCASE("配了 long_plane 就长出三个节点并接到 n_fit_base") {
-    const nlohmann::json doc = importText(
-        "StandardGap.yml:template:fine",
-        withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
-                      " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
-        nullptr);
+    const nlohmann::json doc =
+        importText("StandardGap.yml:template:fine",
+                   withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
+                                 " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
+                   nullptr);
     REQUIRE(hasOp(doc, "gap.datum_window"));
     const auto& win = nodeById(doc, "n_datum_box")["params"];
     CHECK(win["side"] == "left");
@@ -605,7 +629,8 @@ TEST_CASE("方向基准：默认不生成节点；配了 long_plane 就长出「
     bool sawAnchor = false;
     bool sawHeight = false;
     for (const auto& e : doc["edges"]) {
-      if (e["to"]["node"] != "n_datum_box") continue;
+      if (e["to"]["node"] != "n_datum_box")
+        continue;
       if (e["to"]["port"] == "anchor") {
         sawAnchor = true;
         CHECK(e["from"]["port"] == "gapLeft");
@@ -630,15 +655,18 @@ TEST_CASE("方向基准：默认不生成节点；配了 long_plane 就长出「
   }
 
   SUBCASE("锚和高度锚可以分别指定") {
-    const nlohmann::json doc = importText(
-        "StandardGap.yml:template:fine",
-        withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right,"
-                      " height_anchor: flush_ref, mode: band, nominal_deg: 1.0}\n"),
-        nullptr);
+    const nlohmann::json doc =
+        importText("StandardGap.yml:template:fine",
+                   withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right,"
+                                 " height_anchor: flush_ref, mode: band, nominal_deg: 1.0}\n"),
+                   nullptr);
     for (const auto& e : doc["edges"]) {
-      if (e["to"]["node"] != "n_datum_box") continue;
-      if (e["to"]["port"] == "anchor") CHECK(e["from"]["port"] == "gapRight");
-      if (e["to"]["port"] == "heightAnchor") CHECK(e["from"]["port"] == "flushRef");
+      if (e["to"]["node"] != "n_datum_box")
+        continue;
+      if (e["to"]["port"] == "anchor")
+        CHECK(e["from"]["port"] == "gapRight");
+      if (e["to"]["port"] == "heightAnchor")
+        CHECK(e["from"]["port"] == "flushRef");
     }
     // side 跟着 anchor 走：锚在右边的缝框上，窗口就往右推
     CHECK(nodeById(doc, "n_datum_box")["params"]["side"] == "right");
@@ -650,7 +678,8 @@ namespace {
 
 std::vector<std::string> stringList(const nlohmann::json& a) {
   std::vector<std::string> out;
-  for (const auto& e : a) out.push_back(e.get<std::string>());
+  for (const auto& e : a)
+    out.push_back(e.get<std::string>());
   std::sort(out.begin(), out.end());
   return out;
 }
@@ -661,17 +690,19 @@ std::vector<nlohmann::json> validationErrors(const nlohmann::json& doc) {
       nlohmann::json::parse(exec::validateGraphJson(doc.dump(), std::filesystem::path()));
   std::vector<nlohmann::json> errors;
   for (const auto& d : diags) {
-    if (d["severity"] == "error") errors.push_back(d);
+    if (d["severity"] == "error")
+      errors.push_back(d);
   }
   return errors;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("细粒度图：fit_line 接 toward、不写 side，business_rois 不写 datumSide（auto）") {
   for (const char* kind : {"StandardGap.yml:template:fine", "StandardGap.yml:model:fine"}) {
     CAPTURE(kind);
-    Fixture f(std::string("m7-") + (std::strcmp(kind, "StandardGap.yml:model:fine") == 0 ? "model" : "tpl"),
+    Fixture f(std::string("m7-") +
+                  (std::strcmp(kind, "StandardGap.yml:model:fine") == 0 ? "model" : "tpl"),
               "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
     const nlohmann::json doc = import(kind, f.point);
     REQUIRE(doc.is_object());
@@ -699,7 +730,8 @@ TEST_CASE("细粒度图：基准线与参考线的 toward 都接 business_rois �
   const nlohmann::json doc = importText("StandardGap.yml:template:fine", kConfig, nullptr);
   int seen = 0;
   for (const auto& e : doc["edges"]) {
-    if (e["to"]["port"] != "toward") continue;
+    if (e["to"]["port"] != "toward")
+      continue;
     if (e["to"]["node"] == "n_fit_base" || e["to"]["node"] == "n_fit_ref") {
       CHECK(e["from"]["node"] == "n_rois");
       CHECK(e["from"]["port"] == "seam");
@@ -725,50 +757,50 @@ TEST_CASE("细粒度图：基准线与参考线的 toward 都接 business_rois �
 TEST_CASE("导入的图带顶层参数：gapOffset 绑两处，模型模式的 modelPath 逐个列出节点") {
   Fixture f("m7-params", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   for (const char* style : {"", ":fine"}) {
-  CAPTURE(style);
-  const nlohmann::json tpl = import(std::string("StandardGap.yml:template") + style, f.point);
-  REQUIRE(tpl["params"].contains("gapOffset"));
-  CHECK(stringList(tpl["params"]["gapOffset"]["binds"]) ==
-        std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
-  CHECK(tpl["params"]["gapOffset"]["default"] == 0.0);
-  CHECK_FALSE(tpl["params"].contains("modelPath"));
-  // 被绑定的参数不能再显式写在节点上（一处定义）
-  CHECK_FALSE(nodeById(tpl, "n_gap")["params"].contains("offset"));
-  CHECK_FALSE(nodeById(tpl, "n_circles")["params"].contains("offset"));
+    CAPTURE(style);
+    const nlohmann::json tpl = import(std::string("StandardGap.yml:template") + style, f.point);
+    REQUIRE(tpl["params"].contains("gapOffset"));
+    CHECK(stringList(tpl["params"]["gapOffset"]["binds"]) ==
+          std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
+    CHECK(tpl["params"]["gapOffset"]["default"] == 0.0);
+    CHECK_FALSE(tpl["params"].contains("modelPath"));
+    // 被绑定的参数不能再显式写在节点上（一处定义）
+    CHECK_FALSE(nodeById(tpl, "n_gap")["params"].contains("offset"));
+    CHECK_FALSE(nodeById(tpl, "n_circles")["params"].contains("offset"));
 
-  const nlohmann::json model = import(std::string("StandardGap.yml:model") + style, f.point);
-  REQUIRE(model["params"].contains("modelPath"));
-  CHECK(model["params"]["modelPath"]["default"] == "X:/m.onnx");
-  // 黑盒对照 gap.measure_reference 两种图都不再生成（L12），modelPath 只绑推理那一处
-  CHECK(stringList(model["params"]["modelPath"]["binds"]) ==
-        std::vector<std::string>{std::string(*style ? "n_infer" : "n_model") + ".modelPath"});
-  CHECK_FALSE(hasOp(model, "gap.measure_reference"));
-  CHECK_FALSE(hasOp(tpl, "gap.measure_reference"));
-  for (const auto& b : model["params"]["modelPath"]["binds"]) {
-    CHECK(b.get<std::string>().find('*') == std::string::npos);
-  }
-  CHECK(stringList(model["params"]["gapOffset"]["binds"]) ==
-        std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
-  // 图文件的 sha256 由宿主经 params_json 传（docs/result-bundle-plan.md (a)）
-  for (const nlohmann::json* doc : {&tpl, &model}) {
-    REQUIRE((*doc)["params"].contains("graphSha256"));
-    CHECK((*doc)["params"]["graphSha256"]["type"] == "string");
-    CHECK((*doc)["params"]["graphSha256"]["default"] == "");
-    CHECK(stringList((*doc)["params"]["graphSha256"]["binds"]) ==
-          std::vector<std::string>{"n_bundle.graphSha256"});
-  }
+    const nlohmann::json model = import(std::string("StandardGap.yml:model") + style, f.point);
+    REQUIRE(model["params"].contains("modelPath"));
+    CHECK(model["params"]["modelPath"]["default"] == "X:/m.onnx");
+    // 黑盒对照 gap.measure_reference 两种图都不再生成（L12），modelPath 只绑推理那一处
+    CHECK(stringList(model["params"]["modelPath"]["binds"]) ==
+          std::vector<std::string>{std::string(*style ? "n_infer" : "n_model") + ".modelPath"});
+    CHECK_FALSE(hasOp(model, "gap.measure_reference"));
+    CHECK_FALSE(hasOp(tpl, "gap.measure_reference"));
+    for (const auto& b : model["params"]["modelPath"]["binds"]) {
+      CHECK(b.get<std::string>().find('*') == std::string::npos);
+    }
+    CHECK(stringList(model["params"]["gapOffset"]["binds"]) ==
+          std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
+    // 图文件的 sha256 由宿主经 params_json 传（docs/result-bundle-plan.md (a)）
+    for (const nlohmann::json* doc : {&tpl, &model}) {
+      REQUIRE((*doc)["params"].contains("graphSha256"));
+      CHECK((*doc)["params"]["graphSha256"]["type"] == "string");
+      CHECK((*doc)["params"]["graphSha256"]["default"] == "");
+      CHECK(stringList((*doc)["params"]["graphSha256"]["binds"]) ==
+            std::vector<std::string>{"n_bundle.graphSha256"});
+    }
   }
 }
 
-TEST_CASE("roisFrom：候选自带 rois 的槽记 template，没带的（回放全局框）记 config —— 积木 / 细粒度都写") {
+TEST_CASE(
+    "roisFrom：候选自带 rois 的槽记 template，没带的（回放全局框）记 config —— 积木 / 细粒度都写") {
   // kConfig 的 f1 没带 rois；再加一个带了 rois 的 f2
   std::string yaml = kConfig;
   const std::string f1 = "    - {id: f1, left: left_template.pcd, right: right_template.pcd}\n";
   const auto at = yaml.find(f1);
   REQUIRE(at != std::string::npos);
-  yaml.insert(at + f1.size(),
-              "    - {id: f2, left: f2_left.pcd, right: f2_right.pcd,\n"
-              "       rois: {gap: {left_roi: [4, 162, 8, 170]}}}\n");
+  yaml.insert(at + f1.size(), "    - {id: f2, left: f2_left.pcd, right: f2_right.pcd,\n"
+                              "       rois: {gap: {left_roi: [4, 162, 8, 170]}}}\n");
   Status s;
   const nlohmann::json blocks = importText("StandardGap.yml:template", yaml, &s);
   REQUIRE(s.ok);
@@ -789,20 +821,19 @@ TEST_CASE("导入的图过 core 的 validate：模板、模型、带 fallback �
   const struct {
     const char* kind;
     const Fixture* fixture;
-  } cases[6] = {{"StandardGap.yml:template", &plain},
-                {"StandardGap.yml:model", &plain},
-                {"StandardGap.yml:model", &withFallback},
-                {"StandardGap.yml:template:fine", &plain},
-                {"StandardGap.yml:model:fine", &plain},
-                {"StandardGap.yml:model:fine", &withFallback}};
+  } cases[6] = {
+      {"StandardGap.yml:template", &plain},     {"StandardGap.yml:model", &plain},
+      {"StandardGap.yml:model", &withFallback}, {"StandardGap.yml:template:fine", &plain},
+      {"StandardGap.yml:model:fine", &plain},   {"StandardGap.yml:model:fine", &withFallback}};
   for (const auto& c : cases) {
     CAPTURE(c.kind);
     const nlohmann::json doc = import(c.kind, c.fixture->point);
     REQUIRE(doc.is_object());
     const auto errors = validationErrors(doc);
-    for (const auto& e : errors) CAPTURE(e.dump());
+    for (const auto& e : errors)
+      CAPTURE(e.dump());
     CHECK(errors.empty());
-    if (!errors.empty()) MESSAGE(errors.front().dump());
+    if (!errors.empty())
+      MESSAGE(errors.front().dump());
   }
 }
-

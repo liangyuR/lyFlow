@@ -64,13 +64,17 @@ cv::Rect inflate(cv::Rect r, int pad) {
   return cv::Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
 }
 
+} // namespace
+
 // ------------------------------------------------------------------ 方向
 
 /// 一组点的主方向（PCA），朝向与 fallback 同侧。不到 3 个点返回 fallback。
 P2 principalDirection(const std::vector<P2>& pts, P2 fallback) {
-  if (pts.size() < 3) return fallback;
+  if (pts.size() < 3)
+    return fallback;
   P2 m(0, 0);
-  for (const P2& p : pts) m += p;
+  for (const P2& p : pts)
+    m += p;
   m *= 1.0 / static_cast<double>(pts.size());
   double sxx = 0, sxy = 0, syy = 0;
   for (const P2& p : pts) {
@@ -86,7 +90,8 @@ P2 principalDirection(const std::vector<P2>& pts, P2 fallback) {
   const double lambda = 0.5 * tr + disc;
   P2 v = std::fabs(sxy) > 1e-12 ? P2(lambda - syy, sxy) : (sxx >= syy ? P2(1, 0) : P2(0, 1));
   v = unit(v);
-  if (dot(v, fallback) < 0) v = -v;
+  if (dot(v, fallback) < 0)
+    v = -v;
   return v;
 }
 
@@ -95,108 +100,36 @@ double angleDiffDeg(double a, double b) {
   return d > 180.0 ? 360.0 - d : d;
 }
 
+namespace {
+
 // ------------------------------------------------------------------ 粗找（D1 / D6 / D15）
 
+/// findBeadPath 的一个候选方向：参数化的 trackBead，换回 1.1 的 PathCandidate。
 PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, double headingDeg,
                           double fanLo, double fanHi) {
+  TrackSpec ts;
+  ts.anchor = spec.nozzle;
+  ts.zoneStart = spec.zoneStart;
+  ts.zoneEnd = spec.zoneEnd;
+  ts.bearingFrom = fanLo;
+  ts.bearingTo = fanHi;
+  ts.searchHalf = spec.widthMax;
+  ts.runs.segmentMin = 0.5 * spec.contrastMin;
+  ts.runs.peakMin = spec.contrastMin;
+  ts.runs.mergeWidthMax = spec.widthMax;
+  ts.widthMax = spec.widthMax;
+  ts.coarseStep = spec.coarseStep;
+  ts.maxGap = spec.maxGap;
+  ts.sharpMin = spec.sharpMin;
+  ts.dirWindow = spec.dirWindow;
+  const TrackResult tr = trackBead(R, g, ts, headingDeg);
   PathCandidate cand;
   cand.headingDeg = headingDeg;
-  RunSpec runs;
-  runs.contrastMin = spec.contrastMin;
-  runs.widthMax = spec.widthMax;
-  P2 d = dirOfDeg(headingDeg);
-  P2 p = spec.nozzle + d * spec.zoneStart;
-  double s = spec.zoneStart;
-  double lastFound = -std::numeric_limits<double>::infinity();
-  bool stopped = false;
-  int stepsAtLastFound = 0;  // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
-  std::vector<double> sharp, widths, peaks;
-  while (s <= spec.zoneEnd + 1e-6) {
-    cand.steps += 1;
-    const P2 n = perp(d);
-    bool found = false;
-    P2 c;
-    if (!stopped) {
-      // 已经找到过几个胶点之后，卡尺上的暗段不是都能接：
-      // - 紧接着上一步（中间没断）时，胶点离预测点横着不超过半个胶宽（此前胶宽的中位数，至少 8 px）——
-      //   光滑的胶 8 px 一步横着挪不了这么多；断口一开头卡尺会横着够到胶旁边的阴影、纹理，接上它胶路就被一路拽歪；
-      // - 滑过一段没找到胶之后重新接上的那一个，横向不限，但得像此前找到的胶：对比度不到此前中位数的一半的不要
-      //   （断口里、翻边上的拉丝纹理淡得多）；此前的胶宽很一致（直胶）时，宽度不到中位数一半的也不要（卡尺斜着
-      //   擦过断口端头只量到半截胶，中心是偏的）；边缘陡度不到 sharpMin 的也不要（D15 的判据逐个用在这里：
-      //   阴影也是暗带，但边缘是缓的）
-      const bool afterGap = !cand.coarse.empty() && s - lastFound > 1.5 * spec.coarseStep;
-      auto lookAt = [&](P2 q, P2 nq) {
-        std::vector<Run> rs = lateralRuns(R, q, nq, spec.widthMax, runs);
-        if (widths.size() >= 3) {
-          const double wMed = median(widths);
-          const double pMed = median(peaks);
-          const bool steady = percentile(widths, 75) - percentile(widths, 25) < 0.3 * wMed;
-          rs.erase(std::remove_if(rs.begin(), rs.end(),
-                                  [&](const Run& x) {
-                                    if (!afterGap) return std::fabs(x.mid()) > std::max(0.5 * wMed, 8.0);
-                                    if (x.peak < 0.5 * pMed || (steady && x.width() < 0.5 * wMed)) return true;
-                                    const double sh = runSharpness(g, q, nq, x);
-                                    return std::isfinite(sh) && sh < spec.sharpMin;
-                                  }),
-                   rs.end());
-        }
-        return rs;
-      };
-      std::vector<Run> rs = lookAt(p, n);
-      const Run* r = nearestRun(rs);
-      P2 at = p, nAt = n;
-      bool onFanRay = false;
-      // 断口之前那一段得确实像胶（几乎每步都找到、边缘够陡）才这么做：没胶的帧里粗找跟的是零件上的纹理，
-      // 再给它一条退路，覆盖率就凑够了
-      const bool looksLikeBead = sharp.size() >= 3 && percentile(sharp, 25.0) >= spec.sharpMin &&
-                                 static_cast<double>(cand.coarse.size()) >= 0.6 * stepsAtLastFound;
-      if ((!r || std::fabs(r->mid()) >= 0.6 * spec.widthMax) && afterGap && looksLikeBead) {
-        // 断口后面跟丢了：退回扇形搜索选中的那条射线上找（断口前那几个胶点定出的方向可能是歪的，
-        // 螺旋胶尤其如此；而那条射线本来就是检测区前段响应最强的方向）
-        const P2 d0 = dirOfDeg(headingDeg);
-        at = spec.nozzle + d0 * s;
-        nAt = perp(d0);
-        rs = lookAt(at, nAt);
-        r = nearestRun(rs);
-        onFanRay = true;
-      }
-      // 胶是从喷嘴沿扇区里的方向往外走出去的：胶点相对喷嘴的方位跑出搜索范围 20° 以外、或者离喷嘴的
-      // 距离不到 0.75·s（沿着检测区的圆弧横着走），跟的就不是胶了 —— 零件上一条纹理边能把粗找一路带偏。
-      // 演示数据满胶段的胶路上处处是 距离 / s ≥ 0.98
-      const auto plausible = [&](P2 q) {
-        if (length(q - spec.nozzle) < 0.75 * s) return false;
-        if (fanHi - fanLo >= 360.0 - 1e-6) return true;
-        const double b = degOf(q - spec.nozzle);
-        const double mid = 0.5 * (fanLo + fanHi);
-        return angleDiffDeg(b, mid) <= 0.5 * (fanHi - fanLo) + 20.0;
-      };
-      if (r && std::fabs(r->mid()) < 0.6 * spec.widthMax && plausible(at + nAt * r->mid())) {
-        c = at + nAt * r->mid();
-        cand.coarse.emplace_back(s, c);
-        widths.push_back(r->width());
-        peaks.push_back(r->peak);
-        const double sh = runSharpness(g, at, nAt, *r);
-        if (std::isfinite(sh)) sharp.push_back(sh);
-        lastFound = s;
-        stepsAtLastFound = cand.steps;
-        found = true;
-        // 在那条射线上接上的：方向也回到它，断口前的方向不作数了
-        if (onFanRay) d = dirOfDeg(headingDeg);
-      }
-    }
-    std::vector<P2> recent;
-    for (const auto& [ss, q] : cand.coarse) {
-      if (ss >= s - spec.dirWindow) recent.push_back(q);
-    }
-    if (recent.size() >= 3) d = principalDirection(recent, d);
-    p = (found ? c : p) + d * spec.coarseStep;
-    s += spec.coarseStep;
-    // 在长断口里一直顺着预测方向滑下去，迟早会滑到别的暗带上：已经找到过胶、又连续 maxGap
-    // 没找到，就不再接受新的胶点，后面的胶路交给拟合按已有的胶点外推
-    if (!cand.coarse.empty() && s - lastFound > spec.maxGap) stopped = true;
-  }
-  cand.coverage = cand.steps > 0 ? static_cast<double>(cand.coarse.size()) / cand.steps : 0.0;
-  cand.sharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : -1.0;
+  cand.steps = tr.steps;
+  for (const TrackPoint& q : tr.points)
+    cand.coarse.emplace_back(q.s, q.point);
+  cand.coverage = tr.coverage;
+  cand.sharpness = std::isfinite(tr.sharpness) ? tr.sharpness : -1.0;
   cand.beadlike = cand.sharpness >= spec.sharpMin;
   cand.score = cand.beadlike ? cand.coverage : 0.1 * cand.coverage;
   return cand;
@@ -219,14 +152,16 @@ std::vector<P2> localLinearFit(const std::vector<std::pair<double, P2>>& centers
       const double s0 = grid[gi];
       std::vector<std::size_t> pick;
       for (std::size_t i = 0; i < n; ++i) {
-        if (std::fabs(centers[i].first - s0) <= window) pick.push_back(i);
+        if (std::fabs(centers[i].first - s0) <= window)
+          pick.push_back(i);
       }
       if (pick.size() < 3) {
         std::iota(order.begin(), order.end(), std::size_t{0});
         std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
           return std::fabs(centers[a].first - s0) < std::fabs(centers[b].first - s0);
         });
-        const std::size_t k = std::min<std::size_t>(n, std::max<std::size_t>(3, std::min<std::size_t>(8, n)));
+        const std::size_t k =
+            std::min<std::size_t>(n, std::max<std::size_t>(3, std::min<std::size_t>(8, n)));
         pick.assign(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(k));
       }
       // 法方程：Σ w²·[1, ds]ᵀ[1, ds]·[a, b]ᵀ = Σ w²·[1, ds]ᵀ·x
@@ -251,20 +186,24 @@ std::vector<P2> localLinearFit(const std::vector<std::pair<double, P2>>& centers
     }
     for (std::size_t i = 0; i < n; ++i) {
       double best = std::numeric_limits<double>::infinity();
-      for (const P2& f : fits) best = std::min(best, length(f - centers[i].second));
+      for (const P2& f : fits)
+        best = std::min(best, length(f - centers[i].second));
       resid[i] = best;
     }
     const double mad = median(resid) + 1e-6;
-    for (std::size_t i = 0; i < n; ++i) w[i] = resid[i] < 3.0 * mad + 2.0 ? 1.0 : 0.1;
+    for (std::size_t i = 0; i < n; ++i)
+      w[i] = resid[i] < 3.0 * mad + 2.0 ? 1.0 : 0.1;
   }
-  if (residualOut) *residualOut = median(resid);
+  if (residualOut)
+    *residualOut = median(resid);
   return fits;
 }
 
 /// 把拟合出来的一串点按真实弧长重新参数化：第一个点取离喷嘴恰好 zoneStart 的那一处（s = zoneStart），
 /// 之后 s 按弧长累加，每 2 px 取一个点直到 zoneEnd；拟合点不够长就沿末端切向外推。
 void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneStart, double zoneEnd,
-                         BeadPath& out) {
+                         std::vector<double>* outS, std::vector<P2>* outPoints,
+                         std::vector<P2>* outTangents) {
   // 起点：第一次走到离喷嘴 zoneStart 的地方
   std::size_t k0 = 0;
   P2 start = dense.front();
@@ -297,49 +236,41 @@ void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneSta
   std::vector<double> arc{0.0};
   for (std::size_t i = k0; i < dense.size(); ++i) {
     const double step = length(dense[i] - pts.back());
-    if (step < 1e-9) continue;
+    if (step < 1e-9)
+      continue;
     arc.push_back(arc.back() + step);
     pts.push_back(dense[i]);
   }
   const double total = zoneEnd - zoneStart;
   std::vector<double> targets;
-  for (double t = 0.0; t < total - 1e-9; t += 2.0) targets.push_back(t);
+  for (double t = 0.0; t < total - 1e-9; t += 2.0)
+    targets.push_back(t);
   targets.push_back(total);
   P2 endTangent = pts.size() >= 2 ? unit(pts.back() - pts[pts.size() - 2]) : P2(1, 0);
-  out.s.clear();
-  out.points.clear();
+  outS->clear();
+  outPoints->clear();
   std::size_t seg = 0;
   for (double t : targets) {
     P2 q;
     if (t >= arc.back()) {
       q = pts.back() + endTangent * (t - arc.back());
     } else {
-      while (seg + 1 < arc.size() && arc[seg + 1] < t) ++seg;
+      while (seg + 1 < arc.size() && arc[seg + 1] < t)
+        ++seg;
       const double span = arc[seg + 1] - arc[seg];
       const double f = span > 1e-12 ? (t - arc[seg]) / span : 0.0;
       q = pts[seg] + (pts[seg + 1] - pts[seg]) * f;
     }
-    out.s.push_back(zoneStart + t);
-    out.points.push_back(q);
+    outS->push_back(zoneStart + t);
+    outPoints->push_back(q);
   }
-  out.tangents.assign(out.points.size(), P2(1, 0));
-  for (std::size_t i = 0; i < out.points.size(); ++i) {
+  const std::vector<P2>& P = *outPoints;
+  outTangents->assign(P.size(), P2(1, 0));
+  for (std::size_t i = 0; i < P.size(); ++i) {
     const std::size_t a = i == 0 ? 0 : i - 1;
-    const std::size_t b = i + 1 < out.points.size() ? i + 1 : i;
-    out.tangents[i] = unit(out.points[b] - out.points[a]);
+    const std::size_t b = i + 1 < P.size() ? i + 1 : i;
+    (*outTangents)[i] = unit(P[b] - P[a]);
   }
-}
-
-/// 没找到胶时的胶路：从喷嘴沿选中方向的一条直线，照样覆盖整个检测区（下游据此画出「全段无胶」）。
-void straightPath(P2 nozzle, double headingDeg, double zoneStart, double zoneEnd, BeadPath& out) {
-  const P2 d = dirOfDeg(headingDeg);
-  out.s.clear();
-  out.points.clear();
-  const double total = zoneEnd - zoneStart;
-  for (double t = 0.0; t < total - 1e-9; t += 2.0) out.s.push_back(zoneStart + t);
-  out.s.push_back(zoneEnd);
-  for (double s : out.s) out.points.push_back(nozzle + d * s);
-  out.tangents.assign(out.points.size(), d);
 }
 
 std::string fmt2(double v) {
@@ -348,22 +279,282 @@ std::string fmt2(double v) {
   return buf;
 }
 
-}  // namespace
+// ------------------------------------------------------------------ 示教胶路的偏移轨迹（T3 / T4）
+
+constexpr double kTrackWindow = 40.0; ///< 偏移轨迹逐站细化时沿 s 取中位数的半窗（px）
+constexpr double kTrackMinSupport =
+    0.1;                        ///< 落在轨迹上的站不到这个比例（或不到 3 站）= 沿示教线没有胶
+constexpr int kTrackPasses = 8; ///< 逐站细化最多几遍（落在轨迹上的那些站不再变就停）
+constexpr double kMergePeakRatio =
+    0.4; ///< 示教直胶合并相邻子段时，较淡一段的峰值至少是较浓一段的这么多倍
+constexpr std::size_t kShiftMinStations = 3; ///< 胶整体横移的一段至少这么多站才跟过去
+constexpr double kShiftCover = 0.6;          ///< 横移段里落在同一相对偏移上的站至少占这么多
+constexpr double kShiftFlankShare =
+    0.3; ///< 两侧正常段里同一相对偏移处也有胶样暗段的站超过这个比例 = 一直伴着胶的平行暗线
+constexpr double kShiftRampMinWidth = 0.5; ///< 横跳过渡处斜着的胶至少这么宽（× 轨迹胶宽）
+
+struct Track {
+  std::vector<double> expect;      ///< 每站期望的胶中心（px）
+  std::vector<const Run*> onTrack; ///< 每站落在轨迹上的那一段（nullptr = 这一站没有）
+  int count = 0;
+  double support = 0;
+  std::string reason; ///< 空 = 认出了胶
+};
+
+/// 轨迹之外的一段胶整体横移（几毫米内突然横跳）：逐站细化一遍只挪一个 gate，跟不上跳变，这一段会被当成断胶。
+/// 没落在轨迹上的连续几站里，大多数站在同一个相对偏移（相对轨迹的期望）上有宽度接近轨迹胶宽的暗段，
+/// 而两侧落在轨迹上的站在同一相对偏移处没有 —— 不是一直伴着胶的平行暗线（零件翻边、阴影）—— 就认作胶横移了，
+/// 这几站的轨迹跟过去，下游按位置偏移判。过渡处斜着的那一两站仍不在轨迹上。
+/// 两头还要接得上（真横移在过渡处有斜着的胶）：从两侧轨迹的最后一站到横移段的第一站，中间每一站都有一段胶，中心落在
+/// 横移前（那一站的轨迹期望）与横移后（横移段起头几站的胶中心）之间、离两头各至少半个 gate，不比两头并起来还宽；
+/// 没有中间站时，这两站至少一站的胶已经斜过去。接不上的（真断口旁只在这一段出现的孔、槽、紧固件阴影）仍按断口报。
+void followShifts(const std::vector<Station>& st, double tol, double gate, Track& tr) {
+  const std::size_t n = st.size();
+  std::vector<double> widths;
+  for (const Run* r : tr.onTrack) {
+    if (r)
+      widths.push_back(r->width());
+  }
+  if (widths.size() < kShiftMinStations)
+    return;
+  const double wRef = median(widths);
+  const double wTol = std::max(gate, 0.3 * wRef);
+  const auto near = [&](const Station& x, double e) -> const Run* {
+    const Run* best = nullptr;
+    for (const Run& r : x.runs) {
+      if (std::fabs(r.mid()) > tol || std::fabs(r.width() - wRef) > wTol)
+        continue;
+      if (!best || std::fabs(r.mid() - e) < std::fabs(best->mid() - e))
+        best = &r;
+    }
+    return best && std::fabs(best->mid() - e) <= gate ? best : nullptr;
+  };
+  std::size_t i = 0;
+  while (i < n) {
+    if (tr.onTrack[i]) {
+      ++i;
+      continue;
+    }
+    const std::size_t a = i;
+    while (i < n && !tr.onTrack[i])
+      ++i;
+    const std::size_t b = i;
+    const std::size_t len = b - a;
+    if (len < kShiftMinStations)
+      continue;
+    double delta = 0;
+    std::size_t votes = 0;
+    for (std::size_t k = a; k < b; ++k) {
+      for (const Run& r : st[k].runs) {
+        const double d = r.mid() - tr.expect[k];
+        if (std::fabs(d) <= gate || !near(st[k], r.mid()))
+          continue;
+        std::size_t v = 0;
+        for (std::size_t j = a; j < b; ++j)
+          v += near(st[j], tr.expect[j] + d) ? 1 : 0;
+        if (v > votes) {
+          votes = v;
+          delta = d;
+        }
+      }
+    }
+    if (votes < kShiftMinStations || static_cast<double>(votes) < kShiftCover * len)
+      continue;
+    std::size_t flank = 0, parallel = 0;
+    const auto look = [&](std::size_t k) {
+      if (!tr.onTrack[k])
+        return;
+      ++flank;
+      parallel += near(st[k], tr.expect[k] + delta) ? 1 : 0;
+    };
+    for (std::size_t k = a > len ? a - len : 0; k < a; ++k)
+      look(k);
+    for (std::size_t k = b; k < std::min(n, b + len); ++k)
+      look(k);
+    if (flank < kShiftMinStations || static_cast<double>(parallel) > kShiftFlankShare * flank)
+      continue;
+    std::vector<const Run*> moved(len, nullptr);
+    std::size_t first = b, last = a;
+    for (std::size_t k = a; k < b; ++k) {
+      if ((moved[k - a] = near(st[k], tr.expect[k] + delta))) {
+        first = std::min(first, k);
+        last = k;
+      }
+    }
+    const auto linked = [&](std::size_t onTrackEnd, std::size_t shiftedEnd) {
+      std::vector<double> ahead;
+      for (std::size_t k = shiftedEnd; k >= a && k < b && ahead.size() < kShiftMinStations;
+           k = shiftedEnd > onTrackEnd ? k + 1 : k - 1) {
+        if (moved[k - a])
+          ahead.push_back(moved[k - a]->mid());
+      }
+      const double from = tr.expect[onTrackEnd], to = median(ahead), jump = std::fabs(to - from);
+      const auto slanted = [&](std::size_t k) {
+        return std::any_of(st[k].runs.begin(), st[k].runs.end(), [&](const Run& r) {
+          const double along = (r.mid() - from) * (to > from ? 1.0 : -1.0);
+          return std::fabs(r.mid()) <= tol && along >= 0.5 * gate && along <= jump - 0.5 * gate &&
+                 r.width() >= kShiftRampMinWidth * wRef && r.width() <= wRef + jump - gate;
+        });
+      };
+      const std::size_t lo = std::min(onTrackEnd, shiftedEnd),
+                        hi = std::max(onTrackEnd, shiftedEnd);
+      bool any = false;
+      for (std::size_t k = lo; k <= hi; ++k) {
+        const bool s = slanted(k);
+        if (!s && k != lo && k != hi)
+          return false;
+        any = any || s;
+      }
+      return any;
+    };
+    if ((a > 0 && !linked(a - 1, first)) || (b < n && !linked(b, last)))
+      continue;
+    for (std::size_t k = a; k < b; ++k) {
+      if (const Run* r = moved[k - a]) {
+        tr.onTrack[k] = r;
+        tr.expect[k] = r->mid();
+      }
+    }
+  }
+}
+
+/// 示教胶路的偏移轨迹：胶相对示教线横着偏了多少（机器人 / 工件偏差、示教没点准），逐站估出来。
+/// 候选 = 中心离示教线不超过 tol 的暗段（已按 widthRange、contrastMin 筛过）。
+/// 1. 投票定一个常数偏移 h：每个候选的中心（外加 0）各是一个假设，票数 = 离它不到 gate 有候选的站数；
+///    票数不低于最多那个一半的假设里取离示教线最近的 —— 断口里零散的纹理拽不走它，旁边一条更长的平行暗边也拽不走；
+/// 2. 逐站细化，直到落在轨迹上的站不再变（最多 kTrackPasses 遍）：每站取离当前期望最近、且在 gate 以内的候选，
+///    沿 s 在 ±kTrackWindow 里取中位数；没有候选落在轨迹上的站（断口）按两侧线性插值 —— 断口里的期望中心是两头的胶
+///    连起来的那条线。一遍最多挪 gate 那么远，所以弯道上胶慢慢偏开示教线也跟得上，跳到旁边一条暗线上去却不行；
+/// 3. 夹在 ±tol 里。落在轨迹上的站不到 3 个、或不到 kTrackMinSupport 就算沿示教线没有胶。
+Track trackOffsets(const std::vector<Station>& st, double tol, double centerRatio) {
+  Track tr;
+  const std::size_t n = st.size();
+  tr.expect.assign(n, 0.0);
+  tr.onTrack.assign(n, nullptr);
+  std::vector<double> candWidths, hypotheses{0.0};
+  for (const Station& x : st) {
+    for (const Run& r : x.runs) {
+      if (std::fabs(r.mid()) > tol)
+        continue;
+      candWidths.push_back(r.width());
+      hypotheses.push_back(r.mid());
+    }
+  }
+  if (candWidths.empty()) {
+    tr.reason = "示教线 ± " + fmt2(tol) + " px 以内没有一站量到胶样的暗段";
+    return tr;
+  }
+  const double gate = std::max(6.0, centerRatio * median(candWidths));
+  const auto nearestCand = [&](const Station& x, double e) -> const Run* {
+    const Run* best = nullptr;
+    for (const Run& r : x.runs) {
+      if (std::fabs(r.mid()) > tol)
+        continue;
+      if (!best || std::fabs(r.mid() - e) < std::fabs(best->mid() - e))
+        best = &r;
+    }
+    return best && std::fabs(best->mid() - e) <= gate ? best : nullptr;
+  };
+
+  std::vector<int> votes(hypotheses.size(), 0);
+  int bestVotes = 0;
+  for (std::size_t k = 0; k < hypotheses.size(); ++k) {
+    for (const Station& x : st)
+      votes[k] += nearestCand(x, hypotheses[k]) ? 1 : 0;
+    bestVotes = std::max(bestVotes, votes[k]);
+  }
+  // 示教线附近的那一条优先：得票不到最多那条一半的才让位。旁边一条平行的暗边（零件翻边、阴影）往往比断了一截的
+  // 胶还长，单比票数它会赢，胶路就被它整条拽走 —— 这正是 bead_path 自由搜索缺胶时跟着零件暗边走的那种错
+  double h = 0.0;
+  int hVotes = -1;
+  for (std::size_t k = 0; k < hypotheses.size(); ++k) {
+    if (2 * votes[k] < bestVotes)
+      continue;
+    const double a = std::fabs(hypotheses[k]);
+    if (hVotes < 0 || a < std::fabs(h) - 1e-9 || (a <= std::fabs(h) + 1e-9 && votes[k] > hVotes)) {
+      h = hypotheses[k];
+      hVotes = votes[k];
+    }
+  }
+  std::fill(tr.expect.begin(), tr.expect.end(), h);
+
+  std::vector<double> lastMids;
+  for (int pass = 0; pass < kTrackPasses; ++pass) {
+    std::vector<double> mids(n, kNaN);
+    for (std::size_t i = 0; i < n; ++i) {
+      if (const Run* r = nearestCand(st[i], tr.expect[i]))
+        mids[i] = r->mid();
+    }
+    const auto same = [](double a, double b) { return std::isnan(a) ? std::isnan(b) : a == b; };
+    if (lastMids.size() == n && std::equal(mids.begin(), mids.end(), lastMids.begin(), same))
+      break;
+    lastMids = mids;
+    std::vector<double> e(n, kNaN);
+    for (std::size_t i = 0; i < n; ++i) {
+      std::vector<double> w;
+      for (std::size_t j = 0; j < n; ++j) {
+        if (std::isfinite(mids[j]) && std::fabs(st[j].s - st[i].s) <= kTrackWindow)
+          w.push_back(mids[j]);
+      }
+      if (!w.empty())
+        e[i] = median(std::move(w));
+    }
+    // 断口：两侧都有就线性插值，只有一侧就取那一侧，一个都没有就是投票的常数
+    std::ptrdiff_t prev = -1;
+    for (std::size_t i = 0; i <= n; ++i) {
+      if (i < n && !std::isfinite(e[i]))
+        continue;
+      for (std::size_t k = static_cast<std::size_t>(prev + 1); k < i; ++k) {
+        if (prev < 0 && i == n) {
+          e[k] = h;
+        } else if (prev < 0) {
+          e[k] = e[i];
+        } else if (i == n) {
+          e[k] = e[static_cast<std::size_t>(prev)];
+        } else {
+          const double a = st[static_cast<std::size_t>(prev)].s, b = st[i].s;
+          const double f = b - a > 1e-9 ? (st[k].s - a) / (b - a) : 0.0;
+          e[k] = e[static_cast<std::size_t>(prev)] + (e[i] - e[static_cast<std::size_t>(prev)]) * f;
+        }
+      }
+      prev = static_cast<std::ptrdiff_t>(i);
+    }
+    for (double& v : e)
+      v = std::clamp(v, -tol, tol);
+    tr.expect = std::move(e);
+  }
+  for (std::size_t i = 0; i < n; ++i)
+    tr.onTrack[i] = nearestCand(st[i], tr.expect[i]);
+  followShifts(st, tol, gate, tr);
+  for (const Run* r : tr.onTrack)
+    tr.count += r ? 1 : 0;
+  tr.support = n > 0 ? static_cast<double>(tr.count) / static_cast<double>(n) : 0.0;
+  if (tr.count < 3 || tr.support < kTrackMinSupport) {
+    tr.reason = "沿示教线只有 " + std::to_string(tr.count) + " 站（" + fmt2(100.0 * tr.support) +
+                "%）量到落在同一条偏移轨迹上的胶，不到 3 站或 10%";
+  }
+  return tr;
+}
+
+} // namespace
 
 // ------------------------------------------------------------------ 小工具
 
 double median(std::vector<double> v) {
-  if (v.empty()) return kNaN;
+  if (v.empty())
+    return kNaN;
   const std::size_t mid = v.size() / 2;
   std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid), v.end());
   const double hi = v[mid];
-  if (v.size() % 2 == 1) return hi;
+  if (v.size() % 2 == 1)
+    return hi;
   const double lo = *std::max_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid));
   return 0.5 * (lo + hi);
 }
 
 double percentile(std::vector<double> v, double q) {
-  if (v.empty()) return kNaN;
+  if (v.empty())
+    return kNaN;
   std::sort(v.begin(), v.end());
   const double pos = (q / 100.0) * static_cast<double>(v.size() - 1);
   const std::size_t i = static_cast<std::size_t>(std::floor(pos));
@@ -373,9 +564,12 @@ double percentile(std::vector<double> v, double q) {
 
 // ------------------------------------------------------------------ 响应图
 
-Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi) {
+Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi, Field* level) {
   const cv::Rect inner = roi & imageRect(gray);
-  if (inner.empty()) return {};
+  if (level)
+    *level = Field();
+  if (inner.empty())
+    return {};
   const Octagon o = octagon(widthMax + 1);
   // 闭运算里膨胀与腐蚀各走一次结构元，再加上 5×5 的高斯：外扩两倍半径 + 4 之后，inner 里的值
   // 与整幅图算出来的一样（外扩碰到图像边界时两边的边界规则也一样）
@@ -389,37 +583,100 @@ Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi
     cv::subtract(morph, src, r, cv::noArray(), CV_32F);
   }
   cv::GaussianBlur(r, r, cv::Size(5, 5), 1.2);
+  if (level) {
+    cv::Mat l;
+    (bright ? src : morph).convertTo(l, CV_32F);
+    cv::GaussianBlur(l, l, cv::Size(5, 5), 1.2);
+    *level = Field(l, outer.tl(), inner);
+  }
   return Field(r, outer.tl(), inner);
 }
 
 Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi) {
   const cv::Rect inner = roi & imageRect(gray);
-  if (inner.empty()) return {};
+  if (inner.empty())
+    return {};
   const cv::Rect outer = inflate(inner, 4) & imageRect(gray);
   cv::Mat g;
   gray(outer).convertTo(g, CV_32F);
   cv::GaussianBlur(g, g, cv::Size(5, 5), 1.0);
-  if (bright) g = 255.0 - g;
+  if (bright)
+    g = 255.0 - g;
   return Field(g, outer.tl(), inner);
+}
+
+ResponseMaps responseMaps(const cv::Mat& gray, const ResponseSpec& spec) {
+  const cv::Rect all = imageRect(gray);
+  const cv::Rect inner = (spec.roi.width > 0 && spec.roi.height > 0 ? spec.roi : all) & all;
+  ResponseMaps out;
+  if (inner.empty())
+    return out;
+  out.frame = inner;
+  const auto blur = [](cv::Mat& m, double sigma) {
+    if (sigma > 0)
+      cv::GaussianBlur(m, m, cv::Size(5, 5), sigma);
+  };
+  // 与 responseField 同一套外扩：inner 里的值与整幅图逐位相同。clone 让形态学只看到外扩块
+  // （OpenCV 的滤波默认会读子矩阵外的父图像素）
+  const Octagon o = octagon(spec.diameter);
+  const cv::Rect outer = inflate(inner, 2 * o.radius + 4) & all;
+  const cv::Mat src = gray(outer).clone();
+  const cv::Mat morph = closeOrOpen(src, o, spec.bright);
+  // 5×5 的平滑只要块外 2 px：之后的几步只在这一圈里做（形态学要的那一大圈外扩到这里已经用完了）。
+  // 块里每个点的 5×5 邻域都落在这一圈里，碰到图像边界时与整幅计算一样截在图边，所以结果一位不差
+  const cv::Rect near = inflate(inner, 2) & all;
+  const cv::Rect nl(near.tl() - outer.tl(), near.size());
+  const cv::Mat srcN = src(nl), morphN = morph(nl);
+  cv::Mat r, l, g;
+  if (spec.bright) {
+    cv::subtract(srcN, morphN, r, cv::noArray(), CV_32F);
+  } else {
+    cv::subtract(morphN, srcN, r, cv::noArray(), CV_32F);
+  }
+  // 八边形拆成三次形态学串着做，贴图边（两倍半径以内）时中间那一步出了图，闭运算会比原图还低一点：
+  // 负的响应是这个假象，按契约（≥ 0）截到 0。responseField 不截（1.1 的结果一位不变）
+  cv::max(r, 0.0, r);
+  blur(r, spec.responseSigma);
+  (spec.bright ? srcN : morphN).convertTo(l, CV_32F);
+  blur(l, spec.levelSigma);
+  srcN.convertTo(g, CV_32F);
+  blur(g, spec.graySigma);
+  if (spec.bright)
+    g = 255.0 - g;
+  // 只交出块内：整幅不再分配、不再填 NaN，执行器给每张输出做的统计也只扫这一块
+  const cv::Rect local(inner.tl() - near.tl(), inner.size());
+  const auto place = [&](const cv::Mat& part) {
+    return near == inner ? part : part(local).clone();
+  };
+  out.response = place(r);
+  out.level = place(l);
+  out.gray = place(g);
+  return out;
 }
 
 // ------------------------------------------------------------------ 卡尺
 
-std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec) {
+std::vector<Run> caliperRuns(const Field& response, P2 c, P2 n, double half,
+                             const RunSplitSpec& spec, std::vector<Run>* rawOut,
+                             double* validFraction) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
   std::vector<double> v(static_cast<std::size_t>(std::max(count, 0)));
   std::vector<char> ok(v.size());
+  int valid = 0;
   for (int i = 0; i < count; ++i) {
     const double t = -half + i * kRes;
     const double x = response.at(c + n * t);
     ok[i] = x >= 0.0;
     v[i] = ok[i] ? x : 0.0;
+    valid += ok[i] ? 1 : 0;
   }
-  // 不扣局部底：零件上成片的纹理、渐暗区响应整体抬高，「> contrastMin / 2」连成一整条、宽过 widthMax
+  if (validFraction)
+    *validFraction = count > 0 ? static_cast<double>(valid) / count : 0.0;
+  // 不扣局部底：零件上成片的纹理、渐暗区响应整体抬高，「> segmentMin」连成一整条、宽过 widthMax
   // 被筛掉 —— 胶是干净背景上一条分明的暗带，这正是把纹理挡在外面的那一道（Glue2 #1–2 的无胶帧）
   auto tAt = [&](int i) { return -half + i * kRes; };
-  const double thr = 0.5 * spec.contrastMin;
+  const double thr = spec.segmentMin;
   std::vector<Run> raw;
   for (int i = 0; i < count;) {
     if (!(ok[i] && v[i] > thr)) {
@@ -427,39 +684,105 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
       continue;
     }
     int j = i;
-    while (j + 1 < count && ok[j + 1] && v[j + 1] > thr) ++j;
+    while (j + 1 < count && ok[j + 1] && v[j + 1] > thr)
+      ++j;
     double peak = 0;
-    for (int k = i; k <= j; ++k) peak = std::max(peak, v[k]);
-    if (peak >= spec.contrastMin) {
+    for (int k = i; k <= j; ++k)
+      peak = std::max(peak, v[k]);
+    if (peak >= spec.peakMin) {
       // D4：半高处取边，按这一段自己的峰值
       const double lvl = 0.5 * peak;
-      int a = i;
-      while (a < j && v[a] < lvl) ++a;
-      int b = j;
-      while (b > i && v[b] < lvl) --b;
-      const double la =
-          a > 0 ? tAt(a) - (v[a] - lvl) / std::max(v[a] - v[a - 1], 1e-6) * kRes : tAt(a);
-      const double lb = b < count - 1
-                            ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes
-                            : tAt(b);
-      raw.push_back(Run{la, lb, peak});
+      for (int a = i; a <= j;) {
+        while (a <= j && v[a] < lvl)
+          ++a;
+        if (a > j)
+          break;
+        int b = a;
+        if (spec.halfMax) {
+          while (b < j && v[b + 1] >= lvl)
+            ++b;
+        } else {
+          b = j;
+          while (b > a && v[b] < lvl)
+            --b;
+        }
+        const double la =
+            a > 0 ? tAt(a) - (v[a] - lvl) / std::max(v[a] - v[a - 1], 1e-6) * kRes : tAt(a);
+        const double lb =
+            b < count - 1 ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes : tAt(b);
+        double localPeak = 0;
+        for (int k = a; k <= b; ++k)
+          localPeak = std::max(localPeak, v[k]);
+        if (localPeak >= spec.peakMin) {
+          Run r;
+          r.lo = la;
+          r.hi = lb;
+          r.peak = localPeak;
+          r.loComplete = a > 0 && ok[a - 1] && v[a - 1] < lvl;
+          r.hiComplete = b < count - 1 && ok[b + 1] && v[b + 1] < lvl;
+          r.completeEdges = r.loComplete && r.hiComplete;
+          raw.push_back(r);
+        }
+        a = b + 1;
+      }
     }
     i = j + 1;
   }
-  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 widthMax 就并回去
+  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 mergeWidthMax 就并回去。
+  // 给了峰值比时两段还得一样浓：胶被高光劈开的两半都是胶，峰值相近；紧贴胶边的一条淡肩
+  // （法兰过渡、浅阴影）峰值只有胶的零头，并进来胶宽就时宽时窄
   std::vector<Run> merged;
   for (const Run& r : raw) {
     if (!merged.empty() && r.lo - merged.back().hi <= spec.mergeGap &&
-        r.hi - merged.back().lo <= spec.widthMax) {
-      merged.back().hi = r.hi;
-      merged.back().peak = std::max(merged.back().peak, r.peak);
+        r.hi - merged.back().lo <= spec.mergeWidthMax &&
+        (spec.mergePeakRatio <= 0 ||
+         std::min(r.peak, merged.back().peak) >=
+             spec.mergePeakRatio * std::max(r.peak, merged.back().peak))) {
+      Run& m = merged.back();
+      m.completeEdges = m.completeEdges && r.completeEdges;
+      m.hiComplete = r.hiComplete;
+      m.hi = r.hi;
+      m.peak = std::max(m.peak, r.peak);
+      m.parts += r.parts;
     } else {
       merged.push_back(r);
     }
   }
+  if (rawOut)
+    *rawOut = std::move(raw);
+  return merged;
+}
+
+std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
+                             std::vector<Run>* candidates, bool separatePeaks) {
+  RunSplitSpec cs;
+  cs.segmentMin = 0.5 * spec.contrastMin;
+  cs.peakMin = spec.contrastMin;
+  cs.mergeGap = spec.mergeGap;
+  cs.mergePeakRatio = separatePeaks ? kMergePeakRatio : 0.0;
+  cs.mergeWidthMax = spec.widthMax;
+  cs.halfMax = separatePeaks;
+  std::vector<Run> raw;
+  const std::vector<Run> merged = caliperRuns(response, c, n, half, cs, &raw);
+  if (candidates) {
+    candidates->clear();
+    const auto add = [&](const Run& r) {
+      if (r.completeEdges && r.lo > -half && r.hi < half && r.hi > r.lo &&
+          std::none_of(candidates->begin(), candidates->end(),
+                       [&](const Run& other) { return other.lo == r.lo && other.hi == r.hi; }))
+        candidates->push_back(r);
+    };
+    for (const Run& r : merged)
+      add(r);
+    if (separatePeaks) {
+      for (const Run& r : raw)
+        add(r);
+    }
+  }
   std::vector<Run> out;
   for (const Run& r : merged) {
-    if (r.width() >= spec.widthMin && r.width() <= spec.widthMax) out.push_back(r);
+    if (r.width() >= spec.widthMin && r.width() <= spec.widthMax)
+      out.push_back(r);
   }
   return out;
 }
@@ -467,30 +790,41 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
 const Run* nearestRun(const std::vector<Run>& runs, double expect) {
   const Run* best = nullptr;
   for (const Run& r : runs) {
-    if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect)) best = &r;
+    if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect))
+      best = &r;
   }
   return best;
 }
 
-double runSharpness(const Field& g, P2 c, P2 n, const Run& run) {
+RunEdges runEdges(const Field& g, P2 c, P2 n, const Run& run, double edgeProbe,
+                  double backgroundProbe) {
+  RunEdges out;
   auto at = [&](double t) { return g.at(c + n * t); };
   const double w = run.width();
-  const double samples[6] = {at(run.lo - 3), at(run.lo + 3), at(run.hi + 3),
-                             at(run.hi - 3), at(run.lo - 8), at(run.hi + 8)};
+  const double samples[6] = {at(run.lo - edgeProbe),       at(run.lo + edgeProbe),
+                             at(run.hi + edgeProbe),       at(run.hi - edgeProbe),
+                             at(run.lo - backgroundProbe), at(run.hi + backgroundProbe)};
   double inside = 0;
   for (int k = 0; k < 5; ++k) {
     const double v = at(run.lo + 0.25 * w + (0.5 * w) * k / 4.0);
-    if (v < 0) return kNaN;
+    if (v < 0)
+      return out;
     inside += v;
   }
   for (double v : samples) {
-    if (v < 0) return kNaN;
+    if (v < 0)
+      return out;
   }
   inside /= 5.0;
-  const double dl = samples[0] - samples[1];
-  const double dr = samples[2] - samples[3];
-  const double depth = std::max(1.0, 0.5 * (samples[4] + samples[5]) - inside);
-  return std::min(dl, dr) / depth;
+  out.edgeLo = samples[0] - samples[1];
+  out.edgeHi = samples[2] - samples[3];
+  out.depth = std::max(1.0, 0.5 * (samples[4] + samples[5]) - inside);
+  out.sharpness = std::min(out.edgeLo, out.edgeHi) / out.depth;
+  return out;
+}
+
+double runSharpness(const Field& g, P2 c, P2 n, const Run& run) {
+  return runEdges(g, c, n, run).sharpness;
 }
 
 // ------------------------------------------------------------------ 定胶路
@@ -510,35 +844,20 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   // D6：扇形搜索。每条射线在检测区前段（≤ 150 px）上取响应的均值
   const double lo = spec.useHeading ? spec.headingDeg - spec.headingTolDeg : spec.sectorFromDeg;
   const double hi = spec.useHeading ? spec.headingDeg + spec.headingTolDeg : spec.sectorToDeg;
-  const double fanLen = std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
-  std::vector<std::pair<double, double>> fan;  // (score, angle)
-  for (double a = lo; a <= hi + 1e-6; a += 1.0) {
-    const P2 d = dirOfDeg(a);
-    int total = 0, bad = 0;
-    double sum = 0;
-    for (double t = spec.zoneStart; t < spec.zoneStart + fanLen - 1e-9; t += spec.fanStep) {
-      const double v = R.at(spec.nozzle + d * t);
-      total += 1;
-      if (v < 0) {
-        bad += 1;
-      } else {
-        sum += v;
-      }
-    }
-    const double score = total > 0 && bad < 0.3 * total ? sum / total : -1.0;
-    fan.emplace_back(score, a);
-  }
-  std::stable_sort(fan.begin(), fan.end(),
-                   [](const auto& x, const auto& y) { return x.first > y.first; });
-  std::vector<std::pair<double, double>> picks;
-  for (const auto& f : fan) {
-    bool far = true;
-    for (const auto& p : picks) {
-      if (angleDiffDeg(p.second, f.second) <= spec.fanSeparationDeg) far = false;
-    }
-    if (far) picks.push_back(f);
-    if (picks.size() == 3) break;
-  }
+  FanSpec fs;
+  fs.anchor = spec.nozzle;
+  fs.from = lo;
+  fs.to = hi;
+  fs.r0 = spec.zoneStart;
+  fs.r1 = spec.zoneStart + std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
+  fs.radialStep = spec.fanStep;
+  fs.peakCount = 3;
+  fs.peakSeparation = spec.fanSeparationDeg;
+  fs.includeInvalid = true;
+  const FanResult scan = fanScan(R, fs);
+  std::vector<std::pair<double, double>> picks; // (score, angle)；无效的方向记 −1
+  for (const FanPeak& p : scan.peaks)
+    picks.emplace_back(std::isfinite(p.score) ? p.score : -1.0, p.angle);
 
   // 前三个峰各粗找一遍，按「覆盖率 ×（像胶 ? 1 : 0.1）」留一个（D15）。射线本身几乎没有响应（不到最强那条的
   // 四分之一）的方向再打个对折：它是靠 ±widthMax 的卡尺从旁边「蹭」上胶的，起点落在胶外面；而真正的方向
@@ -548,7 +867,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   for (const auto& pk : picks) {
     PathCandidate c = coarseTrack(R, g, spec, pk.second, lo, hi);
     c.fanScore = pk.first;
-    if (fanMax > 0 && pk.first < 0.25 * fanMax) c.score *= 0.5;
+    if (fanMax > 0 && pk.first < 0.25 * fanMax)
+      c.score *= 0.5;
     out.candidates.push_back(std::move(c));
     const PathCandidate& cc = out.candidates.back();
     if (best < 0 || cc.score > out.candidates[static_cast<std::size_t>(best)].score) {
@@ -558,7 +878,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   if (best < 0) {
     out.reason = "扇区里一个方向都没有（检查 sector / heading）";
     out.headingDeg = 0.5 * (lo + hi);
-    straightPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, out);
+    straightBeadPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, &out.s, &out.points,
+                     &out.tangents);
     out.residual = kNaN;
     return out;
   }
@@ -567,7 +888,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   out.coverage = chosen.coverage;
   out.sharpness = chosen.sharpness;
   out.beadlike = chosen.beadlike;
-  for (const auto& c : chosen.coarse) out.coarse.push_back(c.second);
+  for (const auto& c : chosen.coarse)
+    out.coarse.push_back(c.second);
 
   if (chosen.coverage < spec.minCoverage) {
     out.reason = "覆盖率 " + fmt2(chosen.coverage) + " 低于 minCoverage " + fmt2(spec.minCoverage);
@@ -578,55 +900,266 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
     out.reason = "粗找到的胶点不到 3 个";
   }
   if (!out.reason.empty()) {
-    straightPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, out);
+    straightBeadPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, &out.s, &out.points,
+                     &out.tangents);
     out.residual = kNaN;
     return out;
   }
-
-  // 拟合网格往两头各多走一截（局部线性拟合在那里就是沿端点切向外推）：起点要落在「离喷嘴 zoneStart」
-  // 的那一处，终点要够得着 zoneEnd，下面的高斯平滑也不能让两头的截断影响到检测区里
-  std::vector<double> grid;
-  for (double s = spec.zoneStart - 48.0; s <= spec.zoneEnd + 56.0 + 1e-6; s += 1.0) grid.push_back(s);
-  std::vector<P2> dense = localLinearFit(chosen.coarse, grid, spec.smoothWindow, nullptr);
-  // 检测区开头一段没找到胶（断口正好落在那里）：局部线性拟合会沿后面几个胶点的切向往回外推，拐错了方向
-  // 就是一条横着的胶路。胶是从喷嘴出来的 —— 第一个胶点之前的那一段取喷嘴到它的连线
-  const double sFirst = chosen.coarse.front().first;
-  if (sFirst > spec.zoneStart + 2.0 * spec.coarseStep) {
-    std::size_t k = 0;
-    while (k + 1 < grid.size() && grid[k] < sFirst) ++k;
-    const P2 anchor = dense[k];
-    for (std::size_t i = 0; i < k; ++i) {
-      dense[i] = spec.nozzle + (anchor - spec.nozzle) * (grid[i] / sFirst);
-    }
-  }
-  // 再做一次 σ = 12 px 的高斯平滑：粗找 8 px 一步，螺旋胶的胶点左右摆，局部线性拟合会留下与螺距同频的
-  // 小摆动 —— 胶路不光滑，按弧长算的 s 就比实际长出一截（300 px 的检测区能长出 20 px），断口的位置跟着漂
-  std::vector<P2> smooth(dense.size());
-  constexpr int kHalf = 36;
-  constexpr double kSigma = 12.0;
-  for (std::size_t i = 0; i < dense.size(); ++i) {
-    P2 acc(0, 0);
-    double wsum = 0;
-    for (int k = -kHalf; k <= kHalf; ++k) {
-      const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
-      if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size())) continue;
-      const double w = std::exp(-0.5 * k * k / (kSigma * kSigma));
-      acc += dense[static_cast<std::size_t>(j)] * w;
-      wsum += w;
-    }
-    smooth[i] = acc * (1.0 / wsum);
-  }
-  resampleByArcLength(smooth, spec.nozzle, spec.zoneStart, spec.zoneEnd, out);
-  std::vector<double> resid;
-  for (const P2& q : out.coarse) {
-    double bestD = std::numeric_limits<double>::infinity();
-    for (const P2& p : out.points) bestD = std::min(bestD, length(p - q));
-    resid.push_back(bestD);
-  }
-  out.residual = median(resid);
+  fitBeadPath(chosen.coarse, spec.nozzle, spec.zoneStart, spec.zoneEnd, spec.coarseStep,
+              spec.smoothWindow, 12.0, &out.s, &out.points, &out.tangents, &out.residual);
   out.ok = true;
   out.fallback = false;
   return out;
+}
+
+// ------------------------------------------------------------------ 扇形扫描
+
+FanResult fanScan(const Field& R, const FanSpec& spec) {
+  FanResult out;
+  for (double t = spec.r0; t < spec.r1 - 1e-9; t += spec.radialStep)
+    out.samples += 1;
+  for (double a = spec.from; a <= spec.to + 1e-6; a += spec.angleStep) {
+    const P2 d = dirOfDeg(a);
+    int total = 0, bad = 0;
+    double sum = 0;
+    for (double t = spec.r0; t < spec.r1 - 1e-9; t += spec.radialStep) {
+      const double v = R.at(spec.anchor + d * t);
+      total += 1;
+      if (v < 0) {
+        bad += 1;
+      } else {
+        sum += v;
+      }
+    }
+    out.angles.push_back(a);
+    out.scores.push_back(total > 0 && bad < spec.invalidMax * total ? sum / total : kNaN);
+    out.invalid.push_back(bad);
+  }
+  // includeInvalid：与 1.1 一样，无效方向按得分 −1 一起排（同分保持角度顺序）
+  const auto key = [&](std::size_t i) {
+    return std::isfinite(out.scores[i]) ? out.scores[i] : -1.0;
+  };
+  std::vector<std::size_t> order;
+  for (std::size_t i = 0; i < out.scores.size(); ++i) {
+    if (spec.includeInvalid || std::isfinite(out.scores[i]))
+      order.push_back(i);
+  }
+  std::stable_sort(order.begin(), order.end(),
+                   [&](std::size_t x, std::size_t y) { return key(x) > key(y); });
+  for (std::size_t i : order) {
+    if (static_cast<int>(out.peaks.size()) >= spec.peakCount)
+      break;
+    const bool far = std::all_of(out.peaks.begin(), out.peaks.end(), [&](const FanPeak& p) {
+      return angleDiffDeg(p.angle, out.angles[i]) > spec.peakSeparation;
+    });
+    if (far)
+      out.peaks.push_back(FanPeak{i, out.angles[i], out.scores[i]});
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ 粗跟踪
+
+TrackResult trackBead(const Field& R, const Field& g, const TrackSpec& spec, double headingDeg) {
+  TrackResult out;
+  P2 d = dirOfDeg(headingDeg);
+  P2 p = spec.anchor + d * spec.zoneStart;
+  double s = spec.zoneStart;
+  double lastFound = -std::numeric_limits<double>::infinity();
+  bool stopped = false;
+  int stepsAtLastFound = 0; // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
+  std::vector<double> sharp, widths, peaks;
+  const double accept = spec.acceptOffsetRatio * spec.widthMax;
+  while (s <= spec.zoneEnd + 1e-6) {
+    out.steps += 1;
+    const P2 n = perp(d);
+    bool found = false;
+    P2 c;
+    if (!stopped) {
+      // 已经找到过几个胶点之后，卡尺上的暗段不是都能接：
+      // - 紧接着上一步（中间没断）时，胶点离预测点横着不超过半个胶宽（此前胶宽的中位数，至少 8 px）——
+      //   光滑的胶 8 px 一步横着挪不了这么多；断口一开头卡尺会横着够到胶旁边的阴影、纹理，接上它胶路就被一路拽歪；
+      // - 滑过一段没找到胶之后重新接上的那一个，横向不限，但得像此前找到的胶：对比度不到此前中位数的一半的不要
+      //   （断口里、翻边上的拉丝纹理淡得多）；此前的胶宽很一致（直胶）时，宽度不到中位数一半的也不要（卡尺斜着
+      //   擦过断口端头只量到半截胶，中心是偏的）；边缘陡度不到 sharpMin 的也不要（D15 的判据逐个用在这里：
+      //   阴影也是暗带，但边缘是缓的）
+      const bool afterGap = !out.points.empty() && s - lastFound > spec.gapSteps * spec.coarseStep;
+      auto lookAt = [&](P2 q, P2 nq) {
+        std::vector<Run> rs = caliperRuns(R, q, nq, spec.searchHalf, spec.runs);
+        rs.erase(std::remove_if(rs.begin(), rs.end(),
+                                [&](const Run& x) {
+                                  return x.width() < spec.widthMin || x.width() > spec.widthMax;
+                                }),
+                 rs.end());
+        if (static_cast<int>(widths.size()) >= spec.historyMin) {
+          const double wMed = median(widths);
+          const double pMed = median(peaks);
+          const bool steady =
+              percentile(widths, 75) - percentile(widths, 25) < spec.steadyIqrRatio * wMed;
+          rs.erase(std::remove_if(
+                       rs.begin(), rs.end(),
+                       [&](const Run& x) {
+                         if (!afterGap)
+                           return std::fabs(x.mid()) >
+                                  std::max(spec.jumpRatio * wMed, spec.jumpMin);
+                         if (x.peak < spec.reacquirePeakRatio * pMed ||
+                             (steady && x.width() < spec.reacquireWidthRatio * wMed))
+                           return true;
+                         const double sh =
+                             runEdges(g, q, nq, x, spec.edgeProbe, spec.backgroundProbe).sharpness;
+                         return std::isfinite(sh) && sh < spec.sharpMin;
+                       }),
+                   rs.end());
+        }
+        return rs;
+      };
+      std::vector<Run> rs = lookAt(p, n);
+      const Run* r = nearestRun(rs);
+      P2 at = p, nAt = n;
+      bool onFanRay = false;
+      // 断口之前那一段得确实像胶（几乎每步都找到、边缘够陡）才这么做：没胶的帧里粗找跟的是零件上的纹理，
+      // 再给它一条退路，覆盖率就凑够了
+      const bool looksLikeBead =
+          sharp.size() >= 3 && percentile(sharp, 25.0) >= spec.sharpMin &&
+          static_cast<double>(out.points.size()) >= spec.rayFallbackCoverage * stepsAtLastFound;
+      if (spec.rayFallback && (!r || std::fabs(r->mid()) >= accept) && afterGap && looksLikeBead) {
+        // 断口后面跟丢了：退回起始方向的那条射线上找（断口前那几个胶点定出的方向可能是歪的，
+        // 螺旋胶尤其如此；而那条射线本来就是检测区前段响应最强的方向）
+        const P2 d0 = dirOfDeg(headingDeg);
+        at = spec.anchor + d0 * s;
+        nAt = perp(d0);
+        rs = lookAt(at, nAt);
+        r = nearestRun(rs);
+        onFanRay = true;
+      }
+      // 胶是从喷嘴沿扇区里的方向往外走出去的：胶点相对喷嘴的方位跑出搜索范围 bearingMargin 以外、或者离喷嘴的
+      // 距离不到 outwardRatio·s（沿着检测区的圆弧横着走），跟的就不是胶了 —— 零件上一条纹理边能把粗找一路带偏。
+      // 演示数据满胶段的胶路上处处是 距离 / s ≥ 0.98
+      const auto plausible = [&](P2 q) {
+        if (length(q - spec.anchor) < spec.outwardRatio * s)
+          return false;
+        if (spec.bearingTo - spec.bearingFrom >= 360.0 - 1e-6)
+          return true;
+        const double b = degOf(q - spec.anchor);
+        const double mid = 0.5 * (spec.bearingFrom + spec.bearingTo);
+        return angleDiffDeg(b, mid) <=
+               0.5 * (spec.bearingTo - spec.bearingFrom) + spec.bearingMargin;
+      };
+      if (r && std::fabs(r->mid()) < accept && plausible(at + nAt * r->mid())) {
+        c = at + nAt * r->mid();
+        TrackPoint tp;
+        tp.s = s;
+        tp.point = c;
+        tp.mid = r->mid();
+        tp.width = r->width();
+        tp.peak = r->peak;
+        tp.sharpness = runEdges(g, at, nAt, *r, spec.edgeProbe, spec.backgroundProbe).sharpness;
+        tp.onRay = onFanRay;
+        out.points.push_back(tp);
+        widths.push_back(r->width());
+        peaks.push_back(r->peak);
+        if (std::isfinite(tp.sharpness))
+          sharp.push_back(tp.sharpness);
+        lastFound = s;
+        stepsAtLastFound = out.steps;
+        found = true;
+        // 在那条射线上接上的：方向也回到它，断口前的方向不作数了
+        if (onFanRay)
+          d = dirOfDeg(headingDeg);
+      }
+    }
+    std::vector<P2> recent;
+    for (const TrackPoint& q : out.points) {
+      if (q.s >= s - spec.dirWindow)
+        recent.push_back(q.point);
+    }
+    if (recent.size() >= 3)
+      d = principalDirection(recent, d);
+    p = (found ? c : p) + d * spec.coarseStep;
+    s += spec.coarseStep;
+    // 在长断口里一直顺着预测方向滑下去，迟早会滑到别的暗带上：已经找到过胶、又连续 maxGap
+    // 没找到，就不再接受新的胶点，后面的胶路交给拟合按已有的胶点外推
+    if (!stopped && !out.points.empty() && s - lastFound > spec.maxGap) {
+      stopped = true;
+      out.stoppedAt = s;
+    }
+  }
+  out.coverage = out.steps > 0 ? static_cast<double>(out.points.size()) / out.steps : 0.0;
+  out.sharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : kNaN;
+  return out;
+}
+
+// ------------------------------------------------------------------ 拟合
+
+void fitBeadPath(const std::vector<std::pair<double, P2>>& coarse, P2 anchor, double zoneStart,
+                 double zoneEnd, double coarseStep, double fitWindow, double fitSigma,
+                 std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents,
+                 double* residual) {
+  // 拟合网格往两头各多走一截（局部线性拟合在那里就是沿端点切向外推）：起点要落在「离喷嘴 zoneStart」
+  // 的那一处，终点要够得着 zoneEnd，下面的高斯平滑也不能让两头的截断影响到检测区里
+  std::vector<double> grid;
+  for (double g = zoneStart - 48.0; g <= zoneEnd + 56.0 + 1e-6; g += 1.0)
+    grid.push_back(g);
+  std::vector<P2> dense = localLinearFit(coarse, grid, fitWindow, nullptr);
+  // 检测区开头一段没找到胶（断口正好落在那里）：局部线性拟合会沿后面几个胶点的切向往回外推，拐错了方向
+  // 就是一条横着的胶路。胶是从喷嘴出来的 —— 第一个胶点之前的那一段取喷嘴到它的连线
+  const double sFirst = coarse.front().first;
+  if (sFirst > zoneStart + 2.0 * coarseStep) {
+    std::size_t k = 0;
+    while (k + 1 < grid.size() && grid[k] < sFirst)
+      ++k;
+    const P2 head = dense[k];
+    for (std::size_t i = 0; i < k; ++i) {
+      dense[i] = anchor + (head - anchor) * (grid[i] / sFirst);
+    }
+  }
+  // 再做一次高斯平滑（1.1 是 σ = 12 px）：粗找 8 px 一步，螺旋胶的胶点左右摆，局部线性拟合会留下与螺距同频的
+  // 小摆动 —— 胶路不光滑，按弧长算的 s 就比实际长出一截（300 px 的检测区能长出 20 px），断口的位置跟着漂
+  std::vector<P2> smooth = dense;
+  if (fitSigma > 0) {
+    const int half = static_cast<int>(std::ceil(3.0 * fitSigma));
+    // 权重只算一遍（逐点逐抽头调 exp 占了拟合的大半）；每个抽头的算式不变，结果一位不差
+    std::vector<double> weights(static_cast<std::size_t>(2 * half + 1));
+    for (int k = -half; k <= half; ++k)
+      weights[static_cast<std::size_t>(k + half)] = std::exp(-0.5 * k * k / (fitSigma * fitSigma));
+    for (std::size_t i = 0; i < dense.size(); ++i) {
+      P2 acc(0, 0);
+      double wsum = 0;
+      for (int k = -half; k <= half; ++k) {
+        const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
+        if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size()))
+          continue;
+        const double w = weights[static_cast<std::size_t>(k + half)];
+        acc += dense[static_cast<std::size_t>(j)] * w;
+        wsum += w;
+      }
+      smooth[i] = acc * (1.0 / wsum);
+    }
+  }
+  resampleByArcLength(smooth, anchor, zoneStart, zoneEnd, s, points, tangents);
+  std::vector<double> resid;
+  for (const auto& q : coarse) {
+    double bestD = std::numeric_limits<double>::infinity();
+    for (const P2& pt : *points)
+      bestD = std::min(bestD, length(pt - q.second));
+    resid.push_back(bestD);
+  }
+  if (residual)
+    *residual = median(resid);
+}
+
+void straightBeadPath(P2 anchor, double headingDeg, double zoneStart, double zoneEnd,
+                      std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents) {
+  const P2 d = dirOfDeg(headingDeg);
+  s->clear();
+  points->clear();
+  const double total = zoneEnd - zoneStart;
+  for (double t = 0.0; t < total - 1e-9; t += 2.0)
+    s->push_back(zoneStart + t);
+  s->push_back(zoneEnd);
+  for (double v : *s)
+    points->push_back(anchor + d * v);
+  tangents->assign(points->size(), d);
 }
 
 void PolylineView::at(double sq, P2* point, P2* tangent) const {
@@ -652,13 +1185,69 @@ void PolylineView::at(double sq, P2* point, P2* tangent) const {
   *tangent = unit(T[i] + (T[j] - T[i]) * f);
 }
 
+// ------------------------------------------------------------------ 示教胶路
+
+double polylineLength(const std::vector<P2>& pts) {
+  double total = 0;
+  for (std::size_t i = 1; i < pts.size(); ++i)
+    total += length(pts[i] - pts[i - 1]);
+  return total;
+}
+
+bool resampleTaught(const std::vector<P2>& pts, double zoneStart, double zoneEnd,
+                    std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents) {
+  std::vector<P2> q;
+  std::vector<double> arc;
+  for (const P2& p : pts) {
+    if (!finite(p))
+      return false;
+    if (!q.empty() && length(p - q.back()) < 1e-9)
+      continue;
+    arc.push_back(q.empty() ? 0.0 : arc.back() + length(p - q.back()));
+    q.push_back(p);
+  }
+  if (q.size() < 2)
+    return false;
+  const double total = arc.back();
+  const double z1 = zoneEnd > 0 ? zoneEnd : total;
+  if (!(zoneStart >= 0) || !(z1 > zoneStart) || z1 > total + 1e-6)
+    return false;
+
+  std::vector<double> targets;
+  for (double t = zoneStart; t < z1 - 1e-9; t += 2.0)
+    targets.push_back(t);
+  targets.push_back(std::min(z1, total));
+  std::vector<P2> out;
+  out.reserve(targets.size());
+  std::size_t seg = 0; // 这一段是 q[seg] → q[seg + 1]
+  for (double t : targets) {
+    while (seg + 2 < q.size() && arc[seg + 1] < t)
+      ++seg;
+    const double span = arc[seg + 1] - arc[seg];
+    const double f = span > 1e-12 ? std::clamp((t - arc[seg]) / span, 0.0, 1.0) : 0.0;
+    out.push_back(q[seg] + (q[seg + 1] - q[seg]) * f);
+  }
+  std::vector<P2> tan(out.size(), P2(1, 0));
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    const std::size_t a = i == 0 ? 0 : i - 1;
+    const std::size_t b = i + 1 < out.size() ? i + 1 : i;
+    // 只有一个点（zone 短到不足 2 px 不会发生，validate 拦着）时退回所在那一段的方向
+    tan[i] = b > a ? unit(out[b] - out[a]) : unit(q[seg + 1] - q[seg]);
+  }
+  *s = std::move(targets);
+  *points = std::move(out);
+  *tangents = std::move(tan);
+  return true;
+}
+
 // ------------------------------------------------------------------ 量胶宽
 
 StationResult measureStations(const cv::Mat& gray, const PolylineView& path, bool pathOk,
                               double zoneStart, double zoneEnd, bool bright, int responseWidthMax,
                               const StationSpec& spec) {
   StationResult out;
-  if (!path.valid()) return out;
+  if (!path.valid())
+    return out;
   for (double s = zoneStart; s <= zoneEnd + 1e-6; s += spec.step) {
     Station st;
     st.s = s;
@@ -666,8 +1255,14 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     st.n = perp(st.t);
     out.stations.push_back(std::move(st));
   }
-  if (!pathOk) return out;
+  out.expect.assign(out.stations.size(), 0.0);
+  if (!pathOk)
+    return out;
 
+  // 示教胶路（T3）：胶离示教线最远 lateralTol，卡尺至少要够得着那里的整条胶（最宽 widthRange 上限）
+  const bool taught = spec.lateralTol >= 0;
+  const double half = taught ? std::max(spec.searchHalf, spec.lateralTol + 0.5 * spec.runs.widthMax)
+                             : spec.searchHalf;
   // 响应图只算胶路两侧卡尺够得着的那一块
   double x0 = std::numeric_limits<double>::infinity(), y0 = x0, x1 = -x0, y1 = -x0;
   for (const P2& p : *path.points) {
@@ -676,17 +1271,115 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     x1 = std::max(x1, p.x);
     y1 = std::max(y1, p.y);
   }
-  const double pad = spec.searchHalf + 4.0;
+  const double pad = half + 4.0;
   const cv::Rect roi(static_cast<int>(std::floor(x0 - pad)), static_cast<int>(std::floor(y0 - pad)),
                      static_cast<int>(std::ceil(x1 - x0 + 2 * pad)) + 1,
                      static_cast<int>(std::ceil(y1 - y0 + 2 * pad)) + 1);
-  const Field R = responseField(gray, bright, responseWidthMax, roi);
-  for (Station& st : out.stations) st.runs = lateralRuns(R, st.c, st.n, spec.searchHalf, spec.runs);
+  Field level;
+  const Field R = responseField(gray, bright, responseWidthMax, roi, taught ? &level : nullptr);
+  for (Station& st : out.stations)
+    st.runs = lateralRuns(R, st.c, st.n, half, spec.runs, &st.candidates, taught && !spec.swirl);
+  const auto retainCandidates = [&](double referenceWidth, bool useTrack) {
+    const double gate = std::max(6.0, spec.centerRatio * referenceWidth);
+    for (std::size_t i = 0; i < out.stations.size(); ++i) {
+      Station& st = out.stations[i];
+      st.candidateLo = st.candidateHi = kNaN;
+      const double expect = useTrack ? out.expect[i] : 0.0;
+      const Run* best = nullptr;
+      for (const Run& r : st.candidates) {
+        if (r.lo < -spec.searchHalf || r.hi > spec.searchHalf || r.lo > expect || r.hi < expect ||
+            std::fabs(r.mid() - expect) > gate)
+          continue;
+        if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect))
+          best = &r;
+      }
+      if (best) {
+        st.candidateLo = best->lo;
+        st.candidateHi = best->hi;
+      }
+    }
+  };
+  retainCandidates(spec.runs.widthMax, false);
+
+  // 每站拿哪一段去算参考宽 / 参考峰值：拟合的胶路取离胶路最近的那一段（原来的做法）；
+  // 示教胶路只取落在偏移轨迹上的那一段（断口里、轨迹外的暗段不进参考）
+  std::vector<const Run*> refRun(out.stations.size(), nullptr);
+  if (!taught) {
+    for (std::size_t i = 0; i < out.stations.size(); ++i)
+      refRun[i] = nearestRun(out.stations[i].runs);
+  } else {
+    Track tr = trackOffsets(out.stations, spec.lateralTol, spec.centerRatio);
+    if (!spec.swirl && tr.reason.empty()) {
+      std::vector<double> trackWidths;
+      for (const Run* r : tr.onTrack) {
+        if (r)
+          trackWidths.push_back(r->width());
+      }
+      const double referenceWidth = median(trackWidths);
+      const double gate = std::max(6.0, spec.centerRatio * referenceWidth);
+      std::vector<std::pair<std::size_t, Run>> recovered;
+      for (std::size_t i = 0; i < out.stations.size(); ++i) {
+        if (tr.onTrack[i])
+          continue;
+        const Run* best = nullptr;
+        for (const Run& r : out.stations[i].candidates) {
+          if (r.width() < spec.runs.widthMin || r.width() > spec.runs.widthMax ||
+              std::fabs(r.width() - referenceWidth) > gate ||
+              std::fabs(r.mid() - tr.expect[i]) > gate || std::fabs(r.mid()) > spec.lateralTol ||
+              std::any_of(
+                  out.stations[i].runs.begin(), out.stations[i].runs.end(),
+                  [&](const Run& existing) { return existing.lo == r.lo && existing.hi == r.hi; }))
+            continue;
+          if (!best || std::fabs(r.mid() - tr.expect[i]) < std::fabs(best->mid() - tr.expect[i]))
+            best = &r;
+        }
+        if (best)
+          recovered.emplace_back(i, *best);
+      }
+      for (const auto& [i, r] : recovered)
+        out.stations[i].runs.push_back(r);
+      if (!recovered.empty())
+        tr = trackOffsets(out.stations, spec.lateralTol, spec.centerRatio);
+    }
+    out.expect = tr.expect;
+    out.trackSupport = tr.support;
+    std::vector<double> sharp, onTrackExpect;
+    if (tr.count > 0) {
+      // D15 用在整条轨迹上（T5）：压痕、阴影也是暗带，边缘却是缓的。逐站不卡（D15 的教训）
+      const Field g = smoothGrayField(gray, bright, roi);
+      for (std::size_t i = 0; i < out.stations.size(); ++i) {
+        if (!tr.onTrack[i])
+          continue;
+        onTrackExpect.push_back(tr.expect[i]);
+        const double sh = runSharpness(g, out.stations[i].c, out.stations[i].n, *tr.onTrack[i]);
+        if (std::isfinite(sh))
+          sharp.push_back(sh);
+      }
+      out.trackOffset = median(onTrackExpect);
+    }
+    out.trackSharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : kNaN;
+    if (tr.reason.empty() && std::isfinite(out.trackSharpness) &&
+        out.trackSharpness < spec.sharpMin) {
+      tr.reason = "示教线上的暗带边缘太缓（陡度 P25 = " + fmt2(out.trackSharpness) +
+                  " < sharpMin " + fmt2(spec.sharpMin) + "），像压痕或阴影，不像胶";
+    }
+    if (!tr.reason.empty()) {
+      out.trackReason = tr.reason;
+      return out; // 全部判无胶（T4）
+    }
+    std::vector<double> trackWidths;
+    for (const Run* r : tr.onTrack) {
+      if (r)
+        trackWidths.push_back(r->width());
+    }
+    retainCandidates(median(trackWidths), true);
+    refRun = tr.onTrack;
+  }
 
   // D16：参考宽取全检测区候选暗段宽度的中位数（断口里的局部窗口会被零件表面的拉丝纹主导）
   std::vector<double> widths, peaks;
-  for (const Station& st : out.stations) {
-    if (const Run* r = nearestRun(st.runs)) {
+  for (const Run* r : refRun) {
+    if (r) {
       widths.push_back(r->width());
       peaks.push_back(r->peak);
     }
@@ -695,15 +1388,34 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   out.peakRef = peaks.empty() ? 0.0 : median(peaks);
   const double minWidth = spec.presentRatio * out.wRef;
   // 对比度也要一致：断口两头模糊出来的「胶的残影」宽度对、位置对，只是淡（真实满胶帧上每站的峰值都在
-  // 中位数的 0.72 倍以上）
-  const double minPeak = spec.contrastRatio * out.peakRef;
+  // 中位数的 0.72 倍以上）。示教胶路照明不均时（亮法兰旁 / 暗背景旁）胶的顶帽响应沿线能差三四倍，直接比峰值会把
+  // 暗处整段胶当成残影：改比峰值 / 段内最亮的局部亮度，胶旁背景暗下去多少就按多少放宽。参考仍取全检测区的
+  // 中位数、不用局部窗口 —— 断口里一条与胶同宽的淡带（薄胶膜、残胶、浅槽）同样背景上比胶淡得多，
+  // 局部窗口会被它占满，参考跟着它降下来就把它当成胶了。拟合的胶路不变（原来的做法）
+  const auto contrastOf = [&](const Station& st, const Run& r) {
+    if (!taught)
+      return r.peak;
+    double lv = level.at(st.c + st.n * r.hi);
+    for (double t = r.lo; t < r.hi; t += 1.0)
+      lv = std::max(lv, level.at(st.c + st.n * t));
+    return r.peak / std::max(lv, 1.0);
+  };
+  std::vector<double> contrasts;
+  for (std::size_t i = 0; i < out.stations.size(); ++i) {
+    if (refRun[i])
+      contrasts.push_back(contrastOf(out.stations[i], *refRun[i]));
+  }
+  const double minContrast = contrasts.empty() ? 0.0 : spec.contrastRatio * median(contrasts);
 
   if (!spec.swirl) {
     const double maxOffset = std::max(6.0, spec.centerRatio * out.wRef);
-    for (Station& st : out.stations) {
-      const Run* r = nearestRun(st.runs);
-      if (!r || widths.empty() || r->width() < minWidth || std::fabs(r->mid()) > maxOffset ||
-          r->peak < minPeak) {
+    for (std::size_t i = 0; i < out.stations.size(); ++i) {
+      Station& st = out.stations[i];
+      // 中心偏离的是期望的胶中心：拟合的胶路恒为 0，示教胶路是偏移轨迹（T3）
+      const double e = out.expect[i];
+      const Run* r = nearestRun(st.runs, e);
+      if (!r || widths.empty() || r->width() < minWidth || std::fabs(r->mid() - e) > maxOffset ||
+          contrastOf(st, *r) < minContrast) {
         continue;
       }
       st.present = true;
@@ -714,21 +1426,25 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     return out;
   }
 
-  // D5：螺旋胶取外包络。每站的池子 = ±window/2 内各站、离胶路不远的全部暗段
-  const double half = 0.5 * spec.window;
+  // D5：螺旋胶取外包络。每站的池子 = ±window/2 内各站、离（期望的）胶中心不远的全部暗段
+  const double halfWindow = 0.5 * spec.window;
   const double poolReach = 0.8 * spec.searchHalf;
   std::vector<std::vector<const Run*>> pools(out.stations.size());
   for (std::size_t i = 0; i < out.stations.size(); ++i) {
-    for (const Station& y : out.stations) {
-      if (std::fabs(y.s - out.stations[i].s) > half) continue;
+    for (std::size_t j = 0; j < out.stations.size(); ++j) {
+      const Station& y = out.stations[j];
+      if (std::fabs(y.s - out.stations[i].s) > halfWindow)
+        continue;
       for (const Run& r : y.runs) {
-        if (std::fabs(r.mid()) < poolReach) pools[i].push_back(&r);
+        if (std::fabs(r.mid() - out.expect[j]) < poolReach)
+          pools[i].push_back(&r);
       }
     }
   }
   std::vector<double> env;
   for (const auto& pool : pools) {
-    if (pool.empty()) continue;
+    if (pool.empty())
+      continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
     for (const Run* r : pool) {
       lo = std::min(lo, r->lo);
@@ -740,16 +1456,19 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   for (std::size_t i = 0; i < out.stations.size(); ++i) {
     Station& st = out.stations[i];
     auto qualifies = [&](const Run& r) {
-      return std::fabs(r.mid()) <= out.envelopeHalf && r.width() >= minWidth;
+      return std::fabs(r.mid() - out.expect[i]) <= out.envelopeHalf && r.width() >= minWidth;
     };
     // 有无胶按本站自己判（窗口只用来算外包络）：按窗口判会把比窗口短的断口整个抹掉。
     // 对比度的一致性只卡「本站有没有胶」，不卡外包络：螺圈外沿的那几股本来就淡一些
     bool own = false;
-    for (const Run& r : st.runs) own = own || (qualifies(r) && r.peak >= minPeak);
-    if (!own || widths.empty()) continue;
+    for (const Run& r : st.runs)
+      own = own || (qualifies(r) && contrastOf(st, r) >= minContrast);
+    if (!own || widths.empty())
+      continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo, peak = 0;
     for (const Run* r : pools[i]) {
-      if (!qualifies(*r)) continue;
+      if (!qualifies(*r))
+        continue;
       lo = std::min(lo, r->lo);
       hi = std::max(hi, r->hi);
       peak = std::max(peak, r->peak);
@@ -762,4 +1481,4 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   return out;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

@@ -28,7 +28,7 @@ unsafe extern "C" fn trampoline<R: Runtime>(event_json: *const c_char, user: *mu
         if event_json.is_null() || user.is_null() {
             return;
         }
-        let ctx = &*(user as *const EmitCtx::<R>);
+        let ctx = &*(user as *const EmitCtx<R>);
         let Ok(text) = CStr::from_ptr(event_json).to_str() else {
             eprintln!("execution event 不是合法 UTF-8，已丢弃");
             return;
@@ -252,8 +252,8 @@ fn launch<R: Runtime>(
         spec.preview_max_points = p.max_points;
         spec.preview_budget_ms = p.budget_ms;
     }
-    let handle = unsafe { RunHandle::start(core, spec, trampoline::<R>, ctx) }
-        .map_err(|e| e.to_string())?;
+    let handle =
+        unsafe { RunHandle::start(core, spec, trampoline::<R>, ctx) }.map_err(|e| e.to_string())?;
     Ok(Arc::new(handle))
 }
 
@@ -317,7 +317,16 @@ impl RunManager {
     ) -> Result<String, String> {
         let run_id = ulid::new();
         self.submit(
-            || launch(app, Arc::clone(&core), graph_json, base_dir, options, &run_id),
+            || {
+                launch(
+                    app,
+                    Arc::clone(&core),
+                    graph_json,
+                    base_dir,
+                    options,
+                    &run_id,
+                )
+            },
             || {
                 let owned = OwnedStart::copy_of(graph_json, base_dir, &options);
                 let (launch_app, notify_app) = (app.clone(), app.clone());
@@ -329,7 +338,14 @@ impl RunManager {
                         // 它就一直卸载不掉，跑的还是旧的算子（ADR-0009）
                         let core = core_ffi::core()?;
                         let options = owned.options();
-                        launch(&launch_app, core, &owned.graph_json, &owned.base_dir, options, &launch_id)
+                        launch(
+                            &launch_app,
+                            core,
+                            &owned.graph_json,
+                            &owned.base_dir,
+                            options,
+                            &launch_id,
+                        )
                     },
                     move |status, error| {
                         emit_never_started(&notify_app, &notify_id, status, error.as_deref())
@@ -398,8 +414,15 @@ impl RunManager {
                 st = self.resumed.wait(st).unwrap_or_else(|e| e.into_inner());
             }
             st.paused = true;
-            let taken: Vec<Run> = [st.active.take(), st.draining.take()].into_iter().flatten().collect();
-            let finished = if mode == PauseMode::ReleaseAll { st.finished.take() } else { None };
+            let taken: Vec<Run> = [st.active.take(), st.draining.take()]
+                .into_iter()
+                .flatten()
+                .collect();
+            let finished = if mode == PauseMode::ReleaseAll {
+                st.finished.take()
+            } else {
+                None
+            };
             (taken, finished)
         };
         for run in &taken {
@@ -512,10 +535,7 @@ fn append_f32(out: &mut Vec<u8>, values: &[f32]) {
     {
         // 小端机器上 f32 的内存布局就是我们要的字节序，整段拷过去即可
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                values.as_ptr().cast::<u8>(),
-                std::mem::size_of_val(values),
-            )
+            std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
         };
         out.extend_from_slice(bytes);
     }
@@ -535,9 +555,15 @@ pub fn encode_cloud(view: &core_ffi::CloudView) -> Vec<u8> {
         if has_intensity { n * 4 } else { 0 } + if has_normals { n * 12 } else { 0 } + rgb_len;
     let mut out = Vec::with_capacity(16 + 24 + n * 12 + extra);
     // flags 按实际写出的通道算，不照抄 core 的：载荷里有什么、位就是什么
-    let flags = if has_intensity { core_ffi::CLOUD_HAS_INTENSITY } else { 0 }
-        | if has_normals { core_ffi::CLOUD_HAS_NORMALS } else { 0 }
-        | if has_rgb { core_ffi::CLOUD_HAS_RGB } else { 0 };
+    let flags = if has_intensity {
+        core_ffi::CLOUD_HAS_INTENSITY
+    } else {
+        0
+    } | if has_normals {
+        core_ffi::CLOUD_HAS_NORMALS
+    } else {
+        0
+    } | if has_rgb { core_ffi::CLOUD_HAS_RGB } else { 0 };
 
     out.extend_from_slice(&CLOUD_MAGIC.to_le_bytes());
     out.extend_from_slice(&view.point_count().to_le_bytes());
@@ -568,10 +594,7 @@ fn append_i64(out: &mut Vec<u8>, values: &[i64]) {
     #[cfg(target_endian = "little")]
     {
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                values.as_ptr().cast::<u8>(),
-                std::mem::size_of_val(values),
-            )
+            std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
         };
         out.extend_from_slice(bytes);
     }
@@ -585,10 +608,7 @@ fn append_i32(out: &mut Vec<u8>, values: &[i32]) {
     #[cfg(target_endian = "little")]
     {
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                values.as_ptr().cast::<u8>(),
-                std::mem::size_of_val(values),
-            )
+            std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
         };
         out.extend_from_slice(bytes);
     }

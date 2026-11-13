@@ -39,7 +39,8 @@ constexpr std::size_t kRobustMinPoints = 8;
 // "lower median" (s[(n-1)//2]) -- see onnx_port_contract.md section 3.
 double medianOfSorted(const std::vector<double>& sorted) {
   const std::size_t n = sorted.size();
-  if (n % 2 == 1) return sorted[n / 2];
+  if (n % 2 == 1)
+    return sorted[n / 2];
   return (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
 }
 
@@ -108,7 +109,8 @@ std::vector<Component> componentsFor(const SegmentRow& row, int class_id,
 
   std::vector<Component> runs;
   for (std::size_t i = 0; i < x.size(); ++i) {
-    if (!valid[i] || labels[i] != class_id) continue;
+    if (!valid[i] || labels[i] != class_id)
+      continue;
     if (!runs.empty()) {
       const std::size_t previous = runs.back().back();
       const bool slot_break = i - previous > options.split_slot_gap;
@@ -121,11 +123,13 @@ std::vector<Component> componentsFor(const SegmentRow& row, int class_id,
     }
     runs.push_back(Component{i});
   }
-  if (runs.size() <= 1) return runs;
+  if (runs.size() <= 1)
+    return runs;
 
   std::vector<Box> boxes;
   boxes.reserve(runs.size());
-  for (const auto& run : runs) boxes.push_back(boxOf(row, run));
+  for (const auto& run : runs)
+    boxes.push_back(boxOf(row, run));
 
   std::vector<std::size_t> parent(runs.size());
   std::iota(parent.begin(), parent.end(), std::size_t{0});
@@ -138,10 +142,12 @@ std::vector<Component> componentsFor(const SegmentRow& row, int class_id,
   };
   for (std::size_t i = 0; i < runs.size(); ++i) {
     for (std::size_t j = i + 1; j < runs.size(); ++j) {
-      if (boxDistance(boxes[i], boxes[j]) > options.link_mm) continue;
+      if (boxDistance(boxes[i], boxes[j]) > options.link_mm)
+        continue;
       const std::size_t a = find(i);
       const std::size_t b = find(j);
-      if (a != b) parent[a] = b;
+      if (a != b)
+        parent[a] = b;
     }
   }
 
@@ -168,12 +174,16 @@ std::vector<Component> componentsFor(const SegmentRow& row, int class_id,
 const Component* pickLargest(const std::vector<Component>& components, std::size_t min_slots) {
   const Component* best = nullptr;
   for (const auto& component : components) {
-    if (component.size() < min_slots) continue;
-    if (best == nullptr || component.size() > best->size()) best = &component;
+    if (component.size() < min_slots)
+      continue;
+    if (best == nullptr || component.size() > best->size())
+      best = &component;
   }
-  if (best != nullptr) return best;
+  if (best != nullptr)
+    return best;
   for (const auto& component : components) {
-    if (best == nullptr || component.size() > best->size()) best = &component;
+    if (best == nullptr || component.size() > best->size())
+      best = &component;
   }
   return best;
 }
@@ -183,21 +193,26 @@ std::size_t labelledSlotCount(const SegmentRow& row, int class_id) {
   const auto& labels = *row.labels;
   std::size_t count = 0;
   for (std::size_t i = 0; i < labels.size(); ++i) {
-    if (valid[i] && labels[i] == class_id) ++count;
+    if (valid[i] && labels[i] == class_id)
+      ++count;
   }
   return count;
 }
 
 detection::domain::Roi& fieldFor(detection::domain::TemplateRoiConfiguration& rois,
                                  const std::string& name) {
-  if (name == "left_surface") return rois.flush_base;
-  if (name == "left_roll") return rois.gap_left;
-  if (name == "right_roll") return rois.gap_right;
-  if (name == "right_surface") return rois.flush_ref;
+  if (name == "left_surface")
+    return rois.flush_base;
+  if (name == "left_roll")
+    return rois.gap_left;
+  if (name == "right_roll")
+    return rois.gap_right;
+  if (name == "right_surface")
+    return rois.flush_ref;
   throw std::runtime_error("gap_ml::boxesFromLabels: unknown segment name " + name);
 }
 
-}  // namespace
+} // namespace
 
 ClusterBounds robustClusterBounds(std::vector<double> values, double gap_factor, double scale_floor,
                                   std::size_t min_points) {
@@ -215,7 +230,8 @@ ClusterBounds robustClusterBounds(std::vector<double> values, double gap_factor,
   const double med = values[mid];
 
   std::vector<double> absolute_deviation(n);
-  for (std::size_t i = 0; i < n; ++i) absolute_deviation[i] = std::fabs(values[i] - med);
+  for (std::size_t i = 0; i < n; ++i)
+    absolute_deviation[i] = std::fabs(values[i] - med);
   std::sort(absolute_deviation.begin(), absolute_deviation.end());
   const double mad = medianOfSorted(absolute_deviation);
   const double scale = std::max(mad * 1.4826, scale_floor);
@@ -264,7 +280,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
   MaskRefineResult result;
   result.labels[0] = *row0.labels;
   result.labels[1] = *row1.labels;
-  if (!options.enabled) return result;
+  if (!options.enabled)
+    return result;
 
   constexpr std::size_t kRows = 2;
   constexpr std::size_t kSegmentCount = 4;
@@ -291,7 +308,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
     const std::size_t kept = chosen[r][s].size();
     // A suspicion flag always gets an entry, even for the otherwise-silent single-component case:
     // the whole point of the flag is to surface a decision that could not be cross-checked.
-    if (!pairing_degraded && components[r][s].size() <= 1 && kept == labelled) return;
+    if (!pairing_degraded && components[r][s].size() <= 1 && kept == labelled)
+      return;
     SegmentRefinement entry;
     entry.segment = kSegments[s].name;
     entry.row = r;
@@ -312,10 +330,12 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
     std::vector<const Component*> candidates;
     bool any_above_floor = false;
     for (const auto& component : components[r][s]) {
-      if (component.size() >= options.min_component_slots) any_above_floor = true;
+      if (component.size() >= options.min_component_slots)
+        any_above_floor = true;
     }
     for (const auto& component : components[r][s]) {
-      if (any_above_floor && component.size() < options.min_component_slots) continue;
+      if (any_above_floor && component.size() < options.min_component_slots)
+        continue;
       candidates.push_back(&component);
     }
     return candidates;
@@ -347,7 +367,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
           // pair seen -- row0 candidates outer, row1 inner, both in componentsFor order.
           const bool better = best0 == nullptr || distance < best_distance ||
                               (distance == best_distance && slots > best_slots);
-          if (!better) continue;
+          if (!better)
+            continue;
           best0 = candidate0;
           best1 = candidate1;
           best_distance = distance;
@@ -378,7 +399,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
   const auto anchorBox = [&](std::size_t s) -> std::optional<Box> {
     std::optional<Box> box;
     for (std::size_t r = 0; r < kRows; ++r) {
-      if (chosen[r][s].empty()) continue;
+      if (chosen[r][s].empty())
+        continue;
       const Box row_box = boxOf(*rows[r], chosen[r][s]);
       box = box ? unite(*box, row_box) : row_box;
     }
@@ -406,7 +428,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
 
       bool any_above_floor = false;
       for (const auto& candidate : candidates) {
-        if (candidate.size() >= options.min_component_slots) any_above_floor = true;
+        if (candidate.size() >= options.min_component_slots)
+          any_above_floor = true;
       }
 
       const Component* best_gated = nullptr;
@@ -414,13 +437,15 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
       const Component* nearest = nullptr;
       double nearest_distance = std::numeric_limits<double>::infinity();
       for (const auto& candidate : candidates) {
-        if (any_above_floor && candidate.size() < options.min_component_slots) continue;
+        if (any_above_floor && candidate.size() < options.min_component_slots)
+          continue;
         const double distance = boxDistance(boxOf(*rows[r], candidate), *anchor);
         if (distance < nearest_distance) {
           nearest_distance = distance;
           nearest = &candidate;
         }
-        if (distance > options.anchor_gap_mm) continue;
+        if (distance > options.anchor_gap_mm)
+          continue;
         if (best_gated == nullptr || candidate.size() > best_gated->size()) {
           best_gated = &candidate;
           best_gated_distance = distance;
@@ -446,11 +471,13 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
   for (std::size_t r = 0; r < kRows; ++r) {
     std::vector<char> keep(result.labels[r].size(), 0);
     for (std::size_t s = 0; s < kSegmentCount; ++s) {
-      for (const std::size_t slot : chosen[r][s]) keep[slot] = 1;
+      for (const std::size_t slot : chosen[r][s])
+        keep[slot] = 1;
     }
     const auto& valid = *rows[r]->valid;
     for (std::size_t i = 0; i < result.labels[r].size(); ++i) {
-      if (keep[i] || !valid[i]) continue;
+      if (keep[i] || !valid[i])
+        continue;
       for (const auto& segment : kSegments) {
         if (result.labels[r][i] == segment.class_id) {
           result.labels[r][i] = 0;
@@ -465,7 +492,8 @@ MaskRefineResult refineSegmentMasks(const SegmentRow& row0, const SegmentRow& ro
 std::string describeRefinements(const std::vector<SegmentRefinement>& refinements) {
   std::string text;
   for (const auto& entry : refinements) {
-    if (!text.empty()) text += "; ";
+    if (!text.empty())
+      text += "; ";
     text += entry.segment + "/row" + std::to_string(entry.row) + ": " +
             std::to_string(entry.component_count) + " components, kept " +
             std::to_string(entry.kept_slots) + " slots, dropped " +
@@ -484,8 +512,10 @@ std::string describeRefinements(const std::vector<SegmentRefinement>& refinement
       text += buffer;
       text += "mm";
     }
-    if (entry.anchor_gate_missed) text += " (anchor-gate-missed)";
-    if (entry.pairing_degraded) text += " (pairing-degraded)";
+    if (entry.anchor_gate_missed)
+      text += " (anchor-gate-missed)";
+    if (entry.pairing_degraded)
+      text += " (pairing-degraded)";
   }
   return text;
 }
@@ -502,4 +532,4 @@ RoiBoxesResult boxesFromRefinedLabels(const SegmentRow& row0, const SegmentRow& 
   return result;
 }
 
-}  // namespace gap::ml
+} // namespace gap::ml

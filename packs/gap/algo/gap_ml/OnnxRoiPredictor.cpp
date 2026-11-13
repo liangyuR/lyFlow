@@ -15,10 +15,8 @@ namespace gap::ml {
 
 struct OnnxRoiPredictor::Impl {
   explicit Impl(const std::filesystem::path& model_path)
-      : path(model_path),
-        sha256(gap::io::sha256File(model_path)),
-        env(ORT_LOGGING_LEVEL_WARNING, "xyz_gap_ml"),
-        session(makeSession(env, model_path)) {
+      : path(model_path), sha256(gap::io::sha256File(model_path)),
+        env(ORT_LOGGING_LEVEL_WARNING, "xyz_gap_ml"), session(makeSession(env, model_path)) {
     auto in_name = session.GetInputNameAllocated(0, allocator);
     auto out_name = session.GetOutputNameAllocated(0, allocator);
     input_name = in_name.get();
@@ -143,4 +141,4 @@ const std::string& OnnxRoiPredictor::modelSha256() const { return impl_->sha256;
 
 const std::filesystem::path& OnnxRoiPredictor::modelPath() const { return impl_->path; }
 
-}  // namespace gap::ml
+} // namespace gap::ml

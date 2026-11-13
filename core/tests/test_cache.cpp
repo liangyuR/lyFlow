@@ -73,7 +73,7 @@ double runDurationMs(const RunLog& log) {
   return finished.empty() ? -1.0 : finished.back().value("durationMs", -1.0);
 }
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------- 1.1 缓存
 
@@ -130,9 +130,100 @@ TEST_CASE("改中间节点参数：只重算它和它的下游") {
   const RunLog second = runGraphCached(changed);
 
   CHECK(second.runStatus() == "ok");
-  CHECK(second.finalState("g") == "skipped");  // 上游没变
+  CHECK(second.finalState("g") == "skipped"); // 上游没变
   CHECK(second.finalState("v") == "done");
-  CHECK(second.finalState("p") == "done");     // 下游跟着失效
+  CHECK(second.finalState("p") == "done"); // 下游跟着失效
+}
+
+TEST_CASE("cacheKey：修复同名相对路径在不同目录、相同大小与 mtime 时错误复用") {
+  namespace fs = std::filesystem;
+  const auto dir = fs::temp_directory_path() /
+                   ("lyflow-cache-path-" +
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup {
+    fs::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      fs::remove_all(dir, ec);
+    }
+  } cleanup{dir};
+  const auto a = dir / "a";
+  const auto b = dir / "b";
+  fs::create_directories(a / "unused");
+  fs::create_directories(b);
+  std::ofstream(a / "input.bin", std::ios::binary) << "AAA";
+  std::ofstream(b / "input.bin", std::ios::binary) << "BBB";
+  fs::last_write_time(b / "input.bin", fs::last_write_time(a / "input.bin"));
+  REQUIRE(fs::file_size(a / "input.bin") == fs::file_size(b / "input.bin"));
+  REQUIRE(fs::last_write_time(a / "input.bin") == fs::last_write_time(b / "input.bin"));
+
+  Registry registry;
+  registry.addType(PortType{"Transform", "#a0d030", {}, ""});
+  OperatorDesc op;
+  op.id = "test.path_identity";
+  op.version = "1.0.0";
+  op.label = "Path Identity";
+  op.category = "Test";
+  op.outputs = {Port{"out", "Transform", "Out", "", true}};
+  op.compute = [](const Inputs&, const ParamView&, Outputs& out, ExecContext&) {
+    out.set("out", Data::transform(Transform{}));
+    return Status::Ok();
+  };
+  Param path;
+  path.name = "path";
+  path.type = ParamType::Path;
+  path.def = Value::text("");
+  op.params = {path};
+  registry.addOperator(op);
+  OperatorDesc noPath = op;
+  noPath.id = "test.no_path_identity";
+  noPath.params.clear();
+  registry.addOperator(std::move(noPath));
+  op.id = "test.stamped_path_identity";
+  op.externalKey = [](const ParamView& params) {
+    const auto file = params.path("path");
+    std::error_code ec;
+    const auto size = fs::file_size(file, ec);
+    if (ec)
+      return std::string{};
+    const auto mtime = fs::last_write_time(file, ec);
+    return ec ? std::string{}
+              : std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
+  };
+  registry.addOperator(std::move(op));
+  REQUIRE(registry.validate().empty());
+
+  auto keyOf = [&](const std::string& opId, const fs::path& base, const std::string& rawPath) {
+    const Json params = opId == "test.no_path_identity" ? Json::object() : Json{{"path", rawPath}};
+    const Json doc = makeGraph({{"n", opId, params}}, {});
+    exec::RawGraph raw;
+    Diagnostics diags;
+    REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
+    exec::BuildOptions options;
+    options.runId = "path-identity";
+    options.baseDir = base;
+    exec::Plan plan;
+    REQUIRE(exec::buildPlan(registry, raw, options, plan, diags));
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(plan.nodes.size() == 1);
+    return plan.nodes.front().cacheKey;
+  };
+  for (const auto* opId : {"test.path_identity", "test.stamped_path_identity"}) {
+    CAPTURE(opId);
+    const auto first = keyOf(opId, a, "input.bin");
+    CHECK(first != keyOf(opId, b, "input.bin"));
+    CHECK(first == keyOf(opId, a, "input.bin"));
+    CHECK(first == keyOf(opId, a / "." / "unused" / "..", "input.bin"));
+    const auto absolute = (a / "input.bin").u8string();
+    CHECK(keyOf(opId, a, absolute) == keyOf(opId, b, absolute));
+    CHECK(keyOf(opId, a, "missing.bin") != keyOf(opId, b, "missing.bin"));
+    CHECK_NOTHROW(keyOf(opId, a, "invalid<>path.bin"));
+  }
+  CHECK(keyOf("test.no_path_identity", a, "") == keyOf("test.no_path_identity", b, ""));
+  const auto stamped = keyOf("test.stamped_path_identity", a, "input.bin");
+  fs::last_write_time(a / "input.bin",
+                      fs::last_write_time(a / "input.bin") + std::chrono::seconds(2));
+  CHECK(stamped != keyOf("test.stamped_path_identity", a, "input.bin"));
 }
 
 TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
@@ -149,7 +240,7 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   }
   CHECK(cold[0]["level"] == 0);
   CHECK(cold[2]["level"] == 2);
-  CHECK(cold[0]["upstreamMissing"] == false);  // 没有上游
+  CHECK(cold[0]["upstreamMissing"] == false); // 没有上游
   CHECK(cold[1]["upstreamMissing"] == true);
 
   runGraphCached(doc);
@@ -157,7 +248,8 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   const Json warm = Json::parse(exec::planGraphJson(doc.dump(), {}, {}));
   std::set<std::string> predicted;
   for (const Json& n : warm) {
-    if (n["cached"].get<bool>()) predicted.insert(n["nodeId"].get<std::string>());
+    if (n["cached"].get<bool>())
+      predicted.insert(n["nodeId"].get<std::string>());
   }
   const RunLog again = runGraphCached(doc);
   CHECK(predicted == statesOf(again, "skipped"));
@@ -168,7 +260,8 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   const auto cachedNow = [&] {
     std::set<std::string> out;
     for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}))) {
-      if (n["cached"].get<bool>()) out.insert(n["nodeId"].get<std::string>());
+      if (n["cached"].get<bool>())
+        out.insert(n["nodeId"].get<std::string>());
     }
     return out;
   };
@@ -218,7 +311,8 @@ TEST_CASE("LRU 字节预算：超预算时从最久没用的一头淘汰") {
   // 先在大预算下攒三份互不相同的结果
   store.setBudget(64ull * 1024 * 1024);
   for (int i = 0; i < 3; ++i) {
-    runGraphCached(makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 20000}, {"seed", i}}}}, {}));
+    runGraphCached(
+        makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 20000}, {"seed", i}}}}, {}));
   }
   const auto before = store.stats();
   CHECK(before.entries == 3);
@@ -338,8 +432,8 @@ TEST_CASE("bypass 改变 cacheKey：取消静音之后不会拿到静音时的�
 
   const RunLog b = runGraphCached(chainGraph());
   CHECK(b.runStatus() == "ok");
-  CHECK(b.finalState("g") == "skipped");  // 源头没变
-  CHECK(b.finalState("v") == "done");     // 静音状态变了，必须重算
+  CHECK(b.finalState("g") == "skipped"); // 源头没变
+  CHECK(b.finalState("v") == "done");    // 静音状态变了，必须重算
   CHECK(b.nodeEvent("v", "done")["stats"]["elementCount"].get<int>() <
         a.nodeEvent("v", "skipped")["stats"]["elementCount"].get<int>());
 }
@@ -360,7 +454,7 @@ TEST_CASE("bypass 找不到类型兼容的源：下游报 bypassed_no_source") {
        {"pl.indices", "x.indices"},
        {"x.rest", "tail.cloud"}});
   Json muted = doc;
-  muted["nodes"][1]["bypass"] = true;  // 静音 half_indices
+  muted["nodes"][1]["bypass"] = true; // 静音 half_indices
 
   const RunLog log = runGraph(muted);
   CHECK(log.runStatus() == "error");
@@ -391,7 +485,8 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
   REQUIRE(exec::buildPlan(ensureRegistry(), raw, options, plan, diags));
   CHECK_FALSE(diags.hasErrors());
   for (const auto& n : plan.nodes) {
-    if (n.id != "r1" && n.id != "r2") continue;
+    if (n.id != "r1" && n.id != "r2")
+      continue;
     CHECK(n.inputTypes.at("in") == "PointCloud");
     CHECK(n.outputTypes.at("out") == "PointCloud");
   }
@@ -415,7 +510,8 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
   exec::buildPlan(ensureRegistry(), badRaw, options, badPlan, badDiags);
   bool sawMismatch = false;
   for (const auto& d : badDiags.items()) {
-    if (d.status.code == "type_mismatch") sawMismatch = true;
+    if (d.status.code == "type_mismatch")
+      sawMismatch = true;
   }
   CHECK(sawMismatch);
 }
@@ -452,7 +548,8 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   REQUIRE(diags.is_array());
   Json migration;
   for (const Json& d : diags) {
-    if (d.value("kind", "") == "migration") migration = d;
+    if (d.value("kind", "") == "migration")
+      migration = d;
   }
   REQUIRE_FALSE(migration.is_null());
   CHECK(migration["nodeId"] == "s");
@@ -505,7 +602,8 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   bound["params"] = Json{{"seed", Json{{"default", 9}, {"binds", Json::array({"s.seed"})}}}};
   Json boundMigration;
   for (const Json& d : Json::parse(exec::validateGraphJson(bound.dump(), {}))) {
-    if (d.value("kind", "") == "migration") boundMigration = d;
+    if (d.value("kind", "") == "migration")
+      boundMigration = d;
     CHECK(d.value("severity", "") != "error");
   }
   REQUIRE_FALSE(boundMigration.is_null());
@@ -566,7 +664,7 @@ TEST_CASE("注册表自检：迁移链断档会被挡在启动时") {
 
   Registry broken;
   broken.addType(PortType{"Transform", "#a0d030", {}, ""});
-  broken.addOperator(makeOp("3.0.0", {Migration{1, identity}}));  // 缺 2 → 3
+  broken.addOperator(makeOp("3.0.0", {Migration{1, identity}})); // 缺 2 → 3
   const auto problems = broken.validate();
   REQUIRE_FALSE(problems.empty());
   CHECK(problems.front().find("migration from major 2") != std::string::npos);
@@ -638,7 +736,8 @@ TEST_CASE("拓扑迁移（ADR-0025）：删掉旧端口的边、插一个节点�
         1, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
           TopologyEdit e;
           for (const MigrationInput& in : inputs) {
-            if (in.port != "old") continue;
+            if (in.port != "old")
+              continue;
             CHECK(in.fromOp == "test.t_src");
             e.dropInputs.push_back("old");
             e.addNodes.push_back({"pack", "test.t_pack", nlohmann::json::object(), "打包"});
@@ -680,7 +779,8 @@ TEST_CASE("拓扑迁移（ADR-0025）：删掉旧端口的边、插一个节点�
   CHECK(m["edits"]["addEdges"][1]["from"] == Json{{"node", "s_pack_2"}, {"port", "out"}});
   CHECK(m["edits"]["addEdges"][1]["to"] == Json{{"node", "s"}, {"port", "in"}});
   bool noted = false;
-  for (const Json& n : m["notes"]) noted = noted || n == "old 收进 t_pack，接到 in";
+  for (const Json& n : m["notes"])
+    noted = noted || n == "old 收进 t_pack，接到 in";
   CHECK(noted);
 
   std::set<std::string> planned;
@@ -704,7 +804,8 @@ TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出
   Json migration;
   for (const Json& d : diags) {
     CHECK(d.value("severity", "") != "error");
-    if (d.value("kind", "") == "migration") migration = d;
+    if (d.value("kind", "") == "migration")
+      migration = d;
   }
   REQUIRE_FALSE(migration.is_null());
   CHECK(migration["params"]["keepCount"] == 100);
@@ -726,7 +827,8 @@ TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出
 
 // ------------------------------------------------------------- 1.6 参数联动
 
-TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 与 schema、编辑器同一套判据（param-recipe P1.6）") {
+TEST_CASE(
+    "visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 与 schema、编辑器同一套判据（param-recipe P1.6）") {
   ensureTestOps();
   // cond 决定 path 何时露出来：eq file（source = file 才可见）或 ne identity（source ≠ identity 才可见）
   auto makeRegistry = [](const char* opId, bool useNe) {
@@ -804,9 +906,11 @@ TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 
     const Json manifest = Json::parse(r.toManifestJson());
     const Json* declared = nullptr;
     for (const Json& o : manifest["operators"]) {
-      if (o["id"] != "test.ne_path") continue;
+      if (o["id"] != "test.ne_path")
+        continue;
       for (const Json& p : o["params"]) {
-        if (p["name"] == "path") declared = &p;
+        if (p["name"] == "path")
+          declared = &p;
       }
     }
     REQUIRE(declared != nullptr);
@@ -823,7 +927,8 @@ TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 
 
 // ------------------------------------------------ 落盘缓存（docs/disk-cache-plan.md）
 
-TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张量、图像，逐位往返；点云读回换新 id；别的类型不落盘") {
+TEST_CASE(
+    "落盘缓存的编解码：点云带 intensity / normals / rgb、张量、图像，逐位往返；点云读回换新 id；别的类型不落盘") {
   PointCloud c;
   c.xyz = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f};
   c.intensity = {0.5f, 0.25f};
@@ -833,7 +938,8 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
   t.shape = {1, 2, 3};
   t.data = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
   Image img = Image::allocate(3, 2, 4, PixelDepth::U16);
-  for (std::size_t i = 0; i < img.byteSize(); ++i) img.mutablePixels()[i] = static_cast<std::uint8_t>(i * 7);
+  for (std::size_t i = 0; i < img.byteSize(); ++i)
+    img.mutablePixels()[i] = static_cast<std::uint8_t>(i * 7);
   const exec::PortData ports = {
       {"cloud", Data::cloud(c)}, {"logits", Data::tensor(t)}, {"image", Data::image(img)}};
   std::string bytes;
@@ -848,7 +954,7 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
   CHECK(bc->intensity == c.intensity);
   CHECK(bc->normals == c.normals);
   CHECK(bc->rgb == c.rgb);
-  CHECK(bc->id != c.id);  // 进程内唯一：读回来的是一片新云，Indices 对账不会认错
+  CHECK(bc->id != c.id); // 进程内唯一：读回来的是一片新云，Indices 对账不会认错
   const Tensor* bt = back[1].second.asTensor();
   REQUIRE(bt != nullptr);
   CHECK(bt->shape == t.shape);
@@ -877,15 +983,17 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
   // 有一个端口不是点云 / 张量，整节点不编
   Indices idx;
   idx.values = {0};
-  CHECK_FALSE(exec::encodeNode({{"cloud", Data::cloud(c)}, {"indices", Data::indices(idx)}}, bytes));
+  CHECK_FALSE(
+      exec::encodeNode({{"cloud", Data::cloud(c)}, {"indices", Data::indices(idx)}}, bytes));
 }
 
-TEST_CASE("落盘缓存：另一个「进程」（清空内存）照样命中且逐位相同，plan 的 cached 预测查盘；指纹换了不命中；坏文件当未命中") {
+TEST_CASE(
+    "落盘缓存：另一个「进程」（清空内存）照样命中且逐位相同，plan 的 cached 预测查盘；指纹换了不命中；坏文件当未命中") {
   ensureTestOps();
   const auto dir = std::filesystem::temp_directory_path() / "lyflow-disk-cache-test";
   std::filesystem::remove_all(dir);
   exec::DiskCache& disk = exec::DiskCache::instance();
-  disk.setMinDurationMs(0);  // 测试图都很快；阈值的逻辑本身就是一个比较
+  disk.setMinDurationMs(0); // 测试图都很快；阈值的逻辑本身就是一个比较
   REQUIRE(disk.setDir(dir.u8string(), "fpA").empty());
 
   // g / t / s 只出点云（能落盘），h 出 Indices（不能）；s 用读回的 t 与现算的 h 对账
@@ -896,7 +1004,10 @@ TEST_CASE("落盘缓存：另一个「进程」（清空内存）照样命中且
           {"h", "test.half_indices"},
           {"s", "test.split"},
       },
-      {{"g.cloud", "t.cloud"}, {"t.cloud", "h.cloud"}, {"t.cloud", "s.cloud"}, {"h.indices", "s.indices"}});
+      {{"g.cloud", "t.cloud"},
+       {"t.cloud", "h.cloud"},
+       {"t.cloud", "s.cloud"},
+       {"h.indices", "s.indices"}});
   auto selected = [](const std::string& runId) {
     Data d;
     REQUIRE(exec::ResultStore::instance().get(runId, "s", "selected", d));
@@ -904,21 +1015,23 @@ TEST_CASE("落盘缓存：另一个「进程」（清空内存）照样命中且
   };
   std::vector<float> first;
   {
-    Session s(doc);  // 先清空内存再跑：第一次全部真算、落盘
+    Session s(doc); // 先清空内存再跑：第一次全部真算、落盘
     REQUIRE(s.wait().runStatus() == "ok");
     first = selected(s.runId());
   }
   std::size_t files = 0;
   for (const auto& e : std::filesystem::recursive_directory_iterator(dir)) {
-    if (e.path().extension() == ".lfc") ++files;
+    if (e.path().extension() == ".lfc")
+      ++files;
   }
-  CHECK(files == 3);  // g、t、s；h 的 Indices 不落盘
+  CHECK(files == 3); // g、t、s；h 的 Indices 不落盘
 
   // 清空内存 = 换了一个进程：plan 预测 g / t / s 命中、h 要算
   exec::ResultStore::instance().clear();
   std::set<std::string> predicted;
   for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}))) {
-    if (n["cached"].get<bool>()) predicted.insert(n["nodeId"].get<std::string>());
+    if (n["cached"].get<bool>())
+      predicted.insert(n["nodeId"].get<std::string>());
   }
   CHECK(predicted == std::set<std::string>{"g", "t", "s"});
   {
@@ -942,7 +1055,8 @@ TEST_CASE("落盘缓存：另一个「进程」（清空内存）照样命中且
 
   // 坏文件（写到一半被杀）：当未命中、删掉，这一次照常真算并重写
   for (const auto& e : std::filesystem::recursive_directory_iterator(dir / "fpB")) {
-    if (e.path().extension() != ".lfc") continue;
+    if (e.path().extension() != ".lfc")
+      continue;
     std::ofstream(e.path(), std::ios::binary | std::ios::trunc) << "LFC1broken";
   }
   {

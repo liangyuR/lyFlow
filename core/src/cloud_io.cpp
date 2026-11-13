@@ -10,7 +10,7 @@ std::atomic<CloudWriterFn>& writer() {
   return fn;
 }
 
-}  // namespace
+} // namespace
 
 void setCloudWriter(CloudWriterFn fn) { writer().store(fn); }
 
@@ -24,4 +24,4 @@ Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& fil
   return fn(cloud, file, format);
 }
 
-}  // namespace lyflow
+} // namespace lyflow

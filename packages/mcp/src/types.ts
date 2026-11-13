@@ -39,7 +39,7 @@ export interface ManifestBundle {
 }
 
 export interface CoreInfo {
-  buildFingerprint?: string;
+  buildIdentity?: string | null;
   version?: string;
   operatorCount?: number;
   typeCount?: number;
@@ -136,7 +136,14 @@ export interface ExecutionEvent {
   [key: string]: unknown;
 }
 
+export interface CaptureOptions {
+  policy: 'all' | 'selected' | 'failures' | 'metrics';
+  outputs?: { nodeId: string; port: string }[] | undefined;
+  maxBytes?: number | undefined;
+}
+
 export interface RunEnvelope {
+  capture?: CaptureOptions;
   doc: GraphDoc;
   graphPath: string | null;
   targets?: string[] | null;

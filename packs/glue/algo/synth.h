@@ -14,21 +14,21 @@ namespace lyflow::packs::glue {
 struct SynthSpec {
   double sStart = 200;
   double length = 30;
-  double margin = 4;        ///< 盖住的带子比胶两边各宽出这么多
-  double shiftExtra = 12;   ///< 源带在盖住的带子外再错开这么多
+  double margin = 4;      ///< 盖住的带子比胶两边各宽出这么多
+  double shiftExtra = 12; ///< 源带在盖住的带子外再错开这么多
   double dirtyMax = 0.02;
   double contrastMin = 16;
-  double feather = 1.5;     ///< 羽化的高斯 σ（过渡约 3 px）
+  double feather = 1.5; ///< 羽化的高斯 σ（过渡约 3 px）
 };
 
 struct SynthResult {
   bool ok = false;
   std::string reason;
-  int side = 0;             ///< 源带在哪一侧：+1 法向（行进方向右侧），−1 左侧
+  int side = 0; ///< 源带在哪一侧：+1 法向（行进方向右侧），−1 左侧
   double dirtyRight = 0;
   double dirtyLeft = 0;
-  int stations = 0;         ///< 断口里原本有胶的站数
-  double sFrom = 0;         ///< 盖住的那一段（原图胶路的 s），就是断口的真值
+  int stations = 0; ///< 断口里原本有胶的站数
+  double sFrom = 0; ///< 盖住的那一段（原图胶路的 s），就是断口的真值
   double sTo = 0;
 };
 
@@ -37,4 +37,4 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
                        const std::vector<Station>& stations, double stationStep, bool bright,
                        int widthMax, const SynthSpec& spec, cv::Mat& out);
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

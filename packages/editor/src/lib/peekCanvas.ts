@@ -1,4 +1,4 @@
-export type PeekCanvasGetter = () => HTMLCanvasElement | null;
+export type PeekCanvasGetter = () => HTMLCanvasElement | null | Promise<HTMLCanvasElement | null>;
 
 const getters = new Map<string, PeekCanvasGetter>();
 
@@ -9,7 +9,7 @@ export function registerPeekCanvas(id: string, get: PeekCanvasGetter): () => voi
   };
 }
 
-export function takePeekCanvas(id: string): HTMLCanvasElement | null {
+export async function takePeekCanvas(id: string): Promise<HTMLCanvasElement | null> {
   const get = getters.get(id);
   if (!get) return null;
   return get();

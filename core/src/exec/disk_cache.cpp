@@ -29,37 +29,38 @@ constexpr std::uint8_t kHasIntensity = 1;
 constexpr std::uint8_t kHasNormals = 2;
 constexpr std::uint8_t kHasRgb = 4;
 
-template <typename T>
-void put(std::string& out, const T& v) {
+template <typename T> void put(std::string& out, const T& v) {
   out.append(reinterpret_cast<const char*>(&v), sizeof(T));
 }
 
-template <typename T>
-void putVec(std::string& out, const std::vector<T>& v) {
-  if (!v.empty()) out.append(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(T));
+template <typename T> void putVec(std::string& out, const std::vector<T>& v) {
+  if (!v.empty())
+    out.append(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(T));
 }
 
 struct Reader {
   const std::string& s;
   std::size_t at = 0;
 
-  template <typename T>
-  bool get(T& v) {
-    if (s.size() - at < sizeof(T)) return false;
+  template <typename T> bool get(T& v) {
+    if (s.size() - at < sizeof(T))
+      return false;
     std::memcpy(&v, s.data() + at, sizeof(T));
     at += sizeof(T);
     return true;
   }
-  template <typename T>
-  bool getVec(std::vector<T>& v, std::uint64_t n) {
-    if (n > (s.size() - at) / sizeof(T)) return false;
+  template <typename T> bool getVec(std::vector<T>& v, std::uint64_t n) {
+    if (n > (s.size() - at) / sizeof(T))
+      return false;
     v.resize(static_cast<std::size_t>(n));
-    if (n) std::memcpy(v.data(), s.data() + at, static_cast<std::size_t>(n) * sizeof(T));
+    if (n)
+      std::memcpy(v.data(), s.data() + at, static_cast<std::size_t>(n) * sizeof(T));
     at += static_cast<std::size_t>(n) * sizeof(T);
     return true;
   }
   bool bytes(std::string& out, std::size_t n) {
-    if (s.size() - at < n) return false;
+    if (s.size() - at < n)
+      return false;
     out.assign(s.data() + at, n);
     at += n;
     return true;
@@ -69,9 +70,12 @@ struct Reader {
 void encodeCloud(const PointCloud& c, std::string& out) {
   const std::uint64_t n = c.pointCount();
   std::uint8_t flags = 0;
-  if (c.hasIntensity()) flags |= kHasIntensity;
-  if (c.hasNormals()) flags |= kHasNormals;
-  if (c.hasRgb()) flags |= kHasRgb;
+  if (c.hasIntensity())
+    flags |= kHasIntensity;
+  if (c.hasNormals())
+    flags |= kHasNormals;
+  if (c.hasRgb())
+    flags |= kHasRgb;
   put(out, n);
   put(out, flags);
   putVec(out, c.xyz);
@@ -83,11 +87,16 @@ void encodeCloud(const PointCloud& c, std::string& out) {
 bool decodeCloud(Reader& r, PointCloud& c) {
   std::uint64_t n = 0;
   std::uint8_t flags = 0;
-  if (!r.get(n) || !r.get(flags)) return false;
-  if (!r.getVec(c.xyz, n * 3)) return false;
-  if ((flags & kHasIntensity) && !r.getVec(c.intensity, n)) return false;
-  if ((flags & kHasNormals) && !r.getVec(c.normals, n * 3)) return false;
-  if ((flags & kHasRgb) && !r.getVec(c.rgb, n * 3)) return false;
+  if (!r.get(n) || !r.get(flags))
+    return false;
+  if (!r.getVec(c.xyz, n * 3))
+    return false;
+  if ((flags & kHasIntensity) && !r.getVec(c.intensity, n))
+    return false;
+  if ((flags & kHasNormals) && !r.getVec(c.normals, n * 3))
+    return false;
+  if ((flags & kHasRgb) && !r.getVec(c.rgb, n * 3))
+    return false;
   return c.channelsConsistent();
 }
 
@@ -103,8 +112,10 @@ void encodeTensor(const Tensor& t, std::string& out) {
 bool decodeTensor(Reader& r, Tensor& t) {
   std::uint32_t ndim = 0;
   std::uint64_t count = 0;
-  if (!r.get(ndim) || ndim > 16 || !r.getVec(t.shape, ndim)) return false;
-  if (!r.get(count) || !r.getVec(t.data, count)) return false;
+  if (!r.get(ndim) || ndim > 16 || !r.getVec(t.shape, ndim))
+    return false;
+  if (!r.get(count) || !r.getVec(t.data, count))
+    return false;
   return t.consistent();
 }
 
@@ -118,13 +129,18 @@ void encodeImage(const Image& img, std::string& out) {
 
 bool decodeImage(Reader& r, Image& img) {
   std::uint32_t w = 0, h = 0, c = 0, d = 0;
-  if (!r.get(w) || !r.get(h) || !r.get(c) || !r.get(d)) return false;
-  if (w == 0 || h == 0 || w > 1u << 20 || h > 1u << 20) return false;
-  if (d != 1 && d != 2 && d != 4) return false;
-  if (c != 1 && c != 3 && c != 4) return false;
+  if (!r.get(w) || !r.get(h) || !r.get(c) || !r.get(d))
+    return false;
+  if (w == 0 || h == 0 || w > 1u << 20 || h > 1u << 20)
+    return false;
+  if (d != 1 && d != 2 && d != 4)
+    return false;
+  if (c != 1 && c != 3 && c != 4)
+    return false;
   // 先按剩余字节查长度、再分配：坏文件的头写个 2^20 × 2^20 就是 16 TiB，分配会抛 bad_alloc（review 修正）
   const std::uint64_t n = std::uint64_t{w} * h * c * d;
-  if (n > r.s.size() - r.at) return false;
+  if (n > r.s.size() - r.at)
+    return false;
   img = Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
                         static_cast<std::int32_t>(c), static_cast<PixelDepth>(d));
   std::memcpy(img.mutablePixels(), r.s.data() + r.at, n);
@@ -143,15 +159,21 @@ struct PortEntry {
 bool readTable(Reader& r, std::vector<PortEntry>& out) {
   std::string magic;
   std::uint32_t version = 0, count = 0;
-  if (!r.bytes(magic, 4) || std::memcmp(magic.data(), kMagic, 4) != 0) return false;
-  if (!r.get(version) || version != kFormatVersion) return false;
-  if (!r.get(count) || count > 256) return false;
+  if (!r.bytes(magic, 4) || std::memcmp(magic.data(), kMagic, 4) != 0)
+    return false;
+  if (!r.get(version) || version != kFormatVersion)
+    return false;
+  if (!r.get(count) || count > 256)
+    return false;
   for (std::uint32_t i = 0; i < count; ++i) {
     PortEntry e;
     std::uint16_t nameLen = 0;
-    if (!r.get(nameLen) || !r.bytes(e.name, nameLen)) return false;
-    if (!r.get(e.kind) || !r.get(e.length)) return false;
-    if (e.length > r.s.size() - r.at) return false;
+    if (!r.get(nameLen) || !r.bytes(e.name, nameLen))
+      return false;
+    if (!r.get(e.kind) || !r.get(e.length))
+      return false;
+    if (e.length > r.s.size() - r.at)
+      return false;
     e.offset = r.at;
     r.at += static_cast<std::size_t>(e.length);
     out.push_back(std::move(e));
@@ -162,23 +184,28 @@ bool readTable(Reader& r, std::vector<PortEntry>& out) {
 bool covers(const std::vector<PortEntry>& table, const std::vector<std::string>& ports) {
   for (const auto& p : ports) {
     bool found = false;
-    for (const auto& e : table) found = found || e.name == p;
-    if (!found) return false;
+    for (const auto& e : table)
+      found = found || e.name == p;
+    if (!found)
+      return false;
   }
   return !ports.empty();
 }
 
 bool readFile(const std::filesystem::path& file, std::string& out) {
   std::ifstream in(file, std::ios::binary);
-  if (!in) return false;
+  if (!in)
+    return false;
   // 量好大小一次读完。原来用 istreambuf_iterator 逐字节走 streambuf、边读边扩容，
   // 几十 MB 的点云缓存光读就要几百毫秒 —— 命中缓存反倒成了慢的那一步
   in.seekg(0, std::ios::end);
   const std::streamoff size = in.tellg();
-  if (size < 0) return false;
+  if (size < 0)
+    return false;
   in.seekg(0, std::ios::beg);
   out.resize(static_cast<std::size_t>(size));
-  if (size > 0 && !in.read(out.data(), static_cast<std::streamsize>(size))) return false;
+  if (size > 0 && !in.read(out.data(), static_cast<std::streamsize>(size)))
+    return false;
   return true;
 }
 
@@ -188,25 +215,30 @@ std::string safeName(const std::string& key) {
   for (char& c : s) {
     const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                     c == '-' || c == '_';
-    if (!ok) c = '_';
+    if (!ok)
+      c = '_';
   }
   return s;
 }
 
-}  // namespace
+} // namespace
 
 bool persistable(const Data& d) {
   // scale 不进文件格式：预览缩小过的图（scale > 1）本来就不落盘（预览命名空间不落盘），这是第二道防线 ——
   // 读回来变成 scale 1，下游的像素参数就不再换算了（ADR-0028）
-  if (const Image* img = d.asImage()) return img->consistent() && img->scale == 1;
-  if (d.asTensor()) return d.tensorScale() == 1;
+  if (const Image* img = d.asImage())
+    return img->consistent() && img->scale == 1;
+  if (d.asTensor())
+    return d.tensorScale() == 1;
   return d.asCloud() != nullptr;
 }
 
 bool encodeNode(const PortData& ports, std::string& out) {
-  if (ports.empty()) return false;
+  if (ports.empty())
+    return false;
   for (const auto& [name, d] : ports) {
-    if (!persistable(d) || name.size() > 0xFFFF) return false;
+    if (!persistable(d) || name.size() > 0xFFFF)
+      return false;
   }
   std::string buf(kMagic, 4);
   put(buf, kFormatVersion);
@@ -237,22 +269,26 @@ bool encodeNode(const PortData& ports, std::string& out) {
 bool decodeNode(const std::string& bytes, PortData& out) {
   Reader table{bytes};
   std::vector<PortEntry> entries;
-  if (!readTable(table, entries)) return false;
+  if (!readTable(table, entries))
+    return false;
   PortData ports;
   for (const PortEntry& e : entries) {
     const std::string payload = bytes.substr(e.offset, static_cast<std::size_t>(e.length));
     Reader r{payload};
     if (e.kind == kKindCloud) {
-      PointCloud c;  // 构造时拿一个新的进程内 id —— Indices 对账靠它，不能沿用写盘那个进程的
-      if (!decodeCloud(r, c) || r.at != payload.size()) return false;
+      PointCloud c; // 构造时拿一个新的进程内 id —— Indices 对账靠它，不能沿用写盘那个进程的
+      if (!decodeCloud(r, c) || r.at != payload.size())
+        return false;
       ports.emplace_back(e.name, Data::cloud(std::move(c)));
     } else if (e.kind == kKindTensor) {
       Tensor t;
-      if (!decodeTensor(r, t) || r.at != payload.size()) return false;
+      if (!decodeTensor(r, t) || r.at != payload.size())
+        return false;
       ports.emplace_back(e.name, Data::tensor(std::move(t)));
     } else if (e.kind == kKindImage) {
       Image img;
-      if (!decodeImage(r, img) || r.at != payload.size()) return false;
+      if (!decodeImage(r, img) || r.at != payload.size())
+        return false;
       ports.emplace_back(e.name, Data::image(std::move(img)));
     } else {
       return false;
@@ -273,8 +309,10 @@ std::string DiskCache::setDir(const std::string& dir, const std::string& fingerp
     root_.clear();
     return std::string();
   }
-  if (fingerprint.empty()) return "落盘缓存要一个构建指纹：没有它，改了算子实现也会读到旧结果";
-  const std::filesystem::path root = std::filesystem::u8path(dir) / std::filesystem::u8path(safeName(fingerprint));
+  if (fingerprint.empty())
+    return "落盘缓存要一个构建指纹：没有它，改了算子实现也会读到旧结果";
+  const std::filesystem::path root =
+      std::filesystem::u8path(dir) / std::filesystem::u8path(safeName(fingerprint));
   std::error_code ec;
   std::filesystem::create_directories(root, ec);
   if (ec || !std::filesystem::is_directory(root, ec)) {
@@ -302,16 +340,19 @@ double DiskCache::minDurationMs() const {
 
 std::filesystem::path DiskCache::fileOf(const std::string& cacheKey) const {
   std::lock_guard<std::mutex> lock(mu_);
-  if (root_.empty() || cacheKey.size() < 2) return {};
+  if (root_.empty() || cacheKey.size() < 2)
+    return {};
   const std::string name = safeName(cacheKey);
   return root_ / name.substr(0, 2) / (name + ".lfc");
 }
 
 bool DiskCache::has(const std::string& cacheKey, const std::vector<std::string>& ports) const {
   const std::filesystem::path file = fileOf(cacheKey);
-  if (file.empty()) return false;
+  if (file.empty())
+    return false;
   std::string bytes;
-  if (!readFile(file, bytes)) return false;
+  if (!readFile(file, bytes))
+    return false;
   Reader r{bytes};
   std::vector<PortEntry> table;
   return readTable(r, table) && covers(table, ports);
@@ -320,19 +361,24 @@ bool DiskCache::has(const std::string& cacheKey, const std::vector<std::string>&
 bool DiskCache::load(const std::string& cacheKey, const std::vector<std::string>& ports,
                      PortData& out) const {
   const std::filesystem::path file = fileOf(cacheKey);
-  if (file.empty()) return false;
+  if (file.empty())
+    return false;
   std::string bytes;
-  if (!readFile(file, bytes)) return false;
+  if (!readFile(file, bytes))
+    return false;
   PortData got;
   if (!decodeNode(bytes, got)) {
     std::error_code ec;
-    std::filesystem::remove(file, ec);  // 坏文件（写到一半被杀、磁盘出错）：当未命中，删掉免得每次都读
+    std::filesystem::remove(file,
+                            ec); // 坏文件（写到一半被杀、磁盘出错）：当未命中，删掉免得每次都读
     return false;
   }
   for (const auto& p : ports) {
     bool found = false;
-    for (const auto& g : got) found = found || g.first == p;
-    if (!found) return false;
+    for (const auto& g : got)
+      found = found || g.first == p;
+    if (!found)
+      return false;
   }
   out = std::move(got);
   return true;
@@ -340,19 +386,21 @@ bool DiskCache::load(const std::string& cacheKey, const std::vector<std::string>
 
 void DiskCache::store(const std::string& cacheKey, const PortData& ports) const {
   const std::filesystem::path file = fileOf(cacheKey);
-  if (file.empty()) return;
+  if (file.empty())
+    return;
   std::string bytes;
-  if (!encodeNode(ports, bytes)) return;
+  if (!encodeNode(ports, bytes))
+    return;
   static std::atomic<std::uint64_t> seq{0};
   std::error_code ec;
   std::filesystem::create_directories(file.parent_path(), ec);
   const std::filesystem::path tmp =
-      file.parent_path() /
-      (file.filename().u8string() + ".tmp" + std::to_string(LYFLOW_GETPID()) + "_" +
-       std::to_string(seq.fetch_add(1)));
+      file.parent_path() / (file.filename().u8string() + ".tmp" + std::to_string(LYFLOW_GETPID()) +
+                            "_" + std::to_string(seq.fetch_add(1)));
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return;
+    if (!out)
+      return;
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     if (!out) {
       out.close();
@@ -360,8 +408,10 @@ void DiskCache::store(const std::string& cacheKey, const PortData& ports) const 
       return;
     }
   }
-  std::filesystem::rename(tmp, file, ec);  // 同名文件已在（别的进程刚写完同一个节点）：内容相同，顶掉无妨
-  if (ec) std::filesystem::remove(tmp, ec);
+  std::filesystem::rename(tmp, file,
+                          ec); // 同名文件已在（别的进程刚写完同一个节点）：内容相同，顶掉无妨
+  if (ec)
+    std::filesystem::remove(tmp, ec);
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

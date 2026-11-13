@@ -1,11 +1,11 @@
 // 文件操作（交互清单 P0 #13）。存盘走传输层，前端拒绝自己写文件 ——
 // 校验逻辑放前端就会有一条绕过它的路（docs/graph-doc.md）。
 
-import { transport, type BackupStatus, type LoadedGraph, type RecentEntry } from "../transport";
-import type { GraphDoc } from "../types/graph";
-import { dialogs } from "./dialogs";
+import { transport, type BackupStatus, type LoadedGraph, type RecentEntry } from '../transport';
+import type { GraphDoc } from '../types/graph';
+import { dialogs } from './dialogs';
 
-export { NoDialogError } from "./dialogs";
+export { NoDialogError } from './dialogs';
 
 /** 返回 null 表示用户取消。 */
 export async function pickOpenPath(): Promise<string | null> {
@@ -81,7 +81,7 @@ export async function confirmRestore(path: string): Promise<boolean> {
 /** 上级目录的名字：不同目录下的同名文件（demo.lyflow.json）在最近文件里靠它分清。没有上级时空串。 */
 export function parentName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
+  return parts.length >= 2 ? (parts[parts.length - 2] ?? '') : '';
 }
 
 export function baseName(path: string): string {
@@ -92,6 +92,6 @@ export function baseName(path: string): string {
 
 /** 从图名推一个默认文件名。 */
 export function suggestFileName(doc: GraphDoc): string {
-  const base = (doc.name ?? "untitled").trim() || "untitled";
+  const base = (doc.name ?? 'untitled').trim() || 'untitled';
   return `${base}.lyflow.json`;
 }

@@ -2,16 +2,22 @@
 // 工具栏的「改 N 处」与调参页顶上那一行共用。敲回车、下拉框、勾选框改的值不自动运行（ADR-0011），F5 之前常常
 // 已经攒了几处，以前只看得到一个「已过时」。
 
-import { useMemo } from "react";
+import { useMemo } from 'react';
 
-import { changeCount, diffRuns, pendingBase, type RunDiff, type RunRecord } from "../lib/runHistory";
-import { augmentOperators, locateEventNode } from "../lib/subgraph";
-import { useExecutionStore } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { runParamsOf, useRecipeStore } from "../store/recipe";
-import { useRunHistoryStore } from "../store/runHistory";
-import type { ParamChange } from "../lib/runHistory";
+import {
+  changeCount,
+  diffRuns,
+  pendingBase,
+  type RunDiff,
+  type RunRecord,
+} from '../lib/runHistory';
+import { augmentOperators, locateEventNode } from '../lib/subgraph';
+import { useExecutionStore } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { runParamsOf, useRecipeStore } from '../store/recipe';
+import { useRunHistoryStore } from '../store/runHistory';
+import type { ParamChange } from '../lib/runHistory';
 
 export interface PendingChanges {
   base: RunRecord;
@@ -43,7 +49,7 @@ export function usePendingChanges(): PendingChanges | null {
 export function canRevert(c: ParamChange): boolean {
   const doc = useGraphStore.getState().doc;
   if (c.from === undefined) return false;
-  if (c.id.startsWith("gp:")) return !!doc.params?.[c.name];
+  if (c.id.startsWith('gp:')) return !!doc.params?.[c.name];
   return locateEventNode(doc, c.id) !== null;
 }
 
@@ -51,7 +57,7 @@ export function canRevert(c: ParamChange): boolean {
  *  图参数按现在的配方写（选着配方写进配方，「基础」写 default —— 与在那一行上改一样）。 */
 export function revertChange(c: ParamChange): void {
   const graph = useGraphStore.getState();
-  if (c.id.startsWith("gp:")) {
+  if (c.id.startsWith('gp:')) {
     graph.editGraphParamValue(c.name, c.from);
     return;
   }
