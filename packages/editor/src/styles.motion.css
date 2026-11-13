@@ -274,6 +274,85 @@
     border-color var(--lyflow-motion-base) ease;
 }
 
+.app .canvas__empty-illustration {
+  --lyflow-empty-cycle: 4.8s;
+  animation: lyflow-empty-float var(--lyflow-empty-cycle) ease-in-out infinite;
+}
+
+.app .canvas__empty-flow {
+  stroke: var(--primary);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0.08 0.92;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation: lyflow-empty-flow var(--lyflow-empty-cycle) linear infinite;
+}
+
+.app .canvas__empty-flow--lower {
+  animation-delay: 0.3s;
+}
+
+.app .canvas__empty-pulse {
+  stroke: var(--primary);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: lyflow-empty-pulse var(--lyflow-empty-cycle) ease-out infinite;
+}
+
+.app .canvas__empty-pulse--target {
+  animation-delay: 2.6s;
+}
+
+.app .canvas__empty-pulse--lower {
+  animation-delay: 2.9s;
+}
+
+@keyframes lyflow-empty-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes lyflow-empty-flow {
+  0%,
+  8% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  16%,
+  54% {
+    opacity: 0.9;
+  }
+  62%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes lyflow-empty-pulse {
+  0%,
+  5% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.55;
+  }
+  30%,
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
 /* ----------------------------------------------------------- 关动效（A4） */
 
 /* 宿主 animations={false}（根上挂 lyflow-motion-off）或系统要求减少动态效果：

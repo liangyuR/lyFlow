@@ -206,6 +206,12 @@ function EmptyHint({
           stroke="var(--primary-container)"
           strokeWidth="2"
         />
+        <path className="canvas__empty-flow" d="M56 46h20c16 0 12-24 28-24h20" pathLength="1" />
+        <path
+          className="canvas__empty-flow canvas__empty-flow--lower"
+          d="M56 46h20c16 0 12 24 28 24h20"
+          pathLength="1"
+        />
         <rect x="8" y="26" width="48" height="40" rx="12" fill="var(--secondary-container)" />
         <rect x="124" y="4" width="48" height="36" rx="12" fill="var(--surface-high)" />
         <rect x="124" y="52" width="48" height="36" rx="12" fill="var(--surface-high)" />
@@ -218,6 +224,19 @@ function EmptyHint({
         <circle cx="56" cy="46" r="4" fill="var(--primary)" />
         <circle cx="124" cy="22" r="4" fill="var(--primary)" />
         <circle cx="124" cy="70" r="4" fill="var(--secondary)" />
+        <circle className="canvas__empty-pulse" cx="56" cy="46" r="6" />
+        <circle
+          className="canvas__empty-pulse canvas__empty-pulse--target"
+          cx="124"
+          cy="22"
+          r="6"
+        />
+        <circle
+          className="canvas__empty-pulse canvas__empty-pulse--target canvas__empty-pulse--lower"
+          cx="124"
+          cy="70"
+          r="6"
+        />
         <path
           d="M140 22h16m-16 48h16"
           stroke="var(--outline)"
