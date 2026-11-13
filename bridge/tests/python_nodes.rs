@@ -92,6 +92,26 @@ fn python_cli_and_embedded_execute_identical_graph_and_refresh_without_touching_
         "{expected}"
     );
     assert_eq!(actual, expected);
+    let changed_file = root.join("changed.lyflow.json");
+    let mut changed = graph.clone();
+    changed["nodes"][1]["params"]["offset"] = json!(0.5);
+    std::fs::write(&changed_file, changed.to_string()).unwrap();
+    let comparison = Command::new(env!("CARGO_BIN_EXE_lyflow"))
+        .arg("diff")
+        .arg(&graph_file)
+        .arg(&changed_file)
+        .arg("--json")
+        .env("LYFLOW_PYTHON_CONFIG", &settings_file)
+        .output()
+        .unwrap();
+    assert!(
+        comparison.status.success(),
+        "{}",
+        String::from_utf8_lossy(&comparison.stderr)
+    );
+    let difference: Value = serde_json::from_slice(&comparison.stdout).unwrap();
+    assert_eq!(difference["empty"], false, "{difference}");
+    assert!(difference.to_string().contains("offset"), "{difference}");
     let marker = root.join("imported.txt");
     let query_script = root.join("query.py");
     std::fs::write(&query_script, format!("from pathlib import Path\nPath({}).touch()\nraise RuntimeError('queries must not import this file')\n", serde_json::to_string(&marker.to_string_lossy()).unwrap())).unwrap();

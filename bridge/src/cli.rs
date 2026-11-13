@@ -2583,6 +2583,8 @@ pub fn main() -> i32 {
                 | "perturb"
                 | "patch"
                 | "recipes"
+                | "diff"
+                | "migrate"
         )
     }) && !args
         .iter()
