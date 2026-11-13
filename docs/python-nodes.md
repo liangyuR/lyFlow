@@ -28,6 +28,8 @@ def offset(inputs, params, ctx):
 
 单文件发现其中的装饰函数；包目录只加载从 `__init__.py` 导出的装饰函数。ID 使用 `py.<包名>.<节点名>`，在所有包间唯一。重复 ID 不注册并显示冲突。参数描述复用现有 manifest 参数类型。升级节点时明确修改 `version`；工作流版本迁移继续使用引擎已有规则。
 
+Python 节点可以从 `2.0.0` 等主版本开始发布，新建节点保存当前版本。首版 SDK 不提供迁移回调；已有工作流与当前节点主版本不一致时，会明确报版本不匹配，需安装兼容版本或显式调整工作流。
+
 SDK 随运行库放在 `python/lyflow_python`，worker 自动加入 SDK 搜索路径。独立编写或测试时，可安装 `python/` 下的 SDK，或将其加入 `PYTHONPATH`。示例见 `python/examples/offset.py` 和 `python/examples/image_metrics/`。
 
 ## 数据与上下文

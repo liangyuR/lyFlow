@@ -591,6 +591,9 @@ std::vector<std::string> Registry::validate() const {
   };
 
   std::set<std::string> opIds;
+  std::set<std::string> pythonIds;
+  for (const auto& op : pythonOperators_)
+    pythonIds.insert(op.id);
   for (const auto& op : operators_) {
     const std::string where = "operator '" + op.id + "'";
     if (op.id.empty())
@@ -785,7 +788,7 @@ std::vector<std::string> Registry::validate() const {
       }
     }
 
-    // 迁移链必须覆盖 1..currentMajor-1 且无断档（ADR-0008）。半条链比没有链更糟：
+    // 内置及库算子的迁移链必须覆盖 1..currentMajor-1 且无断档（ADR-0008）。半条链比没有链更糟：
     // 老图能打开一半、参数改了一半，最后表现成「算法结果莫名其妙」。
     const int major = majorOf(op.version);
     std::set<int> steps;
@@ -800,10 +803,12 @@ std::vector<std::string> Registry::validate() const {
         fail(where + " has two migrations from major " + std::to_string(m.fromMajor));
       }
     }
-    for (int m = 1; m < major; ++m) {
-      if (!steps.count(m)) {
-        fail(where + " is v" + op.version + " but has no migration from major " +
-             std::to_string(m));
+    if (!pythonIds.count(op.id)) {
+      for (int m = 1; m < major; ++m) {
+        if (!steps.count(m)) {
+          fail(where + " is v" + op.version + " but has no migration from major " +
+               std::to_string(m));
+        }
       }
     }
   }

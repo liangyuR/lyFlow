@@ -439,4 +439,42 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
     REQUIRE(python_runtime::refresh(registry).at("ready") == true);
     CHECK(control(compute, "ok", context, result).ok);
   }
+  for (const char* version : {"2.0.0", "3.0.0"}) {
+    CAPTURE(version);
+    changeSource("id='py.integration.control', version='1.0.0'",
+                 std::string("id='py.integration.control', version='") + version + "'");
+    const auto discovered = python_runtime::refresh(registry);
+    INFO(discovered.dump());
+    REQUIRE(discovered.at("ready") == true);
+    REQUIRE(discovered.at("operatorCount") == 3);
+    CHECK(registry.validate().empty());
+    const auto* current = registry.find("py.integration.control");
+    REQUIRE(current != nullptr);
+    CHECK(current->version == version);
+    CHECK(current->migrations.empty());
+    auto graph = makeGraph({{"python", current->id}}, {});
+    for (const std::string saved : {std::string(), std::string(version)}) {
+      CAPTURE(saved);
+      if (saved.empty())
+        graph["nodes"][0].erase("opVersion");
+      else
+        graph["nodes"][0]["opVersion"] = saved;
+      Session session(graph);
+      const auto& log = session.wait();
+      CHECK(log.runStatus() == "ok");
+      CHECK(log.finalState("python") == "done");
+    }
+    for (const char* saved : {"1.0.0", "99.0.0"}) {
+      CAPTURE(saved);
+      graph["nodes"][0]["opVersion"] = saved;
+      char* raw = lyflow_validate(graph.dump().c_str(), "");
+      REQUIRE(raw != nullptr);
+      const auto diagnostics = Json::parse(raw);
+      lyflow_string_free(raw);
+      CHECK(std::any_of(diagnostics.begin(), diagnostics.end(), [](const Json& diagnostic) {
+        return diagnostic.value("code", "") == "version_mismatch" &&
+               diagnostic.value("severity", "") == "error";
+      }));
+    }
+  }
 }
