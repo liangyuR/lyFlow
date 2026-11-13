@@ -239,10 +239,10 @@ async function crowdedRecipeState(cdp, ws) {
   return { param, value: 3 };
 }
 
-/** 1280–1440 宽时图名框完整放下 8 个汉字；工具栏里什么都不溢出、运行区的状态字不被裁、配方下拉框在窗口里。
+/** 1280–1440 宽时活动标签完整放下 8 个汉字；工具栏里什么都不溢出、运行区的状态字不被裁、配方下拉框在窗口里。
  *  状态照 P3 截图那样挤：跑过一次（done N）、改过参数（已过时 + 将重算 N 个）、有文件名、选着配方且没存。 */
 async function suiteToolbarWidth(cdp, report, ws) {
-  report.section("顺手修：1280–1440 宽的窗口里，工具栏的图名框完整放下 8 个汉字");
+  report.section("1280–1440 宽的窗口里，活动标签完整显示 8 个汉字，工具栏无溢出");
   const readState = () => cdp.eval(`
     const b = window.__lyflow;
     const g = b.stores.graph.getState();
@@ -272,20 +272,19 @@ async function suiteToolbarWidth(cdp, report, ws) {
       await sleep(350);
       const m = await cdp.eval(`
         const tb = document.querySelector('.toolbar');
-        const name = document.querySelector('[data-testid="doc-name"]');
+        const name = document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"] .flow-tab__title');
         const run = document.querySelector('.toolbar__group--run');
         const menu = document.querySelector('.recipe-menu');
-        // 8 个字按图名框自己的字体量一遍，与框的内容区比
         const probe = document.createElement('span');
         const cs = getComputedStyle(name);
         probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:' + cs.font;
-        probe.textContent = name.value;
+        probe.textContent = name.textContent;
         document.body.appendChild(probe);
         const text = probe.getBoundingClientRect().width;
         probe.remove();
         const content = name.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
         return {
-          innerWidth, value: name.value, text: Math.round(text * 10) / 10, content,
+          innerWidth, value: name.textContent, text: Math.round(text * 10) / 10, content,
           nameOverflow: name.scrollWidth - name.clientWidth,
           toolbarOverflow: tb.scrollWidth - tb.clientWidth,
           runClipped: run.scrollWidth - run.clientWidth,
@@ -293,16 +292,16 @@ async function suiteToolbarWidth(cdp, report, ws) {
           recompute: document.querySelector('[data-testid="recompute-hint"]')?.textContent ?? null,
           stale: !!document.querySelector('.toolbar__stat--stale'),
           dirty: !!document.querySelector('[data-testid="recipe-dirty"]'),
-          undoText: document.querySelector('.toolbar button[aria-label="撤销"]')?.innerText ?? null,
+          undoIcon: !!document.querySelector('.toolbar button[aria-label="撤销"] svg'),
         };
       `);
       const at = `${width} 宽`;
       mustOk(m.innerWidth === width, `${at}：视口真的是这个宽度`, m);
       mustOk(Boolean(m.recompute && m.stale && m.dirty), `${at}：状态够挤（将重算、已过时、配方没存都在）`, m);
-      report.ok(`${at}：图名框的内容区放得下「${EIGHT}」`, m.value === EIGHT && m.content >= m.text && m.nameOverflow <= 0,
+      report.ok(`${at}：活动标签显示完整工作流名「${EIGHT}」`, m.value === EIGHT && m.content >= m.text && m.nameOverflow <= 0,
         JSON.stringify(m));
-      report.ok(`${at}：整条工具栏无溢出无裁切（运行区的状态字不被裁、撤销按钮收成箭头 ↶），配方下拉框整个在窗口里`,
-        m.toolbarOverflow <= 0 && m.runClipped <= 0 && m.undoText?.trim() === "↶" && m.menuRight <= width, JSON.stringify(m));
+      report.ok(`${at}：整条工具栏无溢出无裁切，撤销使用图标，配方下拉框整个在窗口里`,
+        m.toolbarOverflow <= 0 && m.runClipped <= 0 && m.undoIcon && m.menuRight <= width, JSON.stringify(m));
     }
   } finally {
     await cdp.send("Emulation.clearDeviceMetricsOverride");

@@ -29,46 +29,6 @@
   background: var(--outline-variant);
 }
 
-.toolbar__doc {
-  display: flex;
-  align-items: center;
-  flex: 0 1 156px;
-  min-width: 108px;
-  max-width: 180px;
-  gap: 8px;
-}
-
-.toolbar__name {
-  width: 100%;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--on-surface);
-  font: 600 14px/20px var(--font-sans);
-  text-overflow: ellipsis;
-  outline: none;
-}
-
-.toolbar__name:hover {
-  background: var(--surface-high);
-}
-.toolbar__name:focus {
-  background: var(--surface-lowest);
-  border-color: var(--primary);
-}
-.toolbar__name::placeholder {
-  color: var(--on-surface-variant);
-}
-.toolbar__dirty {
-  color: var(--warn);
-  font-size: 9px;
-}
-.toolbar__path {
-  display: none;
-}
-
 .toolbar__actions {
   display: contents;
 }
@@ -80,8 +40,23 @@
   gap: 4px;
 }
 
-.toolbar__open {
-  gap: 0;
+.toolbar__save {
+  gap: 1px;
+}
+.toolbar__save > .qs-btn:first-child {
+  border-top-right-radius: var(--r-xs);
+  border-bottom-right-radius: var(--r-xs);
+}
+.toolbar__save > .qs-btn:nth-child(2) {
+  border-top-left-radius: var(--r-xs);
+  border-bottom-left-radius: var(--r-xs);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+.toolbar__save-menu kbd {
+  margin-left: auto;
+  color: var(--on-surface-variant);
+  font: 11px var(--font-mono);
 }
 .toolbar .qs-btn.icon.sm {
   width: var(--ctl-h-sm);
@@ -238,20 +213,6 @@
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
-.toolbar__recentmenu [data-testid='recent-item'] {
-  flex-wrap: wrap;
-  gap: 2px;
-}
-.toolbar__recentmenu .recent__dir {
-  width: 100%;
-  color: var(--on-surface-variant);
-}
-.toolbar__recentempty {
-  display: block;
-  padding: 10px;
-  color: var(--on-surface-variant);
-  font: var(--text-label);
-}
 .history-menu {
   width: 380px;
   max-height: min(60vh, 520px);
@@ -365,11 +326,9 @@
   .toolbar .recipe-menu__toggle {
     max-width: 150px;
   }
-  .toolbar__files .qs-btn > span,
   .toolbar__tools .qs-btn > span {
     display: none;
   }
-  .toolbar__files .qs-btn:not(.icon),
   .toolbar__tools .qs-btn:not(.icon) {
     padding-inline: 10px;
   }
@@ -395,14 +354,7 @@
     padding-inline: 12px;
     gap: 8px;
   }
-  .toolbar__doc {
-    flex-basis: 120px;
-    min-width: 104px;
-  }
   .toolbar__group--run > .toolbar__summary {
-    display: none;
-  }
-  .toolbar__save-as > span {
     display: none;
   }
   .toolbar__group--preview {

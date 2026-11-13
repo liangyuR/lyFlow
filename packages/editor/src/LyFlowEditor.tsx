@@ -30,7 +30,7 @@ import {
 } from './lib/autosave';
 import { autoRunOnCommit } from './lib/preview';
 import { saveCurrent } from './lib/saveFlow';
-import { askChoice } from './lib/modal';
+import { askChoice, askText } from './lib/modal';
 import {
   backupWorkspace,
   readWorkspaceBackup,
@@ -464,6 +464,31 @@ function Workspace({
     await withFlowOperation(() => saveCurrent(forcePicker));
   }, []);
 
+  const doRename = useCallback(async (id: string) => {
+    if (!(await switchTab(id))) return;
+    const finished = await withFlowOperation(async () => {
+      const graph = useGraphStore.getState();
+      const answer = await askText({
+        title: '重命名工作流',
+        value: graph.doc.name ?? '',
+        placeholder: '输入工作流名称',
+        okLabel: '重命名',
+        validate: (value) => (value.trim() ? null : '请输入工作流名称'),
+      });
+      if (
+        answer &&
+        useFlowTabsStore.getState().activeId === id &&
+        useGraphStore.getState().epoch === graph.epoch
+      )
+        useGraphStore.getState().setName(answer.value.trim());
+      return true;
+    });
+    if (finished && useFlowTabsStore.getState().activeId === id)
+      root.current
+        ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+        ?.focus({ preventScroll: true });
+  }, []);
+
   const doOpen = useCallback(async () => {
     try {
       const path = await withFlowOperation(() => pickOpenPath());
@@ -698,13 +723,12 @@ function Workspace({
         onNew={handlers.onNew}
         onSelect={(id) => void switchTab(id)}
         onClose={(id) => void closeTab(id)}
+        onRename={(id) => void doRename(id)}
       />
       <Toolbar
-        onNew={handlers.onNew}
-        onOpen={handlers.onOpen}
-        onOpenRecent={(p) => void doOpenRecent(p)}
         onSave={handlers.onSave}
         onSaveAs={handlers.onSaveAs}
+        onRename={() => void doRename(activeFlow)}
         onRun={handlers.onRun}
         onRerun={handlers.onRerun}
         onCancel={handlers.onCancel}

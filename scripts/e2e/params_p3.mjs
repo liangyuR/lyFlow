@@ -267,7 +267,7 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   const onDisk = readJson(file);
   report.ok("图文件同时保存（磁盘上的 doc 带着三个图参数），工具栏脏标记落下",
     Object.keys(onDisk.params ?? {}).join() === "leafSize,cutMax,meanK" &&
-      !(await cdp.eval(`return !!document.querySelector('[data-testid="toolbar-dirty"]');`)),
+      !(await cdp.eval(`return !!document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"] [data-testid="flow-tab-dirty"]');`)),
     Object.keys(onDisk.params ?? {}).join());
 
   // 重开：换一张空图再打开这张
