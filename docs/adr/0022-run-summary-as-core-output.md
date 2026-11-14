@@ -5,7 +5,7 @@
 ## 背景
 
 M5 之后的第二次真实任务（xyz-gap-inspector 上一段带 11 个 fallback 的多点位调参，
-见 [m6-plan.md](../m6-plan.md) §来源）暴露出同一类问题的三个面：
+见 [m6-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m6-plan.md) §来源）暴露出同一类问题的三个面：
 
 - 一次 run 结束后留下的只有一串 `node_state` 和一个 `run_finished.status`。
   宿主要自己重建「这次到底成没成」，**做错了两次**：一次把缓存命中的 `skipped`

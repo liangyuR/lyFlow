@@ -6,7 +6,7 @@
 ## 背景
 
 第二个数据域（roadmap「M5 之后」）要回答两个问题：图像在数据模型里是什么，以及它怎么过 IPC。
-计划与调研见 [image-plan.md](../image-plan.md)。可供参照的是两条已有的路：
+计划与调研见 [image-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/image-plan.md)。可供参照的是两条已有的路：
 
 - `Tensor`（ADR-0015 / ADR-0019）：只有 float32，零拷贝按元素切片，不抽稀；
 - 点云（ADR-0006）：复制 + 等步长抽稀。

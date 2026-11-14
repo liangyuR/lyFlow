@@ -13,45 +13,48 @@
 
 ```powershell
 $env:LYFLOW_STD_PACKS = "0"
-pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没有一个 pcl_*
+$env:LYFLOW_PACKS = ""
+pnpm check
 ```
+
+不启用外部包时，纯平台保留 `gen.synthetic`、`util.reroute`、`flow.fallback` 和 `flow.select` 四个内置算子，不链接 PCL。
 
 ## 算子
 
-20 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
+本包注册 20 个算子。下表采用当前显示名称与分类；运行库实际提供的算子及版本以 manifest 为准。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
-| `io.load_pcd` | IO/Input | Load PCD | — → cloud |
-| `io.save_pcd` | IO/Output | Save PCD | cloud → — |
-| `filter.passthrough` | Filter/Crop | Passthrough | cloud → cloud, indices |
-| `filter.voxel_grid` | Filter/Downsample | Voxel Grid | cloud → cloud |
-| `filter.crop_box` | Filter/Crop | Crop Box | cloud, pose → cloud |
-| `filter.random_sample` | Filter/Downsample | Random Sample | cloud → cloud |
-| `filter.statistical_outlier` | Filter/Outlier | Statistical Outlier Removal | cloud → cloud, removed |
-| `filter.radius_outlier` | Filter/Outlier | Radius Outlier Removal | cloud → cloud, removed |
-| `features.normals` | Features | Estimate Normals | cloud → cloud |
-| `segment.ransac_plane` | Segment | RANSAC Plane | cloud → inliers, plane |
-| `segment.extract_indices` | Segment | Extract Indices | cloud, indices → selected, rest |
-| `transform.make` | Transform | Make Transform | — → transform |
-| `transform.apply` | Transform | Apply Transform | cloud, transform → cloud |
-| `util.merge` | Util | Merge Clouds | a, b → cloud |
+| `io.load_pcd` | 输入输出/输入 | 点云读取 | — → cloud |
+| `io.save_pcd` | 输入输出/输出 | 点云保存 | cloud → — |
+| `filter.passthrough` | 过滤/裁剪 | 直通滤波 | cloud → cloud, indices |
+| `filter.voxel_grid` | 过滤/降采样 | 体素降采样 | cloud → cloud |
+| `filter.crop_box` | 过滤/裁剪 | 三维包围盒裁剪 | cloud, pose → cloud |
+| `filter.random_sample` | 过滤/降采样 | 随机采样 | cloud → cloud |
+| `filter.statistical_outlier` | 过滤/离群点 | 统计离群点剔除 | cloud → cloud, removed |
+| `filter.radius_outlier` | 过滤/离群点 | 半径离群点剔除 | cloud → cloud, removed |
+| `features.normals` | 特征 | 点云法线估计 | cloud → cloud |
+| `segment.ransac_plane` | 分割 | RANSAC 平面拟合 | cloud → inliers, plane |
+| `segment.extract_indices` | 分割 | 点云索引提取 | cloud, indices → selected, rest |
+| `transform.make` | 变换 | 刚体变换构造 | — → transform |
+| `transform.apply` | 变换 | 点云变换 | cloud, transform → cloud |
+| `util.merge` | 工具 | 点云合并 | a, b → cloud |
 
 2D 量测域的四个（[ADR-0015](../../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）：
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
-| `filter.crop_box2d` | Filter/Crop | Crop Box 2D | cloud, box → cloud |
-| `fit.line_2d` | Fit/Line | Fit Line 2D | cloud, [clipTo] → line, inliers |
-| `fit.circle_2d` | Fit/Circle | Fit Circle 2D | cloud → circle, inliers |
-| `register.icp_2d` | Register/ICP | ICP 2D | source, target, [init] → transform, result |
+| `filter.crop_box2d` | 过滤/裁剪 | 二维矩形裁剪 | cloud, box → cloud |
+| `fit.line_2d` | 拟合/直线 | 二维直线拟合 | cloud, [clipTo] → line, inliers |
+| `fit.circle_2d` | 拟合/圆 | 二维圆拟合 | cloud → circle, inliers |
+| `register.icp_2d` | 配准/ICP | 二维 ICP 配准 | source, target, [init] → transform, result |
 
 编辑域一个（M5，给 `lyflow perturb` 用，见
 [ADR-0020](../../docs/adr/0020-eval-and-perturb-as-cli.md)）：
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
-| `edit.translate_region` | 编辑 | 平移选区 | cloud → cloud |
+| `edit.translate_region` | 编辑 | 点云选区平移 | cloud → cloud |
 
 分割域一个（标定的左右分割，替代 xyz-gap-inspector 里的过渡实现 `calibration/split.rs`）：
 
@@ -74,7 +77,7 @@ include/lyflow_pcl/
   pcl_path.h                    中文路径下把窄字符串喂给 PCL 的三种模式（D9）
   pcl_pch.h                     本包的预编译头
 ops/
-  ops.h                         14 个注册函数的声明
+  ops.h                         算子注册函数的声明
   register.cpp                  registerPackOps + setCloudWriter
   *.cpp                         一个算子一个文件
 algo/

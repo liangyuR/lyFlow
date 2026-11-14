@@ -66,7 +66,7 @@ lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]
 
 每个选项的完整说明（`--input` 的两种注入、`patch` 的动作顺序、`perturb` 的单位、配方的四类失配……）见 `lyflow --help`。
 `--cache-dir`（或环境变量 `LYFLOW_CACHE_DIR`）在 `run` / `eval` / `sweep` / `perturb` 上都认：结果缓存落盘，
-默认关，按产品版本、源码修订和缓存格式版本组成的构建身份分目录。只有具有有效源码修订的受控正式发布构建才能启用；普通开发构建的 `buildIdentity` 为 `null`，启用落盘缓存会被拒绝，旧哈希目录也不再复用。具体条件见 [磁盘缓存设计](disk-cache-plan.md)。
+默认关，按产品版本、源码修订和缓存格式版本组成的构建身份分目录。只有具有有效源码修订的受控正式发布构建才能启用；普通开发构建的 `buildIdentity` 为 `null`，启用落盘缓存会被拒绝，旧哈希目录也不再复用。目录管理与限制见[跨进程缓存](#跨进程缓存)。
 
 `eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
 `nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径，
@@ -112,6 +112,23 @@ lyflow perturb demo.lyflow.json --after n_frame_s:cloud --region '{"kind":"halfs
 ```
 
 `region` 和 `axis` 的位移单位是米；当量测值单位为毫米时，位移 1 mm、读数增加 1 mm 对应 `--expect 1000`。选区需要与插入端口处的点云处于同一坐标系。逐帧锚点、留出集、分组统计和参数来源详见 [Agent 调参指南](agent-tuning.md)；配方格式与失配规则见 [参数配方](recipe.md)。
+
+## 跨进程缓存
+
+`run`、`eval`、`sweep`、`perturb` 可显式指定 `--cache-dir <dir>`；MCP 将 `LYFLOW_CACHE_DIR` 传给 CLI。默认关闭，桌面编辑器不启用这层缓存。
+
+```powershell
+lyflow info
+lyflow run demo.lyflow.json --cache-dir .cache/lyflow --summary
+lyflow cache info --cache-dir .cache/lyflow
+lyflow cache clear --cache-dir .cache/lyflow --stale
+```
+
+构建身份由缓存格式版本、实际引擎产品版本和源码修订组成。普通开发构建没有可用于落盘的 `buildIdentity`；受控正式构建的条件见[发包指南](deployment/packaging.md)。CLI 与 core 的完整产品版本还必须一致，否则不能形成该缓存身份；这比 C ABI 允许的主.次系列兼容更严格。不同身份不共用结果，不按旧目录的内容哈希判断运行库兼容性。
+
+缓存判定由 C++ 执行器负责。只有全部输出都可序列化、且耗时达到默认 20 ms 门槛的节点才落盘；当前支持点云、原始比例的 Tensor 和 Image。预览命名空间、Error、非确定性结果及 Python 节点不借此跨运行复用，混有不支持输出类型的节点会重算。写入使用临时文件加原子改名，损坏文件按未命中处理。
+
+这不是输入文件的内容校验：同名输入被覆盖却保留 size/mtime 时，需要清理缓存或使用冻结输入。`cache clear --stale` 清理旧构建身份，省略 `--stale` 清理该缓存目录全部结果；调用前确认目录用途。当前没有自动配额、跨机器共享或编辑器跨会话计算缓存承诺。
 
 ## 输出与退出码
 

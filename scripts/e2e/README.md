@@ -1,8 +1,8 @@
 # e2e —— CDP 验收
 
-用 CDP 驱动**真实运行的 Tauri app**，覆盖 [docs/m2-plan.md](../../docs/m2-plan.md) §11
+用 CDP 驱动**真实运行的 Tauri app**，覆盖 [docs/当前指南](../../docs/architecture.md) §11
 里所有标着「CDP」的验收项，外加中文路径那一条。逐条结果见
-[docs/m2-acceptance.md](../../docs/m2-acceptance.md)。
+[docs/当前指南](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m2-acceptance.md)。
 
 ```
 cdp.mjs      极简 CDP 客户端

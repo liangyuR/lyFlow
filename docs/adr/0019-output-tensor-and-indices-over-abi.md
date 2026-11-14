@@ -5,7 +5,7 @@
 
 ## 背景
 
-连线内容查看器（[edge-peek-plan.md](../edge-peek-plan.md)）要做到「双击一条边，看见这条线上流的东西」。
+连线内容查看器（[edge-peek-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/edge-peek-plan.md)）要做到「双击一条边，看见这条线上流的东西」。
 十三个端口类型里，十一个已经能看：点云走 ADR-0006 的二进制通道，其余九种的完整 JSON
 随 `node_state` 事件早就到了前端。
 
@@ -90,4 +90,4 @@ ADR-0003 已经立过同一条规矩：C++ 给事实，前端给呈现。
 - 保留历史 run 的结果以便回看：桥接层只留最近一个已完成的 run 句柄，
   旧 runId 的索引在新 run 开始时就被 `freeRun` 抹掉。
   这条约束直接决定了查看器的「锁定快照」只能冻结前端已解码的数据，
-  理由与取舍见 [edge-peek-plan.md §4.5](../edge-peek-plan.md)。
+  理由与取舍见 [edge-peek-plan.md §4.5](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/edge-peek-plan.md)。

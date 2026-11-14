@@ -163,7 +163,7 @@ cacheKey(node) = hash(op.id, op.version, params, [cacheKey(upstream_i) for i in 
 ```
 
 前端不参与缓存决策，但需要理解一件事：**改一个上游节点的参数，会让它所有下游失效。**
-UI 上把受影响的下游节点标成 stale（虚线边框之类）是很值钱的反馈，成本很低。
+编辑器显示过时状态与重算计划；是否可复用、哪些节点需要执行仍由 core 决定。Python 节点首版不参与结果缓存，详见[Python 节点](python-nodes.md)。
 
 中间结果本身也留在 C++（[ADR-0006](adr/0006-result-store-binary-ipc.md)）：
 结果仓按 cacheKey 内容寻址，`runId → (nodeId, port) → cacheKey` 只是索引。

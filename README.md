@@ -118,10 +118,10 @@ app/                   Tauri 桌面前端
 examples/              React 宿主与 C++ 消费示例
 schema/                图、算子、事件、配方与样本等 JSON Schema
 scripts/               开发、验证、发包与端到端验收入口
-docs/                  使用指南、接口契约、设计与验收记录
+docs/                  当前指南、接口契约、接入边界与架构决策
 ```
 
-所有文档按使用场景整理在 [文档中心](docs/README.md)。功能演进与未完成项见 [Roadmap](docs/roadmap.md)。
+所有文档按使用场景整理在 [文档中心](docs/README.md)。当前范围与后续边界见 [Roadmap](docs/roadmap.md)。
 
 ## 许可
 

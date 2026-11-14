@@ -420,7 +420,7 @@ void registerResultBundle(Registry& r) {
       " sha256；留空的 bundle 没法溯源到具体哪张图。\n"
       "roi_source 取 rois.info.source（模板路径上按选中槽的 roisFrom 分 template / config，模型路径 model），"
       "回退选了备用路径记 template。\n"
-      "point_counts 不产出、以业务侧为准的键（docs/result-bundle-plan.md (c)）：非 line end 配置下的"
+      "point_counts 不产出、以业务侧为准的键：非 line end 配置下的"
       " flush_ref_roi（没有 fit_line）；preprocess_* 的口径在跟随裁剪之前（原算法在之后），且等于 input；"
       "input_*_removed_non_finite、filter_before_*、segmentation_*、consistency_gate_exceeded（没有端口带这些数）；"
       "*_global_coarse_* 只有选中候选的那一条；原算法的逐圆诊断键。";

@@ -107,7 +107,7 @@ Record/Bundle 用 `summarize_output {fields,offset,limit}` 读取；返回数值
 
 `export_candidate {evaluationId,paramSet:0,format:"graph"|"recipe",out?}` 要求评估完整、身份一致，写新文件和 `.provenance.json`，保留评估引用、输入/构建身份、划分与缓存策略。已有文件不会覆盖。图支持节点和顶层候选；配方只能表达顶层参数，节点覆盖需导出图。返回 targetGraph/baseDir 供配方回放；相对输入仍按 provenance.baseDir 解析。
 
-导出证明候选已执行评估，不自动宣称达到现场质量指标。先审核 validation/holdout 约束和失败证据，再采用候选。本次代码验收使用合成图和标注正反例；真实模板、stations、标定与现场漏检率仍需产线数据验证。点云 `perturb` 的几何位移不适用于图像真值。
+导出证明候选已执行评估，不自动宣称达到现场质量指标。先审核 validation/holdout 约束和失败证据，再采用候选。合成图和标注正反例只覆盖相应回归；真实模板、stations、标定与现场漏检率仍需产线数据验证。点云 `perturb` 的几何位移不适用于图像真值。
 
 
-本次逐项检查与测试结果见 [实现验收](mcp-tuning-acceptance.md)。
+当前复验入口及范围见[测试地图](testing.md)。

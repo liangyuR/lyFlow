@@ -16,11 +16,15 @@ export function App() {
 
 编辑器会撑满父容器的高度，所以父容器得有高度（`flex: 1` 或 `height: 100%`）。
 
-## 装它
+## 安装
 
+编辑器以 TypeScript 源码 tarball 随 LyFlow 发布，不发布到 npm registry。使用与运行库配套的发布资产安装，例如：
+
+```powershell
+pnpm add ./lyflow-editor-vX.Y.Z.tgz
 ```
-pnpm add @lyflow/editor
-```
+
+仓库内开发通过 workspace 依赖引用。资产名、版本与发布规则见 [发包指南](../../docs/deployment/packaging.md)。
 
 peerDependencies —— **必须与宿主共用同一份实例**，否则包里的 hooks 会在宿主的
 渲染树里炸掉（"Invalid hook call"）：
@@ -53,16 +57,22 @@ resolve: { dedupe: ["react", "react-dom", "@xyflow/react", "three", "zustand"] }
 interface LyFlowEditorProps {
   transport: Transport;              // 必填
   dialogs?: EditorDialogs;           // 文件对话框，宿主提供
-  graphPath?: string;                // 挂载后自动打开这张图
+  graphPath?: string;                // 挂载或路径变化后打开这张图
+  sceneId?: string | null;            // 宿主点云会话，运行时转给后端输入提供者
   onDocChange?: (doc: GraphDoc, dirty: boolean) => void;
   theme?: Record<string, string>;    // Qing Steel token 或兼容的 --lyflow-* 变量覆盖
   className?: string;
+  windowChrome?: FlowWindowChrome;    // 宿主提供的标题栏窗口按钮与拖动/最大化回调
   animations?: boolean;              // 画布动效，默认 true
   topologyLocked?: boolean;          // 锁住拓扑、只许调参，默认 false
 }
 ```
 
-`onDocChange` 在文档或 dirty 状态变化时回调，宿主拿它做自己的标题栏、保存提示。
+完整定义见 [LyFlowEditor.tsx](src/LyFlowEditor.tsx)。`onDocChange` 在文档或合并后的 dirty 状态变化时回调，包括复用活动标签打开新文档；宿主可据此更新自己的标题栏和保存提示。
+
+`sceneId` 经运行选项交给宿主的输入提供者，不修改图中的路径参数。`windowChrome` 的类型由包导出，包含 `controls`、`focused`、`onDragStart()` 和 `onToggleMaximize()`；不给时不接管原生窗口操作。宿主装配示例见 [嵌入指南](../../docs/embedding.md)。
+
+当前编辑器的 store、Transport 与对话框配置是模块级单例，同一页面只支持一个 `<LyFlowEditor>`。工作流标签是该实例内的多个文档，不等于多个独立编辑器组件。
 
 `animations={false}` 关掉画布动效：节点进出场、完成/出错的闪光、连线生长、自动布局的过渡
 全部直接落到终态，CSS 的循环与过渡一并停掉。系统设了「减少动态效果」
@@ -97,24 +107,22 @@ interface LyFlowEditorProps {
 | `new HttpTransport(baseUrl, token?)` | 跑在浏览器里，对着 [`docs/http-transport.md`](../../docs/http-transport.md) 的后端 |
 | `new StaticTransport(manifestUrl?)` | 只读：读一份 dump 出来的 manifest，什么都跑不了。没有后端时也能把界面渲染出来 |
 
-Rust 侧用 `lyflow_lib::host::attach`（`host` feature）把 LyFlow 的那 34 条 command
-挂到自己的 `tauri::Builder` 上，不必自己实现任何一条；命令名与事件名都不带前缀，
-`TauriTransport` 拿来就能用。做法见
-[`docs/embedding.md`](../../docs/embedding.md#rusttauri-宿主)。
+Rust/Tauri 宿主通过 `lyflow_lib::host::attach`（`host` feature）装配 managed state 与启动逻辑，并用 `lyflow_handler!` 注册 LyFlow 命令及宿主自己的命令。命令名、事件名与现成 `TauriTransport` 配套；接入方式见 [嵌入指南](../../docs/embedding.md)，以 [host.rs](../../bridge/src/host.rs) 的实际接口为准。
 
-要接自己的后端就实现 `Transport` 接口（`src/transport/types.ts`）。
-它的每个方法都对着 C ABI v12 的一个入口。v7 那一版的完整清单见
-[`docs/phase-a1-acceptance.md`](../../docs/phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
-v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)，
-v9 增补的 `lyflow_run_summary` 见 [ADR-0022](../../docs/adr/0022-run-summary-as-core-output.md)
-（编辑器不额外调它 —— 那份 summary 就挂在 `run_finished` 事件上）。
-v11 给 `runGraph` 的选项加了 `isolate?: string[]` 与 `force?: string[]`（下面「节点运行按钮」一节），
-自己实现 `Transport` 的要把它们透传到后端，语义见 [`docs/embedding.md`](../../docs/embedding.md#部分运行targetsisolateforce)。
-param-recipe P1 又给 `runGraph` 的选项、`validateGraph` 与 `planGraph` 各加了一个可选的 `params`（顶层图参数的取值
-`{名字: 值}`），同样要透传：Tauri 到 C ABI 的 `params_json`，HTTP 到信封的 `params`（[http 契约](../../docs/http-transport.md)）。
-param-recipe P3 加了配方文件的五个方法（`listRecipeDir` / `readRecipeFile` / `writeRecipeFile` / `deleteRecipeFile` /
-`renameRecipeFile`）：文本进、文本出，后端只管读写与路径约束（[recipe.md](../../docs/recipe.md)「传输层与路径安全」），
-Static transport 只读。
+自定义后端须实现 [Transport](src/transport/types.ts)。Transport 同时包含引擎执行与宿主文件服务，并非每个方法都直接对应一个 C ABI 函数。
+
+| 能力 | 必须保持的契约 |
+|---|---|
+| 描述与校验 | `getManifest`、`getCoreInfo`、`validateGraph` 和 `planGraph` 返回权威描述、诊断与计划。校验和计划的 `params` 必须与实际运行使用的顶层图参数一致。 |
+| 执行与结果 | `runGraph` 返回 runId，状态通过 `onExecutionEvent` 到达；`cancelRun` 取消请求。`getOutputInfo`、`getRunOutputs` 和二进制取数方法按 runId 与展开后的节点路径读取结果。 |
+| 运行选项 | 原样传递 `targets`、`isolate`、`force`、`mode`、`previewMaxPoints`、`previewBudgetMs`、`sceneId`、`params`。`isolate` 与 preview 不组合；部分运行和强制重算语义见 [嵌入指南](../../docs/embedding.md)。 |
+| 文件与备份 | 图文件、最近文件、备份、配方文件、二进制写入由宿主实现。配方 I/O 文本进出，格式和失配由编辑器校验；路径限制见 [配方契约](../../docs/recipe.md)。 |
+| 库与更新 | 库目录、库算子定义、导入器与刷新状态由宿主提供；`onManifestUpdated` 和 `onCoreReloadFailed` 传递重新加载结果。 |
+| 可选能力 | `getOutputImage`、`loadCloudFile`、`listSnippets`、`untitledBackupPath` 及 Python 管理方法允许不实现；编辑器按可用能力降级。图像预览缺失时只显示已有统计信息，模板底图缺失时只画 ROI 框，Python 未支持时给出能力提示。 |
+
+Python 管理方法为 `getPythonSettings`、`setPythonSettings`、`refreshPythonNodes`。宿主通过 `supported` / `editable` 表达支持状态和只读配置，详见 [Python 节点指南](../../docs/python-nodes.md)。
+
+C ABI 签名以 [c_api.h](../../core/include/lyflow/c_api.h) 为准。产品版本与 ABI 使用同一个完整 `X.Y.Z` 字符串，C++/Rust 客户端按主、次版本系列判定运行时兼容：同系列补丁兼容，跨次版本拒绝加载。旧数字 ABI 不能作为当前接口契约。资产中的版本和源码修订仍须满足 [发包契约](../../docs/deployment/packaging.md)。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，
@@ -124,7 +132,7 @@ Static transport 只读。
 
 打开、另存这几件事要弹系统对话框，编辑器不知道怎么弹，
 由宿主注入（有没存的改动时那一问「保存 / 不保存 / 取消」、恢复备份那一问「恢复 / 丢弃 / 取消」是编辑器自己画的，`lib/unsaved.ts`、`lib/autosave.ts`，不经宿主 —— `confirmRestore` 只在编辑器整个卸掉、画不出对话框时才用；
-宿主关窗口前也可以调导出的 `resolveUnsaved("关闭窗口")`，桌面壳就是这么做的）：
+宿主关窗口前应调导出的 `resolveAllUnsaved("关闭窗口")` 检查全部工作流，`resolveUnsaved` 只处理当前工作流：
 
 ```ts
 import type { EditorDialogs } from "@lyflow/editor";
@@ -141,8 +149,7 @@ const dialogs: EditorDialogs = {
 配方的导入导出先找 `pickRecipePath`，其次 `pickPath`，都没有就在编辑器里让人输一个路径（HTTP 宿主填工作区里的相对路径）。
 起配方名、确认删除、「文件已被外部修改」这几个对话框是编辑器自己画的（`lib/modal.ts`），不经宿主。
 
-不给 `dialogs` 时：确认类退回 `window.confirm`，路径选择类给一条提示，
-3D 导出退回浏览器自己的下载。`app/src/dialogs.ts` 是 Tauri 版的实现。
+不给 `dialogs` 时，默认宿主不能选择打开或保存路径，会给出不支持文件对话框的提示；恢复确认的卸载兜底使用 `window.confirm`。3D 导出可退回浏览器下载。桌面实现见 [app/src/dialogs.ts](../../app/src/dialogs.ts)。
 
 ## 主题
 
@@ -170,7 +177,9 @@ CSS 由组件自己 `import`，宿主不用单独引样式文件。
 
 顶部标签对应独立工作流；新建或打开会保留其它标签的未保存内容，重复打开同一路径只激活已有标签。切换保留节点、配方、撤销/重做、选择、视口与已完成的运行结果；当前工作流运行中或配方读取中，先完成或停止操作再切换。
 
-标签支持方向键/Home/End切换，Delete关闭；关闭未保存标签与关闭窗口都会询问保存、不保存或取消，窗口关闭会检查所有标签。左侧导航可展开/收起节点库和工作流列表，并进入参数、日志与帮助；当前工作流名称仍可在操作栏编辑。
+标签支持方向键/Home/End 切换、Delete 关闭，双击或标签有焦点时按 F2 重命名。关闭未保存标签与窗口都会询问保存、不保存或取消；窗口关闭检查全部标签。工具栏提供「保存 ▾」，下拉包含另存为、重命名；新建、打开与最近文件集中在左侧工作流面板。
+
+左侧导航展开节点库、工作流列表，并进入参数、日志和帮助。`topologyLocked` 下节点/工作流管理入口隐藏，参数、日志、帮助仍可访问。完整手势见 [操作指南](../../docs/interaction-checklist.md)。
 
 多文档未保存内容另外备份到当前浏览器/WebView配置的 IndexedDB，重新打开时询问恢复。它与原有图文件旁的 `~` 备份并存；不是自动保存到原文件，备份恢复不包含撤销历史和运行结果。选择稍后会保留原工作区备份；本次会话仍有原来的活动图文件备份。
 
@@ -211,7 +220,7 @@ src/
   lib/               类型校验、布局、映射、子图、参数、keymap、对话框注入、动效（motion.ts）
   transport/         Transport 契约 + tauri / http / static 三个实现
   types/             GraphDoc、manifest、ExecutionEvent 的 TS 镜像
-  styles*.css        全部走 --lyflow-* 变量；动效的全部 CSS 在 styles.motion.css
+  styles*.css        Qing Steel 主题角色；兼容 --lyflow-* prop；动效 CSS 在 styles.motion.css
 test-server/         docs/http-transport.md 的最小 Node 实现，给 e2e:http 用
 ```
 
@@ -224,8 +233,7 @@ pnpm test-server -- --root <工作区> --cli <lyflow.exe>
 pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 ```
 
-纯逻辑（`lib/` 下的图参数、参数面板模型、transform / curve 的值、配方的格式与失配）有 `node --test` 单测（`test/`）；界面这一层的正确性由
-`pnpm e2e` 与 `pnpm e2e:http` 端到端保证。
+纯逻辑和 store 契约使用 `pnpm --filter @lyflow/editor test`；真实鼠标、键盘、焦点及宿主链路使用 `pnpm e2e`、`pnpm e2e:http`。这些是验证入口，不代表任意修订已经通过。选择范围与跳过项要求见 [测试地图](../../docs/testing.md)、[E2E 说明](../../scripts/e2e/README.md)。
 
 ---
 
@@ -292,20 +300,17 @@ pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 `applyMigrations`：一条撤销记录、置 dirty、toast 提示
 （[ADR-0008](../../docs/adr/0008-migration-as-diagnostic.md)）。
 
-不静默改写，是因为那是**用户的文档被改了**。撤销栈里必须有这一步，标题栏必须有那个 `*`。
+不静默改写，是因为那是**用户的文档被改了**。撤销栈里必须有这一步，标题栏必须显示未保存标记。
 
 ## 动效
 
-[docs/motion-plan.md](../../docs/motion-plan.md) 是设计，验收记录在 [docs/motion-acceptance.md](../../docs/motion-acceptance.md)。
 动画库是 `motion`（只从 `motion/react` 导入），和 dagre、immer 一样是编辑器自带的依赖，宿主不用管。
 
 **分工。** 一次性、有进出场的动效用 motion：节点进场、删除残影、连线生长、完成/出错闪光、
 错误抖动、自动布局过渡。持续循环与 hover 用 CSS：running 的呼吸光、边上的数据流动、
 节点/边/端口的 hover。几百条边的 hover 判定和流动循环放在 JS 里每帧跑不划算。
 
-**只改两处。** 时长（fast 120 / base 200 / slow 320 ms）、缓动、motion 的预设和「现在要不要动」
-都在 `src/lib/motion.ts`；CSS 变量 `--lyflow-motion-*`、全部 keyframes 与 hover 规则都在
-`src/styles.motion.css`。别处不写时长、不写 `@keyframes`（`git grep @keyframes` 只该命中那一个文件）。
+**集中维护。** JS 动效的时长、缓动、transition 预设和启用判定在 [motion.ts](src/lib/motion.ts)；CSS 动效在 [styles.motion.css](src/styles.motion.css)，通过 `--lyflow-motion-fast/base/slow` 引用 Qing Steel 的 `--dur-short/medium/long`，缓动使用上游主题角色。修改动效时同步核对 JS 与 CSS，不在各组件散写时长或 keyframes。
 要不要动由根组件算好经 context 往下传（`useMotionEnabled()`）；关掉时根上挂 `lyflow-motion-off`。
 
 **谁算「新出现」由 doc 的差分决定，不由挂载决定。** 画布同步订阅 graph store，同一张图
@@ -321,13 +326,13 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 还没重渲、DOM 还在 —— 克隆被删节点的 DOM 放进残影层淡出。克隆体剥掉全部 `id` 与 `data-*`，
 `aria-hidden`、不接鼠标，免得被 e2e 或无障碍树当成真节点。
 
-**自动布局只在用户触发时过渡。** 工具栏、Ctrl+L、右键「整理」经 `withLayoutTransition()` 调
+**自动布局只在用户触发时过渡。** 选区操作条、Ctrl+L、右键「整理」经 `withLayoutTransition()` 调
 `applyLayout`；doc 一次提交（一个撤销步），画布把临时位置逐帧喂给 React Flow，连线跟着走。
 打开文件时的初始布局、脚本直调 `applyLayout` 都一步到位。
 
 **元素动画用 `animateMini`，不用完整版的 `animate(element)`。** 后者给元素建一个 VisualElement，
 终值在下一帧的渲染批次里才写回：`then` 里刚擦掉的 inline `opacity` 会被它重新写成 1，
-静音、未被需要这些类的半透明就永久失效了（e2e 抓到过）。
+静音、未被需要这些类的半透明可能失效。
 
 **实时预览不闪绿。** 拖参数触发的 preview run 一秒能跑好几轮，结束时不播 done 闪光（看的是
 `execution.preview`）；error 的闪光与抖动照播。
@@ -337,8 +342,7 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 
 ## 节点运行按钮
 
-[docs/node-run-plan.md](../../docs/node-run-plan.md) 是设计（§6 修订一改了主操作），验收记录在
-[docs/node-run-acceptance.md](../../docs/node-run-acceptance.md)。每个节点标题栏右端一个 14 px 的小圆圈
+用户操作见 [操作指南](../../docs/interaction-checklist.md)，回归入口见 [测试地图](../../docs/testing.md)。每个节点标题栏右端一个运行按钮
 （`components/NodeRunButton.tsx`），右键菜单里有同一组的三项；两处的判据、状态与动作都在
 `src/lib/nodeRun.ts`，不许各写一份。
 
@@ -347,16 +351,16 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   右键三项：运行到此节点（= 单击）/ 强制重算此节点（= Shift+单击）/ 仅此节点（用现有上游）（= `isolate`，
   上游不齐时置灰写明缺谁）。按钮只在本节点有编辑期校验 error 时置灰。
 - **hover 预告**（`title` 与 `data-run-upstream`）：将一并运行的上游 = 当前层里的祖先中「下次会真算」的那些；
-  判据优先用 `plan_graph` 的 `cached`（ADR-0007，只有 Tauri 那条路有），拿不到时退回执行状态。全部就绪且本节点
+  判据优先用 `plan_graph` 的 `cached`（ADR-0007），拿不到时退回执行状态。全部就绪且本节点
   命中缓存时写「已是最新（命中缓存）—— Shift+点击强制重算」。每次正式运行收场 `LyFlowEditor` 立刻重编一次计划
   （不等 debounce），否则刚跑完的节点仍被当成「没缓存」。
-- **带 targets 的运行都不清空节点表**（修订一 V2）：计划里的节点照常先亮成排队中、跟着事件更新；计划外的留着，
+- **带 targets 的运行都不清空节点表**：计划里的节点照常先亮成排队中、跟着事件更新；计划外的留着，
   收场时按 `run_finished.attached` 决定留不留。
 - **单节点运行（isolate）另有一条**：`beginRun` 带着 isolate 时留着上一次的 `nodes`，`run_started` 只追加
   cacheKey（`extendRanWith`，计划外的下游还要按它们自己上次的键判 stale），不在 isolate 里的节点的
   `node_state` 一律不落库 —— 否则「只跑 b」会把 a 刷成「已缓存」、耗时归零。流水账
   （`onNodeTransition`）同样只记 isolate 里的节点。
-- **计划外节点的输出靠 core 挂上**（R7）。`run_finished.attached` 列出按新 runId 还取得到输出的节点；
+- **计划外节点的输出靠 core 挂上**。`run_finished.attached` 列出按新 runId 还取得到输出的节点；
   收场时节点表里这次没有事件（isolate 下是没命中缓存，`served`）、又不在 attached 里的，一律退回 idle ——
   否则它们显示「完成」，点开 3D 视图或 Edge Peek 却是空的。stale 判定不变。老 core 不带 attached，就全部照旧。
 - **上游不齐：不弹框。** `run_finished.diagnostics` 里的 `upstream_not_ready`（外加执行期才撞上的惰性上游）
@@ -365,9 +369,9 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 - **停与抢占。** 只有这次运行是这个节点自己的按钮（或同义的「运行到此」）发起的（`execution.targets` 恰好是它）才显示 ■、点了是
   `cancelCurrentRun`；别的运行在跑时它照常显示状态（包括 running 的进度环），点了是发起新运行抢占旧的。
 - **标题栏改成了 flex。** 标题 `flex: 1; min-width: 0` 并在自己身上省略，徽标与按钮排在右端；按钮的命中区
-  20×20 用负外边距收回，标题栏不因此变高。按钮不含端口，hover 的放大画在它自己的 SVG 上（motion-plan A6）。
+  20×20 用负外边距收回，标题栏不因此变高。按钮不含端口，hover 的放大画在它自己的 SVG 上，避免影响端口量测。
 
-## 踩过的坑
+## 实现约束
 
 这些全部来自 CDP 验收（`scripts/e2e`）抓到的真 bug，没有一个是单元测试能发现的。
 
@@ -393,25 +397,22 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   而界面什么都没发生。
 - **订阅守卫必须守 Promise 本身。** 守 `unlisten !== null` 不够：它在 await 之后
   才赋值，而 StrictMode 的挂载→卸载→再挂载会让两次都看到 null，结果注册两个监听器。
-- **Shift+F5 被 F5 抢先匹配。** 键表原来只在写明 `Shift+` 时才要求 shift 按下，
-  于是 `F5` 这一条先命中。Shift 必须**精确**匹配，唯一的例外是 `?` 这种
-  本来就要按 Shift 才打得出的符号。
+- **快捷键精确匹配修饰键。** Shift 必须精确匹配，避免 `Shift+F5` 被 `F5` 抢先处理；例外是 `?` 这类本来就需要 Shift 才能输入的符号。
 - **`onReconnectEnd` 的第四个参数各版本形态不一。** 猜错的后果是把一条刚重连好的边
   直接删掉。改成在 `onReconnect` 里自己记一笔，`onReconnectEnd` 只看那一笔。
 - **拖节点到连线上：容差不能只看中心距离。** 12 px 是**画布坐标**，画布缩到 50%
   时只剩 6 个屏幕像素，用户根本够不着。判据改成「连线穿过节点矩形」，
   中心距离只作为擦边时的余量。
-- **含端口的元素不许位移、缩放，hover 也不行**（docs/motion-plan.md A5）。React Flow 在节点挂载、
+- **含端口的元素不许位移、缩放，hover 也不行**。React Flow 在节点挂载、
   尺寸变化、`updateNodeInternals` 时用 `getBoundingClientRect` 量端口相对节点的位置；作用在
   `.node`、`.node__body`、`.node-port` 上的 transform 只要赶上一次量测，连线端点就**永久**错位，
   直到下一次量测。所以节点进场只动 `opacity`、hover「抬起」只加阴影；允许 transform 的只有
   不含端口的 `.node__head`（错误抖动）、端口圆点的 `::before`、删除残影。
-- **圆点本身也不能缩放 —— 「以圆心缩放不改变量测」是错的**（A6，验收后修正）。React Flow 取端口的
+- **圆点本身也不能缩放 —— 「以圆心缩放不改变量测」是错的**。React Flow 取端口的
   `x/y` 用 `getBoundingClientRect`（含 transform），宽高却用 `offsetWidth/Height`（不含），连线端点在圆点
   **外缘**（源在右缘、目标在左缘）而不在圆心。圆点放大 1.35 倍的那一刻要是赶上量测（比如 hover 着端口时
   运行结束、节点多出一行状态条），端点会偏 1.75 px 左右，直到下一次量测。所以端口 hover 的放大与光晕画在
-  圆点的 `::before` 上：伪元素不进 `getBoundingClientRect`，圆点的盒子一动不动。e2e 验收 8 专门在 hover
-  端口期间把节点撑宽、逼 React Flow 重量一次，再断言端点。
+  圆点的 `::before` 上：伪元素不进 `getBoundingClientRect`，圆点的盒子一动不动。相关交互回归应在 hover 端口时触发尺寸变化，验证连线端点仍与端口相接。
 - **拖线期间兼容端口的放大是老行为**，仍然缩放圆点本身，一律经 `--lyflow-handle-scale` 乘在
   `translateY(-50%)` 后面 —— 直接写 `transform: scale()` 会把居中的那半个身位顶掉（兼容端口、自动连线的
   候选端口原来就是这么往下掉的）。
@@ -427,36 +428,31 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   大一半、右下三分之一被裁掉：画面中心跑到可见区右下角，2D 拖框层按画布尺寸摆的框有的落在可见区外、拖不到。
   `.viewer__canvas canvas` 现在与 peek 的 CloudView 一样绝对定位、宽高 100%。
 - **ResizeObserver 会给刚卸掉的元素报一次 0×0。** 虚拟列表的行滚出视口被卸掉后，摘观察的 effect 跑之前
-  观察回调可能先到；把这个 0 当行高记下，后面的偏移整体塌缩，`scrollToKey` 与视口补偿一起跑偏（P2 验收 9：
-  画布上选中节点，面板没滚到那一节）。回调里跳过 `offsetParent === null`（不在排版里）的行。谁先到是时序竞争，
-  这台机器 150% 缩放下每次都是回调先到。
+  观察回调可能先到；把这个 0 当行高记下，会让偏移、`scrollToKey` 与视口补偿失效。回调里跳过 `offsetParent === null`（不在排版里）的行，不依赖卸载与观察回调的先后顺序。
 
-## 图参数（param-recipe P1）
+## 图参数
 
-设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md)，数据格式与编辑器行为见
-[docs/graph-doc.md](../../docs/graph-doc.md)「顶层图参数」，验收记录在 [docs/param-recipe-p1-acceptance.md](../../docs/param-recipe-p1-acceptance.md)。
+数据格式和绑定规则见 [GraphDoc](../../docs/graph-doc.md) 与 [配方契约](../../docs/recipe.md)。
 
 - **纳入配方 = 提升为图参数**：参数行右键「纳入配方（提升为图参数）」→ `promoteToGraphParam`。在子图里做就是整条
   逐层提升链，一个动作一次撤销。其余动作（绑定、解除、删除、改名、改 default、改规格）都在 graph store。
 - **被绑定的参数只有一个写入处**：`setParam` 命中被图参数提供的参数（`lib/graphParams.ts` 的 `resolveGraphBinding`）
-  时转给 `editGraphParamValue`，按当前配方写进配方或 default（K6）。Inspector、2D 拖框、粘贴、重置都经 `setParam`，
+  时转给 `editGraphParamValue`，按当前配方写进配方或 default。Inspector、2D 拖框、粘贴、重置都经 `setParam`，
   所以不必各判一遍；显示走 `withBoundValues`（节点的浅拷贝，被绑定的键换成图参数的有效值）。
 - **有效值 = default ← 当前配方覆盖**：读值一律经 `store/recipe.ts`（`runParamsOf`、`useGraphParamOverrides`）。
-  P1 当前配方恒为「基础」、覆盖恒为空；运行、实时预览、实时校验、编计划都把合成结果经 `RunOptions.params`
-  （validate / plan 的同名参数）交给后端 —— P3 接上配方时调用方不用改。
+  当前配方提供稀疏覆盖；运行、实时预览、实时校验与计划均把合成取值经 `RunOptions.params`（validate / plan 的同名参数）交给后端。
 - **dirty 是「doc 不是存盘时那一份」**：graph store 记着 `savedDoc`（对象身份），撤销回到保存点时 dirty 复原。
   存盘是异步的，`markSaved(path, doc)` 记下真正写下去的那一份。
 
-## 参数面板（param-recipe P2）
+## 参数面板
 
-设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md) P2，验收记录在
-[docs/param-recipe-p2-acceptance.md](../../docs/param-recipe-p2-acceptance.md)。
+使用方式见 [操作指南](../../docs/interaction-checklist.md)；参数规格见 [OperatorManifest](../../docs/operator-manifest.md)。
 
-- **开关与布局**：工具栏「参数」或 `Ctrl+Shift+P`（键表里的 `paramPanel`）。状态在 ui store 的 `paramPanel`
+- **开关与布局**：左侧导航「参数」或 `Ctrl+Shift+P`（键表里的 `paramPanel`）。状态在 ui store 的 `paramPanel`
   （`open / maximized / tab / viewerOpen`），纯 UI、不进 doc 不进撤销。开着时右侧那一列换成面板、**Inspector 不渲染**；
   3D 视图还在那一列顶上，收成一条「预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
   WebGL。面板宽度与 Inspector 宽度各记各的，面板那份记在 `localStorage["lyflow.paramPanel.width"]`。最大化把画布压成
-  0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧（P1 加的）。
+  0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧。
   预览也能最大化（预览栏的 □ 或 `Shift+Space`，Esc 还原；ui store 的 `viewerMaximized`）：画布、算子面板、检查器 / 参数面板
   同样只是藏起来；画布看不见时动画布的快捷键（删除、复制、搜索……）不响，定位到节点、打开参数面板、换图、整理布局先还原。
 - **数据模型在 `lib/paramPanel.ts`**（纯函数、有单测）：行的全集 = 图参数 + 当前层每个节点的**可见**参数 + 子图实例展开进
@@ -468,50 +464,43 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 - **编辑走的还是 store 的动作**：`setParam(nodeId, name, value, at?)` 多了一个可选的层级 `at`（展开进子图定义的那几行在
   更深一层）；`promoteToGraphParam` / `promoteParam` / `unpromoteParam` 同样。`ParamControl` 的 `path` prop 把层级带给
   右键菜单与 live preview（预览目标按「相对当前层」的 id 拼）。
-- **行结构给 P3 留了位置**：最左一条 `.prow__stripe`（`.prow.is-recipe-override` 时画橙色竖条）、label 后的 `.prow__tags`。
+- **配方行标记**：最左一条 `.prow__stripe`（`.prow.is-recipe-override` 时画橙色竖条）、label 后的 `.prow__tags`。
 - **transform / curve**：`components/TransformControl.tsx`、`components/CurveControl.tsx`，纯逻辑在 `lib/transform.ts`、
   `lib/curve.ts`（与 core 的 `checkCurveValue` / `evaluateCurve` 同一套判据与插值）。数字框抽成了 `components/NumberInput.tsx`。
   `valueEquals` 现在也比普通对象（curve 的值），与键顺序无关 —— 稀疏存储删不删键靠它。
 
-## 配方（param-recipe P3）
+## 配方
 
-设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md) P3，格式与规则在 [docs/recipe.md](../../docs/recipe.md)，
-验收记录在 [docs/param-recipe-p3-acceptance.md](../../docs/param-recipe-p3-acceptance.md)。
+文件格式、覆盖规则与失配处理见 [配方契约](../../docs/recipe.md)。
 
 - **三层**：`lib/recipes.ts` 是纯函数（文件格式、目录约定、配方名、specDigest、四类失配与修复建议；有单测，并对着
-  `schema/fixtures/recipes/` 的共享夹具 —— P4 的 Rust 实现用同一份）；`store/recipe.ts` 存配方集合、当前配方与存盘簿记；
+  `schema/fixtures/recipes/` 的共享夹具，与 Rust 实现共用）；`store/recipe.ts` 存配方集合、当前配方与存盘簿记；
   `store/recipeFiles.ts` 是 I/O（打开图时读 `<图名>.recipes/`、Ctrl+S 写回、外部修改检测、自动备份、导入导出）。
-- **撤销（K7）**：改配方集合的动作都在 **graph store** 里（它握着撤销栈），`HistoryEntry` 同时快照 `doc` 与 `recipes`；
+- **撤销**：改配方集合的动作都在 **graph store** 里（它握着撤销栈），`HistoryEntry` 同时快照 `doc` 与 `recipes`；
   `transact(label, docRecipe, recipesStep)` 一步里可以同时改两样（「写回基础」「改为只在本配方生效」）。`begin/commit` 也快照配方，
   拖滑块改配方里的值合成一条。**当前配方不进撤销栈**，按配方的内存 id 跟随（改名、撤销改名时它还是当前配方）。
-- **dirty 与 graph store 同一个判法**：`set !== saved`（对象身份），撤销回到保存点就不脏。工具栏的 ● 与宿主的 `onDocChange`
+- **dirty 与 graph store 同一个判法**：`set !== saved`（对象身份），撤销回到保存点就不脏。工作流标签的未保存小圆点与宿主的 `onDocChange`
   是图与配方合并的；存盘簿记 `savedFiles`（配方 id → 文件名）让「改名」存成 rename、「删掉」存成 delete；`diskText`（文件名 →
   上次读 / 写的文本）是外部修改检测的依据。
 - **配方跟着图走**：LyFlowEditor 订阅 graph store，`epoch` 变了（打开、新建）就 `loadRecipesFor(filePath)`，同一张图只是换了路径
   （第一次存盘）就 `followGraphPath`。所以宿主与脚本直接 `loadDoc(doc, path)` 也会读配方目录。异步读完时把历史里还指着
   「载入前那份空集合」的快照换成读到的（`rebaseHistoryRecipes`）。
-- **写值的唯一入口**仍是 `editGraphParamValue`（P1 留的口子）：选着配方写配方、选着基础写 default；`setParam` 命中被绑定的参数时
-  转给它。选着配方改没纳入的参数时，`setParam` 顺手记一笔 `baseEdits`（K6 ② 的提示与「改为只在本配方生效」要改之前的值）。
+- **写值的唯一入口**仍是 `editGraphParamValue`：选着配方写配方、选着基础写 default；`setParam` 命中被绑定的参数时
+  转给它。选着配方改没纳入的参数时，`setParam` 顺手记一笔 `baseEdits`（为「改为只在本配方生效」保留改动前的值）。
 - **失配阻止运行**在 `startRun` 里：当前配方有 ①–③ 就 failRun 并写明哪个配方的哪几处；显式给了 `params` 的运行不受约束。
 - **界面**：`components/RecipeMenu.tsx`（工具栏下拉框）、`RecipeMatrix.tsx`（矩阵）、`RecipeManager.tsx`（管理与失配报告）、
   `recipeActions.ts`（问名字、确认、选文件，然后调 store 动作）、`Modal.tsx`；样式在 `styles.recipe.css`。
-  按节点页的行（`ParamPanel.tsx`）用 P2 留的 `.prow__stripe` 与 `.prow__tags` 画覆盖标记。
+  按节点页的行（`ParamPanel.tsx`）用 `.prow__stripe` 与 `.prow__tags` 画覆盖标记。
 - **窗口桥**：`window.__lyflow.recipes`（`loaded` / `importFrom` / `exportTo` / `specDigest` / `autosave` / `restoreAutosave`）
   与 `snapshot().recipe`（当前配方、取值、配方集合、合并后的脏标记）。
 
-## 配方的 CLI / MCP / 宿主一侧（param-recipe P4）
+## 配方的 CLI / MCP / 宿主一侧
 
-编辑器之外按配方跑的三条路（CLI `--recipe`、MCP 的 `recipe` 与 `list_recipes`、宿主按名字切换）见
-[docs/recipe.md](../../docs/recipe.md) §8–§10 与 [docs/embedding.md](../../docs/embedding.md)「按名字切换配方」，验收记录在
-[docs/param-recipe-p4-acceptance.md](../../docs/param-recipe-p4-acceptance.md)。编辑器这边的改动：
+CLI `--recipe`、MCP 的 `recipe` / `list_recipes` 与宿主按名字切换，使用 [配方契约](../../docs/recipe.md) 和 [嵌入接口](../../docs/embedding.md)。
 
-- **`lib/recipes.ts` 与 Rust 的 `bridge/src/recipe.rs` 是同一套规则的两份实现**，共享夹具 `schema/fixtures/recipes/expected.json`
-  现在连每一条的 `message` / `fixLabel` 都钉住（`test/recipes.test.mjs` 与 `cargo test recipe` 逐字比）。改文案要两边一起改、
-  重算夹具。P4 对着 docs/recipe.md 修了一处：`recipeReport` 只认 `doc.params` 自己的键（原来 `constructor`、`toString` 这类名字
-  会从原型链上摸到一个「图参数」而不报多出），`withValue` 取基础时同样。另把「应当是 3 个数 的数组」多出来的空格去掉。
-- **工具栏在 1280–1440 宽下不再截断图名**：`styles.editor.css` 末尾的 1440 断点收窄间距与按钮内边距、撤销 / 重做只留箭头
-  （`.toolbar__label` 里的字隐藏，按钮有 `aria-label`）、文件名收起（图名框的 `title` 是路径）；图名框 `data-testid="doc-name"`，
-  至少放下 8 个汉字、有富余长到 180 px；再挤先收运行区右侧的状态字。DOM 与既有选择器都没变。
+`lib/recipes.ts` 与 Rust 的 `bridge/src/recipe.rs` 实现同一套规则，使用 `schema/fixtures/recipes/expected.json` 共享夹具；失配报告的字段、文案与修复建议需同步修改。成员检查只认 `doc.params` 自身的键，不能从原型链读取同名属性。
+
+窄窗口通过响应式样式收敛工具栏内边距和次要状态文字；工作流名称在顶部标签中显示，文件操作集中在保存菜单与工作流面板。交互及宽度回归使用 `scripts/e2e/m3.mjs`、`params_p4.mjs`，不依赖已删除的旧图名输入框。
 
 ## 层级（子图）
 

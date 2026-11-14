@@ -347,7 +347,7 @@ Audio_1 的缝 0.04~0.15 mm 宽、帧间游走 0.9 mm，任何固定的刀都切
 分辨办法：看 `nonResponsive` 的样本是不是集中在缝位置偏离中位数最远的那些帧 ——
 是的话问题在选区，不在读数。
 
-**缝在帧间游走时用 `pointFrom` 让刀口跟着锚点走**（只 halfspace，[pointfrom-plan.md](pointfrom-plan.md)）：
+**缝在帧间游走时用 `pointFrom` 让刀口跟着锚点走**（仅支持 halfspace）：
 
 ```jsonc
 --region '{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],

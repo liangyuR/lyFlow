@@ -2,194 +2,79 @@
 
 [文档首页](README.md) · [环境准备](getting-started.md) · [Windows 发包](deployment/packaging.md)
 
-**写新测试之前先查这里。** 要验的行为多半已经有测试：能在已有用例里加一行（表驱动的一行、一个 SUBCASE、同一流程里多断言一句）就别新开用例；能在更低一层测的就别放到 e2e。
+本页说明当前验证入口和覆盖边界，不记录某次修订的通过结论。测试数量、跳过项、耗时及产物身份，以对应提交的实际输出为准。
 
 ## 选择验证入口
 
-从仓库根目录使用 PowerShell 7 执行；环境准备见 [快速开始](getting-started.md)。`pnpm check` 按当前算子包配置运行完整开发门禁，桌面 e2e 与发包验收另有入口。
+从仓库根目录使用 PowerShell 7 执行；依赖准备见 [快速开始](getting-started.md)。原生检查按 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 选择的包组合执行，不能用纯平台结果替代标准包或领域包验收。
 
 | 要验证的内容 | 命令 | 范围与前提 |
 |---|---|---|
-| 完整开发门禁 | `pnpm check` | core、manifest、schema、Rust bridge/客户端、CLI、C++ SDK、前端与 MCP；按 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 选择包。 |
-| C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算子数值与 C ABI 契约的主要入口。 |
-| Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量的首次与重复 `valueJson()` 计时，输出源码摘要和 p50/p95；不代表整图耗时。 |
-| editor 纯逻辑 | `pnpm --filter @lyflow/editor test` | node:test，不启动桌面壳。 |
-| MCP | `pnpm --filter @lyflow/mcp test` | node:test；集成冒烟需要已构建的 CLI。完整 typecheck/build/test 可用 `pwsh scripts/check.ps1 -Steps mcp`。 |
-| glue 开发门禁 | `pnpm check:glue` | 固定标准包 + glue，另查必需算子；设置 `LYFLOW_GLUE_DATA` 才跑真实帧评估，人造断胶只报告。 |
-| gap 开发门禁 | `pnpm check:gap` | 带 gap 的完整开发门禁；`LYFLOW_GAP_AB=1` 追加历史对拍，其结果只供参考。 |
-| 桌面 app e2e | `pnpm e2e` | 通过 CDP 驱动 Tauri/WebView2；完整范围须带 `gap;dts`。 |
-| 桌面打包产物 e2e | `pnpm e2e:packaged` | 同一套断言验证桌面构建产物；与运行库/SDK ZIP 发包是两个入口。 |
-| 浏览器宿主 e2e | `pnpm e2e:http` | HTTP 传输与 React 宿主的完整链路。 |
-| Windows 发布产物 | `pnpm run package` | 固定标准包 + glue + gap，生成运行库/SDK ZIP、编辑器 tarball 与正式运行库 NuGet 包；检查暂存 DLL 身份，详见 [发包说明](deployment/packaging.md)。 |
+| 完整开发门禁 | `pnpm check` | core、manifest、schema、Rust bridge/客户端、CLI、C++ SDK、前端与 MCP。 |
+| 选择门禁步骤 | `pwsh -NoProfile -File scripts/check.ps1 -Steps frontend,mcp` | 可选步骤为 core、manifest、schema、bridge、client、cli、sdk、frontend、mcp；不给 `-Steps` 则全部运行。 |
+| C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算法数值、执行语义和 C ABI 契约的主要入口。 |
+| Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量首次与重复读取 `valueJson()` 计时，不代表整图耗时。 |
+| 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 24 个文件、94 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
+| 编辑器类型 | `pnpm --filter @lyflow/editor typecheck` | 同时检查 React 18 与 React 19 类型契约。 |
+| 共享可视化 | `pnpm --filter @lyflow/visualization test` | 图像、点云等共享可视化逻辑。 |
+| Python SDK 与 worker | `python -B -m unittest discover -s python/tests -v` | Python 3.11 及以上与 NumPy；检查节点发现、数据交换和 worker 行为。 |
+| MCP 单元测试 | `pnpm --filter @lyflow/mcp test:unit` | 不含需要 CLI 的集成冒烟；完整入口为 `pnpm --filter @lyflow/mcp test`。 |
+| glue / gap 门禁 | `pnpm check:glue` / `pnpm check:gap` | 运行相应包的专项检查；真实数据和历史对拍需额外配置，不能把人造帧结果当现场结论。 |
+| 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2；完整领域场景需带 `gap;dts`。 |
+| 桌面构建产物 | `pnpm e2e:packaged` | 同一套桌面交互断言验证构建产物，不等于运行库/SDK 发包验证。 |
+| 浏览器宿主 | `pnpm e2e:http` | HTTP 传输、结果取数与 React 宿主链路。 |
+| Windows 发包 | `pnpm run package` | 固定标准包、glue、gap，生成运行库/SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
 
-桌面完整验收示例：
+桌面完整验收及按分组复验：
 
 ```powershell
 $env:LYFLOW_PACKS = 'gap;dts'
 pnpm e2e
+pnpm e2e --only m3:suitePanels,params_p4
 ```
 
-按模块或分组复验可用 `pnpm e2e --only m8b:suiteImagePreviewScale,noderun`，规则见 [e2e 跑法](../scripts/e2e/README.md)。测试数量、跳过项与耗时以本次运行输出为准；历史验收记录见 [易用性与性能验收](usability-perf-acceptance.md)，不能作为当前修订的通过证据。
+选择规则、夹具及原生窗口驱动见 [E2E 脚本说明](../scripts/e2e/README.md)。切换包组合后要重新构建 core；已有 DLL 不会因为环境变量改变而自动拥有新算子。
 
-## 历史规模与耗时
+## CI 的实际范围
 
-以下数量是对应日期的验证记录，不代表当前修订的通过证据。
+[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行以下五个 job。`fast` 是汇总检查，实际编译与单测由 `frontend`、`client` 执行。
 
-2026-09-26 按四路审计做过一次合并精简（提交 test/prune），数字是那之后的：
-
-（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。2026-10-01 大图阶段之后按同样的跑法再实测一遍，数字已更新；PR #3 第二轮 review 修正后又跑了一遍；2026-10-01 晚的易用性 / 性能 / 代码质量这一轮之后全部重跑，含纯平台构建与安装包；2026-10-02 这一轮的后半段之后又全部重跑一遍；同一天晚上真鼠标 / 真按键那一轮修完之后再跑一遍 `pnpm check`、桌面 / 安装包 / HTTP 三种 e2e（纯平台构建与 dts、gap;dts 的 C++ 那一轮没改、没重跑；[usability-perf-acceptance.md](usability-perf-acceptance.md) 末尾）。）
-
-| 层 | 命令 | 规模 | 跑一遍 |
-|---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例；`LYFLOW_PACKS=gap` 280 例（2026-10-12 实测，含相切带新增的 1 例；另外三种构建这次没重跑） | 分钟级（含编译） |
-| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 94（24 个文件，包含工作区与 PythonNode 契约，全部执行） | 秒级 |
-| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 35（2026-10-08） | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
-| 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
-
-自定义桌面标题栏在 `scripts/e2e/m3.mjs` 的 `suitePanels` 验证：关闭系统装饰、合并工作流标签与窗口按钮、最大化 / 双击还原、最小化与焦点恢复，以及点击关闭后取消未保存确认仍保留窗口和改动。
-
-## CI（GitHub Actions）
-
-[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行三个 job。格式与 workflow 检查使用 GitHub 托管的 `ubuntu-24.04`，编译与单测使用 `windows-2022`。日常 CI 只做编译、单元测试、类型、格式与 workflow 静态检查，每个步骤直接展示标准命令。
-
-| job | 步骤与标准入口 |
-|---|---|
-| quality | 固定 actionlint 1.7.12 检查所有 workflow；`pnpm format:check` 使用 Prettier 3.6.2 检查前端/MCP 与 workflow 配置；clang-format 20.1.8 以 `--dry-run --Werror` 检查跟踪的 C/C++ 源码。 |
-| fast | `cargo fmt --check` 检查 bridge、客户端和运行库探针；`cargo build` / `cargo test --lib` 验证 Rust 客户端；前端与 MCP 使用 `pnpm ... typecheck`、`pnpm ... build`、`pnpm ... test`（MCP 使用 `test:unit`）。 |
-| native | Python 3.12 + NumPy 2.2.6 执行 `python -B -m unittest discover -s python/tests -v`；CMake 配置纯平台 + dts，编译后 CTest 运行全部 doctest（含真实 Python worker 接入）；Rust 使用 `cargo build` 编译桌面应用与 CLI，再以 `cargo test --lib --bins` 运行单元测试。 |
-
-C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_test(NAME lyflow-core-tests ...)` 注册。CTest 的一个条目执行该构建组合的全部 doctest 用例；CTest 条目数不等于单元测试例数。Rust 通过 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 的 `build/core/bin`，不在 Cargo 阶段再次编译 C++。
-
-纯平台 + dts 不需要 vcpkg 端口；CI 显式禁用 vcpkg 工具链。需要标准算子包的 Rust 单元测试仍记为 ignored，不能据此宣称标准包测试通过。MCP 的 `test:unit` 选择所有非 `smoke.test.js` 测试文件；原有 `pnpm --filter @lyflow/mcp test` 仍保留完整测试入口。
-
-日常 CI 不运行 SDK 安装消费、Rust `bridge/tests/` 集成、额外 feature 组合、schema 样例校验、桌面/浏览器 e2e 或完整发包。这些本地检查仍可通过 `pnpm check`、`pnpm e2e` 等原有入口运行，测试实现未删除。Rust、前端/MCP 与 C++ 格式基线使用独立格式提交。
-
-前端/MCP 本地使用 `pnpm format` 自动格式化、`pnpm format:check` 检查；范围为 `app`、`packages`、`examples` 下的 JS/TS/CSS/HTML/JSON 以及根配置和 workflow。`.prettierignore` 排除生成产物。C++ 使用 `.clang-format`，通过 `python -m pip install -r scripts/requirements-format.txt` 安装固定版本；对 `git ls-files` 列出的 C/C++ 文件运行 `clang-format -i` 或 `clang-format --dry-run --Werror`。`.clang-format-ignore` 排除第三方、生成的采样数组和构建产物。两种格式工具均不自动排序 import/include。
-
-日常 CI 在失败时上传单测日志与 native 的 CTest JUnit、`Testing/Temporary/*.log`（含 `LastTest.log`）、CMake 配置日志，保留 7 天。CTest 直接以 `--output-junit` 生成报告；Rust、editor 与 MCP 的单测输出同时写入日志，命令失败仍使 job 失败。GitHub 自身保留各步骤的标准输出，包括编译错误。
-
-工具链仍固定在 `rust-toolchain.toml`、`.nvmrc` 与 `package.json`。完整 Windows 发包只在其独立工作流手动运行或推送 `v*` tag 时执行。
-
-2026-10-11 本轮本地按新 CI 入口验证：纯平台 + dts 的 CTest 通过（1 个条目，内含 153 项 doctest / 4165 项断言）；Rust bridge 单元测试 98 通过、59 ignored，客户端 1 通过；editor 161 通过、MCP 单元测试 33 通过，均无失败。桌面/CLI、前端/MCP 编译、类型检查、Rust 格式检查及 actionlint 通过。以上不是标准算子包或完整发包的通过证据。
-
-## Windows 发包门禁
-
-[release-windows.yml](../.github/workflows/release-windows.yml) 在手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue + gap，生成运行库/SDK ZIP、编辑器 tarball 与正式运行库 NuGet 包，并检查暂存布局与 DLL 身份。日常 `CI` 不调用发包工作流；需要时手动运行 `Windows release` 并选择分支。
-
-| 层 | 入口 | 验证范围 |
+| job | runner | 内容 |
 |---|---|---|
-| 全量构建与暂存 | `pnpm run package` | 固定依赖、core 与标准包 Rust 单测、manifest、ABI/版本、headless CLI、运行库/SDK 布局与许可证；实际清单来自交付 DLL。 |
-| 暂存 DLL 身份 | `scripts/inspect-runtime.ps1 -RuntimeDir <目录> -ReportPath <报告>`（由打包入口调用） | x64 DLL、ABI/产品版本/源码修订、manifest、ONNX Runtime 版本与实际模块来源；不解压 ZIP 或运行消费场景。 |
+| `quality` | ubuntu-24.04 | actionlint 1.7.12 检查 workflow；Prettier 3.6.2 检查前端、MCP 和配置；clang-format 20.1.8 检查跟踪的 C/C++ 源码。 |
+| `client` | windows-2022 | 运行库 NuGet 契约测试、bridge/客户端/运行库探针的 Rust 格式检查、独立 Rust 客户端编译与单测。 |
+| `frontend` | windows-2022 | 编辑器 React 18/19 类型、桌面与 React 宿主构建、编辑器及共享可视化单测、MCP 类型/构建/单测。 |
+| `fast` | ubuntu-24.04 | 要求 `frontend` 与 `client` 都成功，不重复运行其测试。 |
+| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes` CLI/嵌入集成测试。 |
 
-最低支持 PCL 1.15.1，固定该版本的发包构建同时覆盖 ASCII PCD 行为一致性；适配该版本时保留逐值/逐字节断言，不放宽数值判据。是否通过以完整构建报告为准。
+CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用同一 job 的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
 
-完整发包在 core 构建后复用其 DLL，运行 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`。启用 `host` 覆盖 IPC/执行层单测；`LYFLOW_STD_PACKS=1` 使日常因缺标准包而 ignored 的 59 项正常执行。无需桌面前端或 ZIP 消费场景，单测失败即停止打包。
+日常 CI 不执行整套桌面/浏览器 e2e、全部 SDK 安装消费、所有 feature/包组合、完整真实数据评估或正式发包。完整 `pnpm check` 与各专项入口仍应按改动范围运行。
 
-构建在成功或失败后上传暂存 JSON/DLL 检查日志、Cargo 编译/单测日志、CTest JUnit/日志与构建日志，保留 7 天；最终 ZIP 与清单仍保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。SDK 消费检查保留在本地完整检查入口，日常 CI 不执行。
+失败诊断上传到 Actions artifact，保留 7 天：前端、MCP、Rust 单测日志，以及 native 的 CTest JUnit、`Testing/Temporary/*.log` 和 CMake 配置日志。格式和编译错误也可直接查看失败步骤输出。
 
-发布夹具只保留 core 单测必需的 `channels-6-to-8.onnx` 及来源说明，不使用客户模型或现场数据。是否完成发包以对应修订的完整构建结果为准，静态检查不能替代 DLL 构建与暂存检查。详见 [发包说明](deployment/packaging.md)。
+[Windows release](../.github/workflows/release-windows.yml) 仅在 `v*` tag 或手动触发时运行，日常 CI 不代替发布门禁。运行库版本、ABI、源码修订、资产检查和下游消费边界以 [发包说明](deployment/packaging.md) 为准。LyFlow 的软件检查也不等于 GlueSight 或其他宿主的现场验收。
 
-## 放在哪一层
+## 测试归属与现有入口
 
-- **算法、数值、执行语义、C ABI 契约** → C++ doctest。gap / dts 的测量数值只在这里钉，改动必须保留数值与容差。
-- **bridge 的封送、IPC 命令、CLI 的参数 / 退出码 / 输出形状、配方失配的 Rust 实现** → `cargo test`。与 C++ 同层重复的不要再写（C++ 已经测了语义，Rust 只测封送和命令层）。要标准包算子的测试加 `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，要 dts 包的加 `#[cfg_attr(not(dts_pack), ignore = …)]`，与不带这个属性的不要合并。
-- **编辑器 store 动作与 lib 纯函数**（图参数、配方、迁移写回、自动连线、参数面板模型、transform / curve、布局、ROI 标签摆放、执行事件怎么落进节点表）→ `packages/editor/test`。
-- **只有真界面才有的**（真鼠标 / 按键、DOM 标记、渲染、系统层行为、跨进程的完整链路）→ e2e。e2e 里**不要**再逐字段复查单测已经测过的 store 数据，只留界面那一半。
+优先在已经拥有该功能契约的用例里增加表项或断言，不为同一判据在不同层重复建测试。
 
-## 已有覆盖：按功能查
-
-| 功能 | 主要测试 |
+| 行为 | 主要位置 |
 |---|---|
-| 执行器、事件 seq、取消、并发（线程预算按整个进程在算的节点数分：`test.budget`）、缓存复用（含落盘缓存：编解码往返、清空内存后命中、指纹隔离、坏文件） | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次）；跨进程与 `--cache-dir` / `LYFLOW_CACHE_DIR` / `lyflow cache info|clear` 在 `bridge/tests/disk_cache.rs`（落盘开关是进程级的，不放进和别的用例同进程的单元测试） |
-| 抢占不阻塞（ADR-0027：立即返回、同一时刻最多一个在算、只留最新请求、排队的被取消 / 起不来时补发 run_finished；重扫库目录与热重载的维护窗口：等被停掉的那个退出、期间的请求只排队、窗口不交错） | 状态机在 `bridge/src/execution/tests.rs`（假 run 可控地「卡住」）；真 app 里重扫库目录不卡主线程、期间的运行排到重扫之后在 e2e `noderun.mjs` 的 `suiteLibraryRescanStalled`；编辑器怎么接（视图按 `resultRunId` 取、带 targets 的等 `run_started` 才换，从没开跑就收场时被抢占那次在算的节点落成已取消）在 `packages/editor/test/execution-store.test.mjs`；工具栏的「↻ 重跑」/「取消中…」（`runControlsOf`、取消中的起落、重跑沿用原来的范围）也在这个文件；真 app 里抢占一个卡住的运行不卡主线程、取消中点重跑在 e2e `noderun.mjs` 的 `suitePreemptStalled`（不理取消的测试算子 `test.stall`，`core/tests/stall_test_op.h`，`LYFLOW_TEST_OPS` 注册） |
-| 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
-| 子图内部出错的定位（子图节点上写明内部节点、检查器里逐条写明来源，点它 / 点诊断 / 点工具栏 error / F8 打开到那一层并标红框；F8 / Shift+F8 在出错的节点之间跳） | 路径解析、聚合与跳转顺序在 `packages/editor/test/execution-store.test.mjs`；真界面在 e2e `m4.mjs` 的 `suiteInnerError` |
-| 预览区的空态给下一步（没跑过 → 运行到此节点；出错 → 错误原文 + 定位到参数，画面画它的输入、状态挪到角上；被上游连带没执行 → 点名出错的节点 + 定位过去） | 找最近的出错上游（只穿过被连带取消的；根因在子图外面时往外一层接着找：`culpritOf`）、子图节点打开到里面那个在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；出错节点画哪个输入（报错指着的口优先，`findBaseCloud` 的 viaPort）在 `view-rule.test.mjs`；真界面在 e2e `run.mjs` 的 `suiteBadParam`（出错 / 连带，真鼠标点定位；出错的 voxel 画的是 crop 的云）与 `noderun.mjs` 的 `suiteMenu` 开头（真鼠标点「运行到此节点」） |
-| 查找节点（Ctrl+F：整张图连子图里面的一起列、按名字 / id / 算子 / 所在子图模糊找，回车打开到那一层；库算子里面不列；is:muted / is:error / op: 筛选、Alt+Enter 选上这一层命中的全部）；状态栏「静音 N」 | 列举、排序与筛选词（`parseFinderQuery`）在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；真界面在 e2e `m4.mjs` 的 `suiteNested` 末尾（顶层直接跳进两层子图；真按 Ctrl+M 静音两层里各一个、点状态栏「静音 2」、Alt+Enter、op: 筛选） |
-| 日志页（只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层）；检查器的节点 id（路径 id，点了复制）；撤销 / 重做之后的 toast | 撤销提示在 `packages/editor/test/graph-params-actions.test.mjs`；真界面在 e2e `m4.mjs`：日志页与节点 id 在 `suiteNested`，Ctrl+Z 的 toast 在 `suiteLibrary` |
-| 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读 + 「浏览…」选目录（文件对话框是 run.mjs 装的桩）） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
-| 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务）；撤销记录写节点名字与参数 label（拖动、挪节点不给名字时按实际改了什么起名）、撤销历史列表（`travel(n)` 与连按 n 次一样、`historyRows` 标出存盘的那一步）在 `graph-params-actions.test.mjs`，真点 ▾ 一次走两步、Esc 收起在 e2e `m3.mjs` 的 `suiteEditing` | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
-| 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表；松在节点身子上接哪个端口的 `dropOnNode`、松在一个具体端口上只判它的 `dropOnPort`、已接着线的输入换来源的 `canConnectReplacing` / `replaceableTargets`；插到连线中间用哪一对端口的 `insertPortsFor`；拖线松在空白处挑了新算子、接它哪个端口的 `pendingPort`）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用；只挪了位置的节点 data 沿用原对象）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs`；长一点的提示按字数停留（警告至少 4 秒）在 `m3.mjs` 的 `suiteDropToSearch` |
-| 算子搜索（中英文、全半角、缩写、多词跨字段 AND、有限英文拼写容错、排序与原文高亮） | `packages/editor/test/search.test.mjs`；侧栏与画布结果一致、中文输入法确认不误触在 e2e `m3.mjs` 的 `suiteDropToSearch` |
-| 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
-| 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
-| 参数面板（虚拟列表、搜索、chip、14 种控件；打字之后按 Esc 撤回：数字框与文字框在 `suiteAllTypes`、图参数规格在 `suiteSearchFilter`；聚焦的数字框上滚滚轮不改值、数字框里按 ↑ 按参数的步长走一格、没范围的参数按值的量级走（步长怎么取：`stepFor` 在 `param-values.test.mjs`）、下拉框里选完一项就按 Ctrl+Z 撤得掉、取色器拖着选一条撤销也在 `suiteAllTypes`）；数字框能打算式与相对改法（`lib/numExpr`：算式、*2 / +=5、全角符号、越界夹住与取整说一声在 `param-values.test.mjs`；多选里各按各的值改、绑着同一个图参数只改一次在 `graph-params-actions.test.mjs`；真界面在 e2e `m3.mjs` 的 `suiteEditing`：多选里打全角「＊２０００」）；路径框粘进带引号、前后有空格的路径时去掉引号与空白（`cleanPathText` 在 `param-values.test.mjs`；真粘、真跑、旁边摆着「浏览…」在 e2e `m4.mjs` 的 `suiteM3Tails` 末尾（浏览器宿主没有文件对话框、不摆在 `http.mjs` 的 `suiteEditAndRun` 末尾）） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs`；路径参数的「浏览…」（原生文件对话框：按 open / save / dir 与文件类型过滤、从框里的路径开 —— 相对路径拼上图所在的目录，选在那下面的照旧存相对的；验收里是 run.mjs 经 devbridge 装的桩）真点在 e2e `m4.mjs` 的 `suiteM3Tails` |
-| 迁移（含改连线 ADR-0025） | `core/tests/test_cache.cpp`（迁移链）、`bridge/src/patch/tests.rs` / `commands.rs`、`packages/editor/test/migrations.test.mjs` |
-| 拓扑锁（`<LyFlowEditor topologyLocked>`，宿主的流程调试页：改结构的 store 动作一律拒、写「拓扑已锁定」、返回各自的「没做」；剪切 / 删除选中在动手前拦下；调参与图参数取值照常；锁上时清空撤销栈；迁移只拦带 edits 的） | `packages/editor/test/graph-params-actions.test.mjs` 末尾的拓扑锁那一条（一张表逐个动作过）；迁移那一半在 `migrations.test.mjs` 的 edits 那一条末尾；界面（面板不出、端口拖不出线、右键项置灰）没有 e2e |
-| 点云载荷的 rgb、按节点清缓存（C ABI v12）；带注入的计划与清缓存（1.1.3，`lyflow_plan_inputs` / `lyflow_cache_evict_inputs`） | `core/tests/test_output_view.cpp`、`test_cache.cpp`、`test_flow.cpp`（注入再跑之后：不带注入算不出那次的键，带同一份注入才 cached、才清得掉）；`bridge/src/execution/tests.rs` 的 `cloud_payload_carries_rgb_last_and_padded`；`packages/mcp/test/cloud.test.ts`；e2e `m4.mjs`（RGB 着色）、`noderun.mjs`（右键清缓存） |
-| 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
-| 图像数据域（docs/image-plan.md：valueJson 逐通道统计、块均值缩小、`lyflow_output_image` 的级别 / 行切片 / 越界、落盘往返、`shape` 契约用在图像上、C ABI 注入图像带行填充、注入摘要带 normals / rgb） | `core/tests/test_data.cpp`、`test_output_view.cpp`、`test_cache.cpp`、`test_contract.cpp`、`test_flow.cpp`（合成图像的测试算子 `test.make_image` / `test.take_gray` 在 `core/tests/image_test_op.h`，e2e 经 `LYFLOW_TEST_OPS` 同一份）；LYIM 载荷布局 `bridge/src/execution/tests.rs` 的 `encode_image_frame_matches_the_documented_layout`；差异表的 Image 行 `compare-diff.test.mjs`；e2e `peek.mjs` 的图像组（适配级别、切原图分段取齐、悬停读数与合成公式一致） |
-| 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli/tests.rs` |
-| 标准算子 / PCD 读写 / ONNX（法线与两个离群点滤波分段并行：与 PCL 原实现逐点相同、与线程数无关、`flipTowardsViewpoint` 关掉不翻，在 `test_std_ops.cpp` 里拿 PCL 的三个类当参照；`fitCircle2D` 细化后在界内时与 `SACSegmentation` 逐位相同、越界时钉在界上、半径先验短弧收长弧不动，同一个文件拿 `SACSegmentation` 当参照；`segment.region_growing_2d` 与 xyz-gap-inspector 的 `split.rs` 逐位对拍（期望值是它生成的 `tests/data/region_growing_2d_cases.h`：split.rs 自己的用例 + 现场标定圆柱两个头在五组参数下），在 `test_2d_ops.cpp`；体素栅格按线程预算并行之后与原来的单线程写法逐字节相同，同一个文件；ASCII PCD 的快读快写与 PCL 1.15.1 本身逐字节对照、1 / 3 / 8 个线程各一遍 —— 怪文件、怪词、随机词、超过一块的文件、逗号小数点的 locale，在 `test_io_pcd.cpp`） | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
-| 主预览的图像模式（画输出还是输入那张图、放大后重跑视角不动、像素框拖动写回参数并可撤销、像素几何叠画；规则本身在 `view-rule.test.mjs`） | e2e `m8b.mjs` 的 `suiteImageMainView` |
-| 大图预览（ADR-0028：源头按 2 的幂缩到 4 MP、像素参数 / 几何 / 量测在 compute 两侧换算、`absolute` 绝对尺寸、u16 单通道缩小时 0 不计入、超预算提示按数据域） | 规则与执行器端到端在 `core/tests/test_pixel_scale.cpp`（探针算子 `test.px_probe` 在同一个文件里）；shrinkImage 的 scale 与 D3 在 `test_data.cpp`；点云那一支的提示在 `test_subgraph.cpp` 的预览超预算用例；真实链路（找圆、区域统计预览与正式对得上，经过张量转回来的图带着比例）在 `packs/std-image/tests/test_image_ops.cpp`；主预览按原图尺寸摆放、角标、框与正式结果同一处，预览 ↔ 正式之间视角不动（源头的大图、手选「原图」、比源头小的输出三种）在 e2e `m8b.mjs` 的 `suiteImagePreviewScale` |
-| MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回、超过 16 MB 分段取齐；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
-| 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
-| dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
-| 涂胶（合成图上的胶宽、边距、断口、无胶与压痕、标定、加载期校验；示教折线、偏移、圆弧、平行暗线与整段无胶；浅谷连接的旁侧暗带不并入胶宽，胶内窄高光保留完整宽度，沿线照明不均时暗处仍量到胶，长断口里与胶同宽的淡带不算胶、断口报全，时有时无的淡肩不并入胶宽，一段胶在一个胶宽内整体横跳时跟过去报横移后的中心、不当断口，断口旁一直伴着与胶同宽的暗带、或只在这一段有一块与胶同宽的暗块时断口照报；无胶用例含离线暗带/宽阴影候选拒绝及居中超宽保留；飞拍定位（含贴边、转角贴边与歧义门，圆孔模板不误判转角贴边、报 angleObservable = false 且角度为 0，只加噪声或只平移半像素、不转时角度不被插值与亚像素相位带偏（含 96 px 模板），转角离粗扫角度约 0.4 步时角度不量化到细扫窗口端点，模板里贴着框边的特征平移不漂，angleRange 小于 angleStep（0.4°、0.1°）时照样扫角度、转出范围判转角贴边，看不出角度的模板转出范围判转角贴边，宽峰侧坡不算第二个峰，示教框贴图边报 out_of_image）及逐点卡尺；1.2 测量算子（docs/glue-measure-ops.md）：合成直胶四档宽度的扇形峰 / 跟踪覆盖 / 每站中心暗段宽度 / 零件边，默认参数下拟合胶路与 1.1 bead_path 逐位相同、bead_width 每站胶边都在卡尺暗段里、glue.polyline 与 taught_path 相同，卡尺半高拆分 / 连通段 / 分段门限 / 合并峰值比 / 端点截断，响应图只输出 roi 那一块、块里与整幅逐位相同、块外采样无效、处处 ≥ 0、亮胶 gray 取反，扇形扫描 includeInvalid 按 1.1 补峰，取不到的峰与没有胶是值不是错、roi 与图像不相交是 bad_param，加载期校验与随包参考图 graphs/measure.lyflow.json） | `packs/glue/tests/test_glue.cpp`（27 项）、`test_flyshot.cpp`（22 项）；真实帧评估走 `packs/glue/tools/`，不以合成图代替现场验收。 |
-| 涂胶 1.3 彩色测量算子（docs/glue-measure-ops.md「1.3 彩色测量算子」：合成 RGB 场景（铸件先排成 Bayer 再去马赛克、镀锌灰、两侧各一，照明渐变）上宽度 × 底材 × 照明每站一段、宽度中位误差 ≤ 1 px；高光横穿的站中心落在 highlight 无信息区间、真断口有信息没有段；湿胶高光条（含一圈没饱和的发白光晕）按 mergeUnknownGap 并回一段、不并时两半内侧是 highlight；只有铸件 / 只有中性灰暗带不出段；像素三态（高光 NaN、暗背景按胶亮度 P5 判 0 而不看噪声、暗区 NaN）与「得分 = 面积占比」（25 / 50 / 75 % 混合像素、离群颜色压低）；color_model 示教线偏 10 px 重新居中、同输入逐位相同、prior 累加与顺序无关、模型 JSON 填参数与接端口逐位相同、roi 那一块与整幅逐位相同、得分图与线程数无关；坏模型 / 空模型加载期 bad_param、不带 stats 的精简模型能打分（与完整模型逐位相同）但当 prior 是 bad_input、灰度图 bad_input 指到 image、roi 不相交 bad_param、随包参考图 graphs/color.lyflow.json 校验干净；圆弧胶 + 高光横穿的 color_fan → color_track coverageInformative ≥ 0.9、无信息步不计 maxGap、拟合胶路贴着真胶；胶中间一条带光晕的反光带时胶点取合并段中点、不跟半条胶，不合并时过半是半条胶） | `packs/glue/tests/test_color.cpp`（8 项）；真实帧评估走 `packs/glue/tools/glue_color_eval.py`（只报告，数据 `LYFLOW_GLUE_COLOR_DATA`） |
-| gap 测量、积木、导入、模型 ROI（`fit_gap_circles` 细化越界钉在界上、半径先验与 quality 的 `clamped` / `prior`、相切带选回拐角圆在 `test_gap_ops.cpp`） | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
-| 2D 拖框（文件底图与输入端口底图；最近拖过的框写读数与框里几个点、方向键微调、拖到一半 Esc 放弃、跑过之后拖完松手补运行在 e2e `m8b.mjs` 的 `suiteBuildFromBlank`，数点 `countInRect` 在 `pick.test.mjs`，store 的 `abort` 在 `autoconnect.test.mjs` 的 batch 那一条）、自动连线、片段；加节点记进「最近用过」（搜索弹层与面板空查询时排最前）；搜索弹层里的片段与这张图的子图（`searchSnippets` 名称 / id / 分类 / 说明、`searchableOps` 会套进当前这几层自己的不列）在 `search.test.mjs`，加节点时 sub: 套进自己被拒在 `autoconnect.test.mjs` 的子图复制粘贴那一条，真双击空白处打「测点骨架」回车插入整个片段、Ctrl+Z 一次全撤在 e2e `m8b.mjs` 的 `suitePalette` 末尾，外层子图里搜得到内层、搜不到它自己在 `m4.mjs` 的 `suiteRecursion` 末尾；节点复制粘贴（id 重映射、内部连线、平移、静音照旧；系统剪贴板里带标记的 JSON 与整张图的 JSON，真按键在 e2e `m3.mjs` 的 `suiteEditing`，Ctrl+V 读 paste 事件、不调 `readText`、复制节点之后又复制了一段字时不粘旧节点、鼠标停在检查器上粘贴落在画布里也在那里；子图节点带着它用到的子图定义（连同里面的；同内容的不重复加、子图里挪过节点也算同内容，同 id 不同内容的连同套着它的外层另起一份，只加粘上了的用得到的，粘不进它自己里面、也粘不进它里面那一层，一条撤销连定义一起撤）在 `autoconnect.test.mjs`，真按键复制两层子图、在它自己的里层粘被拒、新建一张图粘过去跑得通在 e2e `m4.mjs` 的 `suiteRecursion` 末尾；子图里复制、Ctrl+A / Ctrl+M / Ctrl+E 取当前这一层、日志里选着文字时 Ctrl+C / Ctrl+X 归浏览器、Esc 退出子图时选中刚出来的子图节点（面包屑那一步在 `suiteCompose`）在 e2e `m4.mjs` 的 `suiteNested`；被图参数绑定的参数在副本上写成有效值、子图里被提升成子图参数的写成这个实例上的值在 `graph-params-actions.test.mjs`）；Shift+D / 右键「复制并保留输入」（副本接原件的同一个上游，子图里接上子图入口，一条撤销；删子图里的节点连带摘掉子图入口指着它的那条）在 `graph-params-actions.test.mjs`，真按键与菜单在 e2e `suiteEditing`；右键「复制参数 / 粘贴参数 / 全部恢复默认」（稀疏的展开、只粘同一种算子、被图参数或子图参数提供的不动、各一条撤销、换了一张图子图节点不粘）在 `graph-params-actions.test.mjs`（`lib/paramClipboard.ts`），真右键在 e2e `suiteEditing`；右键「换成别的算子…」（`lib/replace.ts`：参数怎么带过去 `carryParams` 在 `param-values.test.mjs`；线、绑定、子图入口、图输出怎么收拾、子图出口会断就不换、一条撤销在 `graph-params-actions.test.mjs`），真右键与搜索在 e2e `suiteBypassReroute` 末尾；删节点连带删边（P0 #5）；图级输出跟着删节点、合成、解散改路径或一并删掉（compose → dissolve 来回、删节点、删子图实例在 `graph-params-actions.test.mjs` 的合成 / 解散那一条；子图里标的输出 bridge 只查第一段在 `bridge/src/graph.rs` 的 `keeps_graph_outputs_and_checks_their_node`；真按 Delete 删标着输出的节点、Ctrl+G 收进子图后 F5 照样跑在 e2e `phase_a.mjs` 的 `suiteGraphOutputs` 末尾）；F2 改名（改名框里没改就回车不记撤销）、F 适配选中、框选选上框里的节点（按着 Shift 是追加、不按是换掉；框选之后选中节点的标题与端口不被选区框盖住）、方向键挪节点每下一条撤销、拖其中一个选中的节点整组走且整段一条、撤销掉粘贴之后选中里不留它的 id、真按 Delete 删框选的节点与连线一条撤销、右键按在节点上拖平移且松手不弹菜单、右键菜单 Esc 收起与点菜单外面收起、画布下沿的节点上右键菜单整个在窗口里（怎么摆：`placeMenu` 在 `layout.test.mjs`）、右键菜单的断开全部连线 / 选中同一种算子 / 改名 / 删除与空白处菜单、混选时在检查器里点一种算子收窄、数字框里打着字按 F5 跑的是新值、Tab / Space 在空白处开搜索而在按钮上归按钮、焦点在勾选框上照样 Ctrl+Z、拖完数字框紧接着 Ctrl+Z 撤得掉（e2e `suiteEditing`；打着字按 Ctrl+S 存进文件、图名与节点标题敲完回车一条撤销而 Esc 撤回、工具栏下拉框 Esc 与点外面收起在 `suitePanels`）；一个手势一条撤销（store 的 `batch`：并成一条、并进拖动的事务、cancel 不记）在 `autoconnect.test.mjs`，界面上的四处（Delete、右键插 reroute、拖线松手后搜索选中、拖到连线上插入）各在 e2e `m3.mjs` 的对应分组里补了一句 Ctrl+Z；从算子面板拖到连线上插入在 `m8b.mjs` 的算子面板组；连线右键「插入算子…」与选中一条连线按 Tab 插到线中间、Ctrl+Delete 删除并接通上下游在 `suiteBypassReroute` 末尾（接回去的规则 `healPlan` 与 store 的一条撤销在 `autoconnect.test.mjs`），选中一个节点按 Tab 从它接出（放在右边、右边有下游就往下让 `branchSlot` 在 `layout.test.mjs`；真按 Tab 一路接两个、回到中间再接一条分支、焦点跟到新节点上）也在那里，搜索弹层底下写当前那一行的说明与进出端口、列不下写「还有 N 个」也在那一步里；对话框开着时按 Delete 不删在 `params_p3.mjs` 的 `suiteCreateSaveReopen` | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs`；「最近用过」的真界面在 e2e `m3.mjs` 的 `suiteDropToSearch` 末尾；拖线松在节点身子上（接唯一能接的端口 / 提示对准）也在那里，线头松在节点身子上改接、线头改接到已接着线的输入（换来源）在 `suiteReconnect` |
-| 两节点输出对比（差异表的配对、每种类型的行、容差、全量点数；进入即冻结、换 B 解冻、B 被删自动退出、快捷键；两栏内容合并） | `packages/editor/test/compare-diff.test.mjs`、`compare-store.test.mjs`、`view-rule.test.mjs`；e2e `compare.mjs`（两栏、冻结后重跑只有 A 变、共用相机、右键换 B、A 跟随、拖框互斥、两侧都只有值）。差异表每种类型的数值只在单测里钉 |
-| 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉；测量关着时双击设转心、重跑与换到同一坐标系的节点时相机与转心不动也在那里；要不要重新取景的 `sameFrame` 在 `view-rule.test.mjs`）、`compare.mjs` 一句（A、B 两栏各点一次） |
-| 点云缓存的并发请求合并（同键只取一次、失败不留占位）与字节预算（法线、颜色也算） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数；拖动中每次重跑预览都留着上一片云、没有变空） |
-| `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点；`--jobs` 同时跑几次：按顺序交出、停在同一行；终端里的进度行） | `bridge/src/eval/tests.rs`、`perturb.rs` 的单元测试（`--jobs` 的调度用假任务钉：`ordered_parallel_*`；进度行原地刷新、按宽度截断、关着时一个字节不写：`the_progress_line_*`；`run` 的那一行数节点：`cli/tests.rs` 的 `the_run_progress_line_*`；没成的那几次在 stderr 上归成一行：`the_failure_digest_*`）；`cli/tests.rs` 的 `eval_crosses_parameter_sets_with_samples`（`--jobs 4` 与一次接一次逐行相同）、`eval_with_jobs_stops_at_the_same_row_as_without`；`bridge/src/cli/tests.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
-| 预览的显示设置（着色、色带、点大小、显示点数落 localStorage、读回时逐项校验；手动着色范围按着色模式分开记）；选看哪个点云输出（预览栏下拉框、检查器「输出」里点一行、连线查看器「在主 3D 视图打开」带上端口；几何节点的底图跟着它接的那个口） | 读回的校验、按模式取范围、启动时读回、`cloudPortsOf` 与底图沿边取端口在 `packages/editor/test/view-rule.test.mjs`；栏上的包围盒尺寸怎么写（`extentText`）在 `pick.test.mjs`；网格跟着云走（`gridSpec`：1/2/5 的格子、居中在整格上、没重新取景时不换档）在 `view-rule.test.mjs`，x = 1000 的云在 e2e `suiteViewer`；真界面在 e2e `m3.mjs` 的 `suiteViewer`（分组结束时放回原来的存储；提取下标的 selected / rest）；预览的「PNG」弹保存框、真写出文件在 e2e `m3.mjs` 的 `suiteViewer` |
-| 连线查看器 Edge Peek | e2e `peek.mjs`（含 ⤢ 回到全貌、转过视角之后重跑视角留着、重跑期间接着显示上一帧不卸掉视图、点大小、新窗口沿用主预览的着色）；重算时留不留上一帧（`keepLastFrame`）在 `peek-store.test.mjs`；窗口上限与自动关窗的提示、新窗口带上主预览的着色 / 色带 / 点大小 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
-| 按输出类型选视图（主预览的点云 / 值）；量测读数写在节点底栏与运行收尾里 | `packages/editor/test/view-rule.test.mjs`（读数怎么写 `readingsOf`、收尾里有问题的排上面 `sortSummaryOutputs`，`lib/outputs.ts`）；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效；节点底栏的读数与判定、运行收尾的读数 / 排序 / 真点节点名打开到它，工具栏的「NG 1」与点它列出 is:ng 再回车，值与收尾都从执行事件灌；判定计数 `verdictTally`、一个节点最差的判定 `worstTone` 在 `view-rule.test.mjs`，is:ng / is:边界 在 `execution-store.test.mjs` 的查找节点那一条） |
-| 调参记录（抽屉的「调参」页：每次正式运行记下交给 core 的图与图参数、量测读数；两次之间改了什么、读数变了多少；「恢复这组参数」） | 改了什么（有效参数、静音、增删节点、图参数，写成一行）、读数按 id 排、预览与单节点运行不记、运行到某个节点只记计划里的、被下一次顶掉的记成取消、最多 50 次、基准只能定在记着的那几次上且不被挤掉在 `packages/editor/test/run-history.test.mjs`；真界面（真点「调参」页签，七次正式运行（含敲数回车、撤销补的那两次）、新的在上、预览不记、写着改了哪个参数；点第 1 次的「设为基准」看「比基准 #1」那一行、点「恢复这组参数」再 Ctrl+Z）在 e2e `m4.mjs` 的 `suitePreview` 末尾；恢复本身（节点参数、静音、子图定义里的、图参数基础值，后加的节点不动，一条撤销，一样时不记；那次用的就是现在选着的配方时配方里的值也改回去、不是同一个配方就不动）在 `graph-params-actions.test.mjs`；「未运行的改动」跟哪一次比（`pendingBase`）、一共几处、带参数名在 `run-history.test.mjs`，逐条改回（节点参数、子图定义里的、图参数选着配方写进配方，各一条撤销）在 `graph-params-actions.test.mjs`，关着自动运行真敲数回车改两处、工具栏「改 2 处」、点 ↩ 改回一处、「全部改回」在 e2e `m4.mjs` 的 `suitePreview` 末尾 |
-| 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs`；300 节点的图上真拖一个节点（先确认中心点露在画布上、拖完确实挪了）与鼠标扫过一片节点时的帧率在 `m4.mjs` 的 `suiteBigGraph` |
-| 节点运行按钮；右键「选中上游 / 下游」；键盘沿连线走（Alt+方向键） | 图结构（智能运行的上游闭包、选中上 / 下游的闭包、沿连线走一步 `stepAlong`）在 `packages/editor/test/node-run.test.mjs`，画布挪多少（`revealShift`）在 `layout.test.mjs`；300 节点的图上 Alt+→ 九下从链头走到视野外的链尾在 e2e `m4.mjs` 的 `suiteBigGraph`；拖参数时正看着的下游（钉住的、对比里没冻结的 B）一起算（`previewTargets`，与 `closureOf` 同一条单测），真按 P 钉住下游、真拖上游的滑块；自动运行管所有改参数的方式（改了哪些 `paramEditTargets`、只补跑过的 `autoRunTargetsReady` 在 `node-run.test.mjs`，调度（攒、并、撤：跑着时排着的照补、松手并进、换图 / 关掉 / 框没画齐撤掉、整图运行撤掉、带 targets 的并进来）在 `execution-store.test.mjs` 末尾，提交了一步的信号 `onCommitted` 在 `autoconnect.test.mjs` 的 batch 那几条后面；开着自动运行真敲数回车补一次、Ctrl+Z 也补、打着字按 F5 不再补在 e2e `suitePreview`）；关了自动运行敲数回车后预览左上角的「画面是上一次的结果」与它的 ▶、关了自动运行拖完停在预览上时角标说「抽稀的预览」（拖着时不出）、再按 P 取消在 e2e `m4.mjs` 的 `suitePreview` 末尾；看着的在外面几层（改的在子图里）也在 `node-run.test.mjs` 那张表里；拖图参数算它绑着的顶层节点（`previewTargetsOf`）同一条单测，真拖检查器上面图参数那一行的滑块在 `suitePreview` 末尾；按钮在 e2e `noderun.mjs`；右键菜单的选中在 e2e `m4.mjs` 的 `suiteCompose` 开头 |
-| 分栏、拖放配置（dragDropEnabled）；窗口窄了两侧面板让位、画布留够最窄；打开缺坐标的图时的自动布局不记撤销、不算改动（`layoutLoaded`、只排缺坐标的 `initialLayout`、迁移加节点后整张重排在 `layout.test.mjs`，真从最近打开里开一张在 e2e `m3.mjs` 的 `suitePanels`）；检查器的排布（参数在端口小节前面、算子说明截两行、端口小节的开合记住；「参数说明」默认收起、点开每个参数下面写说明与默认值 / 范围、开合记住，那一行怎么写 `paramFacts` 在 `param-values.test.mjs`）；预览的标准视角（俯 / 前 / 侧 / 轴：绕转心转、距离不变 `presetPosition` 在 `view-rule.test.mjs`；真点按钮、鼠标在画布上按 1 不动、在预览上按 1 是俯视在 e2e `m3.mjs` 的 `suiteMeasure`）；键表里每一个键位都回到它自己（以后加键撞上前面的先红；P 钉住与 Ctrl+Shift+P 参数面板不撞）在 `compare-store.test.mjs`；预览最大化（哪些动作先还原、Shift+Space 与 Space 不撞在 `compare-store.test.mjs`；真点按钮、Delete 不删看不见的节点、Esc 还原在 e2e `m3.mjs` 的 `suiteMeasure`） | 怎么让（右栏先缩、到最窄停）、开关偏好的读写在 `packages/editor/test/layout.test.mjs`；e2e `params_p2.mjs` 的 `suiteLayout` 开头（检查器排布，真鼠标点「展开说明」、收起端口小节）；e2e `params_p2.mjs` 的 `suiteLayout`（右侧分栏；窗口真缩到 900、参数面板不出窗口；预览与检查器之间、底部抽屉的上沿上下拖，双击恢复默认）、`m8b.mjs` 的算子面板组 |
-| 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch/tests.rs` |
-| 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli/tests.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval/tests.rs` 的 `available_paths_*` |
-| MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
-| MCP glue 完整流程、统一绑定值、规格锁定、冻结输入拒绝漂移、预算耗尽/续跑、后台取消、验证/留出评估、失败 ROI 叠画、比较与图/配方导出 | 现有 `packages/mcp/test/smoke.test.ts` 两条流程扩展，含 voxel_grid 五档向量扫描对照原 CLI、A/B 组隔离比较与未请求的自动质量指标；`run.test.ts` 三条新增覆盖 Record/Bundle 分页封存、工件分组、质量门槛与候选数量，现有候选用例扩展扫描广播、holdout/split 完整分组、质量改善/退化和 artifact |
-| 标注评分（单位不符/缺失、混合单位行和两种汇总拒绝、按单位分组、执行与产品状态、断口一对一匹配及图像真值投影）、数组归约、CLI 预算/续跑 | `bridge/src/eval/tests.rs` 的 `annotations_separate_failures_units_and_one_to_one_defects`；MCP `run.test.ts` 的现有排名测试覆盖 tolerance 默认门槛与显式通过率；CLI 的现有 `eval_layers_base_recipe_paramsets_then_param`；schema 的正负例进入 scripts/check.ps1 |
-| HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
-| 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
-| 自动备份（存过盘的写 `<file>~`、没存过盘的写到传输层给的那一处、找回来、换上算没保存、删掉；没有那个口的传输不备份；读坏了的删掉；开图时备份比正文新问「恢复 / 丢弃 / 取消」—— 取消与 Esc 不打开、备份留着，没挂对话框退回原生的是 / 否） | `packages/editor/test/autosave.test.mjs`（内存里的假传输）；真按 Esc 关掉那一问、再点「丢弃」在 e2e `m3.mjs` 的 `suitePanels`（备份那一段）；真的 app data 位置与写盘在 e2e `m3.mjs` 的 `suitePanels` 末尾（harness 跑之前把用户自己的那份挪开、收尾时挪回去） |
-| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关闭未保存标签与关窗口时问「保存 / 不保存 / 取消」（有没存的改动才问；真鼠标点编辑器画的那一问：取消不关、不保存文件不动、保存先存盘；关窗口经 devbridge 不点 × 走一遍，监听装没装上、destroy 的权限另查；各个选项的分支与另存为取消了的情况在 `packages/editor/test/autosave.test.mjs`）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+| 算法数值、端口数据、C ABI、执行计划、缓存、取消与子图 | `core/tests/`、各 `packs/*/tests/`。领域数值测试保留原判据和容差。 |
+| Rust 封送、IPC、命令行选项/退出码、宿主及跨进程缓存 | `bridge/src/*/tests.rs`、`bridge/tests/`；客户端在 `crates/lyflow-client/`。 |
+| 图动作、撤销、端口兼容、自动连线、参数、配方与搜索 | `packages/editor/test/graph-params*.test.mjs`、`typecheck.test.mjs`、`param-values.test.mjs`、`recipes.test.mjs`、`search.test.mjs`。 |
+| 标签快照、异步操作归属、宿主文档通知及备份恢复 | `packages/editor/test/flow-tabs.test.mjs`、`flow-backup.test.mjs`、`autosave.test.mjs`。 |
+| 执行事件、正式判定、结果显示与预览 | `packages/editor/test/execution-store.test.mjs`、`view-rule.test.mjs`。 |
+| Python 发现、数据校验、异常与 worker；引擎及宿主接入 | `python/tests/`、`core/tests/test_python.cpp`、`bridge/tests/python_nodes.rs`、编辑器 Python 场景。 |
+| 真鼠标、键盘、弹窗、焦点、窗口行为与渲染 | `scripts/e2e/`；共享动作位于 `page.mjs`，CDP 连接位于 `cdp.mjs`。 |
+| 图像、点云等取数与展示的跨端契约 | `packages/visualization/`、`packages/mcp/` 及 [MCP 可视化说明](mcp-visualization.md)。 |
 
-本轮画布交互的回归复用 `m3:suiteEditing`（左键平移、Ctrl 框选、Ctrl+Shift 追加、右键菜单且不平移）、`m3:suiteRunToSelected`（浮动操作条多目标运行，必要上游参与、未选中下游不参与）与 `motion:suiteEnter`（左键平移触发虚拟化）。精确选区运行取消待自动运行、保留多个目标与重跑范围的断言扩展在现有 `execution-store.test.mjs` 自动运行用例中，测试数量不变。
+跨语言规则优先扩充 `schema/fixtures/recipes/`、`schema/examples/` 等共享夹具；全类型参数示例位于 `examples/param-showcase.lyflow.json`。C++ 辅助在 `core/tests/helpers.h`，CLI 测试辅助由 `bridge/src/cli.rs` 的 `test_support` 提供。
 
-多文档标签复用 `m3:suitePanels` 验证新建保留后台文档、同路径去重、切换参数与撤销/重做、关闭标签和后台未保存文档的窗口保护。`packages/editor/test/flow-tabs.test.mjs` 的 3 个用例覆盖对象身份、独立会话、异步迟到隔离、关闭取消及全局拓扑锁下的跨标签撤销隔离；`flow-backup.test.mjs` 的 4 个用例覆盖 IndexedDB 适配器、载荷校验及串行写入/清理。编辑器纯逻辑测试由 171 项收敛为 89 项，原有 24 个测试文件全部执行。整合 main 后补回拓扑锁契约测试，共 90 项；拓扑锁下的迁移写回沿用 `migrations.test.mjs` 的现有用例。同一功能契约的正常、边界与失败场景共用夹具或具名场景表，保留状态隔离和异步清理；后续回归优先补入已有契约。
+## 结果应如何解释
 
-## 共用的夹具与辅助
-
-- **共享夹具**：`schema/fixtures/recipes/`（Rust 与 TS 共用）、`schema/examples/*.lyflow.json`、`examples/param-showcase.lyflow.json`（`test.param_showcase` 覆盖 14 种参数类型，C++ / CLI / e2e 共用）。新增跨语言规则时往共享夹具里加一行，别各写一份。
-- **C++**：`core/tests/helpers.h`（`seqIsDense` 等；直接调算子的 `test::OpCall` / `test::StubContext` —— 输入里有 Box2D、Record 这类不好拼图的值时用，`threads` 给线程预算，包测试只用本包算子时传自己的注册表）、`core/tests/test_ops.h`（测试算子，含会抛异常的 `test.throw`）、`param_showcase_op.h`。
-- **Rust**：`bridge/src/cli.rs` 的 `#[cfg(test)] pub(crate) mod test_support`（`SharedBuf`、`Ran`、`cli()`），其它模块复用它；cli 自己的测试在 `bridge/src/cli/tests.rs`。
-- **e2e**：`scripts/e2e/page.mjs`（`newDoc`、`buildGraph`、`placeAtScreen`、`dragMouse`、`runAndWait`、`mustOk`，参数面板虚拟列表里滚到某一行的 `revealInList`、`clickSelector`、`pickRecipe` 等），`peek.mjs` 的 `openByDoubleClick`，`m8b.mjs` 的 `roiGeometry` / `setCamera` / `waitValidated`。各 params 文件的 `typeIn` / `typeInto` 仍是各写一份（要不要先滚进列表、往哪种控件里打字各不相同），新代码先找现成的。
-
-## 写测试的规矩
-
-1. **先查、后加。** 按上表找到已有的测试；同一判据的新情形加成表驱动的一行或 SUBCASE。
-2. **一个事实一条断言。** 同一个对象不要拆成多条 eq；合成一条，出错信息写清是哪一项不对。
-3. **前提不算断言。** e2e 里「图跑通了」「菜单点到了」「动作返回 'ok'」用 `mustOk()`：不成立就中断这一组并报原因，但不单独计数。
-4. **不许静默跳过。** 缺数据、缺包、缺模型时要么 `report.fail` 并给出补救命令，要么明确打出「跳过」；分组自己 `return` 会让汇总照样「全绿」。跑 e2e 要带 `LYFLOW_PACKS=gap;dts`，否则依赖 gap 的分组会缺席。
-5. **修 bug 时加的复现测试要留**，在测试名或注释里写明对应的修复（如「修前 NoSuchOutput」），以后精简时靠它识别。
-6. **不测常量、不测框架本身**（TypeScript 类型已保证的、`ok(…, true)`、waitFor 之后必然成立的）。
-7. 名字要说它真正测的东西；测不到的路径（比如异常转 internal）宁可补一个测试算子，也别让名字冒充。
-
-## 示教胶路移植的软件验证
-
-原 PR #8 移植到当前 main 后，2026-10-12 本地 std-image + glue 组合通过 CTest：190 项 doctest、10704 项断言、0 跳过；包含 26 项涂胶测试。GlueSight 现有的原生像素量测、多视图 OR、相同标签并发隔离测试分别通过，共 3 项。该 DLL 为本地构建，源码修订为空，不能作为正式依赖包。
-
-发布检查新增必需算子清单校验；对旧 main c625155c 的实际 DLL 执行检查时，以缺少 glue.taught_path 拒绝。正式候选包的完整构建与下游依赖校验仍需对应 GitHub 运行和实际产物证据；这些软件测试不能替代现场准确率验收。
-
-## 运行快照与原生可视化（2026-10-28）
-
-新增验证入口：
-
-| 命令 | 范围 |
-| --- | --- |
-| `node --test packages/editor/test-server/snapshots.test.mjs` | 9 项真实 CLI/HTTP 集成：同次快照、源文件变化、重启、保存策略、LYIM 图像、总配额、保留期、崩溃暂存占用与路径边界；需已构建标准包 CLI。 |
-| `pnpm --filter @lyflow/visualization test` | 3 项纯逻辑：坐标与变换、几何与图像、统一视口网格；PNG 另用真实无 GPU 浏览器检查。 |
-| `pnpm --filter @lyflow/mcp test` | 当前 36 项 MCP（34 项非 smoke）及 2 项启动器测试；覆盖可视化字段解析、身份与目录依赖、快照就绪状态。 |
-
-编辑器既有 161 项纯逻辑测试保持通过。新增共享渲染不增加 DOM 单元测试；实际图片、20 样本网格和真实 DTS 端到端复测用于视觉验收。验收约束见 [MCP 可视化](mcp-visualization.md)。
-
-本轮真实 HTTP 宿主 e2e 36/36 通过（在原 34 项基础上新增共享二维导图 2 项）：真实 CLI 点云执行后，切换二维并点击导出 PNG；验证共享 SVG 与 PNG、运行来源图注和控制台无错误。
+- 同时记录源码修订、包组合、依赖/数据前提、执行入口和失败或跳过项。旧提交的通过记录不能代替当前代码验证。
+- 缺包、缺模型、缺数据要明确报失败或说明跳过，不能让分组提前返回后仍显示全部通过。
+- e2e 的启动、等待及必要前提用 `mustOk`；行为断言要说明真正验证的结果，避免只断言元素存在。
+- 现场精度、标定单位、客户数据效果及产品节拍，需要对应宿主和数据的独立验证。基准、模拟结果或历史算法对拍不能自动转成现场结论。

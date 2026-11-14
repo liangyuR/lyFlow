@@ -10,7 +10,7 @@ Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Ru
   只是换成一个 crate。
 - **Rust/Tauri 宿主**（[下文](#rusttauri-宿主)）：宿主是 Tauri 2 的 app，
   前端嵌 `@lyflow/editor`，Rust 侧直接复用 `lyflow_lib` 的整个 IPC 层 ——
-  39 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
+  IPC commands、`RunManager`、事件流与库扫描；具体注册入口见 `bridge/src/host.rs`。
 - **只要编辑器界面**，嵌进自己的 React 页面：看文末的
   [前端编辑器](#前端编辑器lyfloweditor)。
 
@@ -18,63 +18,26 @@ Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Ru
 只依赖同目录的 `lyflow/c_api.h` 与 `lyflow/version.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本使用产品版本字符串 **1.1.0**。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
+契约版本使用当前产品版本字符串，版本定义见 [`version.h`](../core/include/lyflow/version.h)。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
 `LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
 `lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本属于同一 主.次 系列；同系列的补丁版本保持 C ABI 兼容，可以直接替换运行库。
 只有统一打包入口验证固定依赖并声明 `LYFLOW_RELEASE_BUILD=ON`，且实际为 Windows x64、
-RelWithDebInfo、固定四包（std-pointcloud、std-image、std-ml、glue）、无外部算子包、源码树干净
+RelWithDebInfo、[发布配置](../packaging/release.json)规定的固定包组合、无外部算子包、源码树干净
 且 Git 修订可识别时，`lyflow_source_revision()` 才返回完整提交标识；否则返回空串。
 该开关默认为 OFF，普通开发构建、其他算子组合与未经依赖验证的构建都不能启用跨进程磁盘缓存。
 C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空值不能启用跨进程磁盘缓存。
 不匹配时在绑定业务函数前报错；旧整数 ABI 15 的 DLL 因缺少新的字符串导出而直接拒绝，不会按指针调用旧函数。
 
-下面 v8–v15 描述仅为结构演进历史，不再用作当前版本或兼容性判定。
+## 运行和结果接口
 
-v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
-见下面「[顶层图参数](#顶层图参数)」。
+当前完整布局以 [`c_api.h`](../core/include/lyflow/c_api.h)、[`client.hpp`](../core/include/lyflow/client.hpp) 和 [Rust 客户端](../crates/lyflow-client/src/lib.rs) 为准，不再按旧整数 ABI 阶段选择接口。
 
-v11 在它后面又加了两对：`isolate` / `isolate_count`（只运行这几个节点）与 `force` / `force_count`
-（强制重算这几个节点），见下面「[部分运行：targets、isolate、force](#部分运行targetsisolateforce)」。
-结构体变长了，所以 ABI 号跟着加一 —— `client.hpp` 与 `lyflow-client` 都是零初始化整个结构体再填，
-不用这两项的宿主什么都不用改。
-
-v12 两件事，都在结果仓那一侧：
-
-- `lyflow_cloud_view` 在 `handle` 之前加了 `const uint8_t* rgb`（3n 个 0..255，或 NULL），`flags` 的 bit2
-  （`LYFLOW_CLOUD_HAS_RGB`）表示带颜色。**视图结构体是调用方分配、core 往里写的**，所以这一条不是追加字段那么简单 ——
-  拿 v11 的头文件配 v12 的 core 会越界写，这就是必须对齐 ABI 号的原因。`client.hpp` 的 `CloudView::rgb()`、
-  Rust 客户端的 `CloudView::rgb()` 已经跟上。
-- 新入口 `lyflow_cache_evict(graph, baseDir, nodeIds, n, includeDownstream, paramsJson)`：按「图 + 节点」清缓存，
-  返回 `{ removed, skippedPinned, nodes }`。给的是节点不是 cacheKey —— 缓存判定仍只归 core（ADR-0007）；
-  被运行钉住的跳过，预览命名空间里的不动。`client.hpp` 是 `Client::evictCache`，Rust 是 `Core::cache_evict`。
-
-v13 加了 `lyflow_library_definition(opId)`（按算子 id 取库定义），v14 加了结果缓存落盘
-（`lyflow_cache_set_dir` 等，见 [disk-cache-plan.md](disk-cache-plan.md)），都是纯增量入口。
-
-v15 是第二个数据域 **Image**（[image-plan.md](image-plan.md)）：
-
-- 新入口 `lyflow_output_image(run, node, port, level, rowOffset, rowCount, view)` / `lyflow_image_view_free`。
-  `level = 0` 是原图、零拷贝借用（同张量）；`level = k` 是 2^k 倍块均值缩小，core 现算一份。
-  按行切片，`rowOffset` 越界是空切片不是错误。像素行主序、通道交错、**RGB(A) 顺序**，`depth` 是每通道字节数（1 / 2 / 4）。
-  `client.hpp` 是 `Client::image` / `RunHandle::image`（`ImageView`），Rust 是 `Core::output_image`。
-- `lyflow_run_options` 末尾加了 `image_inputs` / `image_input_count`：运行时注入图像（`lyflow_run_image_input`，
-  允许带行填充的 `row_bytes`，core 拷成紧排）。另开结构体是因为 `lyflow_run_input` 是数组元素，改它的大小就破坏 ABI。
-  `client.hpp` 是 `RunOptions::imageInputs`（`InputImage`），Rust 是 `RunSpec::image_inputs`。**BGR 的相机缓冲要宿主先转成 RGB。**
-- `lyflow_output_save` 对图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局）；PNG 等格式在图里接 `io.save_image`。
-
-1.1.3 加了两个带运行时注入的入口：`lyflow_plan_inputs` 与 `lyflow_cache_evict_inputs`，参数是
-`lyflow_plan_params` / `lyflow_cache_evict` 的全部，再加与 `lyflow_run_options` 同一套的 `inputs` / `image_inputs`。
-注入的数据进 cacheKey（ADR-0017），所以宿主「注入点云再跑」之后，不带注入的计划永远说「没缓存」、按节点清缓存
-永远 `removed: 0` —— 给出与那次运行**同一份**注入，算出来的才是那次运行的键。注入都为空时与老入口完全相同。
-这是同系列的纯增量：1.1.3 的客户端把两个符号当可选符号加载，配 1.1.2 及更早的运行库照样能用，只是带注入的
-计划与清缓存报缺符号。`client.hpp` 是 `Client::plan` / `Client::evictCache` 多带 `inputs` / `imageInputs` 的重载与
-`supportsInjectedPlan()`，Rust 是 `Core::plan_with_inputs` / `Core::cache_evict_with_inputs` / `supports_injected_plan`。
-
-v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
-`RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
-**宿主的成败判定读 `summary.status`（`ok` / `degraded` / `failed`），
-不要自己从事件流重建** —— 那要同时处理缓存命中、惰性分支没被 demand、
-失败被 `acceptsError` 端口接住三种情况。
+- `lyflow_run_options` 承载顶层参数、局部运行范围及点云/图像输入。宿主应使用与运行库兼容的头文件初始化完整结构，不自行猜测字段偏移。
+- `lyflow_output_cloud`、`lyflow_output_tensor`、`lyflow_output_indices`、`lyflow_output_image` 返回结果视图，按各自释放接口管理生命周期；图像按行切片，`level = 0` 读取原比例，较高级别用于缩小显示。
+- Image 像素行主序、通道交错，支持单通道灰度或 RGB/RGBA 顺序，位深 u8/u16/f32。相机 BGR 缓冲由宿主先转换；输入图像的行填充通过 `row_bytes` 描述，core 复制为紧排存储。相关算子见[标准图像包](../packs/std-image/README.md)。
+- 注入数据参与缓存键。运行、计划和按节点清缓存必须传入一致的输入，C++/Rust 客户端提供对应的带输入接口，不能对一次注入运行使用未注入的计划判断缓存。
+- 业务判定读取同次运行的 `lyflow_run_summary`，不要从节点事件自行推断成功、降级或失败；见 [run summary 契约](adr/0022-run-summary-as-core-output.md)。
+- 跨进程结果缓存需要有效构建身份，配置与限制见 [CLI 缓存](cli.md#跨进程缓存)。
 
 ## 安装布局
 
@@ -121,7 +84,7 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 | `LYFLOW_CORE_DLL` | `Client` 构造函数要的路径 |
 | `LYFLOW_CLI` | `lyflow.exe`，离线跑图/导入用 |
 | `LYFLOW_LIBRARY_DIR` | 库算子目录 |
-| `LYFLOW_ABI_VERSION` | 产品版本字符串；与头文件、引擎、客户端严格相等 |
+| `LYFLOW_ABI_VERSION` | 产品版本字符串；运行时按主.次系列兼容，包元数据按本次发布逐字一致 |
 | `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
 
 完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
@@ -172,7 +135,7 @@ lyflow::RunResult result = client.run(graphJson, options);
   类型、硬限位 `min`/`max`、`options`。不合法报 `bad_param`，`paramPath` 是图参数名、`nodeId` 为空，
   整次运行不执行任何节点；之后照旧走被绑定节点自己的参数规整。没有 `type` 的老图参数跳过第一步。
 - 切换一组取值之前想先问一句「这组值合不合法、哪些节点会重算」：`lyflow_validate_params(graph, baseDir,
-  params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`（v11 里追加，ABI 号不变）
+  params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`
   与 `lyflow_validate` / `lyflow_plan` 同义，只多一个 `params_json`。`client.hpp` 的 `validate` / `plan`
   与 `lyflow-client` 的 `validate_with_params` / `plan_with_params` 各多一个可选参数。
 
@@ -214,8 +177,7 @@ client.run(graphJson, lyflow::RunOptions().setParamsJson(current));
 
 ### 推荐的产线切换流程
 
-照工业视觉里成熟的做法（[param-recipe-research.md](param-recipe-research.md) §2：Keyence 的「按编号切程序 + ACK/NACK」、
-MERLIC 的默认配方）：
+切换配方时，宿主应定义程序编号与确认流程。参考步骤：
 
 1. **开机**：载入图一次；读 `index.json` 的 `default` 作为当前配方（没有就是「基础」= 不传 `params_json`）。把目录里所有配方各
    `validate` 一遍，不能用的列给上位机 —— 坏配方在开班前暴露，而不是换型那一刻。
@@ -234,7 +196,7 @@ MERLIC 的默认配方）：
 ## 部分运行：targets、isolate、force
 
 三个字段 id 语义相同（展开后的路径，给一个子图节点等于给它内部的全部节点），可以组合
-（[docs/node-run-plan.md](node-run-plan.md)，§6 修订一）。编辑器节点标题栏上的运行按钮：
+（操作入口见[交互指南](interaction-checklist.md)）。编辑器节点标题栏上的运行按钮：
 单击 = `targets: [id]`（智能运行），Shift+单击 = 再加 `force: [id]`；右键「仅此节点」= `isolate: [id]`。
 
 - **`targets`（运行到此 / 智能运行）**：只保留目标的上游闭包，有缓存的复用、缺的或过时的照跑，下游不进计划。
@@ -573,7 +535,7 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 />
 ```
 
-`animations`（默认 `true`）管画布上的全部动效（[docs/motion-plan.md](motion-plan.md)）：节点进出场、
+`animations`（默认 `true`）管画布上的全部动效（见[交互指南](interaction-checklist.md)）：节点进出场、
 完成/出错的闪光与抖动、连线生长、运行时边上的数据流动、hover 反馈的过渡、自动布局的位置过渡。
 设成 `false` 时这些一律直接落到终态，CSS 的循环与过渡也停掉，编辑器自己发起的「适配视图」这类视口动画也一步到位；编辑与执行的语义不受任何影响。
 用户系统里设了「减少动态效果」（`prefers-reduced-motion: reduce`）时编辑器自己按 `false` 处理，
@@ -590,8 +552,7 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 **一页一个编辑器。** store 与 transport 都是模块级单例（[ADR-0018](adr/0018-editor-as-package.md)）：
 同一页面挂两个 `<LyFlowEditor>` 会共用同一份文档与 store，后挂载的 `transport` 顶掉先挂的。
 编辑器检测到第二个实例挂载时会 `console.error`，不再静默串台。要在一个宿主里切换多份图，
-做成 tab 并在切换时卸载当前实例、挂下一个；真正的多实例（每个实例一套 store）的调研与方案见
-[multi-instance-research.md](multi-instance-research.md)。编辑器往 DOM 上挂的状态类（拖分栏时的
+优先使用编辑器自带的工作流标签，或由宿主显式管理卸载与重新挂载；真正的实例隔离尚未实现。编辑器往 DOM 上挂的状态类（拖分栏时的
 `lyflow-is-resizing`、拖动参数时的 `lyflow-param-dragging`）加在编辑器自己的根元素（`[data-lyflow-editor]`）上，
 不碰宿主的 `body`。
 

@@ -77,7 +77,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
 | `LYFLOW_WORK_DIR` | 否 | 评估快照、任务状态、artifact 与逐行结果目录，默认 `os.tmpdir()/lyflow-mcp`；跨重启续跑应配置持久目录 |
-| `LYFLOW_CACHE_DIR` | 否 | 结果缓存落盘目录，原样传给每次起的 CLI 子进程（CLI 自己认这个变量，等价于 `--cache-dir`）：MCP 每次工具调用都是一个新进程，配了它，读盘、滤波、ONNX 推理这类贵的上游在第二次调用起直接命中。默认不设 = 关。按构建指纹分目录，重编 core 后旧结果不再复用；占用用 `lyflow cache info --cache-dir <dir>` 看（[disk-cache-plan.md](disk-cache-plan.md)） |
+| `LYFLOW_CACHE_DIR` | 否 | 结果缓存落盘目录，原样传给每次起的 CLI 子进程（CLI 自己认这个变量，等价于 `--cache-dir`）：MCP 每次工具调用都是一个新进程，配了它，读盘、滤波、ONNX 推理这类贵的上游在第二次调用起直接命中。默认不设 = 关。按产品版本、源码修订和缓存格式组成的构建身份分目录；无有效构建身份的开发运行库不能启用；占用用 `lyflow cache info --cache-dir <dir>` 看（[当前指南](cli.md#跨进程缓存)） |
 
 ### 4. 在 Claude Code 里配
 
@@ -88,10 +88,10 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
   "mcpServers": {
     "lyflow": {
       "command": "node",
-      "args": ["D:/project/LyFlow/packages/mcp/dist/index.js"],
+      "args": ["C:/Users/11601/project/LyFlow/packages/mcp/dist/index.js"],
       "env": {
         "LYFLOW_HTTP_BASE": "http://127.0.0.1:8787",
-        "LYFLOW_CLI": "D:/project/LyFlow/bridge/target/debug/lyflow.exe",
+        "LYFLOW_CLI": "C:/Users/11601/project/LyFlow/bridge/target/debug/lyflow.exe",
         "LYFLOW_PACKS": "gap"
       }
     }
@@ -128,7 +128,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `run_graph` | 同上 + `targets?` `set?` `recipe?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished`；给了 `recipe` 先 `LYFLOW_CLI recipes --recipe` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下），带 `recipe` 时另有 `recipe` |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
-| `view_output_image` | `runId` `nodeId` `port` `maxEdge?`（默认 768） | `GET …/images/:node/:port?level=` 按段取齐 | **一张 PNG**（MCP 的 `image` 内容）+ 一段元信息 `{size, channels, depth, shown, range}`：u16 / f32 按这张图的有限值拉伸到 8 位，`range` 写明。`size` 是原图尺寸；预览运行（`run_graph` 的 `mode: "preview"`）里源头缩小过的图另带 `previewScale`（[ADR-0028](adr/0028-image-preview-pixel-scale.md)）。只收 Image 端口 —— 张量在图里先接 `tensor.to_image`（[image-plan.md](image-plan.md) §5.5） |
+| `view_output_image` | `runId` `nodeId` `port` `maxEdge?`（默认 768） | `GET …/images/:node/:port?level=` 按段取齐 | **一张 PNG**（MCP 的 `image` 内容）+ 一段元信息 `{size, channels, depth, shown, range}`：u16 / f32 按这张图的有限值拉伸到 8 位，`range` 写明。`size` 是原图尺寸；预览运行（`run_graph` 的 `mode: "preview"`）里源头缩小过的图另带 `previewScale`（[ADR-0028](adr/0028-image-preview-pixel-scale.md)）。只收 Image 端口 —— 张量在图里先接 `tensor.to_image`（[当前指南](../packs/std-image/README.md) §5.5） |
 | `eval` | `graphPath` 样本 参数 `metric[]` `recipe?` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
@@ -416,7 +416,7 @@ pnpm --filter @lyflow/mcp test
 
 见 [MCP 可视化与离线复测](mcp-visualization.md) 和 [HTTP 快照契约](http-transport.md#持久运行快照mcp-可视化)。
 
-- `run_graph` 返回可用的 `snapshotId`；`eval` 默认保存每个样本当次运行的可视化输出。
+- `run_graph` 成功捕获时返回非空 `snapshotId` 和 `snapshotStatus=ready`；超时、取消或捕获失败会返回 pending/unavailable 及可能的 `snapshotError`，不能假定每次都有快照。`eval` 默认保存每个样本当次运行的可视化输出。
 - `view_outputs` 接受快照与节点端口图层，返回 PNG 图片内容及高清 PNG、SVG、SceneSpec 文件。点云必须声明投影轴，全部图层必须声明坐标系、单位和纵轴方向。
 - `compare_views` 接受 A/B 快照和各自图层映射，核对输入内容身份并统一视口。并排图保持对应图层配色；叠加图使用 A/B 颜色。
 - `view_evaluation` 按指标或相对基线的绝对差值排序，支持样本、参数组、失败筛选和分页。每条记录包含 `snapshotId`，可直接下钻；旧评估没有捕获的输出会明确说明，不会补跑冒充旧结果。

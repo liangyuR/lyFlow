@@ -144,7 +144,7 @@ Bundle、kind 里确实声明了这个字段，否则报 `unknown_port`；`lyflo
 ### 顶层图参数（M7，P1 起是完整参数规格）
 
 「本来就是全局」的值（间隙补偿量、模型路径）要有唯一的定义处，宿主按名字传值，而不是改 JSON 里某几个节点的参数。
-它也是**参数配方的结构**（[param-recipe-plan.md](param-recipe-plan.md) K1）：配方 = `{ 图参数名: 值 }` 的稀疏覆盖，
+它也是**参数配方的结构**（[当前指南](recipe.md) K1）：配方 = `{ 图参数名: 值 }` 的稀疏覆盖，
 没写的用 `default`（称为「基础」）。GraphDoc 顶层可选 `params`：
 
 ```jsonc

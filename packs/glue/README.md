@@ -5,7 +5,7 @@
 彩色跟踪和量宽对胶内高光、低置信度色谷采用同一套受约束合并：邻站或稳定历史胶宽可以扩大搜索范围，但明确背景不可跨越，合并宽度与中心须符合参考并优于原片段。外边被遮住时保留不完整标记，不用参考宽度替代实测；参数与输出契约见 [彩色测量算子](../../docs/glue-measure-ops.md#13-彩色测量算子)。
 
 对胶枪相机的一帧图像，用几个叫得出名字的积木量出胶宽、查出断胶、量出胶到零件边的距离，并判 OK / NG
-（[docs/glue-plan.md](../../docs/glue-plan.md) §2，G2）。一张检测图 6 个节点：
+（[docs/当前指南](../../docs/glue-integration.md) §2，G2）。一张检测图 6 个节点：
 
 ```
 io.load_image → glue.bead_path → glue.bead_width → glue.bead_breaks ─┐
