@@ -29,6 +29,7 @@ void registerImageP1Basic(Registry& r);
 void registerImageP1Calibration(Registry& r);
 void registerImageP1Matching(Registry& r);
 void registerImageP1Circles(Registry& r);
+void registerImageHighlights(Registry& r);
 
 } // namespace lyflow::ops
 

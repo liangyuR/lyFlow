@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "id": "01P2HIGHLIGHTS000000000001",
+  "name": "P2 高光直线分组与旋转区域",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "region",
+      "op": "pose.construct_2d",
+      "params": {
+        "id": "scan-window",
+        "unit": "px",
+        "frame": "image",
+        "position": [96, 64],
+        "size": [188, 124],
+        "angle": 0.17453292519943295
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 200
+        }
+      }
+    },
+    {
+      "id": "detect",
+      "op": "image.highlights",
+      "params": {
+        "minBrightness": 0.4,
+        "minContrast": 0.08,
+        "ridgeRadius": 5,
+        "maxGap": 6
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "detect",
+        "port": "image"
+      }
+    },
+    {
+      "id": "region",
+      "from": {
+        "node": "region",
+        "port": "pose"
+      },
+      "to": {
+        "node": "detect",
+        "port": "region"
+      }
+    }
+  ],
+  "outputs": {
+    "highlights": {
+      "node": "detect",
+      "port": "instances"
+    },
+    "segments": {
+      "node": "detect",
+      "port": "segments"
+    },
+    "overlay": {
+      "node": "detect",
+      "port": "image"
+    },
+    "ridgeMask": {
+      "node": "detect",
+      "port": "mask"
+    }
+  },
+  "params": {
+    "imageFile": {
+      "type": "path",
+      "label": "输入图像",
+      "default": "p2-highlights.pgm",
+      "binds": ["source.path"]
+    },
+    "minimumLength": {
+      "type": "float",
+      "label": "最小线段长度",
+      "unit": "px",
+      "default": 30,
+      "binds": ["detect.minLength"]
+    },
+    "direction": {
+      "type": "float",
+      "label": "参考方向",
+      "unit": "deg",
+      "default": 0,
+      "binds": ["detect.referenceAngle"]
+    },
+    "directionTolerance": {
+      "type": "float",
+      "label": "方向容差",
+      "unit": "deg",
+      "default": 90,
+      "binds": ["detect.angleTolerance"]
+    }
+  }
+}

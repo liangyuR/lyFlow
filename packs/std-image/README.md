@@ -133,3 +133,11 @@ NCC最多81种角度/尺度组合、64Mi响应像素和4096个有界候选；常
 YOLOX-Nano 使用独立 `image.yolox_preprocess/decode` 与 modelContract=yolox-nano-0.1.1rc0：BGR 0..255、416²右下补114、网格与objectness解码。模型映射 Record 与原生 Tensor 必须配对；不猜测转置、动态、FP16、分割或 OBB 导出格式。结果为像素 `vision.Poses2D.v1`，空目标为有效空集合，pickable=false。候选与输出最多4096，Tensor最多16Mi元素。
 
 四个真实模型的签名、许可、准备命令和示例见 [检测示例](../../examples/p1-detection-README.md) 与 [逐项分析](../../docs/p1-analysis-detection.md)。权重由用户显式准备，不随运行库分发。
+
+## P2 高光直线检测（阶段1）
+
+`image.highlights` 已实现高光直线的亮脊检测、分组、有限线段拟合和质量门控；源码分析、支持矩阵和验收边界见 [A05高光分析](../../docs/p2-highlights-analysis.md)。六阶段按独立PR顺序交付，状态以[交付跟踪](../../docs/p2-sequential-delivery.md)及对应PR为准。
+
+输入为原生 `Image`，可选像素 `Box2D roi` 或单个 `vision.Pose2D.v1 region`，两种ROI互斥；旋转区域的单位/参考帧必须匹配，缺省为全图。输出旋转区域使用 `vision.Poses2D.v1`，不把轴对齐原生Box2D描述成旋转矩形。
+
+输出端口为 `instances`（旋转区域）、`segments`（`image.Highlights.v1`有限线段/质量）、`mask`（u8候选亮脊图）和 `image`（叠图）。分组记录与Pose共享ID，Record中的坐标、长度、RMS和最大正交误差maxError使用原图像素；像素图保留Image.scale，大数组不进入JSON。无目标返回有效空集合，非法输入和预算超限返回诊断。质量分数基于覆盖率、归一化对比度和拟合残差，不是识别概率；完整字段、参数和显式资源预算见分析页，安装后的可用入口以manifest为准。

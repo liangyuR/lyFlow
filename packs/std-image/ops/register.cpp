@@ -31,6 +31,7 @@ void registerPackOps(Registry& r) {
   ops::registerImageP1Calibration(r);
   ops::registerImageP1Matching(r);
   ops::registerImageP1Circles(r);
+  ops::registerImageHighlights(r);
 }
 
 } // namespace lyflow::packs::std_image
