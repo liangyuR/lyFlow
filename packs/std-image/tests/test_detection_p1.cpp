@@ -184,6 +184,30 @@ TEST_CASE("YOLOX NMS uses unclipped model boxes before ROI and preview restorati
   CHECK(items(call)[0]["id"] == "det-0-0");
 }
 
+TEST_CASE("YOLOX excludes right and bottom padding before candidate and detection budgets") {
+  for (const bool wide : {false, true}) {
+    test::OpCall call;
+    Record meta = mapping();
+    meta.data["workingSize"] = wide ? Json::array({416, 208}) : Json::array({208, 416});
+    meta.data["crop"] = wide ? Json::array({0, 0, 416, 208}) : Json::array({0, 0, 208, 416});
+    meta.data["resizedSize"] = meta.data["workingSize"];
+    meta.data["imageScale"] = 2;
+    Tensor tensor = prediction();
+    box(tensor, 0, wide ? 15 : 275, wide ? 275 : 15, 10, 10, 0.9f);
+    box(tensor, 1, 15, 15, 10, 10, 0.8f);
+    call.inputs = {{"mapping", Data::record(meta)}, {"prediction", Data::tensor(tensor)}};
+    for (const auto& budget : {"maxCandidates", "maxDetections"}) {
+      REQUIRE(call.run("image.yolox_decode", {{budget, Value::integer(1)}}).ok);
+      REQUIRE(items(call).size() == 1);
+      CHECK(items(call)[0]["id"] == "det-1-0");
+      CHECK(items(call)[0]["position"][0].get<double>() == doctest::Approx(30));
+      CHECK(items(call)[0]["position"][1].get<double>() == doctest::Approx(30));
+      CHECK(items(call)[0]["size"][0].get<double>() == doctest::Approx(20));
+      CHECK(items(call)[0]["size"][1].get<double>() == doctest::Approx(20));
+    }
+  }
+}
+
 TEST_CASE("YOLOX decoding rejects corrupt model tensors metadata and probability contracts") {
   test::OpCall call;
   Tensor tensor = prediction();

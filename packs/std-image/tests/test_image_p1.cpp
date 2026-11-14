@@ -6,6 +6,7 @@
 #include <limits>
 
 #include <opencv2/calib3d.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "helpers.h"
@@ -589,4 +590,84 @@ TEST_CASE("P1 long image loops cooperate with cancellation before publishing res
   cancelled("image.template_match", {{"image", image(cv::Mat(64, 64, CV_8U, cv::Scalar(0)))},
                                      {"template", c.outputs.at("template")},
                                      {"model", c.outputs.at("model")}});
+}
+
+TEST_CASE("P1 radial sampling bounds survive scheduler preview scaling") {
+  cv::Mat pixels(2048, 4096, CV_8U, cv::Scalar(0));
+  cv::circle(pixels, {2048, 1024}, 300, cv::Scalar(255), -1, cv::LINE_AA);
+  cv::circle(pixels, {2048, 1024}, 200, cv::Scalar(0), -1, cv::LINE_AA);
+  std::vector<unsigned char> bytes;
+  REQUIRE(cv::imencode(".png", pixels, bytes));
+  File file;
+  {
+    std::ofstream output(file.path, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    REQUIRE(output.good());
+  }
+  int counter = 0;
+  for (const double step : {0.25, 4.0, 0.125, 4.01, 0.5})
+    for (const auto mode : {exec::RunMode::Full, exec::RunMode::Preview}) {
+      CAPTURE(step);
+      CAPTURE(int(mode));
+      Json params{{"center", {2048, 1024}},
+                  {"radiusMin", 150},
+                  {"radiusMax", 350},
+                  {"radialStep", step},
+                  {"samples", 72}};
+      const bool overBudget = step == 0.5;
+      if (overBudget) {
+        params["radiusMin"] = 0;
+        params["radiusMax"] = 2046;
+        params["samples"] = 720;
+        params["band"] = 31;
+      }
+      auto circleParams = params;
+      circleParams["polarity"] = "falling";
+      circleParams["maxRms"] = 2;
+      circleParams["fitTolerance"] = 3;
+      const auto graph = test::makeGraph(
+          {{"source", "io.load_image", {{"path", file.path.u8string()}, {"mode", "gray"}}},
+           {"circle", "image.circle_caliper", circleParams},
+           {"ring", "image.ring_width", params}},
+          {{"source.image", "circle.image"}, {"source.image", "ring.image"}});
+      exec::ResultStore::instance().clear();
+      exec::RunOptions options;
+      options.runId = "p1-radial-preview-" + std::to_string(counter++);
+      options.mode = mode;
+      options.noReuse = true;
+      options.maxParallel = 1;
+      test::RunLog log;
+      log.runId = options.runId;
+      exec::Run run(graph.dump(), options, &test::detail::collect, &log);
+      run.join();
+      Data source;
+      REQUIRE(exec::ResultStore::instance().get(log.runId, "source", "image", source));
+      REQUIRE(source.asImage());
+      CHECK(source.asImage()->scale == (mode == exec::RunMode::Preview ? 2 : 1));
+      if (step < 0.25 || step > 4 || overBudget) {
+        CHECK(log.finalState("circle") == "error");
+        CHECK(log.finalState("ring") == "error");
+        CHECK(log.nodeEvent("circle", "error")["error"]["code"] == "bad_param");
+        CHECK(log.nodeEvent("ring", "error")["error"]["code"] == "bad_param");
+        continue;
+      }
+      CHECK_MESSAGE(log.finalState("circle") == "done", log.nodeEvent("circle", "error").dump());
+      CHECK_MESSAGE(log.finalState("ring") == "done", log.nodeEvent("ring", "error").dump());
+      if (log.runStatus() != "ok")
+        continue;
+      Data circle, width, quality;
+      REQUIRE(exec::ResultStore::instance().get(log.runId, "circle", "circle", circle));
+      REQUIRE(circle.asCircle2D());
+      CHECK(circle.asCircle2D()->center[0] == doctest::Approx(2048).epsilon(0.001));
+      CHECK(circle.asCircle2D()->center[1] == doctest::Approx(1024).epsilon(0.001));
+      CHECK(circle.asCircle2D()->radius == doctest::Approx(300).epsilon(0.01));
+      REQUIRE(exec::ResultStore::instance().get(log.runId, "ring", "mean", width));
+      REQUIRE(width.asMeasurement());
+      CHECK(width.asMeasurement()->ok);
+      CHECK(width.asMeasurement()->value == doctest::Approx(100).epsilon(0.03));
+      REQUIRE(exec::ResultStore::instance().get(log.runId, "ring", "quality", quality));
+      REQUIRE(quality.asRecord());
+      CHECK(quality.asRecord()->data["scale"] == source.asImage()->scale);
+      CHECK(quality.asRecord()->data["center"] == Json::array({2048, 1024}));
+    }
 }

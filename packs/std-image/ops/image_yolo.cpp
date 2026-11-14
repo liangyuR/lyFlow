@@ -263,6 +263,9 @@ Status decodeYolo(const Inputs& in, const ParamView& p, Outputs& out, ExecContex
       continue;
     if (coordinate[2] <= coordinate[0] || coordinate[3] <= coordinate[1])
       continue;
+    if (coordinate[2] <= m.left || coordinate[3] <= m.top ||
+        coordinate[0] >= m.left + m.resizedWidth || coordinate[1] >= m.top + m.resizedHeight)
+      continue;
     candidates.push_back(
         {coordinate[0], coordinate[1], coordinate[2], coordinate[3], score, cls, i});
   }

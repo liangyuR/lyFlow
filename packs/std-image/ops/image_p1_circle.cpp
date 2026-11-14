@@ -43,6 +43,9 @@ Status scan(const Inputs& in, const ParamView& p, ExecContext& ctx, const Image*
   settings.lo = p.number("radiusMin");
   settings.hi = p.number("radiusMax");
   settings.step = p.number("radialStep");
+  const double sourceStep = settings.step * input->scale;
+  if (!std::isfinite(sourceStep) || sourceStep < 0.25 || sourceStep > 4)
+    return img::badParam("径向采样步长必须在原图[0.25,4]像素范围内", "radialStep");
   settings.start = p.number("angleStart") * kPi / 180;
   settings.sweep = (p.number("angleEnd") - p.number("angleStart")) * kPi / 180;
   settings.gradient = p.number("minGradient");
@@ -52,8 +55,7 @@ Status scan(const Inputs& in, const ParamView& p, ExecContext& ctx, const Image*
   settings.reverse = p.choice("direction") == "outside_in";
   if (!std::isfinite(settings.x) || !std::isfinite(settings.y) || !std::isfinite(settings.lo) ||
       !std::isfinite(settings.hi) || settings.lo < 0 || settings.hi <= settings.lo ||
-      settings.hi > 1000000 || !std::isfinite(settings.step) || settings.step < 0.25 ||
-      settings.step > 4 || (settings.hi - settings.lo) / settings.step > 4096 ||
+      settings.hi > 1000000 || (settings.hi - settings.lo) / settings.step > 4096 ||
       !std::isfinite(settings.start) || !std::isfinite(settings.sweep) ||
       std::abs(settings.start) > 4 * kPi || std::abs(settings.sweep) < kPi / 180 ||
       std::abs(settings.sweep) > 2 * kPi + 1e-12 || !std::isfinite(settings.gradient) ||
@@ -359,7 +361,8 @@ std::vector<Param> common() {
   auto center = image_p1::vector("center", "扫描中心", {100, 100}, "px");
   auto lo = img::floatParam("radiusMin", "最小扫描半径", 20, "像素。");
   auto hi = img::floatParam("radiusMax", "最大扫描半径", 80, "像素。");
-  auto step = img::floatParam("radialStep", "径向采样步长", 1, "[0.25,4]像素。");
+  auto step =
+      img::floatParam("radialStep", "径向采样步长", 1, "[0.25,4]原图像素；预览随图像比例换算。");
   lo.unit = hi.unit = step.unit = "px";
   return {center,
           lo,

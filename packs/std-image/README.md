@@ -124,6 +124,8 @@ NCC最多81种角度/尺度组合、64Mi响应像素和4096个有界候选；常
 
 圆弧质量Record中的坐标恢复到原图，原生Circle2D和像素Measurement仍由执行器恢复。圆拟合要求圆RMS显著优于同点集直线RMS，以拒绝窄ROI内直边误拟合为圆；径向梯度平台合并后取中心，避免正反向选择造成半像素环宽偏差。扫描、RANSAC、实例处理和候选搜索均有资源上限及取消检查。物理精度和现场重复性仍需真实标定与样本验收。
 
+圆弧和环宽的 `radialStep` 必须位于原图 `[0.25,4]` 像素，预览按图像比例同步缩小步长与扫描范围，校验仍以还原后的原图步长为准。每条径向采样上限及64Mi总采样预算在Full/Preview中一致执行。
+
 ## P1 YOLO 检测链
 
 `image.yolo_preprocess → ml.onnx_run(modelContract=yolo-detection) → image.yolo_decode` 支持 YOLOv8、YOLO11、YOLO26。预处理为 u8 灰度/RGB/RGBA→RGB/255、居中 letterbox；modelFamily 与模型必须匹配，classNames 可显式设置，静态输入宽高为 32 的倍数、32..2048。常规头 `[1,4+C,N]` 无 objectness、按模型空间 IoU 做稳定类别感知 NMS；端到端 `[1,N,6]` 不重复 NMS。NMS 后回映并裁剪到原图/ROI，零面积框不输出。

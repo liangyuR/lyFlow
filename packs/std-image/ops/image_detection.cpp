@@ -202,6 +202,8 @@ Status decode(const Inputs& inputs, const ParamView& params, Outputs& outputs, E
         const double x1 = cx + width / 2, y1 = cy + height / 2;
         if (x1 <= x0 || y1 <= y0)
           continue;
+        if (x1 <= 0 || y1 <= 0 || x0 >= mapping.resizedWidth || y0 >= mapping.resizedHeight)
+          continue;
         candidates.push_back({x0, y0, x1, y1, score, cls, anchor});
       }
     }

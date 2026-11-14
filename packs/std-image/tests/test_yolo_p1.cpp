@@ -168,6 +168,38 @@ TEST_CASE("YOLO raw NMS preserves model-space IoU before clipping preview result
   }
 }
 
+TEST_CASE("YOLO excludes padding-only boxes before candidate and detection budgets") {
+  for (const auto& family : {"yolov8", "yolo11", "yolo26"}) {
+    for (const auto& format : {"raw", "end2end"}) {
+      test::OpCall call;
+      Tensor tensor;
+      if (std::string(format) == "raw") {
+        tensor = raw();
+        box(tensor, 0, 0, 0.9f);
+        box(tensor, 1, 0, 0.8f);
+        tensor.data[0] = tensor.data[1] = 5;
+        tensor.data[21] = 2;
+        tensor.data[22] = 15;
+        tensor.data[42] = tensor.data[43] = 10;
+        tensor.data[63] = 4;
+        tensor.data[64] = 10;
+      } else {
+        tensor.shape = {1, 2, 6};
+        tensor.data = {0, 0, 10, 4, 0.9f, 0, 0, 10, 10, 20, 0.8f, 0};
+      }
+      call.inputs = {{"mapping", Data::record(prepare(family, format))},
+                     {"prediction", Data::tensor(tensor)}};
+      for (const auto& budget : {"maxCandidates", "maxDetections"}) {
+        REQUIRE(call.run("image.yolo_decode", {{budget, Value::integer(1)}}).ok);
+        REQUIRE(items(call).size() == 1);
+        CHECK(items(call)[0]["id"] == "det-1-0");
+        CHECK(items(call)[0]["position"] == Json::array({10.0, 14.0}));
+        CHECK(items(call)[0]["size"] == Json::array({20.0, 20.0}));
+      }
+    }
+  }
+}
+
 TEST_CASE("YOLO rejects malformed mapping labels dimensions and unsupported tensor layouts") {
   test::OpCall call;
   const Record correct = prepare("yolov8");
