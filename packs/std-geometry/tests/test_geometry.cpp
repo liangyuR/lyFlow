@@ -52,9 +52,9 @@ Data rotate90(const Data& data) {
   return line(-source->point[1], source->point[0], -source->dir[1], source->dir[0]);
 }
 
-const nlohmann::json& intersections(test::OpCall& call, Data a, Data b) {
+const nlohmann::json& intersections(test::OpCall& call, Data a, Data b, double tolerance = 1e-6) {
   call.inputs = {{"a", std::move(a)}, {"b", std::move(b)}};
-  const auto s = call.run("geometry.intersect_2d");
+  const auto s = call.run("geometry.intersect_2d", {{"tolerance", Value::number(tolerance)}});
   REQUIRE_MESSAGE(s.ok, s.message);
   return call.outputs.at("intersections").asRecord()->data;
 }
@@ -579,4 +579,132 @@ TEST_CASE("geometry point projection covers perpendicular foot segment clamping 
   CHECK(c.outputs.at("point").asPoint2D()->p[0] == 4);
   c.inputs["point"] = point(4, 3, Unit2D::Pixel);
   CHECK_FALSE(c.run("geometry.project_point_2d").ok);
+}
+
+TEST_CASE("geometry projection cancels exact rational numerators before dividing") {
+  const float huge = 1e20f;
+  struct Case {
+    Data query, target;
+    float x, y;
+  };
+  const std::vector<Case> cases = {
+      {point(huge, -huge), line(0, 0, 1, 1), 0, 0},
+      {point(-huge, huge), line(0, 0, -1, -1), 0, 0},
+      {point(huge, huge), line(0, 0, 1, -1), 0, 0},
+      {point(huge, -huge), line(1, 0, 1, 1), 0.5f, -0.5f},
+      {point(huge, -huge), line(0, 1, 1, 1), -0.5f, 0.5f},
+      {point(huge, -huge), line(huge, huge, 3, 3), 0, 0},
+      {point(huge, -huge), segment(-1, -1, 1, 1), 0, 0},
+      {point(huge, -huge), segment(1, 1, -1, -1), 0, 0},
+      {point(huge, -huge), segment(1, 1, 2, 2), 1, 1},
+      {point(huge, -huge), segment(-2, -2, -1, -1), -1, -1},
+      {point(huge, -huge), segment(-huge, -huge, huge, huge), 0, 0},
+      {point(huge, -huge), segment(huge, huge, -huge, -huge), 0, 0},
+      {point(4 * 0x1p65f, -3 * 0x1p65f), segment(-3, -4, 3, 4), 0, 0},
+      {point(1e-20f, -1e-20f), segment(-1, -1, 1, 1), 0, 0},
+  };
+  for (const auto& item : cases) {
+    test::OpCall call;
+    call.inputs = {{"point", item.query}, {"line", item.target}};
+    REQUIRE(call.run("geometry.project_point_2d").ok);
+    const Point2D* result = call.outputs.at("point").asPoint2D();
+    CHECK(result->p[0] == item.x);
+    CHECK(result->p[1] == item.y);
+  }
+}
+
+TEST_CASE("geometry line intersections cancel distant rational anchors before dividing") {
+  const float large = 1e20f, k = std::sqrt(0.5f);
+  for (const Data a : {line(large, large, -k, -k), line(large, large, k, k)}) {
+    for (const Data b : {line(-large, large, k, -k), line(-large, large, -k, k)}) {
+      for (bool swap : {false, true}) {
+        test::OpCall call;
+        const auto result = intersections(call, swap ? b : a, swap ? a : b);
+        REQUIRE(result["points"].size() == 1);
+        CHECK(result["points"][0][0].get<double>() == 0);
+        CHECK(result["points"][0][1].get<double>() == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("geometry circle radical axes retain exact local zero components") {
+  for (float radius : {1e20f, 1e-20f}) {
+    const double epsilon = radius < 1 ? 1e-46 : 1e-6;
+    const Data a = circle(radius, 0, radius), b = circle(0, radius, radius);
+    for (bool swap : {false, true}) {
+      test::OpCall call;
+      const auto result = intersections(call, swap ? b : a, swap ? a : b, epsilon);
+      REQUIRE(result["points"].size() == 2);
+      CHECK(std::abs(result["points"][0][0].get<double>()) <= epsilon);
+      CHECK(std::abs(result["points"][0][1].get<double>()) <= epsilon);
+      for (int axis = 0; axis < 2; ++axis) {
+        const double coordinate = result["points"][1][axis].get<double>();
+        CHECK(std::abs(coordinate - radius) <= epsilon + static_cast<double>(radius) * 1e-12);
+      }
+      const Data shiftedA = circle(2 * radius, 0, radius),
+                 shiftedB = circle(radius, radius, radius);
+      const auto shifted =
+          intersections(call, swap ? shiftedB : shiftedA, swap ? shiftedA : shiftedB, epsilon);
+      REQUIRE(shifted["points"].size() == 2);
+      CHECK(std::abs(shifted["points"][0][0].get<double>() - radius) <=
+            epsilon + static_cast<double>(radius) * 1e-12);
+      CHECK(std::abs(shifted["points"][0][1].get<double>()) <= epsilon);
+    }
+  }
+}
+
+TEST_CASE("geometry line circle roots and boundary gaps retain local large and tiny values") {
+  for (bool tiny : {false, true}) {
+    const float radius = tiny ? 1e-20f : 1e20f, offset = tiny ? 1e-30f : 1e11f;
+    const double smallRoot = static_cast<double>(offset) * offset / (2 * radius);
+    const double epsilon = tiny ? 1e-46 : 1e-8;
+    const float before = static_cast<float>(smallRoot * 0.8);
+    const float after = static_cast<float>(smallRoot * 1.2);
+    const float far = static_cast<float>(smallRoot * 1.6);
+    struct Case {
+      Data target;
+      std::size_t count;
+      double distance;
+    };
+    const std::vector<Case> cases = {
+        {line(0, 0, 1, 0), 2, 0},
+        {line(radius, 0, 1, 0), 2, 0},
+        {line(radius, 0, -1, 0), 2, 0},
+        {segment(before, 0, after, 0), 1, 0},
+        {segment(after, 0, before, 0), 1, 0},
+        {segment(0, 0, before, 0), 0, smallRoot - before},
+        {segment(before, 0, 0, 0), 0, smallRoot - before},
+        {segment(after, 0, far, 0), 0, after - smallRoot},
+        {segment(far, 0, after, 0), 0, after - smallRoot},
+    };
+    for (bool rotate : {false, true}) {
+      const Data source = circle(radius, offset, radius);
+      const Data ring = rotate ? rotate90(source) : source;
+      for (const auto& item : cases) {
+        const Data target = rotate ? rotate90(item.target) : item.target;
+        for (bool swap : {false, true}) {
+          const Data a = swap ? ring : target, b = swap ? target : ring;
+          test::OpCall call;
+          const auto result = intersections(call, a, b, epsilon);
+          REQUIRE(result["points"].size() == item.count);
+          if (item.count) {
+            const double root = result["points"][0][rotate ? 1 : 0].get<double>();
+            CHECK(std::abs(root - smallRoot) <= epsilon + std::abs(smallRoot) * 1e-12);
+            CHECK(result["points"][0][rotate ? 0 : 1].get<double>() == 0);
+          }
+          CHECK(std::abs(distance(a, b) - item.distance) <=
+                epsilon + std::abs(item.distance) * 1e-12);
+          call.inputs = {{"a", target}, {"b", ring}};
+          REQUIRE(call.run("geometry.distance_2d", {{"mode", Value::text("signed_clearance")}}).ok);
+          const double clearance = call.outputs.at("distance").asMeasurement()->value;
+          if (item.count == 0) {
+            const double expected = smallRoot - std::max(item.target.asLine2D()->start[0],
+                                                         item.target.asLine2D()->end[0]);
+            CHECK(std::abs(clearance - expected) <= epsilon + std::abs(expected) * 1e-12);
+          }
+        }
+      }
+    }
+  }
 }

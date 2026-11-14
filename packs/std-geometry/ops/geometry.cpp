@@ -68,6 +68,17 @@ public:
     add(sign * product);
   }
 
+  void addScaled(const Expansion& value, double factor) {
+    for (std::size_t i = 0; i < value.size_; ++i)
+      addProduct(value.parts_[i], factor, 1);
+  }
+
+  void addProduct(const Expansion& a, const Expansion& b, double sign) {
+    for (std::size_t i = 0; i < a.size_; ++i)
+      for (std::size_t j = 0; j < b.size_; ++j)
+        addProduct(a.parts_[i], b.parts_[j], sign);
+  }
+
   double value() const {
     double result = 0;
     for (std::size_t i = 0; i < size_; ++i)
@@ -76,11 +87,11 @@ public:
   }
 
 private:
-  std::array<double, 32> parts_{};
+  std::array<double, 128> parts_{};
   std::size_t size_ = 0;
 };
 
-double cross(const ExactVec& a, const ExactVec& b) {
+Expansion crossExpansion(const ExactVec& a, const ExactVec& b) {
   Expansion result;
   for (Vec av : {a.high, a.low}) {
     for (Vec bv : {b.high, b.low}) {
@@ -88,8 +99,10 @@ double cross(const ExactVec& a, const ExactVec& b) {
       result.addProduct(av.y, bv.x, -1);
     }
   }
-  return result.value();
+  return result;
 }
+
+double cross(const ExactVec& a, const ExactVec& b) { return crossExpansion(a, b).value(); }
 
 void addDot(Expansion& result, const ExactVec& a, const ExactVec& b, double sign) {
   for (Vec av : {a.high, a.low}) {
@@ -104,6 +117,12 @@ double dot(const ExactVec& a, const ExactVec& b) {
   Expansion result;
   addDot(result, a, b, 1);
   return result.value();
+}
+
+Expansion dotExpansion(const ExactVec& a, const ExactVec& b) {
+  Expansion result;
+  addDot(result, a, b, 1);
+  return result;
 }
 
 struct Geometry {
@@ -200,6 +219,18 @@ double perpendicular(Vec point, const Geometry& line) {
   return cross(line.rawDirection, exactDifference(point, line.p)) / line.directionLength;
 }
 
+Vec rationalPoint(Vec anchor, const ExactVec& direction, const Expansion& numerator,
+                  const Expansion& denominator) {
+  Expansion x, y;
+  x.addScaled(denominator, anchor.x);
+  x.addScaled(numerator, direction.high.x);
+  x.addScaled(numerator, direction.low.x);
+  y.addScaled(denominator, anchor.y);
+  y.addScaled(numerator, direction.high.y);
+  y.addScaled(numerator, direction.low.y);
+  return {x.value() / denominator.value(), y.value() / denominator.value()};
+}
+
 Vec projectedPoint(Vec point, const Geometry& line, bool clamp) {
   if (clamp && line.segment) {
     if (endpointProjection(point, line.p, line) < 0)
@@ -207,9 +238,9 @@ Vec projectedPoint(Vec point, const Geometry& line, bool clamp) {
     if (endpointProjection(point, line.end, line) > 0)
       return line.end;
   }
-  const double normalDistance = perpendicular(point, line);
-  return {std::fma(line.d.y, normalDistance, point.x),
-          std::fma(-line.d.x, normalDistance, point.y)};
+  const Expansion denominator = dotExpansion(line.rawDirection, line.rawDirection);
+  const Expansion along = dotExpansion(exactDifference(point, line.p), line.rawDirection);
+  return rationalPoint(line.p, line.rawDirection, along, denominator);
 }
 
 double pointLineDistance(Vec p, const Geometry& line) {
@@ -255,17 +286,10 @@ bool inSegment(LinePosition position, const Geometry& line, double eps) {
                            position.end * line.directionLength <= eps);
 }
 
-std::pair<Vec, double> intersectionAnchor(LinePosition position, const Geometry& line) {
-  if (line.segment && std::abs(position.end) < std::abs(position.start))
-    return {line.end, position.end};
-  return {line.p, position.start};
-}
-
-Vec intersectionPoint(const LineParameters& parameters, const Geometry& a, const Geometry& b) {
-  const auto pa = intersectionAnchor(parameters.a, a), pb = intersectionAnchor(parameters.b, b);
-  return std::abs(pa.second) * a.directionLength <= std::abs(pb.second) * b.directionLength
-             ? pointFromAnchor(pa.first, a, pa.second)
-             : pointFromAnchor(pb.first, b, pb.second);
+Vec intersectionPoint(const Geometry& a, const Geometry& b) {
+  const Expansion denominator = crossExpansion(a.rawDirection, b.rawDirection);
+  const Expansion along = crossExpansion(exactDifference(b.p, a.p), b.rawDirection);
+  return rationalPoint(a.p, a.rawDirection, along, denominator);
 }
 
 Intersection collinearOverlap(const Geometry& a, const Geometry& b, double eps) {
@@ -310,7 +334,7 @@ Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
   if (!parameters.parallel) {
     if (!inSegment(parameters.a, a, eps) || !inSegment(parameters.b, b, eps))
       return {};
-    return {{intersectionPoint(parameters, a, b)}, false};
+    return {{intersectionPoint(a, b)}, false};
   }
   const ExactVec delta = exactDifference(b.p, a.p);
   if (std::abs(cross(delta, a.rawDirection)) / a.directionLength > eps)
@@ -318,22 +342,70 @@ Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
   return collinearOverlap(a, b, eps);
 }
 
-Intersection lineCircle(const Geometry& line, const Geometry& circle, double eps) {
-  const Vec closest = projectedPoint(circle.p, line, false);
-  const double d = std::abs(perpendicular(circle.p, line));
-  if (d > circle.radius + eps)
-    return {};
-  const double h = std::abs(d - circle.radius) <= eps
-                       ? 0.0
-                       : std::sqrt(std::max(0.0, (circle.radius - d) * (circle.radius + d)));
+double perpendicularGap(const Geometry& line, const Geometry& circle) {
+  const Expansion normal = crossExpansion(line.rawDirection, exactDifference(circle.p, line.p));
+  const Expansion squaredLength = dotExpansion(line.rawDirection, line.rawDirection);
+  Expansion power;
+  power.addProduct(normal, normal, 1);
+  power.addScaled(squaredLength, -circle.radius * circle.radius);
+  const double d = std::abs(normal.value()) / line.directionLength;
+  return power.value() / (squaredLength.value() * (d + circle.radius));
+}
+
+Intersection circleOnImplicitLine(const ExactVec& direction, const Expansion& lineIntercept,
+                                  const Geometry& circle, double eps, bool single = false) {
+  const auto coordinates = [&](bool xAxis) {
+    const auto axis = [&](Vec p) { return xAxis ? p.x : p.y; };
+    const auto other = [&](Vec p) { return xAxis ? p.y : p.x; };
+    Expansion u, v;
+    u.add(axis(direction.high));
+    u.add(axis(direction.low));
+    v.add(other(direction.high));
+    v.add(other(direction.low));
+    Expansion offset;
+    offset.addScaled(lineIntercept, xAxis ? 1 : -1);
+    offset.addScaled(u, -other(circle.p));
+    Expansion uu, a, b, c;
+    uu.addProduct(u, u, 1);
+    a.addProduct(u, u, 1);
+    a.addProduct(v, v, 1);
+    b.addProduct(v, offset, 1);
+    b.addScaled(uu, -axis(circle.p));
+    c.addProduct(offset, offset, 1);
+    c.addScaled(uu, axis(circle.p) * axis(circle.p));
+    c.addScaled(uu, -circle.radius * circle.radius);
+    Expansion discriminant;
+    discriminant.addProduct(b, b, 1);
+    discriminant.addProduct(a, c, -1);
+    const double root = std::sqrt(std::max(0.0, discriminant.value()));
+    const double q = -b.value() - std::copysign(root, b.value());
+    std::array<double, 2> result{q / a.value(), q != 0 ? c.value() / q : -b.value() / a.value()};
+    if (single || discriminant.value() <= 0)
+      result.fill(-b.value() / a.value());
+    std::sort(result.begin(), result.end());
+    return result;
+  };
+  const auto x = coordinates(true);
+  auto y = coordinates(false);
+  if (std::signbit(direction.high.x) != std::signbit(direction.high.y))
+    std::reverse(y.begin(), y.end());
   Intersection result;
-  for (double u : {-h, h}) {
-    const Vec p{std::fma(line.d.x, u, closest.x), std::fma(line.d.y, u, closest.y)};
-    if (!inSegment(p, line, eps))
-      continue;
-    if (result.points.empty() || length(p - result.points.front()) > eps)
-      result.points.push_back(p);
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    const Vec point{x[i], y[i]};
+    if (result.points.empty() || length(point - result.points.front()) > eps)
+      result.points.push_back(point);
   }
+  return result;
+}
+
+Intersection lineCircle(const Geometry& line, const Geometry& circle, double eps) {
+  if (perpendicularGap(line, circle) > eps)
+    return {};
+  const Expansion intercept = crossExpansion(line.rawDirection, ExactVec{line.p, {}});
+  Intersection result = circleOnImplicitLine(line.rawDirection, intercept, circle, eps);
+  result.points.erase(std::remove_if(result.points.begin(), result.points.end(),
+                                     [&](Vec point) { return !inSegment(point, line, eps); }),
+                      result.points.end());
   return result;
 }
 
@@ -360,6 +432,20 @@ CircleRelation circleRelation(const Geometry& a, const Geometry& b) {
           d > 0 ? std::sqrt(std::max(0.0, (-outerPower / (2 * d)) * (-innerPower / (2 * d)))) : 0};
 }
 
+double endpointCircleGap(Vec point, const Geometry& circle) {
+  Geometry endpoint;
+  endpoint.p = point;
+  return circleRelation(endpoint, circle).outsideGap;
+}
+
+double lineCircleGap(const Geometry& line, const Geometry& circle) {
+  if (line.segment && endpointProjection(circle.p, line.p, line) < 0)
+    return endpointCircleGap(line.p, circle);
+  if (line.segment && endpointProjection(circle.p, line.end, line) > 0)
+    return endpointCircleGap(line.end, circle);
+  return perpendicularGap(line, circle);
+}
+
 Intersection circleCircle(Geometry a, Geometry b, double eps) {
   if (a.radius > b.radius ||
       (a.radius == b.radius && (a.p.x > b.p.x || (a.p.x == b.p.x && a.p.y > b.p.y))))
@@ -371,18 +457,13 @@ Intersection circleCircle(Geometry a, Geometry b, double eps) {
   const CircleRelation relation = circleRelation(a, b);
   if (relation.outsideGap > eps || relation.insideGap > eps)
     return {};
-  Expansion numerator;
-  addDot(numerator, delta, delta, 1);
-  numerator.addProduct(a.radius, a.radius, 1);
-  numerator.addProduct(b.radius, b.radius, -1);
-  const double t = numerator.value() / (2 * d);
-  const Vec dir = (b.p - a.p) * (1.0 / d);
-  const Vec center{std::fma(dir.x, t, a.p.x), std::fma(dir.y, t, a.p.y)};
-  const double h = relation.height;
-  const Vec offset = Vec{-dir.y, dir.x} * h;
-  if (h <= eps)
-    return {{center}, false};
-  return {{center - offset, center + offset}, false};
+  Expansion intercept;
+  addDot(intercept, ExactVec{b.p, {}}, ExactVec{b.p, {}}, 0.5);
+  addDot(intercept, ExactVec{a.p, {}}, ExactVec{a.p, {}}, -0.5);
+  intercept.addProduct(a.radius, a.radius, 0.5);
+  intercept.addProduct(b.radius, b.radius, -0.5);
+  const ExactVec direction{{delta.high.y, -delta.high.x}, {delta.low.y, -delta.low.x}};
+  return circleOnImplicitLine(direction, intercept, a, eps, relation.height <= eps);
 }
 
 Intersection intersect(Geometry a, Geometry b, double eps) {
@@ -418,11 +499,11 @@ double distance(Geometry a, Geometry b) {
     return std::max({0.0, relation.outsideGap, relation.insideGap});
   }
   if (b.kind == Geometry::Circle) {
-    const double minRadius = pointLineDistance(b.p, a);
+    const double minGap = lineCircleGap(a, b);
     if (!a.segment)
-      return std::max(0.0, minRadius - b.radius);
-    const double maxRadius = std::max(length(a.p - b.p), length(a.end - b.p));
-    return std::max({0.0, minRadius - b.radius, b.radius - maxRadius});
+      return std::max(0.0, minGap);
+    const double maxGap = std::max(endpointCircleGap(a.p, b), endpointCircleGap(a.end, b));
+    return std::max({0.0, minGap, -maxGap});
   }
   const LineParameters parameters = lineParameters(a, b);
   if (!parameters.parallel) {
@@ -449,7 +530,7 @@ double clearance(Geometry a, Geometry b) {
   if (b.kind == Geometry::Line)
     return pointLineDistance(a.p, b);
   if (a.kind == Geometry::Line)
-    return pointLineDistance(b.p, a) - b.radius;
+    return lineCircleGap(a, b);
   if (a.kind == Geometry::Circle || b.kind == Geometry::Circle)
     return circleRelation(a, b).outsideGap;
   return length(a.p - b.p) - a.radius - b.radius;
