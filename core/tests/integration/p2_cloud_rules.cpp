@@ -142,6 +142,7 @@ TEST_CASE("P2 matching examples preserve CAD anchors across save load C ABI and 
                                     Eigen::AngleAxisd(.3, Eigen::Vector3d::UnitX()))
                                        .toRotationMatrix();
   const auto check = [&](const Json& out) {
+    INFO(out.at("quality").at("value").dump());
     const auto& poses = out.at("instances").at("value").at("data").at("items");
     REQUIRE(poses.size() == 1);
     const auto p = poses[0].at("position").get<std::array<double, 3>>();
@@ -184,17 +185,21 @@ TEST_CASE("P2 matching examples preserve CAD anchors across save load C ABI and 
   save.inputs = {{"cloud", loader.outputs.at("cloud")}};
   REQUIRE(save.run("io.save_pcd", {{"path", Value::text(temporary.u8string())}}).ok);
   for (const char* preset : {"fast", "balanced", "precise"}) {
-    CAPTURE(preset);
+    CAPTURE(std::string(preset));
     const std::string name = std::string("p2-matching-") + preset + ".lyflow.json";
     const auto graph = example(name.c_str());
     const std::string id = std::string("p2-match-") + preset;
-    check(abiRun(graph, id, Json::object()));
+    {
+      INFO("C ABI original model");
+      check(abiRun(graph, id, Json::object()));
+    }
     RunOptions options;
     options.runId = id + "-sdk-roundtrip";
     options.baseDir = LYFLOW_EXAMPLES_DIR;
     options.paramsJson = Json{{"modelFile", temporary.u8string()}}.dump();
     options.noReuse = true;
     const auto result = client.run(graph.dump(), options);
+    INFO("SDK binary roundtrip model");
     REQUIRE_MESSAGE(result.ok(), result.summary);
     check(Json::parse(result.outputs));
   }

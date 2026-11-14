@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "patchRevision": 3,
+  "patchRevision": 4,
   "assets": [
     {
       "name": "kiss-matcher",
@@ -12,10 +12,7 @@
       "sha256": "d6f7d44974c6be66cfeaacbc25203fad2b083065dc694ac92b51d4c8ef8a48cb",
       "patch": "KISS-Matcher-e3440b63340af7414ebd0fdde04e40f02ff4e7d2.patch",
       "license": "MIT",
-      "licenseFiles": [
-        "LICENSE",
-        "cpp/kiss_matcher/3rdparty/tsl_robin/LICENSE"
-      ],
+      "licenseFiles": ["LICENSE", "cpp/kiss_matcher/3rdparty/tsl_robin/LICENSE"],
       "tag": "v1.0.2"
     },
     {
@@ -28,9 +25,7 @@
       "sha256": "5c13e5e8d3ef7d832318e165e92e91ebdfa4ae7c1873833265446fa4032602d3",
       "patch": "ROBIN-5623f02f62c63711052bbb8d6096a410ddca0ee4.patch",
       "license": "BSD-2-Clause (max_core only; PMC excluded)",
-      "licenseFiles": [
-        "LICENSE.md"
-      ]
+      "licenseFiles": ["LICENSE.md"]
     },
     {
       "name": "small-gicp",
@@ -41,9 +36,7 @@
       "bytes": 2689557,
       "sha256": "80a5a2dc2c5b0e2783f4471333df62d074cd28b5214107c0b0b88bbe386d709b",
       "license": "MIT with bundled component notices",
-      "licenseFiles": [
-        "LICENSE"
-      ]
+      "licenseFiles": ["LICENSE"]
     },
     {
       "name": "xenium",
@@ -54,9 +47,7 @@
       "bytes": 235177,
       "sha256": "b81aa376cf1c80907eb958a59e30199299e2b0256d8a82eaf6f40f75a75bc5ae",
       "license": "MIT",
-      "licenseFiles": [
-        "LICENSE"
-      ]
+      "licenseFiles": ["LICENSE"]
     },
     {
       "name": "tbb",
@@ -68,10 +59,7 @@
       "bytes": 9206000,
       "sha256": "6a7cf5f1873afd6efb82af3de40ae08f4898cd4fe7de5d7bf96cd24a6546cc9b",
       "license": "Apache-2.0",
-      "licenseFiles": [
-        "LICENSE.txt",
-        "third-party-programs.txt"
-      ]
+      "licenseFiles": ["LICENSE.txt", "third-party-programs.txt"]
     }
   ]
 }

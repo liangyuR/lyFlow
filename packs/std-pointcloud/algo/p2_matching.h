@@ -39,9 +39,15 @@ struct GicpBackendOptions {
 struct GicpBackendResult {
   Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
   bool converged = false;
+  bool stationary = false;
   std::size_t inliers = 0;
   int iterations = 0;
 };
+
+bool stationaryGicpStep(const Eigen::Matrix<double, 6, 6>& hessian,
+                        const Eigen::Matrix<double, 6, 1>& gradient, double error,
+                        std::size_t inliers, std::size_t iteration,
+                        const GicpBackendOptions& options);
 
 Status kissGlobalCandidate(const PointCloud& model, const PointCloud& scene,
                            const GlobalBackendOptions& options, ExecContext& ctx,

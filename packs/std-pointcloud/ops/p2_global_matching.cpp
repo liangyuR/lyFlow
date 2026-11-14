@@ -435,6 +435,7 @@ struct GlobalMatch {
   std::string roi;
   double score = 0;
   bool ambiguous = false;
+  bool stationaryRefinement = false;
   int equivalent = 1;
   Json symmetryScores;
 };
@@ -518,6 +519,7 @@ Status globalMatch(const Inputs& in, const ParamView& p, Outputs& out, ExecConte
         }
         Mat4 candidatePose = coarse.pose;
         int iterations = 0;
+        bool stationaryRefinement = false;
         if (s.refine) {
           fit3::GicpBackendResult fine;
           success(
@@ -529,6 +531,7 @@ Status globalMatch(const Inputs& in, const ParamView& p, Outputs& out, ExecConte
           }
           candidatePose = fine.pose;
           iterations = fine.iterations;
+          stationaryRefinement = fine.stationary;
         }
         PointCloud nativeScene = scene.select(active);
         fit3::TargetIndex index;
@@ -571,6 +574,7 @@ Status globalMatch(const Inputs& in, const ParamView& p, Outputs& out, ExecConte
         best.fit.iterations = iterations;
         best.score = scores[chosen];
         best.coarse = coarse;
+        best.stationaryRefinement = stationaryRefinement;
         best.roi = roi.id;
         best.equivalent =
             static_cast<int>(std::count_if(scores.begin(), scores.end(), [&](double score) {
@@ -671,6 +675,7 @@ Status globalMatch(const Inputs& in, const ParamView& p, Outputs& out, ExecConte
            {"uniqueSceneRatio", static_cast<double>(match.support.size()) / match.fit.matchedCount},
            {"converged", match.fit.converged},
            {"iterations", match.fit.iterations},
+           {"stationaryRefinement", match.stationaryRefinement},
            {"ambiguous", match.ambiguous},
            {"symmetryScores", match.symmetryScores},
            {"modelToScene", matrixJson(match.fit.pose)},

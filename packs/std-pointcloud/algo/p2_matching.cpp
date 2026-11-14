@@ -1,5 +1,6 @@
 #include "p2_matching.h"
 
+#include <Eigen/Cholesky>
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -91,6 +92,35 @@ Eigen::Matrix4d restore(const Eigen::Matrix3d& rotation, const Eigen::Vector3d& 
   return matrix;
 }
 } // namespace
+
+bool stationaryGicpStep(const Eigen::Matrix<double, 6, 6>& hessian,
+                        const Eigen::Matrix<double, 6, 1>& gradient, double error,
+                        std::size_t inliers, std::size_t iteration,
+                        const GicpBackendOptions& options) {
+  if (options.maxIterations < 2 ||
+      iteration >= static_cast<std::size_t>(options.maxIterations - 1) || inliers < 4 ||
+      !std::isfinite(error) || error < 0 || !hessian.allFinite() || !gradient.allFinite() ||
+      !std::isfinite(options.voxelSize) || options.voxelSize <= 0 ||
+      !std::isfinite(options.translationTolerance) || options.translationTolerance <= 0 ||
+      !std::isfinite(options.rotationTolerance) || options.rotationTolerance <= 0)
+    return false;
+  const double scale = hessian.cwiseAbs().maxCoeff();
+  if (scale <= 0 || (hessian - hessian.transpose()).cwiseAbs().maxCoeff() > scale * 1e-12)
+    return false;
+  const Eigen::LDLT<Eigen::Matrix<double, 6, 6>> decomposition(hessian);
+  if (decomposition.info() != Eigen::Success || !decomposition.isPositive() ||
+      !decomposition.vectorD().allFinite() || decomposition.vectorD().maxCoeff() <= 0 ||
+      decomposition.vectorD().minCoeff() / decomposition.vectorD().maxCoeff() <= 1e-12)
+    return false;
+  const Eigen::Matrix<double, 6, 1> step = decomposition.solve(-gradient);
+  if (decomposition.info() != Eigen::Success || !step.allFinite())
+    return false;
+  const auto residual = (hessian * step + gradient).eval();
+  const double magnitude = std::max(1.0, gradient.cwiseAbs().maxCoeff());
+  return residual.allFinite() && residual.cwiseAbs().maxCoeff() <= magnitude * 1e-10 &&
+         step.head<3>().norm() <= options.rotationTolerance &&
+         step.tail<3>().norm() <= options.translationTolerance * (0.01 / options.voxelSize);
+}
 
 Status kissGlobalCandidate(const PointCloud& model, const PointCloud& scene,
                            const GlobalBackendOptions& options, ExecContext& ctx,
@@ -202,7 +232,10 @@ Status refineSmallGicp(const PointCloud& model, const PointCloud& scene,
     const auto fit = small_gicp::align(target.points, source.points, start, setting);
     if (auto status = cancelled(ctx); !status.ok)
       return status;
-    result.converged = fit.converged;
+    result.stationary =
+        !fit.converged &&
+        stationaryGicpStep(fit.H, fit.b, fit.error, fit.num_inliers, fit.iterations, options);
+    result.converged = fit.converged || result.stationary;
     result.inliers = fit.num_inliers;
     result.iterations = fit.iterations;
     result.pose = restore(fit.T_target_source.linear(), fit.T_target_source.translation(), source,

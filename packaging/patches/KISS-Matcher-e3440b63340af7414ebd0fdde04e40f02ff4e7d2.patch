@@ -255,12 +255,17 @@
  
 --- a/cpp/kiss_matcher/core/kiss_matcher/points/downsampling.hpp
 +++ b/cpp/kiss_matcher/core/kiss_matcher/points/downsampling.hpp
-@@ -1,3 +1,4 @@
+@@ -1,6 +1,9 @@
 +#include "lyflow_matching_runtime.hpp"
  #pragma once
  
  #include <atomic>
-@@ -45,7 +46,7 @@
++#include <cmath>
++#include <stdexcept>
+ #include <iostream>
+ #include <memory>
+ 
+@@ -45,7 +48,7 @@
            const Eigen::Array4i coord =
                fast_floor(traits::point(points, i) * inv_leaf_size) + coord_offset;
            if ((coord < 0).any() || (coord > coord_bit_mask).any()) {
@@ -269,15 +274,134 @@
              coord_pt[i] = {invalid_coord, i};
              continue;
            }
-@@ -119,7 +120,7 @@
-           const Eigen::Array3i coord =
-               fast_floor_vector3f(points[i] * inv_leaf_size) + coord_offset;
-           if ((coord < 0).any() || (coord > coord_bit_mask).any()) {
+@@ -99,78 +102,62 @@
+ 
+ inline std::vector<Eigen::Vector3f> VoxelgridSampling(const std::vector<Eigen::Vector3f>& points,
+                                                       const double leaf_size) {
++  if (!std::isfinite(leaf_size) || leaf_size <= 0 || !std::isfinite(1.0 / leaf_size)) {
++    throw std::invalid_argument("voxel leaf size must be finite and positive");
++  }
+   if (points.empty()) {
+     return {};
+   }
+ 
+-  size_t num_raw_points      = points.size();
+   const double inv_leaf_size = 1.0 / leaf_size;
++  constexpr std::uint64_t invalid_coord = std::numeric_limits<std::uint64_t>::max();
++  constexpr int coord_bit_size = 21;
++  constexpr std::int64_t coord_offset = std::int64_t{1} << (coord_bit_size - 1);
++  std::vector<std::pair<std::uint64_t, size_t>> coord_pt(points.size());
++  tbb::parallel_for(tbb::blocked_range<size_t>(0, points.size(), 64),
++                    [&](const tbb::blocked_range<size_t>& range) {
++    for (size_t i = range.begin(); i != range.end(); ++i) {
++      const Eigen::Vector3d scaled = points[i].cast<double>() * inv_leaf_size;
++      if (!scaled.allFinite() || (scaled.array() < -static_cast<double>(coord_offset)).any() ||
++          (scaled.array() >= static_cast<double>(coord_offset)).any()) {
++        coord_pt[i] = {invalid_coord, i};
++        continue;
++      }
++      std::uint64_t bits = 0;
++      for (int axis = 0; axis < 3; ++axis) {
++        const auto coord = static_cast<std::uint64_t>(
++            static_cast<std::int64_t>(std::floor(scaled[axis])) + coord_offset);
++        bits |= coord << (axis * coord_bit_size);
++      }
++      coord_pt[i] = {bits, i};
++    }
++  });
++  tbb::parallel_sort(coord_pt, [](const auto& lhs, const auto& rhs) { return lhs < rhs; });
+ 
+-  constexpr std::uint64_t invalid_coord = std::numeric_limits<std::uint64_t>::max();
+-  constexpr int coord_bit_size          = 21;
+-  constexpr size_t coord_bit_mask       = (1 << 21) - 1;
+-  constexpr int coord_offset            = 1 << (coord_bit_size - 1);
+-
+-  std::vector<std::pair<std::uint64_t, size_t>> coord_pt(num_raw_points);
+-  tbb::parallel_for(
+-      tbb::blocked_range<size_t>(0, num_raw_points, 64),
+-      [&](const tbb::blocked_range<size_t>& range) {
+-        for (size_t i = range.begin(); i != range.end(); i++) {
+-          const Eigen::Array3i coord =
+-              fast_floor_vector3f(points[i] * inv_leaf_size) + coord_offset;
+-          if ((coord < 0).any() || (coord > coord_bit_mask).any()) {
 -            std::cerr << "warning: voxel coord is out of range!!" << std::endl;
-+            lyflow_matching_runtime::diagnostics() << "warning: voxel coord is out of range!!" << std::endl;
-             coord_pt[i] = {invalid_coord, i};
-             continue;
-           }
+-            coord_pt[i] = {invalid_coord, i};
+-            continue;
+-          }
+-
+-          const std::uint64_t bits =
+-              (static_cast<std::uint64_t>(coord[0] & coord_bit_mask) << (coord_bit_size * 0)) |
+-              (static_cast<std::uint64_t>(coord[1] & coord_bit_mask) << (coord_bit_size * 1)) |
+-              (static_cast<std::uint64_t>(coord[2] & coord_bit_mask) << (coord_bit_size * 2));
+-          coord_pt[i] = {bits, i};
+-        }
+-      });
+-
+-  tbb::parallel_sort(coord_pt,
+-                     [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+-
+-  std::vector<Eigen::Vector3f> downsampled;
+-  downsampled.resize(num_raw_points);
+-
+-  const int block_size            = 2048;
+-  std::atomic_uint64_t num_points = 0;
+-  tbb::parallel_for(tbb::blocked_range<size_t>(0, num_raw_points, block_size),
++  std::vector<size_t> starts;
++  starts.reserve(points.size() + 1);
++  size_t valid_count = 0;
++  while (valid_count < coord_pt.size() && coord_pt[valid_count].first != invalid_coord) {
++    if (valid_count == 0 || coord_pt[valid_count - 1].first != coord_pt[valid_count].first) {
++      starts.push_back(valid_count);
++    }
++    ++valid_count;
++  }
++  if (starts.empty()) {
++    return {};
++  }
++  starts.push_back(valid_count);
++  std::vector<Eigen::Vector3f> downsampled(starts.size() - 1);
++  tbb::parallel_for(tbb::blocked_range<size_t>(0, downsampled.size()),
+                     [&](const tbb::blocked_range<size_t>& range) {
+-                      std::vector<Eigen::Vector3f> sub_points;
+-                      sub_points.reserve(block_size);
+-
+-                      Eigen::Vector3f sum_pt = points[coord_pt[range.begin()].second];
+-                      float count            = 1.0;
+-                      for (size_t i = range.begin() + 1; i != range.end(); i++) {
+-                        if (coord_pt[i].first == invalid_coord) {
+-                          continue;
+-                        }
+-
+-                        if (coord_pt[i - 1].first != coord_pt[i].first) {
+-                          sub_points.emplace_back(sum_pt / count);
+-                          sum_pt.setZero();
+-                          count = 0.0;
+-                        }
+-                        sum_pt += points[coord_pt[i].second];
+-                        count += 1.0;
+-                      }
+-                      sub_points.emplace_back(sum_pt / count);
+-
+-                      const size_t point_index_begin = num_points.fetch_add(sub_points.size());
+-                      for (size_t i = 0; i < sub_points.size(); i++) {
+-                        downsampled[point_index_begin + i] = sub_points[i];
+-                      }
+-                    });
+-
+-  downsampled.resize(num_points);
+-
++    for (size_t run = range.begin(); run != range.end(); ++run) {
++      Eigen::Vector3d sum = Eigen::Vector3d::Zero();
++      for (size_t i = starts[run]; i < starts[run + 1]; ++i) {
++        sum += points[coord_pt[i].second].cast<double>();
++      }
++      downsampled[run] = (sum / static_cast<double>(starts[run + 1] - starts[run])).cast<float>();
++    }
++  });
+   return downsampled;
+ }
+-
+ }  // namespace kiss_matcher
 --- a/cpp/kiss_matcher/core/kiss_matcher/ROBINMatching.cpp
 +++ b/cpp/kiss_matcher/core/kiss_matcher/ROBINMatching.cpp
 @@ -1,3 +1,4 @@
