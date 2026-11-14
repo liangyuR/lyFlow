@@ -14,7 +14,9 @@ def export(directory):
     if torch_version.split("+")[0] != "2.10.0":
         raise RuntimeError("P1 reproducible exports require torch==2.10.0")
     directory = directory.resolve()
-    os.environ["YOLO_CONFIG_DIR"] = str(directory / "ultralytics-settings")
+    settings = directory / "ultralytics-settings"
+    settings.mkdir(parents=True, exist_ok=True)
+    os.environ["YOLO_CONFIG_DIR"] = str(settings)
     os.environ["YOLO_AUTOINSTALL"] = "false"
     from ultralytics import YOLO
     import onnx
