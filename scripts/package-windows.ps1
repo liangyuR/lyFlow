@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'LYFLOW_P4_ASSETS', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -41,7 +41,7 @@ try {
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics', 'matching-deps', 'vision-deps', 'vision-downloads', 'vision-opencv', 'opencv5-install')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics', 'matching-deps', 'barcode-deps', 'p4-assets', 'vision-deps', 'vision-downloads', 'vision-opencv', 'opencv5-install')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -60,13 +60,14 @@ try {
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
-    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -SkipVisionBuild:$SkipVisionBuild -DiagnosticsName package-dependencies
+    $env:LYFLOW_P4_ASSETS = Join-Path $buildParent 'p4-assets'
+    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -SkipVisionBuild:$SkipVisionBuild -P4ModelTests -DiagnosticsName package-dependencies
     $fixtures = Join-Path $buildParent 'release-fixtures'
     & python (Join-Path $root 'tests/release/make_fixtures.py') --output-dir $fixtures
     Assert-ReleaseExit 'Generate release fixtures'
     $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $fixtures 'channels-6-to-8.onnx'
     if (-not (Test-Path -LiteralPath $env:LYFLOW_TEST_ONNX_MODEL)) { throw 'Release ONNX fixture is missing.' }
-    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild -SkipVisionBuild:$SkipVisionBuild
+    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild -SkipVisionBuild:$SkipVisionBuild -P4ModelTests
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
     & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
@@ -104,6 +105,7 @@ try {
         $file = "opencv_${module}510.dll"
         if (-not (Test-Path -LiteralPath (Join-Path $runtime $file) -PathType Leaf)) { throw "Runtime missing $file" }
     }
+    if (@(Get-ChildItem -LiteralPath $runtime -Filter '*zxing*.dll' -File).Count) { throw 'ZXing must be statically linked, without an additional runtime DLL.' }
     $licenses = Join-Path $runtime 'licenses'
     New-Item -ItemType Directory -Path $licenses -Force | Out-Null
     $coreLicenses = Join-Path $licenses 'core'
@@ -164,6 +166,22 @@ try {
     }
     'Only the MIT-licensed STag dictionary tables are consumed. LyFlow implements contour extraction and decoding independently; upstream ED/LSD implementations are not compiled, linked, or distributed.' |
         Set-Content -LiteralPath (Join-Path $licenses 'vision/stag/USAGE.txt') -Encoding utf8NoBOM
+    $barcodeConfig = Get-Content -LiteralPath (Join-Path $root 'packaging/barcode-deps.json') -Raw | ConvertFrom-Json
+    foreach ($asset in $barcodeConfig.assets) {
+        $sourceRoot = Join-Path $root "build/barcode-deps/$($asset.name)"
+        $noticeRoot = Join-Path $licenses "barcode/$($asset.name)"
+        foreach ($name in $asset.licenseFiles) {
+            $source = Join-Path $sourceRoot $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Barcode dependency license missing: $source" }
+            $destination = Join-Path $noticeRoot $name
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination
+        }
+        "$($asset.repository)@$($asset.revision)`n$($asset.license)`nStatic reader-only build; no Zint writer. LyFlow patch revision $($barcodeConfig.patchRevision) adds QR Model2 verified-empty-payload propagation only." |
+            Set-Content -LiteralPath (Join-Path $noticeRoot 'SOURCE.txt') -Encoding utf8NoBOM
+        Copy-Item -LiteralPath (Join-Path $root "packaging/patches/$($asset.patch)") -Destination (Join-Path $noticeRoot $asset.patch)
+        Copy-Item -LiteralPath (Join-Path $root 'packaging/licenses/barcode-third-party.txt') -Destination (Join-Path $noticeRoot 'THIRD-PARTY-NOTICES.txt')
+    }
     $matchingConfig = Get-Content -LiteralPath (Join-Path $root 'packaging/matching-deps.json') -Raw | ConvertFrom-Json
     foreach ($asset in $matchingConfig.assets) {
         $sourceRoot = Join-Path $root "build/matching-deps/$($asset.name)"
@@ -225,6 +243,9 @@ try {
     foreach ($asset in $matchingConfig.assets) {
         $dependencies.Add([ordered]@{ name = "matching-$($asset.name)"; version = $asset.revision })
     }
+    foreach ($asset in $barcodeConfig.assets) {
+        $dependencies.Add([ordered]@{ name = "barcode-$($asset.name)"; version = $asset.tag; sourceRevision = $asset.revision; patchRevision = $barcodeConfig.patchRevision; linkage = 'static' })
+    }
     $dependencies.Add([ordered]@{ name = 'visual-cpp-crt'; version = (Get-Item -LiteralPath (Join-Path $runtime 'vcruntime140.dll')).VersionInfo.FileVersion })
     $inspectionPath = Join-Path $stage 'inspection.json'
     & (Join-Path $PSScriptRoot 'inspect-runtime.ps1') -RuntimeDir $runtime -ReportPath $inspectionPath
@@ -254,7 +275,9 @@ try {
     Write-ReleaseJson -Value $metadata -Path $metadataPath
     foreach ($file in Get-ChildItem -LiteralPath $runtime -Force) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $sdk 'bin') -Recurse -Force }
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
-    foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'library')) {
+    & python (Join-Path $root 'tests/release/p4_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --assets $env:LYFLOW_P4_ASSETS --output-dir (Join-Path $diagnostics 'p4-cli')
+    Assert-ReleaseExit 'Installed P4 CLI saved default/override/default contracts'
+    foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'scripts/fetch-p4-model-assets.py', 'scripts/generate-p4-ocr-fixture.py', 'packaging/p4-model-assets.json', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json', 'docs/p4-assets.md', 'library')) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }
     if (@(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Extension -In @('.pdb', '.onnx')).Count) { throw 'Debug symbols or test models leaked into staging.' }

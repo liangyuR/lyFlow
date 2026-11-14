@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "id": "p4-ocr",
+  "name": "P4 中英文文字检测、方向校正与识别 CPU 完整链",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "prepare",
+      "op": "image.ocr_preprocess",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 270,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "detect",
+      "op": "ml.onnx_run",
+      "params": {
+        "batchMode": "model",
+        "modelContract": "ocr-db"
+      },
+      "ui": {
+        "position": {
+          "x": 540,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "regions",
+      "op": "image.ocr_db_decode",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 810,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "crops",
+      "op": "image.ocr_crops",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1080,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "classify",
+      "op": "ml.onnx_run",
+      "params": {
+        "batchMode": "serial",
+        "modelContract": "ocr-direction-2"
+      },
+      "ui": {
+        "position": {
+          "x": 1350,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "orient",
+      "op": "image.ocr_orient",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1620,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "recognize",
+      "op": "ml.onnx_run",
+      "params": {
+        "batchMode": "serial",
+        "modelContract": "ocr-ctc"
+      },
+      "ui": {
+        "position": {
+          "x": 1890,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "decode",
+      "op": "image.ocr_ctc_decode",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 2160,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-prepare-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "prepare",
+        "port": "image"
+      }
+    },
+    {
+      "id": "source-image-regions-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "regions",
+        "port": "image"
+      }
+    },
+    {
+      "id": "source-image-crops-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "crops",
+        "port": "image"
+      }
+    },
+    {
+      "id": "prepare-input-detect-input",
+      "from": {
+        "node": "prepare",
+        "port": "input"
+      },
+      "to": {
+        "node": "detect",
+        "port": "input"
+      }
+    },
+    {
+      "id": "prepare-mapping-regions-mapping",
+      "from": {
+        "node": "prepare",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "regions",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "detect-output-regions-prediction",
+      "from": {
+        "node": "detect",
+        "port": "output"
+      },
+      "to": {
+        "node": "regions",
+        "port": "prediction"
+      }
+    },
+    {
+      "id": "regions-quads-crops-quads",
+      "from": {
+        "node": "regions",
+        "port": "quads"
+      },
+      "to": {
+        "node": "crops",
+        "port": "quads"
+      }
+    },
+    {
+      "id": "regions-regions-crops-regions",
+      "from": {
+        "node": "regions",
+        "port": "regions"
+      },
+      "to": {
+        "node": "crops",
+        "port": "regions"
+      }
+    },
+    {
+      "id": "crops-clsInput-classify-input",
+      "from": {
+        "node": "crops",
+        "port": "clsInput"
+      },
+      "to": {
+        "node": "classify",
+        "port": "input"
+      }
+    },
+    {
+      "id": "classify-output-orient-classification",
+      "from": {
+        "node": "classify",
+        "port": "output"
+      },
+      "to": {
+        "node": "orient",
+        "port": "classification"
+      }
+    },
+    {
+      "id": "crops-recInput-orient-recInput",
+      "from": {
+        "node": "crops",
+        "port": "recInput"
+      },
+      "to": {
+        "node": "orient",
+        "port": "recInput"
+      }
+    },
+    {
+      "id": "crops-layout-orient-layout",
+      "from": {
+        "node": "crops",
+        "port": "layout"
+      },
+      "to": {
+        "node": "orient",
+        "port": "layout"
+      }
+    },
+    {
+      "id": "orient-input-recognize-input",
+      "from": {
+        "node": "orient",
+        "port": "input"
+      },
+      "to": {
+        "node": "recognize",
+        "port": "input"
+      }
+    },
+    {
+      "id": "orient-layout-decode-layout",
+      "from": {
+        "node": "orient",
+        "port": "layout"
+      },
+      "to": {
+        "node": "decode",
+        "port": "layout"
+      }
+    },
+    {
+      "id": "recognize-output-decode-prediction",
+      "from": {
+        "node": "recognize",
+        "port": "output"
+      },
+      "to": {
+        "node": "decode",
+        "port": "prediction"
+      }
+    }
+  ],
+  "params": {
+    "image": {
+      "type": "path",
+      "default": "p4-ocr-scene.png",
+      "binds": ["source.path"]
+    },
+    "detectorModel": {
+      "type": "path",
+      "default": "p4-assets/det.onnx",
+      "binds": ["detect.modelPath"]
+    },
+    "directionModel": {
+      "type": "path",
+      "default": "p4-assets/cls.onnx",
+      "binds": ["classify.modelPath"]
+    },
+    "recognizerModel": {
+      "type": "path",
+      "default": "p4-assets/rec.onnx",
+      "binds": ["recognize.modelPath"]
+    },
+    "dictionary": {
+      "type": "path",
+      "default": "p4-assets/paddle-v6-dict.txt",
+      "binds": ["decode.dictionaryPath"]
+    },
+    "characterSet": {
+      "type": "string",
+      "default": "all",
+      "binds": ["decode.characterSet"]
+    }
+  },
+  "outputs": {
+    "quads": {
+      "node": "regions",
+      "port": "quads"
+    },
+    "regions": {
+      "node": "regions",
+      "port": "regions"
+    },
+    "instances": {
+      "node": "regions",
+      "port": "instances"
+    },
+    "overlay": {
+      "node": "regions",
+      "port": "image"
+    },
+    "layout": {
+      "node": "orient",
+      "port": "layout"
+    },
+    "text": {
+      "node": "decode",
+      "port": "text"
+    },
+    "results": {
+      "node": "decode",
+      "port": "results"
+    }
+  }
+}

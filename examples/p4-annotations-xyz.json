@@ -1,0 +1,59 @@
+{
+  "width": 64,
+  "height": 48,
+  "roi": [
+    [0, 0],
+    [63, 0],
+    [63, 47],
+    [0, 47]
+  ],
+  "instances": [
+    {
+      "instance_category": "连接件",
+      "bbox": [4, 4, 24, 24],
+      "pickable": 0,
+      "isoccluded": 0,
+      "parts": [
+        {
+          "polygon": [
+            [4, 4],
+            [27, 4],
+            [27, 27],
+            [4, 27]
+          ]
+        },
+        {
+          "polygon": [
+            [12, 12],
+            [21, 12],
+            [21, 21],
+            [12, 21]
+          ]
+        }
+      ]
+    },
+    {
+      "instance_category": "重叠件",
+      "bbox": [16, 16, 24, 20],
+      "pickable": 1,
+      "isoccluded": 1,
+      "parts": [
+        {
+          "polygon": [
+            [16, 16],
+            [39, 16],
+            [39, 35],
+            [16, 35]
+          ]
+        }
+      ]
+    },
+    {
+      "instance_category": "缺掩膜",
+      "bbox": [44, 6, 12, 16],
+      "pickable": 1,
+      "isoccluded": 0,
+      "parts": []
+    }
+  ]
+}

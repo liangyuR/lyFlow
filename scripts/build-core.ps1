@@ -6,6 +6,7 @@ param(
   [switch]$NoTests,
   [switch]$ReleaseBuild,
   [switch]$SkipVisionBuild,
+  [switch]$P4ModelTests,
   [string]$BuildDir
 )
 $ErrorActionPreference = "Stop"
@@ -33,6 +34,7 @@ $build  = if ($BuildDir) { [IO.Path]::GetFullPath($BuildDir) } else { Join-Path 
 $config = $Configuration
 if ($config -notin @("Release", "RelWithDebInfo")) { throw "core 仅支持 Release 或 RelWithDebInfo（/MD）" }
 $runTests = -not $NoTests
+if ($P4ModelTests -and -not $runTests) { throw 'P4 模型验证不能与 -NoTests 同用' }
 
 # vcpkg 工具链只在首次 configure 时生效，缓存里没有它的话之后怎么传都不管用
 # （症状是「找不到 PCLConfig.cmake」）。所以发现不一致就直接重配。
@@ -69,15 +71,26 @@ if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks
   & python (Join-Path $PSScriptRoot 'fetch-matching-deps.py')
   if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
 }
-if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-image' -in ($repoPacks -split ';')) {
+$imageEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-image' -in ($repoPacks -split ';')
+$mlEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-ml' -in ($repoPacks -split ';')
+if ($P4ModelTests -and (-not $imageEnabled -or -not $mlEnabled)) { throw 'P4 模型验证要求 std-image 和 std-ml' }
+if ($imageEnabled) {
+  & python (Join-Path $PSScriptRoot 'fetch-barcode-deps.py')
+  if ($LASTEXITCODE -ne 0) { throw '固定条码源码准备失败' }
   & (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -ReleaseBuild:$ReleaseBuild -SkipBuild:$SkipVisionBuild
+}
+if ($P4ModelTests) {
+  if (-not $env:LYFLOW_P4_ASSETS) { $env:LYFLOW_P4_ASSETS = Join-Path $root 'build/p4-assets' }
+  & python (Join-Path $PSScriptRoot 'fetch-p4-model-assets.py') --output-dir $env:LYFLOW_P4_ASSETS
+  if ($LASTEXITCODE -ne 0) { throw 'P4 固定模型和测试图准备失败' }
 }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $releaseBuildFlag = if ($ReleaseBuild) { "ON" } else { "OFF" }
 $testingFlag = if ($runTests) { "ON" } else { "OFF" }
-$releaseArgs = " -DLYFLOW_RELEASE_BUILD=$releaseBuildFlag -DBUILD_TESTING=$testingFlag"
+$p4TestingFlag = if ($P4ModelTests) { "ON" } else { "OFF" }
+$releaseArgs = " -DLYFLOW_RELEASE_BUILD=$releaseBuildFlag -DBUILD_TESTING=$testingFlag -DLYFLOW_P4_MODEL_TESTS=$p4TestingFlag"
 foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR')) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }

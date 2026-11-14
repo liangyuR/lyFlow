@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "p4-annotations-native",
+  "name": "P4 数据集标注 native",
+  "nodes": [
+    {
+      "id": "annotations",
+      "op": "image.load_annotations",
+      "params": {
+        "format": "lyflow-annotations-v1",
+        "frame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [],
+  "params": {
+    "dataset": {
+      "type": "path",
+      "default": "p4-annotations-index.json",
+      "binds": ["annotations.path"]
+    },
+    "timestamp": {
+      "type": "string",
+      "default": "1700000000000",
+      "binds": ["annotations.timestamp"]
+    },
+    "pickableOnly": {
+      "type": "bool",
+      "default": false,
+      "binds": ["annotations.pickableOnly"]
+    },
+    "includeOccluded": {
+      "type": "bool",
+      "default": true,
+      "binds": ["annotations.includeOccluded"]
+    }
+  },
+  "outputs": {
+    "image": {
+      "node": "annotations",
+      "port": "image"
+    },
+    "overlay": {
+      "node": "annotations",
+      "port": "overlay"
+    },
+    "instances": {
+      "node": "annotations",
+      "port": "instances"
+    },
+    "masks": {
+      "node": "annotations",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "annotations",
+      "port": "maskInfo"
+    },
+    "rois": {
+      "node": "annotations",
+      "port": "rois"
+    },
+    "roiMask": {
+      "node": "annotations",
+      "port": "roiMask"
+    },
+    "quality": {
+      "node": "annotations",
+      "port": "quality"
+    }
+  }
+}

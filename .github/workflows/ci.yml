@@ -43,11 +43,14 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: scripts/requirements-format.txt
+          cache-dependency-path: |
+            scripts/requirements-format.txt
+            scripts/requirements.txt
 
       - name: 安装格式工具与前端依赖
         run: |
           python -m pip install -r scripts/requirements-format.txt
+          python -m pip install -r scripts/requirements.txt
           pnpm install --frozen-lockfile
 
       - name: 前端 / MCP / workflow 格式检查（Prettier）
@@ -55,6 +58,14 @@ jobs:
 
       - name: 固定匹配依赖准备安全测试
         run: python tests/release/test_fetch_matching_deps.py
+
+      - name: 固定条码源码和P4公共资产准备安全测试
+        run: |
+          python tests/release/test-fetch-barcode-deps.py
+          python tests/release/test_fetch_p4_assets.py
+
+      - name: P4示例JSON Schema契约（仅schema，不代替真实CLI门禁）
+        run: python tests/release/p4_contract.py --schema-only
 
       - name: C++ 格式检查（clang-format 20.1.8）
         shell: bash
@@ -300,6 +311,19 @@ jobs:
           python-version: '3.12'
 
       - uses: actions/cache@v4
+        with:
+          path: |
+            build/barcode-deps
+            build/third-party/zxing-cpp-3.1.1.zip
+          key: barcode-ubuntu-24.04-source-${{ hashFiles('packaging/barcode-deps.json', 'packaging/patches/ZXing-Cpp-*.patch', 'scripts/fetch-barcode-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
+      - name: 准备固定条码源码并验证准备器
+        run: |
+          python scripts/fetch-barcode-deps.py
+          python tests/release/test-fetch-barcode-deps.py
+          python tests/release/test_fetch_p4_assets.py
+
+      - uses: actions/cache@v4
         id: vision-cache
         with:
           path: |
@@ -340,11 +364,12 @@ jobs:
             build/vision/CMakeFiles/CMakeConfigureLog.yaml
             build/vision-opencv/*.log
             build/vision-deps/prepared.json
+            build/barcode-deps/prepared.json
           if-no-files-found: ignore
           retention-days: 7
 
   vision-native:
-    name: P1 三维点云 / 配准 / 固定模型检测链
+    name: 原生点云 / 配准 / 检测 / P4识别分割链
     runs-on: windows-2022
     timeout-minutes: 60
     permissions:
@@ -405,6 +430,30 @@ jobs:
             build/opencv5-install
           key: opencv5-windows-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/barcode-deps
+            build/third-party/zxing-cpp-3.1.1.zip
+          key: barcode-windows-2022-source-${{ hashFiles('packaging/barcode-deps.json', 'packaging/patches/ZXing-Cpp-*.patch', 'scripts/fetch-barcode-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
+      - uses: actions/cache@v4
+        with:
+          path: build/p4-assets
+          key: p4-public-assets-${{ hashFiles('packaging/p4-model-assets.json', 'scripts/fetch-p4-model-assets.py', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json') }}-v1
+
+      - name: 准备固定P4公共资产并验证准备器
+        shell: pwsh
+        run: |
+          python tests/release/test-fetch-barcode-deps.py
+          if ($LASTEXITCODE -ne 0) { throw '条码源码准备安全测试失败' }
+          python tests/release/test_fetch_p4_assets.py
+          if ($LASTEXITCODE -ne 0) { throw 'P4资产准备安全测试失败' }
+          python scripts/fetch-p4-model-assets.py
+          if ($LASTEXITCODE -ne 0) { throw 'P4固定公开资产准备失败' }
+          python scripts/fetch-p4-model-assets.py --verify-only --offline
+          if ($LASTEXITCODE -ne 0) { throw 'P4固定公开资产复验失败' }
+
       - name: 准备固定公开模型和测试图
         shell: pwsh
         run: |
@@ -420,7 +469,7 @@ jobs:
           python tests/release/make_fixtures.py --output-dir build/p1-fixtures
           if ($LASTEXITCODE -ne 0) { throw '原生推理回归夹具准备失败' }
 
-      - name: 固定依赖恢复与完整 P1 链验证
+      - name: 固定依赖恢复与完整 P1 和 P4 链验证
         shell: pwsh
         env:
           LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -432,8 +481,9 @@ jobs:
           ./tests/release/test-build-vision-deps.ps1
           $env:LYFLOW_STD_PACKS = '1'
           $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
+          $env:LYFLOW_P4_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p4-assets'
           $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
-          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
+          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
           cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
@@ -462,5 +512,6 @@ jobs:
             build/p1-native/CMakeFiles/CMakeConfigureLog.yaml
             build/release-dependency-diagnostics/
             build/vision-opencv/*.log
+            build/barcode-deps/prepared.json
           if-no-files-found: ignore
           retention-days: 7

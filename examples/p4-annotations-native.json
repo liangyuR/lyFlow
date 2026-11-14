@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "width": 64,
+  "height": 48,
+  "frame": "image",
+  "rois": [
+    {
+      "id": "working-area",
+      "polygon": [
+        [0, 0],
+        [63, 0],
+        [63, 47],
+        [0, 47]
+      ],
+      "holes": []
+    }
+  ],
+  "instances": [
+    {
+      "id": "plate-A",
+      "label": "连接件",
+      "classId": 1,
+      "bbox": [4, 4, 24, 24],
+      "confidence": 0.95,
+      "pickable": false,
+      "occluded": false,
+      "parts": [
+        {
+          "polygon": [
+            [4, 4],
+            [27, 4],
+            [27, 27],
+            [4, 27]
+          ],
+          "holes": [
+            [
+              [10, 10],
+              [15, 10],
+              [15, 15],
+              [10, 15]
+            ]
+          ]
+        },
+        {
+          "polygon": [
+            [12, 12],
+            [21, 12],
+            [21, 21],
+            [12, 21]
+          ],
+          "holes": []
+        }
+      ]
+    },
+    {
+      "id": "plate-B",
+      "label": "重叠件",
+      "classId": 2,
+      "bbox": [16, 16, 24, 20],
+      "confidence": 0.9,
+      "pickable": true,
+      "occluded": true,
+      "parts": [
+        {
+          "polygon": [
+            [16, 16],
+            [39, 16],
+            [39, 35],
+            [16, 35]
+          ],
+          "holes": []
+        }
+      ]
+    },
+    {
+      "id": "candidate",
+      "label": "缺掩膜",
+      "classId": 3,
+      "bbox": [44, 6, 12, 16],
+      "confidence": 1,
+      "pickable": true,
+      "occluded": false,
+      "parts": []
+    }
+  ]
+}

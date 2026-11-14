@@ -58,3 +58,9 @@ core 的 `bin/`，`bridge/build.rs` 整目录搬走它。
 `modelContract=generic` 保持既有按名称选择输入/输出的通用行为。`yolox-nano-0.1.1rc0` 要求唯一 float32 输入 `[1,3,416,416]` 与输出 `[1,3549,85]`。`yolo-detection` 要求唯一 float32 静态输入 `[1,3,H,W]`（H/W是32的倍数、32..2048），输出为 `[1,4+C,N]`（1..512类、8/16/32步长锚点数）或 `[1,N,6]`（1..4096条端到端检测）。额外IO、动态尺寸及不兼容元素类型均拒绝，不静默丢弃其他输出。模型色序、归一化和类别语义由对应图像预处理/解码节点明确约束。
 
 真实 YOLOv8/11/26 与 YOLOX 的外部模型准备和许可见 [检测示例](../../examples/p1-detection-README.md)。这不改变通用 ONNX 算子的默认契约。
+
+## 串行批次与固定识别契约
+
+std-ml0.3.0增加 `batchMode=serial`：沿Tensor首轴逐项调用常驻ONNX会话，固定batch=1模型可处理N项；N=0仍验证模型、名称、dtype与契约，零次推理并返回canonical `{0}` 空Tensor。只支持单float32输入/输出，最多256项和32Mi个float，输出形状/有限值按实际运行结果再次校验，失败不发布半批。原有 `model` 默认模式和通用显式选头行为保留。
+
+`modelContract`新增 `pphumanseg_2023mar`、`ocr-db`、`ocr-direction-2` 与 `ocr-ctc`，均复核声明与实际形状。线程预算在serial模式限制至上下文预算；取消在Run前后与批次边界生效，单次ORT调用内部不可抢占。组合与模型支持矩阵见[P4示例](../../docs/p4-examples.md)。

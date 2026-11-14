@@ -95,3 +95,9 @@ CI 的 `vision` 在 Linux 运行无PCL的值/几何/位姿/图像包；`vision-n
 P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，跨接口组合位于core/tests/integration/p3_calibration.cpp与p3_shape.cpp。形状用真实大于4MP的源图触发Preview，检查ROI→Box2D→模型/图像尺度和原始坐标；手工设置Image.scale的直接compute测试不能替代该调度链。Marker与工作空间分别检查相机K/D、米制帧、双向体积及原生精度。
 
 默认交付依赖来源以[稳定版本审计](dependency-stable-audit.md)为准。OpenCV5.1的Windows和LinuxCI使用同一固定源码与最小profile；Windows发布仍锁定14.44工具链。源码校验、受管安装记录及licenses全部通过后才能跳过编译，命中缓存名称本身不代表合格。Rust/C++加载契约用真实依赖WINMM的独立DLL检查System32解析，运行库的其他DLL仍不能从CWD/PATH补齐。
+
+## P2 分割、OCR、识码与标注门禁
+
+`-DLYFLOW_P4_MODEL_TESTS=ON`要求std-image和std-ml同时启用。先运行 `python scripts/fetch-p4-model-assets.py --output-dir build/p4-assets`，设置 `LYFLOW_P4_ASSETS` 为该目录；显式开启后模型/字典/图像缺失即失败，无新增跳过。Windows原生CI运行公开PPHumanSeg、PP-OCRv6检测/识别及配套方向模型，保留P1四模型检测门禁；Linux验证无PCL图像链及ZXing私有C++20静态后端。
+
+永久回归覆盖逐ROI掩膜复用的0/1/2次实际Run、unknown/类别冲突、中文多行/倒置/旋转OCR、合法零字节QR、增强前后反馈、原生重叠/孔洞标注、同尺寸文件更新和真实路径链接逃逸。准备脚本的离线、坏缓存、源归档和路径边界独立执行；来源和许可见[P4资产](p4-assets.md)。跨接口测试核对执行器、C ABI和动态C++ SDK的完整原生Tensor/图像，不以只检查manifest替代实际运行。

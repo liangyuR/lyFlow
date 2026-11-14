@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <future>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -67,7 +69,7 @@ TEST_CASE("ml.onnx_run 注册了，且带 pack 标记") {
   CHECK(problems.empty());
   const OperatorDesc* op = ensureRegistry().find("ml.onnx_run");
   REQUIRE(op != nullptr);
-  CHECK(op->pack == "std-ml@0.2.1");
+  CHECK(op->pack == "std-ml@0.3.0");
   CHECK(op->inputs.at(0).type == "Tensor");
   CHECK(op->outputs.at(0).type == "Tensor");
   CHECK(op->externalKey != nullptr);
@@ -236,6 +238,155 @@ TEST_CASE("ml.onnx_run 保留零元素输出且不读取空数据指针") {
   CHECK(out->shape == std::vector<std::int64_t>{0, 8, 1280});
   CHECK(out->data.empty());
   CHECK(out->consistent());
+}
+
+TEST_CASE("ONNX serial batching preserves static batch one item order and readonly input") {
+  std::filesystem::path reference;
+  REQUIRE(testModel(reference));
+  const auto model = reference.parent_path() / "channels-6-to-8-static1.onnx";
+  REQUIRE(std::filesystem::is_regular_file(model));
+  for (int batch : {0, 1, 3}) {
+    CAPTURE(batch);
+    Tensor input;
+    input.shape = {batch, 6, 1280};
+    input.data.resize(static_cast<std::size_t>(batch) * 6 * 1280);
+    for (std::size_t i = 0; i < input.data.size(); ++i)
+      input.data[i] = static_cast<float>(i % 101) * .125f;
+    const auto original = input.data;
+    Call call;
+    call.inputs["input"] = Data::tensor(input);
+    const auto status = call.run("ml.onnx_run", {{"modelPath", Value::text(model.u8string())},
+                                                 {"batchMode", Value::text("serial")}});
+    REQUIRE_MESSAGE(status.ok, status.message);
+    const auto* output = call.out("output").asTensor();
+    REQUIRE(output != nullptr);
+    CHECK(output->consistent());
+    CHECK(call.inputs.at("input").asTensor()->data == original);
+    if (!batch) {
+      CHECK(output->shape == std::vector<std::int64_t>{0});
+      CHECK(output->data.empty());
+    } else {
+      REQUIRE(output->shape == std::vector<std::int64_t>{batch, 8, 1280});
+      for (int item = 0; item < batch; ++item) {
+        const auto begin = output->data.begin() + item * 8 * 1280;
+        CHECK(std::equal(original.begin() + item * 6 * 1280,
+                         original.begin() + (item + 1) * 6 * 1280, begin));
+        CHECK(std::all_of(begin + 6 * 1280, begin + 8 * 1280,
+                          [](float value) { return value == 0; }));
+      }
+    }
+  }
+}
+
+TEST_CASE("ONNX serial empty batch still rejects model heads types names and invalid input") {
+  std::filesystem::path reference;
+  REQUIRE(testModel(reference));
+  const auto directory = reference.parent_path();
+  Tensor input;
+  input.shape = {0, 6, 1280};
+  Call call;
+  call.inputs["input"] = Data::tensor(input);
+  for (const char* name : {"multi-output.onnx", "cast-to-int64.onnx"}) {
+    const auto path = directory / name;
+    REQUIRE(std::filesystem::is_regular_file(path));
+    const auto status = call.run("ml.onnx_run", {{"modelPath", Value::text(path.u8string())},
+                                                 {"batchMode", Value::text("serial")}});
+    CHECK_FALSE(status.ok);
+    CHECK(call.outputs.empty());
+  }
+  const auto model = directory / "channels-6-to-8-static1.onnx";
+  for (const auto& wrong : std::vector<std::pair<std::string, Value>>{
+           {"inputName", Value::text("missing")},
+           {"outputName", Value::text("missing")},
+           {"modelContract", Value::text("pphumanseg_2023mar")},
+           {"batchMode", Value::text("invalid")}}) {
+    std::unordered_map<std::string, Value> parameters{{"modelPath", Value::text(model.u8string())},
+                                                      {"batchMode", Value::text("serial")}};
+    parameters[wrong.first] = wrong.second;
+    const auto status = call.run("ml.onnx_run", parameters);
+    CHECK_FALSE(status.ok);
+    CHECK(call.outputs.empty());
+  }
+  input.shape = {1, 6, 1280};
+  input.data.assign(6 * 1280, 0);
+  input.data.front() = std::numeric_limits<float>::infinity();
+  call.inputs["input"] = Data::tensor(input);
+  CHECK_FALSE(call.run("ml.onnx_run", {{"modelPath", Value::text(model.u8string())},
+                                       {"batchMode", Value::text("serial")}})
+                  .ok);
+  CHECK(call.outputs.empty());
+}
+
+TEST_CASE("ONNX fixed model contracts validate actual runtime shapes before publishing") {
+  std::filesystem::path reference;
+  REQUIRE(testModel(reference));
+  const auto path = reference.parent_path() / "lying-direction.onnx";
+  REQUIRE(std::filesystem::is_regular_file(path));
+  Tensor input;
+  input.shape = {1, 3, 48, 192};
+  input.data.assign(3 * 48 * 192, 0);
+  Call call;
+  call.inputs["input"] = Data::tensor(input);
+  const std::unordered_map<std::string, Value> parameters{
+      {"modelPath", Value::text(path.u8string())},
+      {"modelContract", Value::text("ocr-direction-2")},
+      {"batchMode", Value::text("serial")}};
+  const auto rejected = call.run("ml.onnx_run", parameters);
+  CHECK_FALSE(rejected.ok);
+  CHECK(rejected.code == "bad_input");
+  CHECK(rejected.paramPath == "outputName");
+  CHECK(call.outputs.empty());
+  const auto generic = call.run("ml.onnx_run", {{"modelPath", Value::text(path.u8string())}});
+  REQUIRE_MESSAGE(generic.ok, generic.message);
+  REQUIRE(call.out("output").asTensor() != nullptr);
+  CHECK(call.out("output").asTensor()->shape == std::vector<std::int64_t>{1, 3});
+  input.data.front() = -1;
+  call.inputs["input"] = Data::tensor(input);
+  const auto valid = call.run("ml.onnx_run", parameters);
+  REQUIRE_MESSAGE(valid.ok, valid.message);
+  CHECK(call.out("output").asTensor()->shape == std::vector<std::int64_t>{1, 2});
+}
+
+TEST_CASE("ONNX serial cancellation never publishes a partial batch") {
+  std::filesystem::path reference;
+  REQUIRE(testModel(reference));
+  struct Context : ExecContext {
+    bool stop = false;
+    int updates = 0;
+    std::filesystem::path base;
+    bool cancelled() const override { return stop; }
+    void progress(float, std::string_view) override {
+      ++updates;
+      stop = true;
+    }
+    void log(LogLevel, std::string) override {}
+    const std::filesystem::path& baseDir() const override { return base; }
+    int threadBudget() const override { return 1; }
+  };
+  const auto* op = packRegistry().find("ml.onnx_run");
+  REQUIRE(op != nullptr);
+  ParamMap params;
+  for (const auto& param : op->params)
+    params[param.name] = param.def;
+  params["modelPath"] =
+      Value::text((reference.parent_path() / "channels-6-to-8-static1.onnx").u8string());
+  params["batchMode"] = Value::text("serial");
+  for (int batch : {1, 3}) {
+    Context context;
+    Tensor input;
+    input.shape = {batch, 6, 1280};
+    input.data.assign(static_cast<std::size_t>(batch) * 6 * 1280, 1);
+    std::unordered_map<std::string, Data> inputs{{"input", Data::tensor(input)}}, outputs;
+    Inputs in(inputs);
+    Outputs out(outputs);
+    ParamView view(params, context.base);
+    const auto status = op->compute(in, view, out, context);
+    CHECK_FALSE(status.ok);
+    CHECK(status.code == "cancelled");
+    CHECK(context.updates == 1);
+    CHECK(outputs.empty());
+    CHECK(inputs.at("input").asTensor()->data == input.data);
+  }
 }
 
 TEST_CASE("ONNX 会话缓存有界，淘汰保留活跃句柄") {

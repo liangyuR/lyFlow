@@ -2,6 +2,7 @@
 param(
     [switch]$SkipDependencySetup,
     [switch]$SkipVisionBuild,
+    [switch]$P4ModelTests,
     [switch]$AllowBuild,
     [string]$InstallRoot,
     [string]$BinaryCache,
@@ -117,5 +118,16 @@ $matchingArguments = @((Join-Path $PSScriptRoot 'fetch-matching-deps.py'))
 if ($SkipDependencySetup) { $matchingArguments += '--offline' }
 & python @matchingArguments
 if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
+$barcodeArguments = @((Join-Path $PSScriptRoot 'fetch-barcode-deps.py'))
+if ($SkipDependencySetup) { $barcodeArguments += '--offline' }
+& python @barcodeArguments
+if ($LASTEXITCODE -ne 0) { throw '固定条码源码准备失败' }
+if ($P4ModelTests) {
+    if (-not $env:LYFLOW_P4_ASSETS) { $env:LYFLOW_P4_ASSETS = Join-Path $root 'build/p4-assets' }
+    $assetArguments = @((Join-Path $PSScriptRoot 'fetch-p4-model-assets.py'), '--output-dir', $env:LYFLOW_P4_ASSETS)
+    if ($SkipDependencySetup) { $assetArguments += '--offline' }
+    & python @assetArguments
+    if ($LASTEXITCODE -ne 0) { throw 'P4 固定模型和测试图准备失败' }
+}
 & (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -Offline:$SkipDependencySetup -SkipBuild:($SkipDependencySetup -or $SkipVisionBuild) -ReleaseBuild
 Write-Host "固定依赖已验证：$($config.triplet)，vcpkg $revision，ONNX Runtime $ortVersion"
