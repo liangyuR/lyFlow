@@ -104,6 +104,37 @@ TEST_CASE("geometry constructors normalize geometry without changing plane equat
   CHECK(plane->d == -3);
 }
 
+TEST_CASE("geometry plane normalization preserves extreme finite normal directions") {
+  test::OpCall c;
+  for (float scale :
+       {3e38f, std::numeric_limits<float>::min(), std::numeric_limits<float>::denorm_min()}) {
+    for (float sign : {-1.0f, 1.0f}) {
+      for (int axis = 0; axis < 3; ++axis) {
+        CAPTURE(scale);
+        CAPTURE(sign);
+        CAPTURE(axis);
+        std::vector<double> normal(3, scale);
+        normal[axis] = 0;
+        normal[(axis + 1) % 3] *= sign;
+        const Status s = c.run("geometry.plane",
+                               {{"normal", Value::vec(normal)}, {"offset", Value::number(scale)}});
+        CHECK_MESSAGE(s.ok, s.message);
+        if (!s.ok)
+          continue;
+        const Plane* plane = c.outputs.at("plane").asPlane();
+        REQUIRE(plane != nullptr);
+        CHECK(plane->normal[axis] == 0);
+        CHECK(plane->normal[(axis + 1) % 3] == doctest::Approx(sign / std::sqrt(2.0)));
+        CHECK(plane->normal[(axis + 2) % 3] == doctest::Approx(1 / std::sqrt(2.0)));
+        CHECK(plane->d == doctest::Approx(1 / std::sqrt(2.0)));
+        CHECK(std::hypot(static_cast<double>(plane->normal[0]),
+                         static_cast<double>(plane->normal[1]),
+                         static_cast<double>(plane->normal[2])) == doctest::Approx(1));
+      }
+    }
+  }
+}
+
 TEST_CASE("geometry rejects invalid constants and unrepresentable values") {
   test::OpCall c;
   CHECK_FALSE(c.run("geometry.line_2d", {{"direction", Value::vec({0, 0})}}).ok);

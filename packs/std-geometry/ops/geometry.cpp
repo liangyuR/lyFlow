@@ -742,7 +742,8 @@ void registerConstructors(Registry& r) {
   op.outputs = {Port{"plane", "Plane", "平面", "单位法向与米制偏移。", true}};
   op.compute = [](const Inputs&, const ParamView& p, Outputs& out, ExecContext&) {
     const auto n = p.vec3("normal");
-    const double norm = std::hypot(std::hypot(n[0], n[1]), n[2]);
+    const double norm =
+        std::hypot(static_cast<double>(n[0]), static_cast<double>(n[1]), static_cast<double>(n[2]));
     if (!std::isfinite(norm) || norm <= 0)
       return badParam("平面法向必须有限且非零", "normal");
     const double d = p.number("offset") / norm;
