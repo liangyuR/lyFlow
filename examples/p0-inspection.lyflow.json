@@ -1,0 +1,324 @@
+{
+  "schemaVersion": 1,
+  "id": "01P0INSPECTION000000000001",
+  "name": "P0 区域统计与宽度量测",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "path": "p0-stripe.pgm",
+        "mode": "gray"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "roi",
+      "op": "image.roi_mask",
+      "params": {
+        "roi": [2, 2, 30, 14]
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": -100
+        }
+      }
+    },
+    {
+      "id": "statistics",
+      "op": "image.statistics",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": -100
+        }
+      }
+    },
+    {
+      "id": "regions",
+      "op": "image.components",
+      "params": {
+        "minArea": 2,
+        "contours": true
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 150
+        }
+      }
+    },
+    {
+      "id": "width",
+      "op": "image.width_range",
+      "params": {
+        "roi": [2, 2, 30, 14],
+        "axis": "x",
+        "samples": 8,
+        "minContrast": 10,
+        "maxWidth": 28
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 400
+        }
+      }
+    },
+    {
+      "id": "mean",
+      "op": "value.field",
+      "params": {
+        "pointer": "/mean"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": -100
+        }
+      }
+    },
+    {
+      "id": "limit",
+      "op": "value.number",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 100
+        }
+      }
+    },
+    {
+      "id": "compare",
+      "op": "value.compare",
+      "params": {
+        "operation": "greater"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": -100
+        }
+      }
+    },
+    {
+      "id": "accepted",
+      "op": "value.string",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 100
+        }
+      }
+    },
+    {
+      "id": "rejected",
+      "op": "value.string",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 250
+        }
+      }
+    },
+    {
+      "id": "decision",
+      "op": "flow.select",
+      "params": {
+        "path": "value"
+      },
+      "ui": {
+        "position": {
+          "x": 1400,
+          "y": -100
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-roi-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "roi",
+        "port": "image"
+      }
+    },
+    {
+      "id": "source-image-statistics-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "statistics",
+        "port": "image"
+      }
+    },
+    {
+      "id": "roi-mask-statistics-mask",
+      "from": {
+        "node": "roi",
+        "port": "mask"
+      },
+      "to": {
+        "node": "statistics",
+        "port": "mask"
+      }
+    },
+    {
+      "id": "source-image-regions-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "regions",
+        "port": "image"
+      }
+    },
+    {
+      "id": "roi-mask-regions-mask",
+      "from": {
+        "node": "roi",
+        "port": "mask"
+      },
+      "to": {
+        "node": "regions",
+        "port": "mask"
+      }
+    },
+    {
+      "id": "source-image-width-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "width",
+        "port": "image"
+      }
+    },
+    {
+      "id": "statistics-stats-mean-record",
+      "from": {
+        "node": "statistics",
+        "port": "stats"
+      },
+      "to": {
+        "node": "mean",
+        "port": "record"
+      }
+    },
+    {
+      "id": "mean-value-compare-a",
+      "from": {
+        "node": "mean",
+        "port": "value"
+      },
+      "to": {
+        "node": "compare",
+        "port": "a"
+      }
+    },
+    {
+      "id": "limit-value-compare-b",
+      "from": {
+        "node": "limit",
+        "port": "value"
+      },
+      "to": {
+        "node": "compare",
+        "port": "b"
+      }
+    },
+    {
+      "id": "compare-value-decision-cond",
+      "from": {
+        "node": "compare",
+        "port": "value"
+      },
+      "to": {
+        "node": "decision",
+        "port": "cond"
+      }
+    },
+    {
+      "id": "accepted-value-decision-a",
+      "from": {
+        "node": "accepted",
+        "port": "value"
+      },
+      "to": {
+        "node": "decision",
+        "port": "a"
+      }
+    },
+    {
+      "id": "rejected-value-decision-b",
+      "from": {
+        "node": "rejected",
+        "port": "value"
+      },
+      "to": {
+        "node": "decision",
+        "port": "b"
+      }
+    }
+  ],
+  "outputs": {
+    "decision": {
+      "node": "decision",
+      "port": "out"
+    },
+    "statistics": {
+      "node": "statistics",
+      "port": "stats"
+    },
+    "regions": {
+      "node": "regions",
+      "port": "regions"
+    },
+    "minimumWidth": {
+      "node": "width",
+      "port": "minimum"
+    },
+    "maximumWidth": {
+      "node": "width",
+      "port": "maximum"
+    }
+  },
+  "params": {
+    "meanLimit": {
+      "type": "float",
+      "label": "平均灰度阈值",
+      "default": 50,
+      "binds": ["limit.value"]
+    },
+    "passText": {
+      "type": "string",
+      "label": "通过信息",
+      "default": "通过",
+      "binds": ["accepted.value"]
+    },
+    "failText": {
+      "type": "string",
+      "label": "失败信息",
+      "default": "不通过",
+      "binds": ["rejected.value"]
+    }
+  }
+}

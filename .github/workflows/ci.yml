@@ -192,7 +192,7 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
       LYFLOW_STD_PACKS: '0'
-      LYFLOW_PACKS: dts
+      LYFLOW_PACKS: dts;std-value;std-geometry
       LYFLOW_PREBUILT_CORE_DIR: ${{ github.workspace }}/build/core/bin
     steps:
       - uses: actions/checkout@v4
@@ -231,8 +231,8 @@ jobs:
       - name: 桌面前端编译
         run: pnpm --filter lyflow-app build
 
-      - name: C++ 配置（纯平台 + dts）
-        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF -DLYFLOW_PACKS=dts -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+      - name: C++ 配置（平台 / dts / 值与几何）
+        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=dts;std-value;std-geometry" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - uses: actions/setup-python@v5
         with:
@@ -277,5 +277,40 @@ jobs:
             build/core/Testing/Temporary/*.log
             build/core/CMakeFiles/CMakeConfigureLog.yaml
             build/ci/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  vision:
+    name: P0 值 / 几何 / 图像算子与组合流程
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装图像依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ninja-build libopencv-dev
+
+      - name: 配置 P0 算子测试
+        run: cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
+      - name: 编译并自检算子契约
+        run: |
+          cmake --build build/vision --target lyflow-core-tests lyflow-dump-manifest --parallel 2
+          build/vision/bin/lyflow-dump-manifest --check
+
+      - name: 验证数值、几何、图像和完整链
+        run: ctest --test-dir build/vision --output-on-failure --no-tests=error --output-junit test-results.xml
+
+      - name: 保存失败测试诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-test-diagnostics
+          path: |
+            build/vision/test-results.xml
+            build/vision/Testing/Temporary/*.log
+            build/vision/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: ignore
           retention-days: 7

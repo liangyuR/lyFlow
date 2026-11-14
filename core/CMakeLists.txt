@@ -14,9 +14,10 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.3)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.4)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
+option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -317,7 +318,7 @@ set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
 if(LYFLOW_RELEASE_BUILD AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
    CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND
    NOT LYFLOW_EXT_PACK_NAMES AND
-   _release_identity_packs STREQUAL "gap;glue;std-image;std-ml;std-pointcloud")
+   _release_identity_packs STREQUAL "gap;glue;std-geometry;std-image;std-ml;std-pointcloud;std-value")
   set(LYFLOW_RELEASE_IDENTITY_ALLOWED TRUE)
 endif()
 add_custom_target(lyflow-source-revision
@@ -352,6 +353,17 @@ target_link_libraries(lyflow-dump-manifest PRIVATE ${LYFLOW_PACK_LIBS})
 # 带包构建时把包自己的测试源也编进同一个 doctest 目标（不另起一个 exe）。
 if(BUILD_TESTING)
   file(GLOB LYFLOW_TEST_SOURCES CONFIGURE_DEPENDS "${LYFLOW_TESTS}/*.cpp")
+  if(LYFLOW_PACK_TESTS_ONLY)
+    if(NOT LYFLOW_PACK_TEST_SOURCES)
+      message(FATAL_ERROR "LYFLOW_PACK_TESTS_ONLY requires enabled operator-pack tests")
+    endif()
+    set(LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/doctest_main.cpp")
+  endif()
+  if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES AND
+     "std-geometry" IN_LIST LYFLOW_STD_PACK_NAMES AND
+     "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p0_pipeline.cpp")
+  endif()
   add_executable(lyflow-core-tests
     ${LYFLOW_TEST_SOURCES} ${LYFLOW_PACK_TEST_SOURCES}
     "${LYFLOW_MANIFEST}"
@@ -362,7 +374,10 @@ if(BUILD_TESTING)
   # 包的测试也 #include "helpers.h"，而它在 core/tests/ 下
   target_include_directories(lyflow-core-tests PRIVATE "${LYFLOW_TESTS}")
   target_compile_definitions(lyflow-core-tests PRIVATE
-    "LYFLOW_PYTHON_SDK_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../python\"")
+    "LYFLOW_PYTHON_SDK_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../python\""
+    "LYFLOW_EXAMPLES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../examples\""
+    "LYFLOW_TEST_RUNTIME=\"$<TARGET_FILE:lyflow_core>\"")
+  add_dependencies(lyflow-core-tests lyflow_core)
   if(LYFLOW_PACK_INCLUDES)
     target_include_directories(lyflow-core-tests PRIVATE ${LYFLOW_PACK_INCLUDES})
   endif()
@@ -459,6 +474,9 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lyflow-utf8.manifest"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_concurrent.cpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_inject.cpp"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-inspection.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-stripe.pgm"
         DESTINATION examples)
 
 # 库算子目录（ADR-0010）。宿主往里放 *.lyflow-op.json，所以布局里要有它。
