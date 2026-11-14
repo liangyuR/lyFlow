@@ -1,6 +1,8 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <opencv2/imgproc.hpp>
@@ -335,4 +337,91 @@ TEST_CASE("QR cell reconstruction reports actual degraded before and improved af
   CHECK(refined(call).at("afterDecoded") == true);
   CHECK(refined(call).at("improved") == true);
   CHECK(decodedTexts(refined(call).at("after")) == std::vector<std::string>{"REFINE"});
+}
+
+TEST_CASE("QR refinement scheduler keeps its reconstructed grid absolute after source preview") {
+  cv::Mat canvas(2200, 2200, CV_8U, cv::Scalar(255));
+  const auto code = qrImage("SCALE-GRID", 72);
+  code.copyTo(canvas(cv::Rect(56, 56, code.cols, code.rows)));
+  const auto sourceData = barcodeImage(canvas);
+  const auto graph = test::makeGraph(
+      {{"source", "io.load_image", {{"path", "injected-qr.png"}}},
+       {"before", "image.barcode_decode", {{"formats", "QRCodeModel2"}}},
+       {"refine", "image.qr_refine", {{"outputFrame", "qr_refined"}, {"modulePixels", 8}}},
+       {"after", "image.barcode_decode", {{"formats", "QRCodeModel2"}, {"frame", "qr_refined"}}}},
+      {{"source.image", "before.image"},
+       {"source.image", "refine.image"},
+       {"before.detections", "refine.detections"},
+       {"refine.image", "after.image"}});
+  for (const auto mode : {exec::RunMode::Full, exec::RunMode::Preview}) {
+    CAPTURE(mode == exec::RunMode::Preview);
+    exec::RunOptions options;
+    options.runId = mode == exec::RunMode::Full ? "p4-qr-absolute-full" : "p4-qr-absolute-preview";
+    options.mode = mode;
+    options.noReuse = true;
+    options.maxParallel = 1;
+    options.inputs = {{"source", "image", sourceData}};
+    test::RunLog log;
+    exec::Run run(graph.dump(), options, &test::detail::collect, &log);
+    run.join();
+    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+    Data source, enhanced, before, feedback, after, overlay, instances;
+    auto& results = exec::ResultStore::instance();
+    REQUIRE(results.get(options.runId, "source", "image", source));
+    REQUIRE(results.get(options.runId, "refine", "image", enhanced));
+    REQUIRE(results.get(options.runId, "before", "detections", before));
+    REQUIRE(results.get(options.runId, "refine", "feedback", feedback));
+    REQUIRE(results.get(options.runId, "after", "detections", after));
+    REQUIRE(results.get(options.runId, "after", "image", overlay));
+    REQUIRE(results.get(options.runId, "after", "instances", instances));
+    const int scale = mode == exec::RunMode::Full ? 1 : 2;
+    CHECK(source.asImage()->scale == scale);
+    CHECK(source.asImage()->width == 2200 / scale);
+    CHECK(enhanced.asImage()->width == 232);
+    CHECK(enhanced.asImage()->height == 232);
+    CHECK(enhanced.asImage()->scale == 1);
+    CHECK(overlay.asImage()->scale == 1);
+    const auto& initial = before.asRecord()->data;
+    const auto& mapped = feedback.asRecord()->data;
+    const auto& decoded = after.asRecord()->data;
+    REQUIRE(initial["items"].size() == 1);
+    REQUIRE(decoded["items"].size() == 1);
+    CHECK(decodedTexts(initial["items"]) == std::vector<std::string>{"SCALE-GRID"});
+    CHECK(decodedTexts(decoded["items"]) == std::vector<std::string>{"SCALE-GRID"});
+    CHECK(initial["imageSize"] == Json::array({2200., 2200.}));
+    CHECK(decoded["imageSize"] == Json::array({232., 232.}));
+    CHECK(decoded["frame"] == mapped["outputFrame"]);
+    CHECK(mapped["modulePixels"] == 8);
+    CHECK(mapped["sourceCorners"] == initial["items"][0]["corners"]);
+    const auto matrix = mapped["outputToSource"].get<std::array<double, 9>>();
+    const std::array<std::array<double, 2>, 4> grid{{{32, 32}, {199, 32}, {199, 199}, {32, 199}}};
+    const auto project = [&](double x, double y) {
+      const double w = matrix[6] * x + matrix[7] * y + matrix[8];
+      return std::array<double, 2>{(matrix[0] * x + matrix[1] * y + matrix[2]) / w,
+                                   (matrix[3] * x + matrix[4] * y + matrix[5]) / w};
+    };
+    for (std::size_t i = 0; i < 4; ++i) {
+      const auto expected = initial["items"][0]["corners"][i].get<std::array<double, 2>>();
+      const auto actual = project(grid[i][0], grid[i][1]);
+      CHECK(actual[0] == doctest::Approx(expected[0]).epsilon(1e-6));
+      CHECK(actual[1] == doctest::Approx(expected[1]).epsilon(1e-6));
+      const auto corner = decoded["items"][0]["corners"][i].get<std::array<double, 2>>();
+      CHECK(corner[0] >= 0);
+      CHECK(corner[0] < 232);
+      CHECK(corner[1] >= 0);
+      CHECK(corner[1] < 232);
+      const auto restored = project(corner[0], corner[1]);
+      // ZXing返回模块外沿，允许相对中心栅格多两个重构像素。
+      const double tolerance = 2.1 * (21 * 72) / (21 * 8 - 1);
+      CHECK(std::abs(restored[0] - expected[0]) <= tolerance);
+      CHECK(std::abs(restored[1] - expected[1]) <= tolerance);
+    }
+    REQUIRE(instances.asRecord()->data["items"].size() == 1);
+    const auto center =
+        instances.asRecord()->data["items"][0]["position"].get<std::array<double, 2>>();
+    CHECK(center[0] >= 0);
+    CHECK(center[0] < 232);
+    CHECK(center[1] >= 0);
+    CHECK(center[1] < 232);
+  }
 }

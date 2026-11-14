@@ -499,14 +499,17 @@ void registerP4Barcodes(Registry& registry) {
                    Port{"roi", "Box2D", "ROI", "已裁正QR模块区域；不含静区。", false},
                    image_p1::recordPort("detections", kDetections, false)};
   refine.outputs = {img::imageOut(), image_p1::recordPort("feedback", "image.QrRefinement.v1")};
+  auto modulePixels = img::intParam("modulePixels", "输出每格像素", 8, 1, 32,
+                                    "输出栅格像素，不随输入预览scale改变。");
+  modulePixels.unit = "px";
+  modulePixels.absolute = true;
   refine.params = {
       image_p1::text("frame", "源图参考帧", "image"),
       image_p1::text("outputFrame", "增强图参考帧", "qr_refined"),
       image_p1::text("symbolId", "指定QR目标ID", ""),
       img::intParam("moduleCount", "标准QR边长格数", 21, 21, 177,
                     "21+4k，须已知真实QR版本；不自动猜格数。"),
-      img::intParam("modulePixels", "输出每格像素", 8, 1, 32,
-                    "输出栅格像素，不随输入预览scale改变。"),
+      std::move(modulePixels),
       img::intParam("quietZone", "静区模块数", 4, 4, 16, "标准QR至少四格静区。"),
       img::enumParam("polarity", "源码极性", "dark",
                      {{"dark", "黑码白底", ""}, {"light", "白码黑底", ""}}, "输出统一黑码白底。"),

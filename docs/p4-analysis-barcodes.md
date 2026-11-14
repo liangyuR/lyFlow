@@ -70,6 +70,8 @@
 
 输出 `image` 为u8单通道原生图，尺寸 `(moduleCount+2*quietZone)*modulePixels`，scale=1，表示新的栅格坐标系。输出 `feedback` 为 `image.QrRefinement.v1`，含源四角、输出到原图的3×3单应矩阵、源/输出frame、实际参数、不确定格数、最低局部对比度、before/after逐码内容及布尔解码状态。静区是新增图像，单应矩阵在静区只是几何外推，不表示采集到的源数据。
 
+modulePixels描述符使用 `unit=px, absolute=true`，通过引擎既有绝对输出尺寸机制保持新图scale=1；不能只在compute里赋scale=1后让执行器再次继承源图预览scale。源四角和feedback矩阵仍按原有规则恢复原图坐标。永久调度器回归用2200²真实QR像素触发Preview源头缩小，串接前解码→增强→后解码，核对232²新栅格、后解码imageSize/四角及outputToSource配对，不以仅compute直调代替执行器验证。
+
 before采用同样裁正几何和静区，但尚未模块均值阈值重绘；after才使用重绘结果，避免把裁正或加静区的收益误算成阈值收益。`improved`仅指before无有效解码而after有有效解码，不是图像质量分或纠错保证。解码失败仍交付增强图和明确反馈；不会猜测被遮挡内容。
 
 ## 资源、取消和验证边界
