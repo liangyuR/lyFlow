@@ -46,7 +46,7 @@
 
 ## 外部库能力参考
 
-[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。[198 项能力对照](operator-coverage.md)按实际算法、数据模型和接口区分已有、可组合、部分覆盖及缺失；[补齐计划](operator-completion-plan.md)跟踪交付与后续依赖。P0 的 23 项已逐个参考本机源码分析并实现限定用途，见[分析与示例](p0-operator-analysis.md)。P1新增55个节点，覆盖云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测及YOLOX、YOLOv8/11/26检测，见[P1实现索引与保留边界](p1-operator-analysis.md)。47个P1外部条目仍有21项部分覆盖，不能把限定切片当作全部模式完成。P2首项A01已交付受限表达式，见[源码分析与支持边界](p2-expression-analysis.md)；其余P2任务仍按计划逐项推进。对照不代表流程、端口或参数兼容；当前契约仍以manifest、包指南和源码为准。
+[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。[198 项能力对照](operator-coverage.md)按实际算法、数据模型和接口区分已有、可组合、部分覆盖及缺失；[补齐计划](operator-completion-plan.md)跟踪交付与后续依赖。P0 的 23 项已逐个参考本机源码分析并实现限定用途，见[分析与示例](p0-operator-analysis.md)。P1新增55个节点，覆盖云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测及YOLOX、YOLOv8/11/26检测，见[P1实现索引与保留边界](p1-operator-analysis.md)。47个P1外部条目仍有21项部分覆盖，不能把限定切片当作全部模式完成。P2首项A01已交付受限表达式，见[源码分析与支持边界](p2-expression-analysis.md)；其余P2按[六阶段交付跟踪](p2-sequential-delivery.md)依次创建独立PR并通过CI/审查后合并，当前阶段1为[高光直线检测](p2-highlights-analysis.md)。对照不代表流程、端口或参数兼容；当前契约仍以manifest、包指南和源码为准。
 
 ## 开发与交付
 

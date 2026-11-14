@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-14。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01 首项实现版本 **1.3.6**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-14。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 实现版本 **1.3.7**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -25,7 +25,7 @@
 | 外部分类 | 已有对应 | 可组合替代 | 部分覆盖 | 缺失 | 待核实 | 合计 |
 |---|---:|---:|---:|---:|---:|---:|
 | 输入 | 7 | 0 | 4 | 4 | 0 | 15 |
-| 2D图像处理 | 21 | 1 | 5 | 10 | 3 | 40 |
+| 2D图像处理 | 22 | 1 | 5 | 9 | 3 | 40 |
 | 3D点云处理 | 7 | 2 | 13 | 33 | 1 | 56 |
 | 位姿处理 | 6 | 0 | 5 | 13 | 0 | 24 |
 | 流数据运算 | 7 | 0 | 5 | 2 | 0 | 14 |
@@ -35,7 +35,7 @@
 | 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
 | 内置 Python 脚本 | 6 | 0 | 3 | 7 | 0 | 16 |
-| **合计** | **55** | **7** | **45** | **86** | **5** | **198** |
+| **合计** | **56** | **7** | **45** | **85** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -97,7 +97,7 @@
 | `CropImageByROI`<br>图片ROI裁剪 | 已有对应 | `image.crop` | 按参数或像素 Box2D 裁剪轴对齐矩形 ROI，越界取交集；不宣称支持旋转框、多边形或逐实例 mask，亦不保证外部 ROI 数据结构兼容。 [1](../packs/std-image/ops/image_basic.cpp) | 无需补齐 |
 | `DefectDetector`<br>深度图缺陷检测 | 缺失 | — | 已有针孔深度反投影与灰度阈值/面积基础，但无产品平面残差图、毫米高度阈值、缺陷连通域及物理面积统计的完整深度缺陷流程。 [1](../packs/std-image/ops/image_cloud.cpp) [2](../packs/std-image/ops/image_segment.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `DetectCircleEdge`<br>检测圆形边缘 | 部分覆盖 | `image.circle_caliper` | 已实现圆/圆弧ROI径向亚像素采样、极性/方向、确定性RANSAC和中心化拟合及直边拒绝；固定半径约束拟合模式仍未覆盖。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [A05](operator-completion-plan.md#a05) |
-| `DetectHighLights`<br>检测高光直线 | 缺失 | — | 胶路上的灰度跳变检测不等于横向高光直线检测；缺高光线段分组与旋转 Box2D 输出。 [1](../packs/std-image/ops/register.cpp) [2](../packs/glue/ops/part_edges.cpp) | P2 · [A05](operator-completion-plan.md#a05) |
+| `DetectHighLights`<br>检测高光直线 | 已有对应 | `image.highlights` | 亮脊检测、真实支持点分组/TLS有限线段及长度/RMS/最大误差/覆盖率/对比质量；支持水平、垂直、斜线及像素轴对齐/旋转ROI，输出同ID的旋转Pose2D区域、线段记录、候选mask与保位深叠图。原生Box2D仍轴对齐，不兼容外部Qt配置协议。 [源码与边界](p2-highlights-analysis.md) · [回归](../packs/std-image/tests/test_highlights.cpp) · [跨接口](../core/tests/integration/p2_highlights.cpp) | P2 A05 限定用途已实现 · [A05](operator-completion-plan.md#a05) |
 | `DetectLineEdge`<br>检测直线边缘 | 已有对应 | `image.line_caliper` | 轴对齐ROI的带宽扫描、方向/极性、亚像素点与鲁棒直线拟合；返回有效比例和诊断，失败不造Line2D。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `EdgePoseRefiner`<br>配准工件2D边缘 | 缺失 | — | 局部图像 NCC 与 XY 平面 ICP 均不解决图像边缘约束下的相机 3D 位姿优化；P1已有相机参数，仍缺模型边缘投影与6DoF残差优化。 [1](../packs/glue/ops/locate.cpp) [2](../packs/std-pointcloud/ops/register_icp_2d.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `FindCircles`<br>圆孔检测 | 缺失 | — | image.find_circle 只输出图像平面的二维圆，不能从椭圆/圆投影恢复空间圆孔的 3D 中心、法向和尺度；本项不能按名字映射为已有。 [1](../packs/std-image/ops/image_segment.cpp) | P2 · [C01](operator-completion-plan.md#c01) |

@@ -129,7 +129,8 @@
     "cloud.statistics",
     "cloud.pca",
     "cloud.bounds_obb",
-    "value.expression"
+    "value.expression",
+    "image.highlights"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.6)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.7)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -364,6 +364,7 @@ if(BUILD_TESTING)
      "std-geometry" IN_LIST LYFLOW_STD_PACK_NAMES AND
      "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p0_pipeline.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_highlights.cpp")
   endif()
   if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_expression.cpp")
@@ -489,6 +490,9 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-inspection.lyflow.json
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-stripe.pgm"
         DESTINATION examples)
 
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-highlights.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-highlights.pgm"
+        DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-expression.lyflow.json"
         DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
