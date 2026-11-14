@@ -128,7 +128,8 @@
     "geometry.transform_plane",
     "cloud.statistics",
     "cloud.pca",
-    "cloud.bounds_obb"
+    "cloud.bounds_obb",
+    "value.expression"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

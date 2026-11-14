@@ -10,6 +10,9 @@
 #include "lyflow/value.h"
 
 namespace lyflow::packs::std_value {
+
+void registerExpression(Registry& registry);
+
 namespace {
 
 using Json = nlohmann::json;
@@ -384,6 +387,7 @@ Status sort(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&) {
 } // namespace
 
 void registerPackOps(Registry& r) {
+  registerExpression(r);
   {
     auto d = op("value.number", "数值常量", "可连接的有限数值，单位必须显式声明。",
                 [](const Inputs&, const ParamView& p, Outputs& out, ExecContext&) {
