@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "01P2P2CONSTRAINEDFIT",
+  "name": "P2-constrained-fit",
+  "nodes": [
+    {
+      "id": "constraints",
+      "op": "register.constraints_3d",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "fit",
+      "op": "register.constrained_fit_3d",
+      "params": {
+        "maxRmse": 1e-6,
+        "maxError": 1e-5
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "0",
+      "from": {
+        "node": "constraints",
+        "port": "constraints"
+      },
+      "to": {
+        "node": "fit",
+        "port": "constraints"
+      }
+    }
+  ],
+  "outputs": {
+    "transform": {
+      "node": "fit",
+      "port": "transform"
+    },
+    "quality": {
+      "node": "fit",
+      "port": "quality"
+    },
+    "aligned": {
+      "node": "fit",
+      "port": "aligned"
+    }
+  },
+  "params": {
+    "constraintItems": {
+      "type": "text",
+      "default": "[{\"id\":\"c0\",\"type\":\"point\",\"source\":[0,0,0],\"target\":[0.05,-0.02,0.01],\"weight\":1},{\"id\":\"c1\",\"type\":\"point\",\"source\":[0.06,0,0],\"target\":[0.10861592222493913,-0.00872812632581286,0.016092497484041783],\"weight\":1},{\"id\":\"c2\",\"type\":\"point\",\"source\":[0,0.04,0.01],\"target\":[0.04127949594324762,0.017803474070120024,0.023958873780714825],\"weight\":1},{\"id\":\"c3\",\"type\":\"line\",\"source\":[0.02,0.01,0.03],\"target\":[0.06516086064330603,-0.010073396901239259,0.042735467851764825],\"weight\":1,\"direction\":[-0.19803392792651656,0.9749191848757126,0.10156350895509315]},{\"id\":\"c4\",\"type\":\"plane\",\"source\":[0.03,0.03,0],\"target\":[0.07336694327467407,0.014883512383364949,0.016093154010673686],\"weight\":1,\"direction\":[-0.0799146939691727,-0.11932933249084769,0.9896333422511099]},{\"id\":\"c5\",\"type\":\"plane\",\"source\":[-0.02,0.01,0.03],\"target\":[0.026083579160013283,-0.017587979350697353,0.03867380286240363],\"weight\":1,\"direction\":[0.9769320370823187,0.18786456123645234,0.10154162473402974]}]",
+      "binds": ["constraints.items"]
+    }
+  }
+}

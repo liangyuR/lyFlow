@@ -119,4 +119,8 @@ foreach ($file in @('lib/onnxruntime.lib', 'lib/onnxruntime.dll', 'lib/onnxrunti
 }
 $ortVersion = (Get-Content -LiteralPath (Join-Path $env:LYFLOW_ONNXRUNTIME_ROOT 'VERSION_NUMBER') -Raw).Trim()
 if ($ortVersion -ne $config.onnxruntimeVersion) { throw "ONNX Runtime 版本不符：$ortVersion" }
+$matchingArguments = @((Join-Path $PSScriptRoot 'fetch-matching-deps.py'))
+if ($SkipDependencySetup) { $matchingArguments += '--offline' }
+& python @matchingArguments
+if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
 Write-Host "固定依赖已验证：$($config.triplet)，vcpkg $revision，ONNX Runtime $ortVersion"

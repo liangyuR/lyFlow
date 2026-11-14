@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-14。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 实现版本 **1.3.7**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 与阶段2 B01/B02 开发版本 **1.3.8**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -26,7 +26,7 @@
 |---|---:|---:|---:|---:|---:|---:|
 | 输入 | 7 | 0 | 4 | 4 | 0 | 15 |
 | 2D图像处理 | 22 | 1 | 5 | 9 | 3 | 40 |
-| 3D点云处理 | 7 | 2 | 13 | 33 | 1 | 56 |
+| 3D点云处理 | 17 | 3 | 10 | 25 | 1 | 56 |
 | 位姿处理 | 6 | 0 | 5 | 13 | 0 | 24 |
 | 流数据运算 | 7 | 0 | 5 | 2 | 0 | 14 |
 | 检查 | 0 | 0 | 0 | 5 | 0 | 5 |
@@ -35,7 +35,7 @@
 | 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
 | 内置 Python 脚本 | 6 | 0 | 3 | 7 | 0 | 16 |
-| **合计** | **56** | **7** | **45** | **85** | **5** | **198** |
+| **合计** | **66** | **8** | **42** | **77** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -56,7 +56,7 @@
 
 ## 逐项对照
 
-“下一步”保留初始优先级并链接到任务；已交付的 P0/P1 行列明新入口、回归入口及剩余边界。P2 A01首项受限表达式另见[实现分析](p2-expression-analysis.md)，不表示整批P2完成。初始优先级不改写，P2条目BestFit/SearchPoseLocally的基础能力虽在P1先交付，其高级模式仍按原计划保留。
+“下一步”保留初始优先级并链接到任务；已交付的 P0/P1 行列明新入口、回归入口及剩余边界。P2 A01首项受限表达式另见[实现分析](p2-expression-analysis.md)，不表示整批P2完成。初始优先级不改写，P2条目BestFit/SearchPoseLocally的基础能力虽在P1先交付，其高级模式现由阶段2独立算子补齐；仍不承诺外部协议或现场验收。
 
 ### 输入
 
@@ -127,21 +127,21 @@
 
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
-| `BestFit`<br>最佳适应算法 | 部分覆盖 | `register.rigid_fit` | 已提供等长三维对应点的double中心化Kabsch、反射修正和退化拒绝，质量以交付float32变换重算；混合点线面和加权3-2-1专用规则仍未覆盖。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P2 · [B02](operator-completion-plan.md#b02)；P1已补基础切片 |
+| `BestFit`<br>最佳适应算法 | 已有对应 | `register.rigid_fit`、`register.constraints_3d`、`register.constrained_fit_3d` | 对应点Kabsch及混合点/线/面加权SE(3)，显式3-2-1 datum、可观性/Huber/交付float32残差门控。局部优化需要合理初值；不兼容外部工件协议。 [分析](p2-analysis-advanced-fit.md) · [回归](../packs/std-pointcloud/tests/test_p2_advanced_fit.cpp) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
 | `BoxEstimator`<br>计算包围盒 | 部分覆盖 | `cloud.statistics`、`cloud.bounds_obb` | 已输出AABB/PCA方向包围盒、中心、尺寸及变换；外部实际为平面箱面最小面积矩形并带边缘去噪/法向约束，PCA盒不能冒充该专项估计或最小体积盒。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [B01](operator-completion-plan.md#b01) |
 | `CalObjCoverRate`<br>工件遮挡率计算 | 缺失 | — | 已有Pose3D/相机内参基础，但缺少可见区域、遮挡模型及覆盖率算法；点数与包围盒不能替代遮挡率。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `CalculateContainerBox`<br>计算集装箱内切盒 | 缺失 | — | 暂无由集装箱点云估计相机系内切盒的检测与约束求解；filter.crop_box 仅消费已知边界。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `CalculateHeightByNeighborCloud`<br>计算物体高度 | 缺失 | — | 已有Pose3D及全云统计，但缺少按工件邻域选择基准面并估计相对高度的完整链；gap.flush不能替代该三维规则。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/gap/ops/measure.cpp) | P2 · [B01](operator-completion-plan.md#b01) |
+| `CalculateHeightByNeighborCloud`<br>计算物体高度 | 已有对应 | `cloud.neighbor_height` | 按工件四向邻域及显式workspace选择基准，支持平面距离/轴截距/顶层/均值/最远/提供高度及三种填充策略；保顶面锚点，缺支持标无效，溢出诊断。 [分析](p2-analysis-height.md) · [回归](../packs/std-pointcloud/tests/test_p2_height_rules.cpp) | P2阶段2限定用途已实现 · [B01](operator-completion-plan.md#b01) |
 | `CalculateInstancePrimitivePose`<br>计算实例工件位姿 | 缺失 | — | 已有二维检测和Pose3D契约，但尚无结合深度、相机与工件先验恢复实例三维姿态的通用桥接；检测框不等于6DoF估计。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `CalculatePalletPose`<br>垛型匹配 | 待核实 | — | 清单仅给出“垛型匹配”而无描述；需确认输入、输出、匹配目标及失败条件后才能判定替代关系和投入。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | 待定义 · [U01](operator-completion-plan.md#u01) |
 | `CalculatePlacingPosition`<br>计算放置点位 | 缺失 | — | 已有Pose3D尺寸字段，但无放置规划、支撑/碰撞/可达性算法；工件模型和Transform不提供规划能力。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `CalculatePrimitiveDimension`<br>计算3D尺寸 | 缺失 | — | 已有工件实例及基础统计，但缺少抓取前后场景绑定、对象关联和高度差尺寸估计；Measurement只是结果载荷。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `CalculateTopLayerHeight`<br>计算最高层高度 | 缺失 | — | 无按层厚切分并返回最高层高度及点云的算子；范围滤波需预先给定阈值，不能自动估计层。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_passthrough.cpp) | P2 · [B01](operator-completion-plan.md#b01) |
+| `CalculateTopLayerHeight`<br>计算最高层高度 | 已有对应 | `cloud.top_layer` | 米制显式轴/原点/窗口/最少支持，单云或绑定分组，输出顶层高度/Measurement与原始top/rest索引；无支持用valid=false和null，不以哨兵值代表高度。 [分析](p2-analysis-height.md) · [示例](../examples/p2-height-rules.lyflow.json) | P2阶段2限定用途已实现 · [B01](operator-completion-plan.md#b01) |
 | `CloudCutByPrimitives`<br>用工件切割点云 | 缺失 | `filter.crop_box` | 已有带 Transform 的盒裁剪可覆盖单个已知长方体；P1已有三维工件列表，仍缺少消费该列表的形状适配、批量裁剪和碰撞语义。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) | P2 · [B07](operator-completion-plan.md#b07) |
 | `CloudCutByRoi`<br>ROI裁剪点云 | 已有对应 | `filter.crop_box` | filter.crop_box 按米制三维 min/max 盒过滤，可接可选 Transform 实现局部框并保留内部/外部；外部 ROI 元数据仍需显式转换，不承诺结果逐点一致。 不包含外部 Roi/Workspace 对象和 organized/cropped-organized 输出。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) | 无需补齐 |
 | `CloudCutByTote`<br>去除料框外点云 | 可组合替代 | `transform.make`、`filter.crop_box` | 在宿主明确提供料框边界与坐标变换时，可用盒裁剪保留料框内部点云；不包含料框自动识别、壁厚估计或机器人坐标树。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/transform_make.cpp) [4](../packs/std-pointcloud/ops/filter_crop_box.cpp) | 无需补齐 |
 | `CloudDraggingNoiseRemoval`<br>去除拖拽噪声 | 缺失 | `filter.statistical_outlier`、`filter.radius_outlier` | 统计/半径离群滤波已有，但未实现利用可抓取箱体几何识别其周围拖拽噪声的业务算法。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_statistical_outlier.cpp) [4](../packs/std-pointcloud/ops/filter_radius_outlier.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `CloudEdgeExtract`<br>点云边缘提取 | 缺失 | `features.normals` | 暂无通用三维点云边缘/深度不连续边界提取；features.normals 只提供法线，二维图像边缘不能自动保留点云对应关系。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/features_normals.cpp) | P2 · [B02](operator-completion-plan.md#b02) |
+| `CloudEdgeExtract`<br>点云边缘提取 | 已有对应 | `cloud.edges_3d` | 显式organizedWidth及NaN/有效索引孔洞，区分深度边界、遮挡近远侧和曲率；另提供无组织切平面角缺口模式，后者不伪造像素遮挡分类。输出有限原生云与原输入索引。 [分析](p2-analysis-matching.md) · [回归](../packs/std-pointcloud/tests/test_p2_matching.cpp) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
 | `CloudFillHoles`<br>点云孔洞填补 | 缺失 | `image.blur` | 清单要求以闭运算定位孔洞并补深度；已有图像中值平滑，但无深度无效值/孔洞掩码/点云像素对应和重建契约。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-image/ops/image_basic.cpp) [4](../packs/std-image/ops/image_cloud.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `CloudFilter`<br>点云过滤 | 已有对应 | `filter.passthrough`、`transform.apply` | filter.passthrough 支持 X/Y/Z/intensity 范围及反选，覆盖参考坐标轴阈值过滤的核心用途；任意参考系应先显式变换，阈值边界包含性与外部实现须单独验收。 阈值为参数常量，尚无动态 Double 阈值端口、严格不等式及双云输出。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_passthrough.cpp) [4](../packs/std-pointcloud/ops/transform_apply.cpp) | 无需补齐 |
 | `CloudICP`<br>3D ICP匹配 | 部分覆盖 | `register.icp_3d`、`cloud.group_get` | 真正三维点点/点面SE(3) ICP，显式source→target初值、收敛/匹配比例/实际float32输出RMSE门限及退化拒绝；外部工件初姿更新和CloudVector批处理协议未整体移植。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [B02](operator-completion-plan.md#b02) |
@@ -150,9 +150,9 @@
 | `CloudROIExtract`<br>根据2D检测结果提取点云 | 缺失 | `segment.extract_indices` | 已有实例标签和云分组载荷，仍缺少organized cloud与图像ROI/实例掩码的逐像素索引映射；extract_indices 只消费既有同源索引，无法从检测结果生成映射。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/segment_extract_indices.cpp) [4](../packs/std-image/ops/image_cloud.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `CloudRemovalByPrimitives`<br>去除识别工件的点云 | 缺失 | `filter.crop_box` | 反选盒裁剪可删除单个已知长方体内点，P1已有三维工件数组，仍无按其任意形状批量删除点云的执行节点。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) | P2 · [B07](operator-completion-plan.md#b07) |
 | `CloudSample`<br>降采样点云 | 已有对应 | `filter.voxel_grid`、`filter.random_sample` | filter.voxel_grid 和 filter.random_sample 提供体素/随机降采样；保留可选通道的规则见实际实现，不承诺包含外部所有采样模式。 不复刻外部自适应 leaf 二次采样策略。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_voxel_grid.cpp) [4](../packs/std-pointcloud/ops/filter_random_sample.cpp) | 无需补齐 |
-| `CloudToGeometry`<br>点云构建几何体 | 部分覆盖 | `segment.ransac_plane`、`segment.extract_indices` | 可提取单一平面参数及内点；尚无清单要求的有限矩形平面片/Geometry3D 输出和姿态尺寸估计。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/segment_ransac_plane.cpp) [4](../packs/std-pointcloud/ops/segment_extract_indices.cpp) | P2 · [B01](operator-completion-plan.md#b01) |
+| `CloudToGeometry`<br>点云构建几何体 | 已有对应 | `cloud.plane_patches` | RANSAC/TLS平面、距离/法向连通组、最小面积有限bounds或占据栅格内切矩形、分位面偏移和碰撞筛选。交付Pose/厚度内实际支持重算RMS/coverage，保原组索引与uncovered。 [分析](p2-analysis-height.md) · [回归](../packs/std-pointcloud/tests/test_p2_height_rules.cpp) | P2阶段2限定用途已实现 · [B01](operator-completion-plan.md#b01) |
 | `CloudTrans`<br>变换点云坐标系 | 已有对应 | `transform.make`、`transform.apply` | transform.apply 可按显式 4x4 矩阵变换 XYZ 并旋转法线，保留强度/RGB；相机/料框/机器人外参和方向由宿主显式提供，不含命名坐标树自动查找。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/transform_make.cpp) [4](../packs/std-pointcloud/ops/transform_apply.cpp) | 无需补齐 |
-| `CloudViewSampling`<br>点云视点采样 | 缺失 | `filter.voxel_grid`、`filter.random_sample` | 体素/随机采样不判断视点遮挡，暂无模型表面可见点采样或隐面移除。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_voxel_grid.cpp) [4](../packs/std-pointcloud/ops/filter_random_sample.cpp) | P2 · [B02](operator-completion-plan.md#b02) |
+| `CloudViewSampling`<br>点云视点采样 | 已有对应 | `cloud.view_sample` | 按显式model到camera位姿执行离散角网格z-buffer可见性与可选背面剔除；原模型组和拼接输出云组分别绑定，不声称连续Mesh可见性或外部视库格式兼容。 [分析](p2-analysis-matching.md) · [回归](../packs/std-pointcloud/tests/test_p2_matching.cpp) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
 | `ClustersToPrimitives`<br>聚类结果生成工件 | 缺失 | `segment.ransac_plane` | 已有三维簇、逐组统计和Pose3D契约；仍无把逐簇箱面矩形拟合及业务工件姿态组合为完整输出的节点，PCA盒不自动等于箱面。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/segment_ransac_plane.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `ConstructHeightMap`<br>生成高度图 | 缺失 | `cloud.to_depth_image` | cloud.to_depth_image 是相机针孔 Z-buffer 深度投影，不能替代向料框底面投影的正交高度图；需定义栅格分辨率、原点、参考面、聚合及无效值。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-image/ops/image_cloud.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `ConstructOrthographicProjectionMap`<br>生成正交投影图 | 缺失 | `cloud.to_depth_image` | 尚无工作空间底面正交栅格和多特征图输出；相机针孔投影及普通灰度化不等价。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-image/ops/image_cloud.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
@@ -171,17 +171,17 @@
 | `GetCloudHeight`<br>计算点云的最大高度 | 部分覆盖 | `cloud.statistics` | 已输出输入帧最大Z的米制Measurement及有界统计，空云无效；Request点邻域ROI、workspace安全高度和相对高度规则仍未覆盖。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [B01](operator-completion-plan.md#b01) |
 | `GroupCloudByPartition`<br>根据分区对点云分组 | 缺失 | `filter.crop_box` | 没有分区几何/分区标识输入与点云组集合输出；单框裁剪可手工处理固定单区，不能替代动态分组。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `GroupPrimitivesByPartition`<br>根据分区对工件分组 | 缺失 | — | 已有三维工件列表，但未提供分区类型及把工件按空间分区分组的执行节点。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `HeightExtraction`<br>深度图高度抽取 | 缺失 | `image.normalize` | image.normalize 仅按像素值映射/位深转换；未实现基于标定参考平面的深度到实际高度计算。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-image/ops/image_basic.cpp) [4](../packs/std-image/ops/image_cloud.cpp) | P2 · [B01](operator-completion-plan.md#b01) |
+| `HeightExtraction`<br>深度图高度抽取 | 已有对应 | `image.height_extract` | 正交u16深度比例/F32米制图，固定Z/三点平面/局部加权一次或二次曲面参考；有符号高度、有效掩膜和显示映射分开，填值不伪装观测。针孔深度需另显式转换。 [分析](p2-analysis-height.md) · [示例](../examples/p2-depth-height.lyflow.json) | P2阶段2限定用途已实现 · [B01](operator-completion-plan.md#b01) |
 | `HomogeneousPrimitiveOptimization`<br>单拆工件优化 | 缺失 | — | 未实现单拆场景箱体补全/重拟合和工件姿态优化；需明确工件几何与抓取业务约束。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `InsertionCheck`<br>纸箱插入Pose优化 | 缺失 | — | 缺少邻域工件碰撞、插入方向可行性与纸箱姿态优化；不能由普通裁剪/刚体变换直接代替。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `MergeClouds`<br>合并两个点云 | 已有对应 | `util.merge` | util.merge 拼接两个 PointCloud；不做配准或重采样，可选通道只保留两侧兼容交集并在丢弃时提示，外部元数据需转换。 不会自动清 NaN、配准或去重。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/util_merge.cpp) | 无需补齐 |
 | `MonoGapFlushDetection`<br>单线间隙面差测量 | 部分覆盖 | `profile.gap_flush` | 单PointCloud、明确平面与双区间，输出采样边缘gap/同referenceX有符号flush及实际Line2D拟合质量；少点、竖直、超限外推和残差拒绝。圆角/槽/斜投影等专用缝型仍未整体覆盖。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [A05](operator-completion-plan.md#a05) |
 | `ProjectCloudToCamera`<br>投影点云到相机坐标系 | 部分覆盖 | `transform.apply`、`cloud.to_depth_image` | transform.apply 加 cloud.to_depth_image 可完成已知相机外参下的针孔深度投影；PointCloud 无 width/height 或像素映射，未恢复 organized cloud。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/transform_apply.cpp) [4](../packs/std-image/ops/image_cloud.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `ProjectPrim3DTo2D`<br>投影3D几何体 | 缺失 | `cloud.to_depth_image` | 已有点云到深度图投影，但没有三维几何体输入、轮廓/边框投影及遮挡/裁剪策略。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-image/ops/image_cloud.cpp) | P2 · [B07](operator-completion-plan.md#b07) |
-| `SearchPoseLocally`<br>局部搜索最匹配位姿 | 部分覆盖 | `register.local_search_3d` | 已实现原始初值、XYZ正负平移及Z正负旋转至多9个ICP候选，按实际输出质量筛选；外部全部轴组合网格/分级搜索及工件姿态协议仍未覆盖。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P2 · [B02](operator-completion-plan.md#b02)；P1已补基础切片 |
+| `SearchPoseLocally`<br>局部搜索最匹配位姿 | 已有对应 | `register.pose_search_3d` | XYZ平移与XYZ旋转Cartesian组合/分级搜索，Transform初值或Poses3D批处理，显式候选/NN预算；仅从通过全部质量门限的候选选胜者，退化支持拒绝，保工件元数据与原生输出。 [分析](p2-analysis-advanced-fit.md) · [回归](../packs/std-pointcloud/tests/test_p2_advanced_fit.cpp) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
 | `SignalEvaluator`<br>轮廓分析 | 部分覆盖 | `profile.analyze`、现有二维几何/gap量测 | 已提供XY/XZ/YZ米制单剖面正交直线和统计，实际原生输出残差门控；多点/线/圆组合和全部外部信号分析模式尚未整体移植。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [A05](operator-completion-plan.md#a05) |
-| `SurfaceBasedEstimator`<br>3D模板匹配 | 缺失 | — | 尚无三维表面模板注册、特征/候选生成和姿态评分；单平面分割或二维 ICP 都不能替代三维全局模板匹配。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/register_icp_2d.cpp) | P2 · [B02](operator-completion-plan.md#b02) |
-| `SurfaceBasedEstimatorV2`<br>3D模板匹配（易用版） | 缺失 | — | 清单声明为易用版三维模板匹配，底层能力同样缺失；应复用统一三维匹配引擎加预设/组合封装，避免独立重复实现。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/register_icp_2d.cpp) | P2 · [B02](operator-completion-plan.md#b02) |
+| `SurfaceBasedEstimator`<br>3D模板匹配 | 已有对应 | `io.load_cloud`、`cloud.template_3d`、`register.global_3d`、`cloud.image_roi`、`image.render_model_3d` | Windows CPU KISS max-core/GNC全局定位与small_gicp精化，原CAD模板/保存重载、显式场景ROI、多实例/对称/朝向与原生交付质量；图像约束/渲染复用标定投影。高噪声/重遮挡能力有限，未验收现场精度；FoundationPose不编入。 [分析](p2-analysis-matching.md) · [后端与实验](p2-3d-matching-backends.md) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
+| `SurfaceBasedEstimatorV2`<br>3D模板匹配（易用版） | 可组合替代 | 三档`p2-matching-*`图与同一`register.global_3d` | fast/balanced/precise可运行图显式展开采样/邻域/候选/迭代配置，共用相同质量门限，实际值记录quality.effective；档名不是精度或速度保证，不隐藏放宽门限或回退。 [平衡档示例](../examples/p2-matching-balanced.lyflow.json) · [回归](../core/tests/integration/p2_cloud_rules.cpp) | P2阶段2限定用途已实现 · [B02](operator-completion-plan.md#b02) |
 | `TubeDirectionCorrection`<br>圆管朝向矫正 | 缺失 | — | 暂无利用圆管高光/成像特征校正三维朝向的专用算法；需明确相机、材质与光照前提。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 
 ### 位姿处理
@@ -238,7 +238,7 @@
 |---|---|---|---|---|
 | `CheckPalleteChangeByPrimitives`<br>检查垛是否变化 | 缺失 | — | 缺少垛型工件布局模型和跨次运行状态/容差比较契约，普通节点输出缓存不是场景变化检测。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `CheckPrimitivesChange`<br>检查工件位姿是否变化 | 缺失 | — | 无抓取前后工件关联、剩余工件姿态比较及阈值诊断；Transform 类型本身不含实例身份。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `CloudBasedEmptyToteChecker`<br>清框检测 | 缺失 | `filter.crop_box`、`filter.passthrough` | 盒内/高度滤波可以预处理，但没有点数统计到图内标量、与识别结果联合判断及清框专用错误策略；空点云不自动等于清框结论。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/std-pointcloud/ops/filter_crop_box.cpp) [4](../packs/std-pointcloud/ops/filter_passthrough.cpp) | P2 · [B01](operator-completion-plan.md#b01) |
+| `CloudBasedEmptyToteChecker`<br>清框检测 | 已有对应 | `cloud.empty_tote` | 显式有效观测、ROI、点数与实例证据区分unknown/empty/occupied/unrecognized；空云且无有效观测不能判空箱。 [分析](p2-analysis-height.md) · [回归](../packs/std-pointcloud/tests/test_p2_height_rules.cpp) | P2阶段2限定用途已实现 · [B01](operator-completion-plan.md#b01) |
 | `DimensionConsistencyCheck`<br>工件长宽一致性检查 | 缺失 | `gap.judge` | 暂无工件尺寸前后关联与长宽一致性比较；gap.judge 仅消费现有 Measurement 并判阈值，不能生成工件尺寸或身份。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) [3](../packs/gap/ops/measure.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `ToplayerCompletenessCheck`<br>顶层点云覆盖度检查 | 缺失 | — | 缺少最高层估计、工件几何投影及点云被实例覆盖率计算，不能由全点数替代漏检检测。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 

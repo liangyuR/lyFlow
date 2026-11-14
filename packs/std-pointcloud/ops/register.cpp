@@ -41,6 +41,9 @@ void registerPackOps(Registry& r) {
   ops::registerRegistration3D(r);
   ops::registerIoLoadCloud(r);
   ops::registerProfileAnalysis(r);
+  ops::registerAdvancedFit3D(r);
+  ops::registerP2HeightRules(r);
+  ops::registerP2GlobalMatching(r);
 
   // 写盘格式的知识只有本包有，core 的 C ABI 经这个钩子转交（ADR-0014）。
   setCloudWriter(static_cast<CloudWriterFn>(&ops::saveCloudToFile));

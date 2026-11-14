@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "01P2P2DEPTHHEIGHT",
+  "name": "P2-depth-height",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "unchanged"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "height",
+      "op": "image.height_extract",
+      "params": {
+        "frame": "orthographic",
+        "pixelSizeX": 0.01,
+        "pixelSizeY": 0.01,
+        "reference": "z_plane",
+        "invalid": "preserve",
+        "direction": "both"
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "0",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "height",
+        "port": "image"
+      }
+    }
+  ],
+  "outputs": {
+    "height": {
+      "node": "height",
+      "port": "height"
+    },
+    "reference": {
+      "node": "height",
+      "port": "reference"
+    },
+    "validMask": {
+      "node": "height",
+      "port": "mask"
+    },
+    "display": {
+      "node": "height",
+      "port": "image"
+    }
+  },
+  "params": {
+    "depthFile": {
+      "type": "path",
+      "default": "p2-depth-height.pgm",
+      "binds": ["source.path"]
+    },
+    "referenceDepth": {
+      "type": "float",
+      "unit": "m",
+      "default": 1,
+      "binds": ["height.z"]
+    },
+    "displayGain": {
+      "type": "float",
+      "default": 0.5,
+      "binds": ["height.gain"]
+    }
+  }
+}

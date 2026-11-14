@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.7)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.8)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -341,6 +341,11 @@ target_link_libraries(lyflow_core PRIVATE ${LYFLOW_PACK_LIBS})
 set_target_properties(lyflow_core PROPERTIES
   # Rust 侧按固定名字 LoadLibrary，不要带 lib 前缀或版本后缀
   OUTPUT_NAME "lyflow_core")
+if(UNIX AND NOT APPLE)
+  set_target_properties(lyflow_core PROPERTIES
+    BUILD_RPATH_USE_ORIGIN TRUE
+    INSTALL_RPATH "$ORIGIN")
+endif()
 
 # 调试工具与测试。都直接吃对象库而不是链 DLL —— DLL 只导出 C ABI，
 # 而这两个要用的是 Registry / Executor 这些 C++ 内部类。
@@ -368,6 +373,12 @@ if(BUILD_TESTING)
   endif()
   if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_expression.cpp")
+  endif()
+  if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES AND
+     "std-geometry" IN_LIST LYFLOW_STD_PACK_NAMES AND
+     "std-pointcloud" IN_LIST LYFLOW_STD_PACK_NAMES AND
+     "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_cloud_rules.cpp")
   endif()
   if(LYFLOW_P1_MODEL_TESTS)
     if(NOT "std-image" IN_LIST LYFLOW_STD_PACK_NAMES OR NOT "std-ml" IN_LIST LYFLOW_STD_PACK_NAMES)
@@ -494,6 +505,17 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-highlights.lyflow.json
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-highlights.pgm"
         DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-expression.lyflow.json"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-height-rules.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-height-rules.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-depth-height.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-depth-height.pgm"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-constrained-fit.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-matching-fast.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-matching-balanced.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-matching-precise.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-model-cad.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-scene.pcd"
         DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
