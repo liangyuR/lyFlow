@@ -10,6 +10,8 @@
 #include "lyflow/value.h"
 
 namespace lyflow::packs::std_geometry {
+void registerPoseOps(Registry&);
+void registerGeometryTransforms(Registry&);
 namespace {
 
 struct Vec {
@@ -762,6 +764,8 @@ void registerConstructors(Registry& r) {
 } // namespace
 
 void registerPackOps(Registry& r) {
+  registerPoseOps(r);
+  registerGeometryTransforms(r);
   registerConstructors(r);
   OperatorDesc op = descriptor("geometry.distance_2d", "二维几何距离", "2D geometry distance");
   op.inputs = {geometryInput("a", 1), geometryInput("b", 2)};

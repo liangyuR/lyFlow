@@ -180,3 +180,19 @@ RANSAC 等参数外露，默认值取自迁出来的那份（xyz-gap-inspector �
 `register.cpp` 里的 `setCloudWriter(&ops::saveCloudToFile)` 把 PCD/PLY 的写盘能力
 装进 core（`lyflow/cloud_io.h`）。C ABI 的 `lyflow_output_save` 与 CLI 的
 `lyflow dump` 靠它落盘；不带这个包的构建里它们会报 `unsupported`。
+
+## P1 三维分析与单扫描
+
+源码逐项分析、取舍和未覆盖模式见 [P1 点云分析](../../docs/p1-analysis-cloud.md)。新算子为：
+
+- `cloud.statistics`、`cloud.pca`、`cloud.bounds_obb`：最大Z、质心、AABB/PCA包围盒与退化轴标志；不是最小体积盒或箱面识别。
+- `cloud.group_pack/get/subset/concat/merge/statistics`：原生点云＋原生Indices＋`cloud.Groups.v1`，最多4096组。消费者校验来源ID、帧、区间和索引；`group_get.indices`仍指向原始来源云，不指向提取的新云。concat支持成对连接的已有组元数据，ID加`a/`、`b/`命名空间，通道不一致拒绝。
+- `segment.euclidean_clusters`、`segment.multi_planes`：真正XYZ簇和顺序多平面；保留原始成员索引、可选通道和余点。聚类ID不是跨帧跟踪身份。
+- `register.rigid_fit`、`register.icp_3d`、`register.local_search_3d`：对应点拟合、点点/点面局部SE(3)配准及至多9初值搜索，方向为source→target。拒绝共线、点面不可观测、缺法线、未收敛、低匹配比例和高RMSE；不是全局模型匹配。最终候选排序、RMSE 和匹配比例均根据输出 float32 Transform 的原生坐标运算重新评估，`aligned` 的 XYZ 与复用该变换的 `transform.apply` 一致；大坐标下无法交付的精度直接拒绝。
+- `io.load_cloud`：PCD（ASCII/二进制/压缩）、点顶点PLY（ASCII/小端二进制）、STL（ASCII/小端二进制面积加权采样）。文件最多256MiB、头最多64KiB，每点字段最多128字节；先检查宣称点数/正文/解压尺寸，再加载。保留XYZ、强度、完整法线与RGB，拒绝额外未知字段、alpha、不完整通道、非有限数和不符合声明整数类型/宽度的 ASCII 值；不保存网格拓扑。文件单位m/mm必须显式指定，初姿平移为米。
+- `profile.analyze`、`profile.gap_flush`：明确XY/XZ/YZ平面、米制单扫描直线与双区间间隙/面差；质量基于实际输出的 float32 直线重新评估，面差与该直线一致；不伪装双相机输入，不自动推断缝型。
+- `profile.project_pair`：应用显式master/slave→common及可选common→output外参，不猜原生云不存在的pose元数据。
+
+相机/云帧是调用者明确声明；没有自动证明外参真实有效。空统计通过valid=false和无效Measurement表示；非法数据/退化/质量不达标返回诊断。新回归入口是`tests/test_p1_cloud.cpp`，采用自制合成数据和确定性文件，不代表现场设备或生产质量验收。
+
+聚类组 ID 按规范 XYZ 点序计算的质心、点数和完整 XYZ 字典序分配；同质心同点数簇不会依赖输入顺序平手。成员索引仍指向原始点云，组 ID 仅代表本次结果规范顺序，不承诺跨帧跟踪。

@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "id": "01P1CLOUD0000000000000001",
+  "name": "P1 三维分簇统计与刚体配准",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_cloud",
+      "params": {
+        "path": "p1-clusters.pcd",
+        "frame": "source"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "clusters",
+      "op": "segment.euclidean_clusters",
+      "params": {
+        "tolerance": 0.04,
+        "frame": "source"
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "statistics",
+      "op": "cloud.group_statistics",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "known",
+      "op": "transform.make",
+      "params": {
+        "translation": [0.01, -0.02, 0.03],
+        "rotation": [8, -12, 6]
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 280
+        }
+      }
+    },
+    {
+      "id": "target",
+      "op": "transform.apply",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 280
+        }
+      }
+    },
+    {
+      "id": "registration",
+      "op": "register.rigid_fit",
+      "params": {
+        "sourceFrame": "source",
+        "targetFrame": "target",
+        "maxRmse": 1e-5
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 280
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "clusters",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "clusters",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "statistics",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "clusters",
+        "port": "indices"
+      },
+      "to": {
+        "node": "statistics",
+        "port": "indices"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "clusters",
+        "port": "groups"
+      },
+      "to": {
+        "node": "statistics",
+        "port": "groups"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "target",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "known",
+        "port": "transform"
+      },
+      "to": {
+        "node": "target",
+        "port": "transform"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "registration",
+        "port": "source"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "target",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "registration",
+        "port": "target"
+      }
+    }
+  ],
+  "outputs": {
+    "clusters": {
+      "node": "statistics",
+      "port": "statistics"
+    },
+    "transform": {
+      "node": "registration",
+      "port": "transform"
+    },
+    "quality": {
+      "node": "registration",
+      "port": "quality"
+    },
+    "aligned": {
+      "node": "registration",
+      "port": "aligned"
+    }
+  }
+}

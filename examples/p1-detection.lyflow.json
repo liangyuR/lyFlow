@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "01P1DETECTION00000000000001",
+  "name": "P1 YOLOX-Nano 固定模型检测",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": { "mode": "color" },
+      "ui": { "position": { "x": 0, "y": 0 } }
+    },
+    {
+      "id": "preprocess",
+      "op": "image.yolox_preprocess",
+      "params": {},
+      "ui": { "position": { "x": 280, "y": 0 } }
+    },
+    {
+      "id": "model",
+      "op": "ml.onnx_run",
+      "params": { "modelContract": "yolox-nano-0.1.1rc0", "intraOpThreads": 1 },
+      "ui": { "position": { "x": 560, "y": 0 } }
+    },
+    {
+      "id": "decode",
+      "op": "image.yolox_decode",
+      "params": {},
+      "ui": { "position": { "x": 840, "y": 0 } }
+    }
+  ],
+  "edges": [
+    {
+      "id": "image",
+      "from": { "node": "source", "port": "image" },
+      "to": { "node": "preprocess", "port": "image" }
+    },
+    {
+      "id": "tensor",
+      "from": { "node": "preprocess", "port": "tensor" },
+      "to": { "node": "model", "port": "input" }
+    },
+    {
+      "id": "prediction",
+      "from": { "node": "model", "port": "output" },
+      "to": { "node": "decode", "port": "prediction" }
+    },
+    {
+      "id": "mapping",
+      "from": { "node": "preprocess", "port": "mapping" },
+      "to": { "node": "decode", "port": "mapping" }
+    }
+  ],
+  "outputs": { "detections": { "node": "decode", "port": "detections" } },
+  "params": {
+    "imageFile": {
+      "type": "path",
+      "label": "输入图片",
+      "default": "../build/p1-assets/astronaut.png",
+      "binds": ["source.path"]
+    },
+    "modelFile": {
+      "type": "path",
+      "label": "固定模型",
+      "default": "../build/p1-assets/yolox_nano.onnx",
+      "binds": ["model.modelPath"]
+    }
+  }
+}

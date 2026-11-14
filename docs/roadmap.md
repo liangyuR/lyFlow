@@ -13,6 +13,7 @@
 | CLI 批处理、样本评估、灵敏度分析与 MCP 工具 | [CLI](cli.md) · [Agent 调参](agent-tuning.md) · [MCP](mcp.md) |
 | 参数配方、静态算子包、库算子和 Python 节点 | [配方](recipe.md) · [算子包](op-packs.md) · [库目录](library-dirs.md) · [Python](python-nodes.md) |
 | C++ / Rust / Tauri / React 嵌入与交付 | [嵌入](embedding.md) · [发包](deployment/packaging.md) |
+| 云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测与选定模型检测 | [P1实现索引与边界](p1-operator-analysis.md) |
 
 ## 仍需独立推进或验收的范围
 
@@ -20,6 +21,6 @@
 - **业务宿主迁移**：xyz-gap-inspector、GlueSight 等仓库的数据库、采集、生产 UI 和部署由各自仓库负责。LyFlow 平台能力已实现不代表这些系统已完成迁移；量测准确率、误检漏检和生产节拍需要业务数据独立验收，不能以旧算法逐字段一致代替正确性验证。
 - **现场数据与产品判据**：真实多相机选取、现场标定、完整 NG 集和生产质量指标不能用合成图或单次离线回放替代。已有算子的前提和未验证边界见 [glue 接入](glue-integration.md)与 [gap 接入](gap-inspector-integration-design.md)。
 - **跨会话缓存**：现有磁盘结果缓存仅由 CLI 显式启用；编辑器跨会话复用、自动配额和跨机器共享不是现有承诺，参见 [CLI 缓存](cli.md#跨进程缓存)。工作区自动备份与计算结果缓存是不同能力。
-- **外部算子补齐**：[198 项能力对照](operator-coverage.md)已更新 P0 实现：通用值与有界值列表、二维几何、图像区域统计与直线卡尺，见[源码分析与示例](p0-operator-analysis.md)。[后续计划](operator-completion-plan.md)继续推进三维处理、标定和模型任务，机器人与设备专项独立验收。原生工件/云集合和部分高级模式仍缺失，不构成外部流程兼容承诺。
+- **外部算子补齐**：[198项能力对照](operator-coverage.md)已同步P0及[P1主要视觉链](p1-operator-analysis.md)。P1已提供受校验云分组/工件集合、局部三维配准、标定与四个选定检测模型，仍保留实例分割/抓取规则、法线和organized聚类、箱面专项、通用几何集合、外部帧树/发布协议等缺口。继续按[原计划](operator-completion-plan.md)补齐限定模式与P2任务，机器人/设备和现场质量独立验收，不构成原流程兼容承诺。
 
 新增需求应先明确数据、接口和验收条件，再形成可执行任务；不继续在本页累计已完成的实施步骤。

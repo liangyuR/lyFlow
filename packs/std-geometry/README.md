@@ -1,6 +1,6 @@
 # std-geometry
 
-无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.1.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI。
+无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.2.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI。
 
 | ID | 名称 | 输入 → 输出 |
 |---|---|---|
@@ -61,4 +61,35 @@
 
 原生成节点把几何和图像绘制耦合，并允许动态坐标/角度；本包保留严格单位的动态输入，把绘制交给已有查看器。原平面节点将单个平面包装为 PlaneVector，并缺少零法向检查；本包使用原生 Plane 且验证归一化。原距离包含带符号间隙和不对称的直线参考点定义，因此本包保留显式模式，默认另选常规最小边界距离。原“求交”也承担两点中点与点线垂足，本包拆成独立专业算子，扩展圆/线段求交并明确无解、重合、多解；避免依赖度数差判断平行和直接求逆。
 
-测试覆盖构造、九种几何距离组合、有限端点、圆包含/相切/双交点、重合、不同单位、非法数据、Record 校验及真实调度中的混合几何输入。通用几何坐标变换属于后续 P1，不在本包首批范围内。
+测试覆盖构造、九种几何距离组合、有限端点、圆包含/相切/双交点、重合、不同单位、非法数据、Record 校验及真实调度中的混合几何输入。本节说明P0首批基础能力；P1变换与工件对象见下节。
+
+## P1 工件对象与变换
+
+P1 在不增加核心种类或 ABI 的前提下，提供以下节点。外部20项源码/脚本属性逐项分析及保留边界见[实现取舍](../../docs/p1-analysis-pose.md)。
+
+| ID | 契约 |
+|---|---|
+| `pose.construct_2d` / `pose.construct_3d` | 带稳定ID、参考帧、尺寸及元数据的单个工件；动态位置与旋转标量显式单位。 |
+| `pose.concat` / `pose.get` | 同维、同帧、同单位集合，保留顺序；重复ID和越界报错。 |
+| `pose.filter` | 置信度、类别、名称、pickable、XY面积、位置、最小间距或数值字段范围；同时输出 matched/rejected。 |
+| `pose.update` | 替换名称、分类、置信度、pickable、size或attributes，不修改身份和位姿。 |
+| `pose.transform_2d` / `pose.transform_3d` | 显式 source→target 左乘；二维为无镜像相似变换，三维为右手刚体。 |
+| `pose.offset_3d` | 局部或父参考帧下的米制位置偏移，不改变旋转和尺寸。 |
+| `pose.flip_axis_2d` | 用户明确声明n重旋转对称等价，选最靠近给定方向的等价角度。 |
+| `pose.frame_from_points` | 按序两/三点构造右手正交帧；三点输入优先，两点模式将up正交化，拒绝重合/共线。 |
+| `pose.decompose_2d` / `pose.compare_2d` | 显式索引分解带单位数值；同帧同单位比较位置与显式周期角度。 |
+| `pose.to_text` / `pose.from_text` | 完整type/data的版本化JSON往返，不丢ID、帧、单位、属性和列表项；文本最多64KiB。 |
+| `pose.to_transform` | 显式提取所选米制工件局部→父参考帧的原生float32刚体矩阵。 |
+| `pose.to_world_plane` | H映射像素中心，局部雅可比映射朝向，再乘已知plane→world；必须配置已知米制size3D，不猜透视框的物理尺寸。 |
+| `geometry.transform_2d` | 点/线/圆保持类型的相似变换，方向只乘线性部分，线段端点同步更新。 |
+| `geometry.transform_plane` | 可逆仿射的逆转置法向与平移d，拒绝归一化矩阵相对行列式≤1e-12的近奇异变换。 |
+
+工件数据使用 `vision.Pose2D.v1` / `vision.Pose3D.v1`，集合使用 `vision.Poses2D.v1` / `vision.Poses3D.v1`。单体 `data` 的必需字段为非空 `id`、`frame`、`unit`、中心 `position`、正尺寸 `size`，以及二维弧度 `angle` 或三维xyzw单位四元数 `rotation`。二维单位为 `px` 或 `m`，三维仅为 `m`；不隐式换单位或变更帧。可选字段为字符串 `name/classId/classLabel`、`confidence∈[0,1]`、布尔 `pickable` 和有界对象 `attributes`。缺失可选字段没有默认业务判定；构造器的 `pickable` 默认false。
+
+集合形如 `{"type":"vision.Poses2D.v1","data":{"frame":"image","unit":"px","items":[...]}}`，items中的每项保留完整单体data。最多4096项、1MiB、16层，要求同帧同单位且ID唯一，允许合法空集合。所有生产者和消费者均校验；重复ID不自动重命名。小型attributes可保留null元数据，尺寸、位置、旋转等计算字段不能为null或非有限数。不得将像素、点云、进程指针或大数组放入工件Record。
+
+三维构造可选四元数或固定内禀XYZ弧度 `R=RxRyRz`。四元数采用缩放归一化，q/-q规范为同一符号，零/非有限输入报错；输出不通过欧拉角反解，避免万向节锁。变换矩阵使用行主序，旋转右手，source→target左乘；局部偏移先由工件朝向旋转到其父帧。二维矩阵的平移单位必须由参数明确匹配工件单位；原生米制Transform不能直接当像素坐标输出。
+
+`pose.filter` 的区间包含端点；缺失可选字段不匹配。最小间距模式按原输入顺序，对已接受项贪心检查，保留首项且不重新排序；面积为sizeX×sizeY，单位是实例单位的平方，不替代抓取面积。`pose.update` 的attributes整体替换，非法补丁即使面对空列表也报错。文本序列化采用JSON可往返数值精度，完整集合超过64KiB时明确报错，调用者需先拆分，不能截断首项或丢失元数据。
+
+`pose.to_world_plane` 仅适用于已知物理平面：`image.PlaneCalib.H` 的像素→mm/m先换算为米，再乘显式plane→world刚体。朝向由单应性在中心的局部雅可比求出；size3D为已知物理输入，默认零占位必须由用户配置为正数。它不是任意深度恢复、相机6DoF估计或机器人FrameTree协议适配。一个无图像/点云依赖的完整例子见[非交换位姿链](../../examples/p1-pose-flow.lyflow.json)。

@@ -67,7 +67,7 @@ TEST_CASE("ml.onnx_run 注册了，且带 pack 标记") {
   CHECK(problems.empty());
   const OperatorDesc* op = ensureRegistry().find("ml.onnx_run");
   REQUIRE(op != nullptr);
-  CHECK(op->pack == "std-ml@0.1.0");
+  CHECK(op->pack == "std-ml@0.2.0");
   CHECK(op->inputs.at(0).type == "Tensor");
   CHECK(op->outputs.at(0).type == "Tensor");
   CHECK(op->externalKey != nullptr);

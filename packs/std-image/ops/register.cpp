@@ -25,6 +25,12 @@ void registerPackOps(Registry& r) {
   ops::registerImageAnalysis(r);
   ops::registerImageCalipers(r);
   ops::registerImageDifference(r);
+  ops::registerImageDetection(r);
+  ops::registerImageYolo(r);
+  ops::registerImageP1Basic(r);
+  ops::registerImageP1Calibration(r);
+  ops::registerImageP1Matching(r);
+  ops::registerImageP1Circles(r);
 }
 
 } // namespace lyflow::packs::std_image
