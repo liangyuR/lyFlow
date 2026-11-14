@@ -42,6 +42,16 @@ Data circle(float x, float y, float r) {
   return Data::circle2d(c);
 }
 
+Data rotate90(const Data& data) {
+  if (const Circle2D* source = data.asCircle2D())
+    return circle(-source->center[1], source->center[0], source->radius);
+  const Line2D* source = data.asLine2D();
+  REQUIRE(source != nullptr);
+  if (source->hasSegment)
+    return segment(-source->start[1], source->start[0], -source->end[1], source->end[0]);
+  return line(-source->point[1], source->point[0], -source->dir[1], source->dir[0]);
+}
+
 const nlohmann::json& intersections(test::OpCall& call, Data a, Data b) {
   call.inputs = {{"a", std::move(a)}, {"b", std::move(b)}};
   const auto s = call.run("geometry.intersect_2d");
@@ -257,6 +267,162 @@ TEST_CASE("geometry parallel predicates preserve raw directions and segment endp
   CHECK(result["points"][0][0].get<double>() == static_cast<double>(1e20f));
   CHECK(result["points"][0][1].get<double>() == static_cast<double>(1e20f));
   CHECK(distance(a, b) == doctest::Approx(0));
+}
+
+TEST_CASE("geometry finite segment point paths use both original endpoints at mixed scales") {
+  struct Case {
+    Data segment, query;
+    double distance;
+    float expectedX, expectedY;
+    bool member;
+  };
+  const std::vector<Case> cases = {
+      {segment(1e20f, 0, 1, 0), point(0, 0), 1, 1, 0, false},
+      {segment(1e20f, 0, 1, 0), point(1, 0), 0, 1, 0, true},
+      {segment(1e20f, 0, 1, 0), point(2, 0), 0, 2, 0, true},
+      {segment(1e20f, 0, 1, 0), point(2, 3), 3, 2, 0, false},
+      {segment(0, 1e20f, 0, 1), point(0, 0), 1, 0, 1, false},
+      {segment(0, 1e20f, 0, 1), point(0, 2), 0, 0, 2, true},
+      {segment(0, 1e20f, 0, 1), point(3, 2), 3, 0, 2, false},
+      {segment(1e20f, 1e20f, 1, 1), point(0, 0), std::sqrt(2.0), 1, 1, false},
+      {segment(1e20f, 1e20f, 1, 1), point(2, 2), 0, 2, 2, true},
+      {segment(1e20f, 1e20f, 1, 1), point(2, 4), std::sqrt(2.0), 3, 3, false},
+  };
+  for (const auto& item : cases) {
+    const Line2D* original = item.segment.asLine2D();
+    for (bool reverse : {false, true}) {
+      const Data target = reverse ? segment(original->end[0], original->end[1], original->start[0],
+                                            original->start[1])
+                                  : item.segment;
+      CHECK(distance(item.query, target) == doctest::Approx(item.distance));
+      test::OpCall call;
+      const auto result = intersections(call, item.query, target);
+      CHECK(result["relation"] == (item.member ? "finite" : "empty"));
+      call.inputs = {{"point", item.query}, {"line", target}};
+      REQUIRE(call.run("geometry.project_point_2d").ok);
+      const Point2D* projected = call.outputs.at("point").asPoint2D();
+      CHECK(projected->p[0] == doctest::Approx(item.expectedX));
+      CHECK(projected->p[1] == doctest::Approx(item.expectedY));
+    }
+  }
+  const float huge = 1e20f, beyond = std::nextafter(huge, std::numeric_limits<float>::infinity());
+  for (const Data target : {segment(huge, 0, 1, 0), segment(1, 0, huge, 0)}) {
+    CHECK(distance(point(beyond, 0), target) == static_cast<double>(beyond) - huge);
+    test::OpCall call;
+    CHECK(intersections(call, point(beyond, 0), target)["relation"] == "empty");
+  }
+}
+
+TEST_CASE("geometry finite segment pairs retain small intersections beside distant anchors") {
+  struct Case {
+    Data other;
+    const char* relation;
+    double distance;
+    std::vector<double> coordinates;
+  };
+  const std::vector<Case> cases = {
+      {line(0, -1, 0, 1), "empty", 1, {}},        {line(1, -1, 0, 1), "finite", 0, {1}},
+      {line(2, -1, 0, 1), "finite", 0, {2}},      {segment(0, -1, 0, 1), "empty", 1, {}},
+      {segment(2, -1, 2, 1), "finite", 0, {2}},   {segment(0, 0, 0.5f, 0), "empty", 0.5, {}},
+      {segment(0.5f, 0, 1, 0), "finite", 0, {1}}, {segment(1, 0, 2, 0), "coincident", 0, {}},
+      {segment(2, 0, 3, 0), "coincident", 0, {}}, {circle(0, 0, 0.5f), "empty", 0.5, {}},
+      {circle(0, 0, 1), "finite", 0, {1}},        {circle(2, 0, 0.5f), "finite", 0, {1.5, 2.5}},
+  };
+  for (bool rotate : {false, true}) {
+    for (const Data original : {segment(1e20f, 0, 1, 0), segment(1, 0, 1e20f, 0)}) {
+      const Data target = rotate ? rotate90(original) : original;
+      for (const auto& item : cases) {
+        const Data other = rotate ? rotate90(item.other) : item.other;
+        for (bool swap : {false, true}) {
+          const Data a = swap ? other : target, b = swap ? target : other;
+          test::OpCall call;
+          const auto result = intersections(call, a, b);
+          CHECK(result["relation"] == item.relation);
+          REQUIRE(result["points"].size() == item.coordinates.size());
+          for (std::size_t i = 0; i < item.coordinates.size(); ++i) {
+            CHECK(result["points"][i][rotate ? 1 : 0].get<double>() ==
+                  doctest::Approx(item.coordinates[i]));
+            CHECK(result["points"][i][rotate ? 0 : 1].get<double>() == doctest::Approx(0));
+          }
+          CHECK(distance(a, b) == doctest::Approx(item.distance));
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("geometry sloped finite segment pairs preserve local bounds and roots") {
+  struct Case {
+    Data other;
+    const char* relation;
+    double distance;
+    std::vector<double> coordinates;
+  };
+  const double step = 1 / std::sqrt(2.0);
+  const std::vector<Case> cases = {
+      {line(0, -1, 0, 1), "empty", 1, {}},
+      {line(1, -1, 0, 1), "finite", 0, {1}},
+      {line(2, -1, 0, 1), "finite", 0, {2}},
+      {segment(0, 0, 0.5f, 0.5f), "empty", step, {}},
+      {segment(0.5f, 0.5f, 1, 1), "finite", 0, {1}},
+      {segment(1, 1, 2, 2), "coincident", 0, {}},
+      {circle(0, 0, 1), "empty", std::sqrt(2.0) - 1, {}},
+      {circle(1, 1, 1), "finite", 0, {1 + step}},
+      {circle(2, 2, 1), "finite", 0, {2 - step, 2 + step}},
+  };
+  for (const Data target : {segment(1e20f, 1e20f, 1, 1), segment(1, 1, 1e20f, 1e20f)}) {
+    for (const auto& item : cases) {
+      for (bool swap : {false, true}) {
+        const Data a = swap ? item.other : target, b = swap ? target : item.other;
+        test::OpCall call;
+        const auto result = intersections(call, a, b);
+        CHECK(result["relation"] == item.relation);
+        REQUIRE(result["points"].size() == item.coordinates.size());
+        for (std::size_t i = 0; i < item.coordinates.size(); ++i) {
+          CHECK(result["points"][i][0].get<double>() == doctest::Approx(item.coordinates[i]));
+          CHECK(result["points"][i][1].get<double>() == doctest::Approx(item.coordinates[i]));
+        }
+        CHECK(distance(a, b) == doctest::Approx(item.distance));
+      }
+    }
+  }
+}
+
+TEST_CASE("geometry unequal circle intersections preserve the smaller chord under input swaps") {
+  for (float radius : {1e8f, 1e20f}) {
+    const Data large = circle(0, 0, radius), small = circle(radius, 0, 1);
+    for (bool swap : {false, true}) {
+      test::OpCall call;
+      const auto result = intersections(call, swap ? small : large, swap ? large : small);
+      REQUIRE(result["relation"] == "finite");
+      REQUIRE(result["points"].size() == 2);
+      CHECK(result["points"][0][0].get<double>() == static_cast<double>(radius));
+      CHECK(result["points"][1][0].get<double>() == static_cast<double>(radius));
+      CHECK(result["points"][0][1].get<double>() == doctest::Approx(-1));
+      CHECK(result["points"][1][1].get<double>() == doctest::Approx(1));
+    }
+  }
+  test::OpCall call;
+  CHECK(intersections(call, circle(0, 0, 1e20f), circle(1e20f, 1e11f, 1))["relation"] == "empty");
+  CHECK(distance(circle(0, 0, 1e20f), circle(1e20f, 1e11f, 1)) ==
+        doctest::Approx(49).epsilon(1e-5));
+  CHECK(intersections(call, point(1e20f, 1e11f), circle(0, 0, 1e20f))["relation"] == "empty");
+  CHECK(distance(point(1e20f, 1e11f), circle(0, 0, 1e20f)) == doctest::Approx(50).epsilon(1e-5));
+  for (float radius : {1e8f, 1e20f}) {
+    const float before = std::nextafter(radius, 0.0f);
+    const float after = std::nextafter(radius, std::numeric_limits<float>::infinity());
+    for (float center : {before, after}) {
+      for (bool swap : {false, true}) {
+        const Data large = circle(0, 0, radius), small = circle(center, 0, 1);
+        const Data a = swap ? small : large, b = swap ? large : small;
+        CHECK(intersections(call, a, b)["relation"] == "empty");
+        CHECK(distance(a, b) ==
+              doctest::Approx(std::abs(static_cast<double>(center) - radius) - 1));
+      }
+    }
+  }
+  REQUIRE(intersections(call, circle(0, 0, 1), circle(1.9999995f, 0, 1))["points"].size() == 2);
+  CHECK(intersections(call, circle(0, 0, 1), circle(2.000002f, 0, 1))["relation"] == "empty");
 }
 
 TEST_CASE("geometry rejects invalid input types units nonfinite and degenerate geometry") {

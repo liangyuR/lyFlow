@@ -19,7 +19,6 @@ struct Vec {
   Vec operator*(double k) const { return {x * k, y * k}; }
 };
 
-double dot(Vec a, Vec b) { return a.x * b.x + a.y * b.y; }
 double length(Vec v) { return std::hypot(v.x, v.y); }
 bool finite(Vec v) { return std::isfinite(v.x) && std::isfinite(v.y); }
 Vec vec(const float* p) { return {p[0], p[1]}; }
@@ -77,7 +76,7 @@ public:
   }
 
 private:
-  std::array<double, 16> parts_{};
+  std::array<double, 32> parts_{};
   std::size_t size_ = 0;
 };
 
@@ -92,12 +91,27 @@ double cross(const ExactVec& a, const ExactVec& b) {
   return result.value();
 }
 
+void addDot(Expansion& result, const ExactVec& a, const ExactVec& b, double sign) {
+  for (Vec av : {a.high, a.low}) {
+    for (Vec bv : {b.high, b.low}) {
+      result.addProduct(av.x, bv.x, sign);
+      result.addProduct(av.y, bv.y, sign);
+    }
+  }
+}
+
+double dot(const ExactVec& a, const ExactVec& b) {
+  Expansion result;
+  addDot(result, a, b, 1);
+  return result.value();
+}
+
 struct Geometry {
   enum Kind { Point, Line, Circle } kind = Point;
   Vec p, d, end;
   ExactVec rawDirection;
   double directionLength = 1;
-  double radius = 0, hi = std::numeric_limits<double>::infinity();
+  double radius = 0;
   bool segment = false;
   Unit2D unit = Unit2D::Meter;
 };
@@ -130,8 +144,7 @@ Status read(const Data& data, const std::string& port, Geometry& out) {
       out.end = end;
       out.rawDirection = exactDifference(end, out.p);
       out.d = out.rawDirection.high;
-      out.hi = length(out.d);
-      if (!(out.hi > 0))
+      if (!(length(out.d) > 0))
         return bad("线段两个端点不能重合", port);
     } else {
       out.rawDirection = {out.d, {}};
@@ -165,29 +178,46 @@ Status pair(const Inputs& inputs, Geometry& a, Geometry& b) {
   return a.unit == b.unit ? Status::Ok() : bad("两个几何体的单位必须一致，不自动换算", "b");
 }
 
-double projectionParameter(const ExactVec& delta, const Geometry& line) {
-  return (dot(delta.high, line.d) + dot(delta.low, line.d)) / line.directionLength;
+Vec pointFromAnchor(Vec anchor, const Geometry& line, double parameter) {
+  if (parameter == 0)
+    return anchor;
+  return {std::fma(line.rawDirection.low.x, parameter,
+                   std::fma(line.rawDirection.high.x, parameter, anchor.x)),
+          std::fma(line.rawDirection.low.y, parameter,
+                   std::fma(line.rawDirection.high.y, parameter, anchor.y))};
 }
 
-Vec pointAt(const Geometry& line, double parameter) {
-  if (parameter == 0)
-    return line.p;
-  if (line.segment && parameter == 1)
-    return line.end;
-  return {std::fma(line.rawDirection.low.x, parameter,
-                   std::fma(line.rawDirection.high.x, parameter, line.p.x)),
-          std::fma(line.rawDirection.low.y, parameter,
-                   std::fma(line.rawDirection.high.y, parameter, line.p.y))};
+double endpointProjection(Vec point, Vec anchor, const Geometry& line) {
+  return dot(exactDifference(point, anchor), line.rawDirection) / line.directionLength;
+}
+
+bool inSegment(Vec point, const Geometry& line, double eps) {
+  return !line.segment || (endpointProjection(point, line.p, line) >= -eps &&
+                           endpointProjection(point, line.end, line) <= eps);
+}
+
+double perpendicular(Vec point, const Geometry& line) {
+  return cross(line.rawDirection, exactDifference(point, line.p)) / line.directionLength;
+}
+
+Vec projectedPoint(Vec point, const Geometry& line, bool clamp) {
+  if (clamp && line.segment) {
+    if (endpointProjection(point, line.p, line) < 0)
+      return line.p;
+    if (endpointProjection(point, line.end, line) > 0)
+      return line.end;
+  }
+  const double normalDistance = perpendicular(point, line);
+  return {std::fma(line.d.y, normalDistance, point.x),
+          std::fma(-line.d.x, normalDistance, point.y)};
 }
 
 double pointLineDistance(Vec p, const Geometry& line) {
-  const ExactVec delta = exactDifference(p, line.p);
-  const double parameter = projectionParameter(delta, line);
-  if (line.segment && parameter < 0)
+  if (line.segment && endpointProjection(p, line.p, line) < 0)
     return length(p - line.p);
-  if (line.segment && parameter > 1)
+  if (line.segment && endpointProjection(p, line.end, line) > 0)
     return length(p - line.end);
-  return std::abs(cross(delta, line.rawDirection)) / line.directionLength;
+  return std::abs(perpendicular(p, line));
 }
 
 struct Intersection {
@@ -196,16 +226,16 @@ struct Intersection {
 };
 
 bool onLine(Vec p, const Geometry& line, double eps) {
-  const ExactVec delta = exactDifference(p, line.p);
-  const double t = projectionParameter(delta, line);
-  const double slack = eps / line.directionLength;
-  return std::abs(cross(delta, line.rawDirection)) / line.directionLength <= eps &&
-         (!line.segment || (t >= -slack && t <= 1 + slack));
+  return std::abs(perpendicular(p, line)) <= eps && inSegment(p, line, eps);
 }
+
+struct LinePosition {
+  double start = 0, end = 0;
+};
 
 struct LineParameters {
   bool parallel;
-  double a = 0, b = 0;
+  LinePosition a, b;
 };
 
 LineParameters lineParameters(const Geometry& a, const Geometry& b) {
@@ -213,76 +243,142 @@ LineParameters lineParameters(const Geometry& a, const Geometry& b) {
   if (denominator == 0)
     return {true};
   const ExactVec delta = exactDifference(b.p, a.p);
-  return {false, cross(delta, b.rawDirection) / denominator,
-          cross(delta, a.rawDirection) / denominator};
+  return {false,
+          {cross(delta, b.rawDirection) / denominator,
+           a.segment ? cross(exactDifference(b.p, a.end), b.rawDirection) / denominator : 0},
+          {cross(delta, a.rawDirection) / denominator,
+           b.segment ? cross(exactDifference(b.end, a.p), a.rawDirection) / denominator : 0}};
 }
 
-double collinearParameter(Vec p, const Geometry& line) {
-  const ExactVec delta = exactDifference(p, line.p);
-  if (std::abs(line.rawDirection.high.x) >= std::abs(line.rawDirection.high.y))
-    return (delta.high.x + delta.low.x) / (line.rawDirection.high.x + line.rawDirection.low.x);
-  return (delta.high.y + delta.low.y) / (line.rawDirection.high.y + line.rawDirection.low.y);
+bool inSegment(LinePosition position, const Geometry& line, double eps) {
+  return !line.segment || (position.start * line.directionLength >= -eps &&
+                           position.end * line.directionLength <= eps);
+}
+
+std::pair<Vec, double> intersectionAnchor(LinePosition position, const Geometry& line) {
+  if (line.segment && std::abs(position.end) < std::abs(position.start))
+    return {line.end, position.end};
+  return {line.p, position.start};
+}
+
+Vec intersectionPoint(const LineParameters& parameters, const Geometry& a, const Geometry& b) {
+  const auto pa = intersectionAnchor(parameters.a, a), pb = intersectionAnchor(parameters.b, b);
+  return std::abs(pa.second) * a.directionLength <= std::abs(pb.second) * b.directionLength
+             ? pointFromAnchor(pa.first, a, pa.second)
+             : pointFromAnchor(pb.first, b, pb.second);
+}
+
+Intersection collinearOverlap(const Geometry& a, const Geometry& b, double eps) {
+  const bool xAxis = std::abs(a.rawDirection.high.x) >= std::abs(a.rawDirection.high.y);
+  const auto axis = [&](Vec p) { return xAxis ? p.x : p.y; };
+  const double component = xAxis ? a.rawDirection.high.x : a.rawDirection.high.y;
+  const double axisScale = a.directionLength / std::abs(component);
+  const double inf = std::numeric_limits<double>::infinity();
+  double lo = a.segment ? std::min(axis(a.p), axis(a.end)) : -inf;
+  double hi = a.segment ? std::max(axis(a.p), axis(a.end)) : inf;
+  if (b.segment) {
+    lo = std::max(lo, std::min(axis(b.p), axis(b.end)));
+    hi = std::min(hi, std::max(axis(b.p), axis(b.end)));
+  }
+  if ((lo - hi) * axisScale > eps)
+    return {};
+  if (std::isfinite(lo) && std::isfinite(hi) && (hi - lo) * axisScale <= eps) {
+    const double coordinate = lo + (hi - lo) * 0.5;
+    const Geometry* reference = &a;
+    Vec anchor = a.p;
+    const auto consider = [&](const Geometry& line, Vec p) {
+      if (std::abs(coordinate - axis(p)) < std::abs(coordinate - axis(anchor))) {
+        reference = &line;
+        anchor = p;
+      }
+    };
+    if (a.segment)
+      consider(a, a.end);
+    consider(b, b.p);
+    if (b.segment)
+      consider(b, b.end);
+    const auto delta = exactDifference(coordinate, axis(anchor));
+    const double direction =
+        xAxis ? reference->rawDirection.high.x : reference->rawDirection.high.y;
+    return {{pointFromAnchor(anchor, *reference, (delta.first + delta.second) / direction)}, false};
+  }
+  return {{}, true};
 }
 
 Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
   const LineParameters parameters = lineParameters(a, b);
-  const double slackA = eps / a.directionLength, slackB = eps / b.directionLength;
   if (!parameters.parallel) {
-    if ((a.segment && (parameters.a < -slackA || parameters.a > 1 + slackA)) ||
-        (b.segment && (parameters.b < -slackB || parameters.b > 1 + slackB)))
+    if (!inSegment(parameters.a, a, eps) || !inSegment(parameters.b, b, eps))
       return {};
-    return {{pointAt(a, parameters.a)}, false};
+    return {{intersectionPoint(parameters, a, b)}, false};
   }
   const ExactVec delta = exactDifference(b.p, a.p);
   if (std::abs(cross(delta, a.rawDirection)) / a.directionLength > eps)
     return {};
-  const double inf = std::numeric_limits<double>::infinity();
-  double lo = a.segment ? 0.0 : -inf;
-  double hi = a.segment ? 1.0 : inf;
-  if (b.segment) {
-    double u = collinearParameter(b.p, a), v = collinearParameter(b.end, a);
-    if (u > v)
-      std::swap(u, v);
-    lo = std::max(lo, u);
-    hi = std::min(hi, v);
-  }
-  if (lo > hi + slackA)
-    return {};
-  if (std::isfinite(lo) && std::isfinite(hi) && hi - lo <= slackA)
-    return {{pointAt(a, (lo + hi) * 0.5)}, false};
-  return {{}, true};
+  return collinearOverlap(a, b, eps);
 }
 
 Intersection lineCircle(const Geometry& line, const Geometry& circle, double eps) {
-  const double t = dot(circle.p - line.p, line.d);
-  const Vec closest = line.p + line.d * t;
-  const double d = length(closest - circle.p);
+  const Vec closest = projectedPoint(circle.p, line, false);
+  const double d = std::abs(perpendicular(circle.p, line));
   if (d > circle.radius + eps)
     return {};
   const double h = std::abs(d - circle.radius) <= eps
                        ? 0.0
                        : std::sqrt(std::max(0.0, (circle.radius - d) * (circle.radius + d)));
   Intersection result;
-  for (double u : {t - h, t + h}) {
-    if (line.segment && (u < -eps || u > line.hi + eps))
+  for (double u : {-h, h}) {
+    const Vec p{std::fma(line.d.x, u, closest.x), std::fma(line.d.y, u, closest.y)};
+    if (!inSegment(p, line, eps))
       continue;
-    const Vec p = line.p + line.d * u;
     if (result.points.empty() || length(p - result.points.front()) > eps)
       result.points.push_back(p);
   }
   return result;
 }
 
-Intersection circleCircle(const Geometry& a, const Geometry& b, double eps) {
+struct CircleRelation {
+  double outsideGap = 0, insideGap = 0, height = 0;
+};
+
+CircleRelation circleRelation(const Geometry& a, const Geometry& b) {
+  const ExactVec delta = exactDifference(b.p, a.p);
+  const double d = length(b.p - a.p);
+  const double big = std::max(a.radius, b.radius), small = std::min(a.radius, b.radius);
+  Expansion outside, inside;
+  addDot(outside, delta, delta, 1);
+  outside.addProduct(big, big, -1);
+  outside.addProduct(big, small, -2);
+  outside.addProduct(small, small, -1);
+  addDot(inside, delta, delta, -1);
+  inside.addProduct(big, big, 1);
+  inside.addProduct(big, small, -2);
+  inside.addProduct(small, small, 1);
+  const double outerPower = outside.value(), innerPower = inside.value();
+  const double innerDenominator = big - small + d;
+  return {outerPower / (d + big + small), innerDenominator > 0 ? innerPower / innerDenominator : 0,
+          d > 0 ? std::sqrt(std::max(0.0, (-outerPower / (2 * d)) * (-innerPower / (2 * d)))) : 0};
+}
+
+Intersection circleCircle(Geometry a, Geometry b, double eps) {
+  if (a.radius > b.radius ||
+      (a.radius == b.radius && (a.p.x > b.p.x || (a.p.x == b.p.x && a.p.y > b.p.y))))
+    std::swap(a, b);
+  const ExactVec delta = exactDifference(b.p, a.p);
   const double d = length(b.p - a.p);
   if (d <= eps)
     return {{}, std::abs(a.radius - b.radius) <= eps};
-  if (d > a.radius + b.radius + eps || d < std::abs(a.radius - b.radius) - eps)
+  const CircleRelation relation = circleRelation(a, b);
+  if (relation.outsideGap > eps || relation.insideGap > eps)
     return {};
-  const double t = (d * d + (a.radius - b.radius) * (a.radius + b.radius)) / (2.0 * d);
+  Expansion numerator;
+  addDot(numerator, delta, delta, 1);
+  numerator.addProduct(a.radius, a.radius, 1);
+  numerator.addProduct(b.radius, b.radius, -1);
+  const double t = numerator.value() / (2 * d);
   const Vec dir = (b.p - a.p) * (1.0 / d);
-  const Vec center = a.p + dir * t;
-  const double h = std::sqrt(std::max(0.0, (a.radius - t) * (a.radius + t)));
+  const Vec center{std::fma(dir.x, t, a.p.x), std::fma(dir.y, t, a.p.y)};
+  const double h = relation.height;
   const Vec offset = Vec{-dir.y, dir.x} * h;
   if (h <= eps)
     return {{center}, false};
@@ -299,7 +395,7 @@ Intersection intersect(Geometry a, Geometry b, double eps) {
     else if (b.kind == Geometry::Line)
       contains = onLine(a.p, b, eps);
     else
-      contains = std::abs(length(a.p - b.p) - b.radius) <= eps;
+      contains = std::abs(circleRelation(a, b).outsideGap) <= eps;
     return contains ? Intersection{{a.p}, false} : Intersection{};
   }
   if (a.kind == Geometry::Line)
@@ -315,11 +411,11 @@ double distance(Geometry a, Geometry b) {
       return length(a.p - b.p);
     if (b.kind == Geometry::Line)
       return pointLineDistance(a.p, b);
-    return std::abs(length(a.p - b.p) - b.radius);
+    return std::abs(circleRelation(a, b).outsideGap);
   }
   if (a.kind == Geometry::Circle) {
-    const double d = length(a.p - b.p);
-    return std::max({0.0, d - a.radius - b.radius, std::abs(a.radius - b.radius) - d});
+    const CircleRelation relation = circleRelation(a, b);
+    return std::max({0.0, relation.outsideGap, relation.insideGap});
   }
   if (b.kind == Geometry::Circle) {
     const double minRadius = pointLineDistance(b.p, a);
@@ -332,8 +428,7 @@ double distance(Geometry a, Geometry b) {
   if (!parameters.parallel) {
     if (!a.segment && !b.segment)
       return 0.0;
-    if ((!a.segment || (parameters.a >= 0 && parameters.a <= 1)) &&
-        (!b.segment || (parameters.b >= 0 && parameters.b <= 1)))
+    if (inSegment(parameters.a, a, 0) && inSegment(parameters.b, b, 0))
       return 0.0;
   } else if (!a.segment && !b.segment) {
     return pointLineDistance(a.p, b);
@@ -355,6 +450,8 @@ double clearance(Geometry a, Geometry b) {
     return pointLineDistance(a.p, b);
   if (a.kind == Geometry::Line)
     return pointLineDistance(b.p, a) - b.radius;
+  if (a.kind == Geometry::Circle || b.kind == Geometry::Circle)
+    return circleRelation(a, b).outsideGap;
   return length(a.p - b.p) - a.radius - b.radius;
 }
 
@@ -715,10 +812,7 @@ void registerPackOps(Registry& r) {
       return bad("需要一个 Point2D 和一个 Line2D");
     if (point.unit != line.unit)
       return bad("点和直线的单位必须一致", "line");
-    double t = dot(point.p - line.p, line.d);
-    if (line.segment && p.flag("clampToSegment"))
-      t = std::clamp(t, 0.0, line.hi);
-    const Vec projection = line.p + line.d * t;
+    const Vec projection = projectedPoint(point.p, line, p.flag("clampToSegment"));
     if (!representable(projection))
       return bad("投影点超出 Point2D 范围");
     Point2D result;
