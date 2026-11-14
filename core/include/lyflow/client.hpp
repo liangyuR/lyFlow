@@ -810,7 +810,8 @@ inline void Client::loadW(const std::wstring& dllPath) {
   if (!length || length >= needed)
     throw ClientError("无法解析 DLL 绝对路径");
   absolute.resize(length);
-  handle_ = ::LoadLibraryExW(absolute.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+  handle_ = ::LoadLibraryExW(absolute.c_str(), nullptr,
+                             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
   if (!handle_) {
     throw ClientError("加载 lyflow_core.dll 失败，GetLastError=" +
                       std::to_string(static_cast<unsigned long>(::GetLastError())));

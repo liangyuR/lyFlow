@@ -557,14 +557,21 @@ macro_rules! sym_opt {
 /// Windows 仅从 DLL 所在目录解析非系统运行依赖。
 #[cfg(windows)]
 fn open_library(path: &Path) -> Result<Library, libloading::Error> {
-    use libloading::os::windows::{Library as WinLibrary, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR};
+    use libloading::os::windows::{
+        Library as WinLibrary, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }
-        .map(Library::from)
+    unsafe {
+        WinLibrary::load_with_flags(
+            &abs,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+        )
+    }
+    .map(Library::from)
 }
 
 #[cfg(not(windows))]
@@ -1680,7 +1687,11 @@ mod load_contract_tests {
                 Some("") => "#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char { std::ptr::null() }".to_owned(),
                 Some(value) => format!("#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char {{ b\"{value}\\0\".as_ptr().cast() }}"),
             };
-            let source = format!("{abi_export}\n#[no_mangle] pub extern \"C\" fn lyflow_version() -> *const std::ffi::c_char {{ b\"{engine}\\0\".as_ptr().cast() }}");
+            let mut source = format!("{abi_export}\n#[no_mangle] pub extern \"C\" fn lyflow_version() -> *const std::ffi::c_char {{ b\"{engine}\\0\".as_ptr().cast() }}");
+            if cfg!(windows) && name == "matching" {
+                source = source.replace("#[no_mangle] pub extern \"C\" fn lyflow_version()", "#[link(name = \"winmm\")] extern \"system\" { fn timeGetTime() -> u32; }\n#[no_mangle] pub extern \"C\" fn lyflow_version()");
+                source = source.replace("{ b\"", "{ let _ = unsafe { timeGetTime() }; b\"");
+            }
             let input = fixtures.0.join(format!("{name}.rs"));
             let library = fixtures
                 .0

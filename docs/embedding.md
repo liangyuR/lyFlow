@@ -62,6 +62,8 @@ pwsh -File scripts/install-lyflow.ps1 -Prefix D:\lyflow-runtime
 `LYFLOW_INSTALL_PREFIX` 环境变量等价于 `-Prefix`。脚本最后会自检布局，
 少一样就报错 —— 缺一个依赖 DLL 的表现是宿主那边一句「找不到模块」，离现场很远。
 
+Windows客户端使用 `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`：非系统依赖放在所选DLL同目录，系统组件从System32解析；不依赖CWD或PATH。OpenCV5迁移需同步替换头文件、import library和完整DLL集合，禁止混用4/5运行库。
+
 `bin/` 要**整目录**带进宿主的安装包：
 
 ```cmake
@@ -71,7 +73,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow 1.3.3 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 1.3.9 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 

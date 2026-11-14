@@ -3,6 +3,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "lyflow_cv/compat.h"
+
 #include <nlohmann/json.hpp>
 
 #include "lyflow/data.h"

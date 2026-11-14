@@ -14,6 +14,7 @@
 #include "lyflow/operator.h"
 #include "lyflow/overlay.h"
 #include "lyflow/registry.h"
+#include "lyflow_cv/compat.h"
 #include "lyflow_cv/plane_calib.h"
 
 namespace lyflow::packs::glue {

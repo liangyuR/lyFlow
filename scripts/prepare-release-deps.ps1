@@ -1,6 +1,7 @@
 #Requires -Version 7.0
 param(
     [switch]$SkipDependencySetup,
+    [switch]$SkipVisionBuild,
     [switch]$AllowBuild,
     [string]$InstallRoot,
     [string]$BinaryCache,
@@ -101,18 +102,11 @@ foreach ($property in $config.vcpkgVersions.PSObject.Properties) {
     if ($port -and $port -ne '0') { $version += "#$port" }
     if ($version -ne $property.Value) { throw "$($property.Name) 版本不符：$version，应为 $($property.Value)" }
 }
-foreach ($feature in @('calib3d', 'fs', 'intrinsics', 'jpeg', 'png', 'thread')) {
-    if (-not @($records | Where-Object { $_ -match '(?m)^Package: opencv4\r?$' -and $_ -match "(?m)^Feature: $feature\r?$" -and $_ -match "(?m)^Architecture: $($config.triplet)\r?$" }).Count) { throw "OpenCV 缺少 feature：$feature" }
-}
 $ortName = "onnxruntime-win-x64-$($config.onnxruntimeVersion)"
 if (-not $SkipDependencySetup -or -not $env:LYFLOW_ONNXRUNTIME_ROOT) { $env:LYFLOW_ONNXRUNTIME_ROOT = Join-Path $root "third_party/onnxruntime/$ortName" }
 if (-not (Test-Path -LiteralPath (Join-Path $env:LYFLOW_ONNXRUNTIME_ROOT 'lib/onnxruntime.lib'))) {
     if ($SkipDependencySetup) { throw '固定 ONNX Runtime 未准备；请先正常运行依赖准备，或设置 LYFLOW_ONNXRUNTIME_ROOT' }
-    $downloadRoot = Join-Path $root 'build/release-tools/downloads'
-    New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
-    $archive = Join-Path $downloadRoot "$ortName.zip"
-    Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v$($config.onnxruntimeVersion)/$ortName.zip" -OutFile $archive
-    Expand-Archive -LiteralPath $archive -DestinationPath (Split-Path -Parent $env:LYFLOW_ONNXRUNTIME_ROOT) -Force
+    & (Join-Path $PSScriptRoot 'fetch-onnxruntime.ps1')
 }
 foreach ($file in @('lib/onnxruntime.lib', 'lib/onnxruntime.dll', 'lib/onnxruntime_providers_shared.dll', 'include/onnxruntime_c_api.h', 'VERSION_NUMBER', 'LICENSE', 'ThirdPartyNotices.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $env:LYFLOW_ONNXRUNTIME_ROOT $file) -PathType Leaf)) { throw "ONNX Runtime 缺少 $file" }
@@ -123,4 +117,5 @@ $matchingArguments = @((Join-Path $PSScriptRoot 'fetch-matching-deps.py'))
 if ($SkipDependencySetup) { $matchingArguments += '--offline' }
 & python @matchingArguments
 if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
+& (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -Offline:$SkipDependencySetup -SkipBuild:($SkipDependencySetup -or $SkipVisionBuild) -ReleaseBuild
 Write-Host "固定依赖已验证：$($config.triplet)，vcpkg $revision，ONNX Runtime $ortVersion"

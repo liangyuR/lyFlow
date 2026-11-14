@@ -32,6 +32,9 @@ void registerImageP1Circles(Registry& r);
 void registerImageHighlights(Registry& r);
 void registerP2ModelProjection(Registry& r);
 void registerP2HeightExtraction(Registry& r);
+void registerP3Markers(Registry& r);
+void registerP3ShapeMatching(Registry& r);
+void registerP3Workspace(Registry& r);
 
 } // namespace lyflow::ops
 

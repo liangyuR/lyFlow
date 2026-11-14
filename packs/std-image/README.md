@@ -1,10 +1,11 @@
 # packs/std-image
 
-图像域的标准算子包，当前版本 **0.5.0**（[文档中心](../../docs/README.md)、[ADR-0026](../../docs/adr/0026-image-data-domain.md)）。
-默认开，依赖 vcpkg 的 OpenCV 4（core / imgproc / imgcodecs / calib3d）：
+图像域的标准算子包，当前版本 **0.6.0**（[文档中心](../../docs/README.md)、[ADR-0026](../../docs/adr/0026-image-data-domain.md)）。
+默认开，依赖固定源码 OpenCV 5.1.0（core / imgproc / imgcodecs / geometry / objdetect），工作空间文件使用 yaml-cpp：
 
 ```powershell
-C:\vcpkg\vcpkg.exe install opencv4:x64-windows
+./scripts/build-vision-deps.ps1
+C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows
 ```
 
 ## 边界（照 ADR-0005）
@@ -145,3 +146,5 @@ YOLOX-Nano 使用独立 `image.yolox_preprocess/decode` 与 modelContract=yolox-
 输入为原生 `Image`，可选像素 `Box2D roi` 或单个 `vision.Pose2D.v1 region`，两种ROI互斥；旋转区域的单位/参考帧必须匹配，缺省为全图。输出旋转区域使用 `vision.Poses2D.v1`，不把轴对齐原生Box2D描述成旋转矩形。
 
 输出端口为 `instances`（旋转区域）、`segments`（`image.Highlights.v1`有限线段/质量）、`mask`（u8候选亮脊图）和 `image`（叠图）。分组记录与Pose共享ID，Record中的坐标、长度、RMS和最大正交误差maxError使用原图像素；像素图保留Image.scale，大数组不进入JSON。无目标返回有效空集合，非法输入和预算超限返回诊断。质量分数基于覆盖率、归一化对比度和拟合残差，不是识别概率；完整字段、参数和显式资源预算见分析页，安装后的可用入口以manifest为准。
+
+新增 `image.marker_pose`、`workspace.load`、`image.shape_template` 和 `image.shape_match`，契约与限制见[Marker](../../docs/p3-analysis-markers.md)、[工作空间](../../docs/p3-analysis-workspace.md)和[梯度形状匹配](../../docs/p3-analysis-shape.md)。

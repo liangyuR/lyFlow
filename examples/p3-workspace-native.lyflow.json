@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "p3-workspace-native",
+  "name": "P3 原生帧树与体积往返",
+  "nodes": [
+    {
+      "id": "workspace",
+      "op": "workspace.load",
+      "params": {
+        "path": "p3-workspace.json",
+        "format": "lyflow-json-v1",
+        "workspaceId": "bin"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "local",
+      "op": "pose.transform_3d",
+      "params": {
+        "targetFrame": "bin_frame"
+      },
+      "ui": {
+        "position": {
+          "x": 330,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "roundtrip",
+      "op": "pose.transform_3d",
+      "params": {
+        "sourceFrame": "bin_frame"
+      },
+      "ui": {
+        "position": {
+          "x": 660,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "workspace",
+        "port": "region"
+      },
+      "to": {
+        "node": "local",
+        "port": "poses"
+      },
+      "id": "e0"
+    },
+    {
+      "from": {
+        "node": "workspace",
+        "port": "toWorkspace"
+      },
+      "to": {
+        "node": "local",
+        "port": "transform"
+      },
+      "id": "e1"
+    },
+    {
+      "from": {
+        "node": "local",
+        "port": "poses"
+      },
+      "to": {
+        "node": "roundtrip",
+        "port": "poses"
+      },
+      "id": "e2"
+    },
+    {
+      "from": {
+        "node": "workspace",
+        "port": "fromWorkspace"
+      },
+      "to": {
+        "node": "roundtrip",
+        "port": "transform"
+      },
+      "id": "e3"
+    }
+  ],
+  "outputs": {
+    "region": {
+      "node": "workspace",
+      "port": "region"
+    },
+    "localRegion": {
+      "node": "local",
+      "port": "poses"
+    },
+    "roundtripRegion": {
+      "node": "roundtrip",
+      "port": "poses"
+    },
+    "fromWorkspace": {
+      "node": "workspace",
+      "port": "fromWorkspace"
+    },
+    "toWorkspace": {
+      "node": "workspace",
+      "port": "toWorkspace"
+    },
+    "workspace": {
+      "node": "workspace",
+      "port": "workspace"
+    }
+  },
+  "params": {
+    "targetFrame": {
+      "type": "string",
+      "default": "camera",
+      "binds": ["workspace.targetFrame", "local.sourceFrame", "roundtrip.targetFrame"]
+    }
+  }
+}

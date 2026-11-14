@@ -2,7 +2,7 @@
 #include <cmath>
 #include <vector>
 
-#include <opencv2/calib3d.hpp>
+#include "lyflow_cv/compat.h"
 #include <opencv2/imgproc.hpp>
 
 #include "lyflow/overlay.h"

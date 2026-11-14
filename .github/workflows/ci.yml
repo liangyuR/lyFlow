@@ -286,17 +286,40 @@ jobs:
   vision:
     name: 值 / 位姿 / 几何 / 图像算子与组合流程
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装图像依赖
+      - name: 安装构建工具与 YAML 依赖
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ninja-build libopencv-dev
+          sudo apt-get install --no-install-recommends -y ninja-build libyaml-cpp-dev
 
-      - name: 配置通用视觉算子测试
-        run: cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@v4
+        id: vision-cache
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: opencv5-ubuntu-24.04-x64-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
+      - name: 正式脚本构建、验证 OpenCV 并配置视觉算子
+        shell: pwsh
+        run: |
+          ./scripts/build-vision-deps.ps1 -Parallel 3 -SkipBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
+          ./tests/release/test-build-vision-deps.ps1
+          foreach ($name in @('OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN')) {
+            "$name=$([Environment]::GetEnvironmentVariable($name, 'Process'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          $libraries = $env:LYFLOW_OPENCV_BIN
+          if ($env:LD_LIBRARY_PATH) { $libraries += [IO.Path]::PathSeparator + $env:LD_LIBRARY_PATH }
+          "LD_LIBRARY_PATH=$libraries" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
+          if ($LASTEXITCODE -ne 0) { throw 'Linux 视觉算子配置失败' }
 
       - name: 编译并自检算子契约
         run: |
@@ -315,6 +338,8 @@ jobs:
             build/vision/test-results.xml
             build/vision/Testing/Temporary/*.log
             build/vision/CMakeFiles/CMakeConfigureLog.yaml
+            build/vision-opencv/*.log
+            build/vision-deps/prepared.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -363,7 +388,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
+          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-glue-gap-v3
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-
 
@@ -371,6 +396,14 @@ jobs:
         with:
           path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.dependency.outputs.ort }}
           key: onnxruntime-win-x64-cpu-${{ steps.dependency.outputs.ort }}-v1
+
+      - uses: actions/cache/restore@v4
+        id: vision-cache
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: opencv5-windows-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
 
       - name: 准备固定公开模型和测试图
         shell: pwsh
@@ -395,11 +428,12 @@ jobs:
           LYFLOW_VCPKG_FEED_MODE: read
           CMAKE_BUILD_PARALLEL_LEVEL: '2'
         run: |
-          ./scripts/prepare-release-deps.ps1
+          ./scripts/prepare-release-deps.ps1 -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
+          ./tests/release/test-build-vision-deps.ps1
           $env:LYFLOW_STD_PACKS = '1'
           $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
           $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
-          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT"
+          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
           cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
@@ -407,6 +441,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'P1 算子契约失败' }
           ctest --test-dir build/p1-native --output-on-failure --no-tests=error --output-junit test-results.xml
           if ($LASTEXITCODE -ne 0) { throw 'P1 点云/检测组合回归失败' }
+
+      - name: 保存已验证的 OpenCV 安装
+        if: github.ref == 'refs/heads/main' && steps.vision-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: ${{ steps.vision-cache.outputs.cache-primary-key }}
 
       - name: 保存 P1 诊断
         if: failure()
@@ -418,5 +461,6 @@ jobs:
             build/p1-native/Testing/Temporary/*.log
             build/p1-native/CMakeFiles/CMakeConfigureLog.yaml
             build/release-dependency-diagnostics/
+            build/vision-opencv/*.log
           if-no-files-found: ignore
           retention-days: 7

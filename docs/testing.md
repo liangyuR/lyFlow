@@ -88,3 +88,10 @@ CI 的 `vision` 在 Linux 运行无PCL的值/几何/位姿/图像包；`vision-n
 检测门禁比较执行器、C ABI和动态C++ SDK输出，对公开人像、猫图和空背景验证类别与有效空集合；点云/位姿有完整组合图与失败门限回归。公开数据验证不等于客户模型质量或现场节拍验收。
 
 若P1原生job在编译前报固定依赖缺包，先比对失败诊断中的 `environment.json` 和 `*abi_info.txt`。Windows runner 更新可能替换相同 MSVC toolset 目录中的编译器文件，改变 vcpkg 的实际编译器身份及整张依赖图 ABI；固定目录名不能证明既有二进制缓存仍适用。此时在可信 main 上运行现有 `Windows release` 手动入口，设置 `rebuild_deps=true`、`dependencies_only=true`，仅预热依赖并空目录验证 NuGet 恢复，再重跑失败的PR检查。不要降低PCL版本、跳过P1测试或向普通PR job开放依赖源码编译。
+
+
+## P2 标定、形状与稳定依赖门禁
+
+P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，跨接口组合位于core/tests/integration/p3_calibration.cpp与p3_shape.cpp。形状用真实大于4MP的源图触发Preview，检查ROI→Box2D→模型/图像尺度和原始坐标；手工设置Image.scale的直接compute测试不能替代该调度链。Marker与工作空间分别检查相机K/D、米制帧、双向体积及原生精度。
+
+默认交付依赖来源以[稳定版本审计](dependency-stable-audit.md)为准。OpenCV5.1的Windows和LinuxCI使用同一固定源码与最小profile；Windows发布仍锁定14.44工具链。源码校验、受管安装记录及licenses全部通过后才能跳过编译，命中缓存名称本身不代表合格。Rust/C++加载契约用真实依赖WINMM的独立DLL检查System32解析，运行库的其他DLL仍不能从CWD/PATH补齐。

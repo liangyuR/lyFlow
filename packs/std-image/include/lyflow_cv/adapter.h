@@ -11,6 +11,7 @@
 
 #include <opencv2/core.hpp>
 
+#include "lyflow_cv/compat.h"
 #include "lyflow/data.h"
 
 namespace lyflow::cvx {

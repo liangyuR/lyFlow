@@ -1,7 +1,7 @@
 #include <memory>
 #include <mutex>
 
-#include <opencv2/calib3d.hpp>
+#include "lyflow_cv/compat.h"
 
 #include "lyflow/pose.h"
 #include "p1_common.h"
@@ -166,10 +166,9 @@ Status warp(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx
       (input->depth == PixelDepth::F32 && std::abs(border) > std::numeric_limits<float>::max()))
     return img::badParam("输出尺寸、平面原点或像素密度非法", "width");
   cv::Mat h(3, 3, CV_64F, plane.H.data());
-  const cv::Mat target = (cv::Mat_<double>(3, 3) << pixelsPerUnit, 0, -origin[0] * pixelsPerUnit, 0,
-                          pixelsPerUnit, -origin[1] * pixelsPerUnit, 0, 0, 1);
-  const cv::Mat source =
-      (cv::Mat_<double>(3, 3) << input->scale, 0, 0, 0, input->scale, 0, 0, 0, 1);
+  const cv::Mat target(cv::Matx33d(pixelsPerUnit, 0, -origin[0] * pixelsPerUnit, 0, pixelsPerUnit,
+                                   -origin[1] * pixelsPerUnit, 0, 0, 1));
+  const cv::Mat source(cv::Matx33d(input->scale, 0, 0, 0, input->scale, 0, 0, 0, 1));
   const cv::Mat mapping = target * h * source;
   if (!cv::checkRange(mapping))
     return img::badParam("透视变换系数超出有限范围", "pixelsPerUnit");

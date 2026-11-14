@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "unit": "m",
+  "rootFrame": "world",
+  "frames": [
+    {
+      "id": "bin_frame",
+      "parent": "world",
+      "transform": [1, 0, 0, 0.1, 0, 1, 0, 0.2, 0, 0, 1, 0, 0, 0, 0, 1]
+    },
+    {
+      "id": "camera",
+      "parent": "world",
+      "transform": [1, 0, 0, 0.2, 0, 1, 0, -0.1, 0, 0, 1, 0.3, 0, 0, 0, 1]
+    }
+  ],
+  "workspaces": [
+    {
+      "id": "bin",
+      "frame": "bin_frame",
+      "size": [0.8, 0.6, 1.2],
+      "anchor": "bottom"
+    }
+  ]
+}

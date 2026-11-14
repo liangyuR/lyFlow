@@ -16,7 +16,7 @@ C ABI 返回的视图在释放对应 handle 前有效。编辑器 Transport 的 
 
 ## 依赖
 
-onnxruntime 1.19.2（win-x64）。构建前准备一份：
+onnxruntime 1.32.0（win-x64）。构建前准备一份：
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1

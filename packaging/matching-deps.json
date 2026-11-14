@@ -1,18 +1,19 @@
 {
   "schemaVersion": 1,
-  "patchRevision": 1,
+  "patchRevision": 4,
   "assets": [
     {
       "name": "kiss-matcher",
       "repository": "MIT-SPARK/KISS-Matcher",
-      "revision": "8b58b118e00c7a5a22448741f8d956d638a44ae2",
-      "url": "https://codeload.github.com/MIT-SPARK/KISS-Matcher/zip/8b58b118e00c7a5a22448741f8d956d638a44ae2",
-      "archive": "kiss-matcher.zip",
-      "bytes": 266622,
-      "sha256": "43b584ba20f5b197d14c7ce075c298110ca9ccd6a55f8b0734733ee1988eb71f",
-      "patch": "KISS-Matcher-8b58b118e00c7a5a22448741f8d956d638a44ae2.patch",
+      "revision": "e3440b63340af7414ebd0fdde04e40f02ff4e7d2",
+      "url": "https://codeload.github.com/MIT-SPARK/KISS-Matcher/zip/refs/tags/v1.0.2",
+      "archive": "kiss-matcher-v1.0.2.zip",
+      "bytes": 255035,
+      "sha256": "d6f7d44974c6be66cfeaacbc25203fad2b083065dc694ac92b51d4c8ef8a48cb",
+      "patch": "KISS-Matcher-e3440b63340af7414ebd0fdde04e40f02ff4e7d2.patch",
       "license": "MIT",
-      "licenseFiles": ["LICENSE", "cpp/kiss_matcher/3rdparty/tsl_robin/LICENSE"]
+      "licenseFiles": ["LICENSE", "cpp/kiss_matcher/3rdparty/tsl_robin/LICENSE"],
+      "tag": "v1.0.2"
     },
     {
       "name": "robin",
@@ -51,12 +52,12 @@
     {
       "name": "tbb",
       "repository": "uxlfoundation/oneTBB",
-      "revision": "0c0ff192a2304e114bc9e6557582dfba101360ff",
-      "tag": "v2022.0.0",
-      "url": "https://codeload.github.com/oneapi-src/oneTBB/zip/refs/tags/v2022.0.0",
-      "archive": "tbb.zip",
-      "bytes": 3447141,
-      "sha256": "36640f2217d2aa054aaf3098eee7e42bf02873da2dd8075919e994b032c639b4",
+      "revision": "41158a44ab3fb7ac5df7f99ef82626c87607447f",
+      "tag": "v2023.2.0",
+      "url": "https://codeload.github.com/uxlfoundation/oneTBB/zip/refs/tags/v2023.2.0",
+      "archive": "tbb-v2023.2.0.zip",
+      "bytes": 9206000,
+      "sha256": "6a7cf5f1873afd6efb82af3de40ae08f4898cd4fe7de5d7bf96cd24a6546cc9b",
       "license": "Apache-2.0",
       "licenseFiles": ["LICENSE.txt", "third-party-programs.txt"]
     }

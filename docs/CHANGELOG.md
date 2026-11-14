@@ -1,6 +1,12 @@
 # 版本变更
 
-## 1.3.8（开发中）
+## 1.3.9（开发中）
+
+- P2阶段3新增Marker解码/PnP、显式工作空间帧文件，以及原生特征Tensor的梯度形状模板/多实例匹配；输入只读，输出通过单位、坐标帧、歧义和质量门控。
+- 默认OpenCV升级到5.1.0固定源码最小模块，迁移geometry/objdetect接口；ONNX Runtime CPU升级1.32.0、oneTBB升级2023.2.0，KISS固定正式v1.0.2。PCL1.15.1已为最新稳定版；完整版本依据见[依赖审计](dependency-stable-audit.md)。
+- std-image0.6.0、std-ml0.2.1、std-pointcloud0.3.1；产品与ABI字符串1.3.9，复用现有端口和C ABI，保持1.3系列兼容。STag仅交付MIT字典，自有解码器不编入原ED/LSD源码。
+
+## 1.3.8
 
 - P2 阶段2新增高度/清框/平面片规则、正交深度高度图，以及加权几何约束拟合和六轴局部位姿搜索。
 - Windows CPU 三维匹配采用固定修订的 KISS-Matcher max-core/GNC 与 small_gicp GICP；新增模型模板、原场景 ROI、多实例/显式对称质量、点云边缘、可见面采样与标定投影组合。FoundationPose 单列可选 GPU 方向，本轮不编入运行库。

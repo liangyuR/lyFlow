@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "id": "p3-marker-workspace",
+  "name": "P3 识别码像素到工作空间位姿",
+  "nodes": [
+    {
+      "id": "image",
+      "op": "io.load_image",
+      "params": {
+        "path": "p3-marker-scene.png",
+        "mode": "gray"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {
+        "path": "p3-camera.json"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 230
+        }
+      }
+    },
+    {
+      "id": "decode",
+      "op": "image.marker_pose",
+      "params": {
+        "dictionary": "DICT_4X4_50",
+        "maxRms": 2,
+        "rejectAmbiguous": true
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "workspace",
+      "op": "workspace.load",
+      "params": {
+        "path": "p3-workspace.json",
+        "format": "lyflow-json-v1",
+        "workspaceId": "bin",
+        "targetFrame": "camera"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 280
+        }
+      }
+    },
+    {
+      "id": "local",
+      "op": "pose.transform_3d",
+      "params": {
+        "sourceFrame": "camera",
+        "targetFrame": "bin_frame"
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "image",
+        "port": "image"
+      },
+      "to": {
+        "node": "decode",
+        "port": "image"
+      },
+      "id": "e0"
+    },
+    {
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "decode",
+        "port": "calib"
+      },
+      "id": "e1"
+    },
+    {
+      "from": {
+        "node": "decode",
+        "port": "instances"
+      },
+      "to": {
+        "node": "local",
+        "port": "poses"
+      },
+      "id": "e2"
+    },
+    {
+      "from": {
+        "node": "workspace",
+        "port": "toWorkspace"
+      },
+      "to": {
+        "node": "local",
+        "port": "transform"
+      },
+      "id": "e3"
+    }
+  ],
+  "outputs": {
+    "cameraPoses": {
+      "node": "decode",
+      "port": "instances"
+    },
+    "workspacePoses": {
+      "node": "local",
+      "port": "poses"
+    },
+    "detections": {
+      "node": "decode",
+      "port": "detections"
+    },
+    "display": {
+      "node": "decode",
+      "port": "image"
+    },
+    "region": {
+      "node": "workspace",
+      "port": "region"
+    },
+    "workspace": {
+      "node": "workspace",
+      "port": "workspace"
+    }
+  },
+  "params": {
+    "markerSize": {
+      "type": "float",
+      "unit": "m",
+      "default": 0.1,
+      "binds": ["decode.markerSize"]
+    }
+  }
+}

@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "id": "p3-shape-cad",
+  "name": "P3 CAD采样投影与梯度形状匹配",
+  "nodes": [
+    {
+      "id": "scene",
+      "op": "io.load_image",
+      "params": {
+        "path": "p3-shape-L-scene.png",
+        "mode": "gray"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 270
+        }
+      }
+    },
+    {
+      "id": "cad_l",
+      "op": "io.load_cloud",
+      "params": {
+        "path": "p3-cad-L.stl",
+        "unit": "m",
+        "frame": "camera",
+        "samples": 150000,
+        "maxPoints": 200000,
+        "seed": 7
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "depth_l",
+      "op": "cloud.to_depth_image",
+      "params": {
+        "width": 128,
+        "height": 128,
+        "fx": 600,
+        "fy": 600,
+        "cx": 64,
+        "cy": 64,
+        "depth": "f32",
+        "depthScale": 1
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "range_l",
+      "op": "image.range_mask",
+      "params": {
+        "space": "gray",
+        "lower": [0.5, 0, 0],
+        "upper": [1.5, 0, 0]
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "template_l",
+      "op": "image.shape_template",
+      "params": {
+        "frame": "cad-projection",
+        "maxFeatures": 96,
+        "minContrast": 0.05,
+        "featureSpacing": 2.5
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "match_l",
+      "op": "image.shape_match",
+      "params": {
+        "frame": "image",
+        "angleMin": 0,
+        "angleMax": 0,
+        "scaleMin": 1,
+        "scaleMax": 1,
+        "minCoverage": 0.85,
+        "minScore": 0.7,
+        "maxRmse": 1.5,
+        "maxDistance": 2,
+        "maxDetections": 4,
+        "maxCandidates": 4096
+      },
+      "ui": {
+        "position": {
+          "x": 1140,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "cad_l",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "depth_l",
+        "port": "cloud"
+      },
+      "id": "e0"
+    },
+    {
+      "from": {
+        "node": "depth_l",
+        "port": "depth"
+      },
+      "to": {
+        "node": "range_l",
+        "port": "image"
+      },
+      "id": "e1"
+    },
+    {
+      "from": {
+        "node": "range_l",
+        "port": "mask"
+      },
+      "to": {
+        "node": "template_l",
+        "port": "image"
+      },
+      "id": "e2"
+    },
+    {
+      "from": {
+        "node": "scene",
+        "port": "image"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "image"
+      },
+      "id": "e3"
+    },
+    {
+      "from": {
+        "node": "template_l",
+        "port": "features"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "features"
+      },
+      "id": "e4"
+    },
+    {
+      "from": {
+        "node": "template_l",
+        "port": "model"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "model"
+      },
+      "id": "e5"
+    }
+  ],
+  "outputs": {
+    "instances": {
+      "node": "match_l",
+      "port": "instances"
+    },
+    "quality": {
+      "node": "match_l",
+      "port": "quality"
+    },
+    "display": {
+      "node": "match_l",
+      "port": "image"
+    },
+    "model": {
+      "node": "template_l",
+      "port": "model"
+    },
+    "features": {
+      "node": "template_l",
+      "port": "features"
+    },
+    "depth": {
+      "node": "depth_l",
+      "port": "depth"
+    },
+    "silhouette": {
+      "node": "range_l",
+      "port": "mask"
+    }
+  },
+  "params": {
+    "modelId": {
+      "type": "string",
+      "default": "cad-L",
+      "binds": ["template_l.id"]
+    }
+  }
+}

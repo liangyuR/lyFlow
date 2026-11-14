@@ -4,4 +4,6 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "lyflow_cv/compat.h"
+
 #include <nlohmann/json.hpp>
