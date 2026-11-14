@@ -1,26 +1,15 @@
 {
   "name": "lyflow-release",
   "version-string": "1",
-  "builtin-baseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
+  "builtin-baseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd",
   "dependencies": [
     {
       "name": "pcl",
       "default-features": false
     },
-    {
-      "name": "opencv4",
-      "default-features": false,
-      "features": [
-        "calib3d",
-        "fs",
-        "intrinsics",
-        "jpeg",
-        "png",
-        "thread"
-      ]
-    },
     "boost-filesystem",
     "eigen3",
-    "yaml-cpp"
+    "yaml-cpp",
+    "lz4"
   ]
 }

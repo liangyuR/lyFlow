@@ -40,6 +40,5 @@ lyflow_op_pack(
 if(LYFLOW_PACK_ENABLED AND NOT TARGET lyflow_opencv_support)
   message(FATAL_ERROR
     "glue 包要 lyflow_opencv_support —— 它由 packs/std-image 提供，别把 LYFLOW_STD_PACKS 关掉；"
-    "OpenCV 没装的话先跑：\n"
-    "  C:\\vcpkg\\vcpkg.exe install \"opencv4[core,jpeg,png,calib3d,fs,intrinsics,thread]:x64-windows\"")
+    "OpenCV 未准备时先运行 scripts/build-vision-deps.ps1 并将其 OpenCV_DIR 传给 CMake。")
 endif()

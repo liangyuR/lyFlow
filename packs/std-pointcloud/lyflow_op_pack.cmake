@@ -51,7 +51,7 @@ file(GLOB STD_PC_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         std-pointcloud
-  VERSION      0.3.0
+  VERSION      0.3.1
   DEFAULT      ON
   SOURCES      ${STD_PC_SOURCES}
   TEST_SOURCES ${STD_PC_TESTS}

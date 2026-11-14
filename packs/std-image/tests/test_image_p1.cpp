@@ -5,7 +5,7 @@
 #include <fstream>
 #include <limits>
 
-#include <opencv2/calib3d.hpp>
+#include "lyflow_cv/compat.h"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -147,8 +147,8 @@ TEST_CASE("P1 color adjustment uses RGB hue and preserves alpha and integer dept
 
 TEST_CASE("P1 flat field corrects spatial gain and rejects invalid division") {
   test::OpCall c;
-  cv::Mat source = (cv::Mat_<std::uint8_t>(1, 2) << 50, 100);
-  cv::Mat reference = (cv::Mat_<std::uint8_t>(1, 2) << 100, 200);
+  cv::Mat source(cv::Matx<std::uint8_t, 1, 2>(50, 100));
+  cv::Mat reference(cv::Matx<std::uint8_t, 1, 2>(100, 200));
   c.inputs = {{"image", image(source)}, {"reference", image(reference)}};
   REQUIRE(c.run("image.shading_correct").ok);
   CHECK(c.outputs.at("image").asImage()->at(0, 0, 0) == 75);
@@ -287,8 +287,8 @@ TEST_CASE(
   for (int y = 0; y < 4; ++y)
     for (int x = 0; x < 5; ++x)
       object.emplace_back(x * 0.02, y * 0.02, 0);
-  cv::Mat rvec = (cv::Mat_<double>(3, 1) << 0.2, -0.1, 0.03);
-  cv::Mat tvec = (cv::Mat_<double>(3, 1) << -0.02, -0.01, 0.6);
+  cv::Mat rvec(cv::Vec3d(0.2, -0.1, 0.03));
+  cv::Mat tvec(cv::Vec3d(-0.02, -0.01, 0.6));
   std::vector<cv::Point2d> pixels;
   cv::projectPoints(object, rvec, tvec, k, cv::Mat(), pixels);
   Json points = Json::array();
@@ -545,8 +545,8 @@ TEST_CASE(
   cv::Mat k(3, 3, CV_64F);
   const auto entries = calib.data["cameraMatrix"].get<std::vector<double>>();
   std::copy(entries.begin(), entries.end(), k.ptr<double>());
-  cv::Mat rotation = (cv::Mat_<double>(3, 1) << 0.35, -0.2, 0.02);
-  cv::Mat translation = (cv::Mat_<double>(3, 1) << -0.04, -0.03, 0.5);
+  cv::Mat rotation(cv::Vec3d(0.35, -0.2, 0.02));
+  cv::Mat translation(cv::Vec3d(-0.04, -0.03, 0.5));
   std::vector<cv::Point3d> vertices{
       {-0.02, -0.02, 0}, {0.1, -0.02, 0}, {0.1, 0.08, 0}, {-0.02, 0.08, 0}};
   std::vector<cv::Point2d> projected;

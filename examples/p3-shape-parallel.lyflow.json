@@ -1,0 +1,414 @@
+{
+  "schemaVersion": 1,
+  "id": "p3-shape-parallel",
+  "name": "P3 两模板独立分支与实例集合拼接",
+  "nodes": [
+    {
+      "id": "scene",
+      "op": "io.load_image",
+      "params": {
+        "path": "p3-shape-parallel-scene.png",
+        "mode": "gray"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "cad_l",
+      "op": "io.load_cloud",
+      "params": {
+        "path": "p3-cad-L.stl",
+        "unit": "m",
+        "frame": "camera",
+        "samples": 150000,
+        "maxPoints": 200000,
+        "seed": 7
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "depth_l",
+      "op": "cloud.to_depth_image",
+      "params": {
+        "width": 128,
+        "height": 128,
+        "fx": 600,
+        "fy": 600,
+        "cx": 64,
+        "cy": 64,
+        "depth": "f32",
+        "depthScale": 1
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "range_l",
+      "op": "image.range_mask",
+      "params": {
+        "space": "gray",
+        "lower": [0.5, 0, 0],
+        "upper": [1.5, 0, 0]
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "template_l",
+      "op": "image.shape_template",
+      "params": {
+        "frame": "cad-projection",
+        "maxFeatures": 96,
+        "minContrast": 0.05,
+        "featureSpacing": 2.5
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "match_l",
+      "op": "image.shape_match",
+      "params": {
+        "frame": "image",
+        "angleMin": 0,
+        "angleMax": 0,
+        "scaleMin": 1,
+        "scaleMax": 1,
+        "minCoverage": 0.85,
+        "minScore": 0.7,
+        "maxRmse": 1.5,
+        "maxDistance": 2,
+        "maxDetections": 4,
+        "maxCandidates": 4096
+      },
+      "ui": {
+        "position": {
+          "x": 1140,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "cad_h",
+      "op": "io.load_cloud",
+      "params": {
+        "path": "p3-cad-H.stl",
+        "unit": "m",
+        "frame": "camera",
+        "samples": 150000,
+        "maxPoints": 200000,
+        "seed": 7
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "depth_h",
+      "op": "cloud.to_depth_image",
+      "params": {
+        "width": 128,
+        "height": 128,
+        "fx": 600,
+        "fy": 600,
+        "cx": 64,
+        "cy": 64,
+        "depth": "f32",
+        "depthScale": 1
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "range_h",
+      "op": "image.range_mask",
+      "params": {
+        "space": "gray",
+        "lower": [0.5, 0, 0],
+        "upper": [1.5, 0, 0]
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "template_h",
+      "op": "image.shape_template",
+      "params": {
+        "frame": "cad-projection",
+        "maxFeatures": 96,
+        "minContrast": 0.05,
+        "featureSpacing": 2.5
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "match_h",
+      "op": "image.shape_match",
+      "params": {
+        "frame": "image",
+        "angleMin": 0,
+        "angleMax": 0,
+        "scaleMin": 1,
+        "scaleMax": 1,
+        "minCoverage": 0.85,
+        "minScore": 0.7,
+        "maxRmse": 1.5,
+        "maxDistance": 2,
+        "maxDetections": 4,
+        "maxCandidates": 4096
+      },
+      "ui": {
+        "position": {
+          "x": 1140,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "combined",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1460,
+          "y": 130
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "cad_l",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "depth_l",
+        "port": "cloud"
+      },
+      "id": "e0"
+    },
+    {
+      "from": {
+        "node": "depth_l",
+        "port": "depth"
+      },
+      "to": {
+        "node": "range_l",
+        "port": "image"
+      },
+      "id": "e1"
+    },
+    {
+      "from": {
+        "node": "range_l",
+        "port": "mask"
+      },
+      "to": {
+        "node": "template_l",
+        "port": "image"
+      },
+      "id": "e2"
+    },
+    {
+      "from": {
+        "node": "scene",
+        "port": "image"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "image"
+      },
+      "id": "e3"
+    },
+    {
+      "from": {
+        "node": "template_l",
+        "port": "features"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "features"
+      },
+      "id": "e4"
+    },
+    {
+      "from": {
+        "node": "template_l",
+        "port": "model"
+      },
+      "to": {
+        "node": "match_l",
+        "port": "model"
+      },
+      "id": "e5"
+    },
+    {
+      "from": {
+        "node": "cad_h",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "depth_h",
+        "port": "cloud"
+      },
+      "id": "e6"
+    },
+    {
+      "from": {
+        "node": "depth_h",
+        "port": "depth"
+      },
+      "to": {
+        "node": "range_h",
+        "port": "image"
+      },
+      "id": "e7"
+    },
+    {
+      "from": {
+        "node": "range_h",
+        "port": "mask"
+      },
+      "to": {
+        "node": "template_h",
+        "port": "image"
+      },
+      "id": "e8"
+    },
+    {
+      "from": {
+        "node": "scene",
+        "port": "image"
+      },
+      "to": {
+        "node": "match_h",
+        "port": "image"
+      },
+      "id": "e9"
+    },
+    {
+      "from": {
+        "node": "template_h",
+        "port": "features"
+      },
+      "to": {
+        "node": "match_h",
+        "port": "features"
+      },
+      "id": "e10"
+    },
+    {
+      "from": {
+        "node": "template_h",
+        "port": "model"
+      },
+      "to": {
+        "node": "match_h",
+        "port": "model"
+      },
+      "id": "e11"
+    },
+    {
+      "from": {
+        "node": "match_l",
+        "port": "instances"
+      },
+      "to": {
+        "node": "combined",
+        "port": "a"
+      },
+      "id": "e12"
+    },
+    {
+      "from": {
+        "node": "match_h",
+        "port": "instances"
+      },
+      "to": {
+        "node": "combined",
+        "port": "b"
+      },
+      "id": "e13"
+    }
+  ],
+  "outputs": {
+    "instances": {
+      "node": "combined",
+      "port": "poses"
+    },
+    "qualityL": {
+      "node": "match_l",
+      "port": "quality"
+    },
+    "qualityH": {
+      "node": "match_h",
+      "port": "quality"
+    },
+    "displayL": {
+      "node": "match_l",
+      "port": "image"
+    },
+    "displayH": {
+      "node": "match_h",
+      "port": "image"
+    },
+    "modelL": {
+      "node": "template_l",
+      "port": "model"
+    },
+    "modelH": {
+      "node": "template_h",
+      "port": "model"
+    }
+  },
+  "params": {
+    "leftModelId": {
+      "type": "string",
+      "default": "cad-L",
+      "binds": ["template_l.id"]
+    },
+    "rightModelId": {
+      "type": "string",
+      "default": "cad-H",
+      "binds": ["template_h.id"]
+    }
+  }
+}

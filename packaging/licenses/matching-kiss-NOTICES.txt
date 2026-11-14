@@ -1,4 +1,4 @@
-Source: https://github.com/MIT-SPARK/KISS-Matcher/blob/8b58b118e00c7a5a22448741f8d956d638a44ae2/cpp/kiss_matcher/core/kiss_matcher/kdtree/nanoflann.hpp
+Source: https://github.com/MIT-SPARK/KISS-Matcher/blob/e3440b63340af7414ebd0fdde04e40f02ff4e7d2/cpp/kiss_matcher/core/kiss_matcher/kdtree/nanoflann.hpp
 
 /***********************************************************************
  * Software License Agreement (BSD License)
@@ -32,7 +32,7 @@ Source: https://github.com/MIT-SPARK/KISS-Matcher/blob/8b58b118e00c7a5a22448741f
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *************************************************************************/
 
-Source: https://github.com/MIT-SPARK/KISS-Matcher/blob/8b58b118e00c7a5a22448741f8d956d638a44ae2/cpp/kiss_matcher/core/kiss_matcher/kdtree/nanoflann_tbb.hpp
+Source: https://github.com/MIT-SPARK/KISS-Matcher/blob/e3440b63340af7414ebd0fdde04e40f02ff4e7d2/cpp/kiss_matcher/core/kiss_matcher/kdtree/nanoflann_tbb.hpp
 
 /***********************************************************************
  * Software License Agreement (BSD License)

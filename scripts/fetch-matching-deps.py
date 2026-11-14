@@ -47,20 +47,20 @@ def check_archive(path, asset):
         raise ValueError(f"Archive size/SHA256 mismatch: {path}")
 
 
-def read_manifest(configuration):
+def read_manifest(configuration, expected_names=NAMES, max_archive_bytes=64 * 1024 * 1024):
     document = json.loads(configuration.read_text(encoding="utf-8-sig"))
     if document.get("schemaVersion") != 1 or not isinstance(document.get("patchRevision"), int):
         raise ValueError("Unsupported matching dependency manifest")
     assets = document.get("assets", [])
-    if len(assets) != 5 or {asset.get("name") for asset in assets} != NAMES:
-        raise ValueError("Matching manifest must contain exactly the five fixed CPU dependencies")
+    if len(assets) != len(expected_names) or {asset.get("name") for asset in assets} != expected_names:
+        raise ValueError("Manifest does not contain the expected fixed dependency set")
     for asset in assets:
         for key in ["name", "archive"]:
             if len(safe_parts(asset[key])) != 1:
                 raise ValueError(f"Expected a plain {key}")
         if not re.fullmatch(r"[0-9a-f]{40}", asset["revision"]) or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"]):
             raise ValueError("Expected fixed revision and SHA256")
-        if not isinstance(asset["bytes"], int) or not 0 < asset["bytes"] <= 64 * 1024 * 1024:
+        if not isinstance(asset["bytes"], int) or not 0 < asset["bytes"] <= max_archive_bytes:
             raise ValueError("Archive byte budget is invalid")
         if not asset["url"].startswith("https://codeload.github.com/"):
             raise ValueError("Only fixed GitHub codeload archives are supported")
@@ -198,8 +198,9 @@ def inventory(source):
     return result
 
 
-def prepare(configuration, output, archive_dir=None, offline=False, verify_only=False):
-    document = read_manifest(configuration)
+def prepare(configuration, output, archive_dir=None, offline=False, verify_only=False,
+            expected_names=NAMES, max_archive_bytes=64 * 1024 * 1024):
+    document = read_manifest(configuration, expected_names, max_archive_bytes)
     repository = Path(__file__).resolve().parents[1]
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,10 @@
 #define EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
+#if defined(_WIN32) && defined(LYFLOW_FIXTURE_matching)
+extern "C" __declspec(dllimport) unsigned long __stdcall timeGetTime();
+#endif
+
 #if defined(LYFLOW_FIXTURE_legacy)
 EXPORT unsigned lyflow_abi_version() { return 15; }
 #else
@@ -22,6 +26,9 @@ EXPORT const char* lyflow_abi_version_string() {
 #endif
 
 EXPORT const char* lyflow_version() {
+#if defined(_WIN32) && defined(LYFLOW_FIXTURE_matching)
+  (void)timeGetTime();
+#endif
 #if defined(LYFLOW_FIXTURE_engine_patch)
   return LYFLOW_FIXTURE_OTHER_VERSION;
 #elif defined(LYFLOW_FIXTURE_engine_minor)

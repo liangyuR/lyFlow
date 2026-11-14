@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include <opencv2/calib3d.hpp>
+#include "lyflow_cv/compat.h"
 
 #include "helpers.h"
 #include "lyflow/calibration.h"

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "purpose": "synthetic example truth; not runtime inputs or production acceptance",
+  "marker": {
+    "dictionary": "DICT_4X4_50",
+    "decodedId": 7,
+    "markerSizeM": 0.1,
+    "cameraPositionM": [0.12, 0.06, 0.65],
+    "cameraRodrigues": [2.941592653589793, 0.05, 0.12],
+    "workspacePositionM": [0.22, -0.24, 0.95],
+    "translationToleranceM": 0.006
+  },
+  "stag": {
+    "decodedId": 0,
+    "markerSizeM": 0.1,
+    "cameraPositionM": [-6.25e-5, -6.25e-5, 0.125],
+    "workspacePositionM": [0.0999375, -0.3000625, 0.425],
+    "translationToleranceM": 0.001
+  },
+  "workspaceNative": {
+    "cameraCenterM": [-0.1, 0.3, 0.3],
+    "localCenterM": [0, 0, 0.6],
+    "sizeM": [0.8, 0.6, 1.2],
+    "worldCenterM": [0.1, 0.2, 0.6]
+  },
+  "workspaceLegacy": {
+    "worldCenterM": [0.3, 0.1, 0.9],
+    "localCenterM": [0, 0, 0.6],
+    "sizeM": [0.8, 0.6, 1.2],
+    "cameraCenterM": [0.1, 0.2, 0.6]
+  },
+  "shape": {
+    "projectionSize": [128, 128],
+    "depthM": 1,
+    "fxFy": 600,
+    "cxCy": [64, 64],
+    "single": {
+      "modelId": "cad-L",
+      "translationPixels": [90, 60]
+    },
+    "parallel": [
+      {
+        "modelId": "cad-L",
+        "translationPixels": [60, 60]
+      },
+      {
+        "modelId": "cad-H",
+        "translationPixels": [200, 120]
+      }
+    ],
+    "positionTruth": "output center = emitted template model.center + translationPixels",
+    "positionTolerancePixels": 1.5,
+    "angleDegrees": 0,
+    "scale": 1,
+    "projectionCenters": {
+      "cad-L": [61, 64],
+      "cad-H": [64, 64]
+    }
+  }
+}

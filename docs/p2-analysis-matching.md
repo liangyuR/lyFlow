@@ -18,11 +18,11 @@ CloudViewSampling 从外部预采样视库按位姿查询且未检查 Query 状�
 
 | 来源 | 固定修订 | 实际使用范围 |
 |---|---|---|
-| [KISS-Matcher](https://github.com/MIT-SPARK/KISS-Matcher/tree/8b58b118e00c7a5a22448741f8d956d638a44ae2) | 8b58b118e00c7a5a22448741f8d956d638a44ae2 | FasterPFH、互检对应、max-core 兼容图剔除、完整三轴 GNC |
+| [KISS-Matcher](https://github.com/MIT-SPARK/KISS-Matcher/tree/e3440b63340af7414ebd0fdde04e40f02ff4e7d2) | v1.0.2，e3440b63340af7414ebd0fdde04e40f02ff4e7d2 | FasterPFH、互检对应、max-core 兼容图剔除、完整三轴 GNC |
 | [ROBIN](https://github.com/MIT-SPARK/ROBIN/tree/5623f02f62c63711052bbb8d6096a410ddca0ee4) | 5623f02f62c63711052bbb8d6096a410ddca0ee4 | BSD-2-Clause 图构造及默认 BZ_SERIAL k-core |
 | [small_gicp](https://github.com/koide3/small_gicp/tree/fa0cfc983417c044b6036f71dfa448038bb9c820) | fa0cfc983417c044b6036f71dfa448038bb9c820 | MIT GICP 精化，Windows 稳定串行路径 |
 | xenium | 1c449ae953ce2a440b0d16c5ed1181d2754860ab | 固定源码头依赖，避免上游浮动 main |
-| oneTBB | v2022.0.0，归档哈希锁定 | FasterPFH 的有界 task_arena；使用上游推荐的 DLL 构建 |
+| oneTBB | v2023.2.0，归档哈希锁定 | FasterPFH 的有界 task_arena；使用上游推荐的 DLL 构建 |
 
 KISS 顶层 MIT 不代表全部递归依赖都是 MIT。上游 PMC 为 GPL-3.0-or-later，本次不编译、不链接、不交付 PMC；MAX_CLIQUE 分支未启用时明确 unsupported，默认 max-core 剔除和 GNC 保持。正式来源、补丁、文件清单和运行库由匹配依赖清单固定。
 
@@ -86,3 +86,5 @@ indices/groups 绑定原 model（可跨视图重复点）；cloud 是按视图�
 方向过滤的独立 C ABI 复验保留默认3/5、512对应配置下首组单物体/双物体偶发粗候选后 GICP 未收敛的基准，不把它归为方向过滤旧问题。永久双实例/方向回归改用显式6/10邻域、1024对应配置，保持 RMSE0.5mm、覆盖0.5、对应距离3mm不变；同一新 DLL 实跑10轮单A、单B、双物体不筛选、只允许A、只允许B，共50次均得到预期1/1/2/1/1实例，方向拒绝仍继续检索另一实例。这是该配置的有限重复验证，算子仍标记非确定性，不引入隐藏重试，也不说明默认参数对所有采样密度稳定。
 
 这些是软件/合成几何验证，不能推出工业实物误检率、漏检率、相机标定精度、机器人抓取安全、吞吐和长期稳定性已验收。三个无目标样本的0误接受也不是生产误报率承诺。
+
+阶段3依赖整理将KISS固定到正式v1.0.2（与阶段2C++算法相同），oneTBB升级2023.2.0；来源比较和验证边界见[稳定依赖审计](dependency-stable-audit.md)。

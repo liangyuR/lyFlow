@@ -26,17 +26,22 @@ git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
 & 'C:\vcpkg\bootstrap-vcpkg.bat' -disableMetrics
 ```
 
-使用 vcpkg 准备标准算子包的 PCL（最低 1.15.1）与 OpenCV，依赖划分见 [算子包指南](op-packs.md)。开发默认查找 `C:\vcpkg`，其他位置通过 `VCPKG_ROOT` 指定：
+使用 vcpkg 准备标准算子包的 PCL（最低 1.15.1）与 yaml-cpp；OpenCV 5.1.0 使用固定源码构建，依赖划分见 [算子包指南](op-packs.md)。开发默认查找 `C:\vcpkg`，其他位置通过 `VCPKG_ROOT` 指定：
 
 ```powershell
 $env:VCPKG_ROOT = 'C:\vcpkg'
-& "$env:VCPKG_ROOT\vcpkg.exe" install pcl:x64-windows opencv4:x64-windows
-pwsh -NoProfile -File scripts/fetch-onnxruntime.ps1
+& "$env:VCPKG_ROOT\vcpkg.exe" install pcl:x64-windows yaml-cpp:x64-windows
+./scripts/fetch-onnxruntime.ps1
+./scripts/build-vision-deps.ps1
 pnpm install --frozen-lockfile
 python -m pip install -r scripts/requirements.txt
 ```
 
-`std-ml` 默认启用，需要 CPU 版 ONNX Runtime 1.19.2。准备脚本会复用已准备的依赖，必要时下载到 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`；也可将 `LYFLOW_ONNXRUNTIME_ROOT` 指向包含 `include/` 与 `lib/` 的现有目录。缺失时 CMake 会报错。
+`std-ml` 默认启用，需要 CPU 版 ONNX Runtime 1.32.0。准备脚本会复用已准备的依赖，必要时下载到 `third_party/onnxruntime/onnxruntime-win-x64-1.32.0`；也可将 `LYFLOW_ONNXRUNTIME_ROOT` 指向包含 `include/` 与 `lib/` 的现有目录。缺失时 CMake 会报错。
+
+`build-vision-deps.ps1` 从固定修订构建 OpenCV 5.1.0 的最小模块集并设置当前会话的 `OpenCV_DIR`；`pnpm core:build` 同样自动准备该依赖。首次需编译，后续复用增量目录。不要混用 OpenCV 4/5 的头文件和 DLL。稳定版核对与已验证边界见[依赖审计](dependency-stable-audit.md)。
+
+固定源码清单升级后，旧 `build/matching-deps` 或 OpenCV 安装的来源/配置不符会明确失败。先停止运行和构建，再将旧的准备/构建目录移入备份、重新准备；不要修改校验记录或混用旧DLL来绕过检查。
 
 以上是日常开发环境。正式发包会按 [packaging/release.json](../packaging/release.json) 准备固定版本依赖，步骤见 [Windows 发包](deployment/packaging.md)。
 

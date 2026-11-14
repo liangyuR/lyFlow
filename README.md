@@ -38,8 +38,9 @@ LyFlow 是面向点云与图像处理的视觉流程平台。用节点连接算�
 
 ```powershell
 $env:VCPKG_ROOT = 'C:\vcpkg'
-& "$env:VCPKG_ROOT\vcpkg.exe" install pcl:x64-windows opencv4:x64-windows
-pwsh -NoProfile -File scripts/fetch-onnxruntime.ps1
+& "$env:VCPKG_ROOT\vcpkg.exe" install pcl:x64-windows yaml-cpp:x64-windows
+./scripts/fetch-onnxruntime.ps1
+./scripts/build-vision-deps.ps1
 pnpm install --frozen-lockfile
 python -m pip install -r scripts/requirements.txt
 pnpm dev

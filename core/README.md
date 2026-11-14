@@ -33,24 +33,24 @@ tests/                doctest 测试
 M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 就链它，
 不各自 `find_package`（[ADR-0005](../docs/adr/0005-pcl-boundary.md)）。
 
-**OpenCV 归 `packs/std-image`**（vcpkg 的 `opencv4`，只用 core / imgproc / imgcodecs；
+**OpenCV 归 `packs/std-image`**（固定源码 OpenCV 5.1.0，模块为 core / imgproc / imgcodecs / geometry / objdetect 及其最小依赖；
 `opencv2/` 的头只在那个包里，进出一律经它的 `lyflow_cv/adapter.h`，[ADR-0026](../docs/adr/0026-image-data-domain.md)）。
 默认开，找不到时 CMake 直接 FATAL 并打印安装命令。
 
-**onnxruntime 归 `packs/std-ml`**，**yaml-cpp 归 `packs/gap`**
+**onnxruntime 归 `packs/std-ml`**，**yaml-cpp 由 `packs/gap` 与 `packs/std-image` 的工作空间加载使用**
 （[ADR-0015](../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）。前者不在 vcpkg 里，
 构建前跑一次 `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（已 gitignore），
 或者设 `LYFLOW_ONNXRUNTIME_ROOT` 指向已有的一份；缺了 CMake 会直接 FATAL 并打印这条命令。
 后者一条 `C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows` 就够，而且只有
-`LYFLOW_PACKS=gap` 时才需要。
+启用工作空间加载或 gap 时需要。
 
 依赖准备（一台新机器上从零开始）：
 
 ```powershell
 C:\vcpkg\vcpkg.exe install pcl:x64-windows                  # 标准点云包
-C:\vcpkg\vcpkg.exe install opencv4:x64-windows              # 标准图像包 std-image
+./scripts/build-vision-deps.ps1                           # 标准图像包固定 OpenCV 5.1.0
 pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
-C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
+C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # std-image 工作空间 / gap
 ```
 
 M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话失效了三个
@@ -65,7 +65,7 @@ core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)�
 C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`，通过
 `lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本属于同一 主.次 系列，
 补丁版本之间保持 C ABI 兼容；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
-完整版本，例如 `find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)`。
+完整版本，例如 `find_package(lyflow 1.3.9 EXACT CONFIG REQUIRED)`。
 `LYFLOW_RELEASE_BUILD` 默认关闭，仅由统一打包入口在验证固定依赖后启用。只有该受控发布构建、
 固定四个发布算子包、无外部包、Windows x64 RelWithDebInfo 且干净 Git 修订时，
 `lyflow_source_revision()` 才提供可用于跨进程缓存的修订；其他构建返回空串。

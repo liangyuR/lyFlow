@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 与阶段2 B01/B02 开发版本 **1.3.8**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 与阶段3 B03/B04 开发版本 **1.3.9**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -24,8 +24,8 @@
 
 | 外部分类 | 已有对应 | 可组合替代 | 部分覆盖 | 缺失 | 待核实 | 合计 |
 |---|---:|---:|---:|---:|---:|---:|
-| 输入 | 7 | 0 | 4 | 4 | 0 | 15 |
-| 2D图像处理 | 22 | 1 | 5 | 9 | 3 | 40 |
+| 输入 | 8 | 0 | 4 | 3 | 0 | 15 |
+| 2D图像处理 | 24 | 1 | 5 | 7 | 3 | 40 |
 | 3D点云处理 | 17 | 3 | 10 | 25 | 1 | 56 |
 | 位姿处理 | 6 | 0 | 5 | 13 | 0 | 24 |
 | 流数据运算 | 7 | 0 | 5 | 2 | 0 | 14 |
@@ -35,7 +35,7 @@
 | 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
 | 内置 Python 脚本 | 6 | 0 | 3 | 7 | 0 | 16 |
-| **合计** | **66** | **8** | **42** | **77** | **5** | **198** |
+| **合计** | **69** | **8** | **42** | **74** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -72,7 +72,7 @@
 | `InputPrimitive3D`<br>生成3D位姿 | 已有对应 | `pose.construct_3d` | 受校验米制Pose3D，内禀XYZ弧度或xyzw单位四元数，规范q/-q并保留ID/帧/尺寸/元数据；不复制全局FrameTree。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `LoadCalibrationInfo`<br>加载标定信息 | 部分覆盖 | `image.load_calib`、`image.load_camera_calib`、显式Transform链 | 已分离平面H、相机K/D及已知外参；未实现外部机器人/手眼/工作空间文件格式和全局帧树更新。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |
 | `LoadCameraCalibInfo`<br>加载相机标定信息 | 部分覆盖 | `image.load_camera_calib` | 已加载并校验版本化vision.CameraCalib.v1的分辨率、K/D、帧和单位；设备YAML、虚拟相机、手眼外参和全局设备帧树副作用仍未移植。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |
-| `LoadWorkspaceInfo`<br>加载工作空间标定信息 | 缺失 | — | 缺少工作空间标定文件、坐标帧关联、边界及标定版本的加载和校验。 [1](../core/include/lyflow/data.h) [2](../docs/embedding.md) | P2 · [B03](operator-completion-plan.md#b03) |
+| `LoadWorkspaceInfo`<br>加载工作空间标定信息 | 已有对应 | `workspace.load`、显式Transform链 | 版本化m单位帧树、工作空间尺寸/底面锚点、workspace↔target变换及float32角点误差门控；显式legacy YAML适配，未知格式不猜测，不修改全局帧树。 [分析](p3-analysis-workspace.md) · [回归](../packs/std-image/tests/test_p3_workspace.cpp) | P2阶段3限定用途已实现 · [B03](operator-completion-plan.md#b03) |
 | `ProfileProjector`<br>轮廓仪投影 | 部分覆盖 | `profile.project_pair` | 已知master/slave→common及可选common→output外参显式组合，保留通道并旋转法线；不猜原生云不存在的pose元数据，不自动推断主云中心或反写配方。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |
 | `XYZCamera`<br>相机 | 缺失 | — | 宿主可注入 Image/PointCloud，但未交付该相机驱动、采集、重连、同步和标定关联；输入注入接口不计为设备支持。 [1](../docs/embedding.md) [2](../core/include/lyflow/data.h) | P3 · [D01](operator-completion-plan.md#d01) |
 | `XYZLaserProfiler`<br>激光轮廓仪 | 缺失 | — | 宿主可注入 Image/PointCloud，但未交付该激光轮廓仪驱动、采集、重连、同步和标定关联；输入注入接口不计为设备支持。 [1](../docs/embedding.md) [2](../core/include/lyflow/data.h) | P3 · [D01](operator-completion-plan.md#d01) |
@@ -90,7 +90,7 @@
 | `CalculateGeometryDistance`<br>计算2D几何特征距离 | 已有对应 | `geometry.distance_2d` | 点/线/线段/圆组合的最短距离，并显式提供signed_clearance、first_anchor及圆心模式；拒绝混单位，不静默混用不同距离定义。 [1](../packs/std-geometry/ops/geometry.cpp) [2](../packs/std-geometry/tests/test_geometry.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `CalculateRingWidth`<br>计算圆环宽度范围 | 部分覆盖 | `image.ring_width` | 已实现亮/暗环带径向内外扫描、相邻边对/首末包络、周向min/max/mean及有效比例；原过圆心直径及全部四种模式未覆盖。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [A05](operator-completion-plan.md#a05) |
 | `CalculateWidthRange`<br>计算宽度范围 | 已有对应 | `image.width_range` | 多条带宽扫描、内/外尺寸边对、最小/最大/平均宽度与有效比例；输出px。支持轴对齐ROI，不声称任意旋转工件的全局极值。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
-| `CalibBoardPoseEstimation`<br>标定板定位 | 已有对应 | `image.board_pose` | 棋盘SB/子像素角点、显式K/D和米制格距、PnP候选正深度/重投影/歧义门控；board→camera Transform原点是首内角点，Pose3D为板中心。Marker/Charuco另列后续。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |
+| `CalibBoardPoseEstimation`<br>标定板定位 | 已有对应 | `image.board_pose` | 棋盘SB/子像素角点、显式K/D和米制格距、PnP候选正深度/重投影/歧义门控；board→camera Transform原点是首内角点，Pose3D为板中心。Marker由阶段3 image.marker_pose提供，Charuco仍非本节点模式。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |
 | `CheckImageChange`<br>检查图像变化 | 已有对应 | `image.change_stats` | 差分阈值、可选掩膜/形态开运算、面积门限和different布尔；luma/max_abs通道策略显式。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `ConcatImages`<br>图片拼接 | 已有对应 | `image.concat` | 两图水平/垂直排布可组合多图网格，明确填充值及同位深/通道/比例条件；支持u8/u16/f32和RGBA，不做全景配准或隐式颜色转换。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [A04](operator-completion-plan.md#a04) |
 | `ConvertImageType`<br>转换图片类型 | 已有对应 | `image.convert_channels`、`image.normalize` | 灰度/RGB/RGBA互转及现有位深/范围转换；遵守RGB顺序，位深支持矩阵见包指南。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
@@ -113,12 +113,12 @@
 | `ImageResize`<br>图像缩放 | 已有对应 | `image.resize` | 支持比例或目标尺寸缩放，area/linear/cubic/nearest 插值；参数名称、默认插值和外部图片结构仍非兼容承诺。 [1](../packs/std-image/ops/image_basic.cpp) | 无需补齐 |
 | `ImageThresholdOperation`<br>图像二值化 | 已有对应 | `image.to_gray`、`image.threshold`、`image.range_mask` | 固定/Otsu/自适应灰度阈值与Gray/RGB/HSV范围掩膜均有；颜色顺序及各位深限制明确。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `LoadForeground`<br>加载料箱区域信息 | 待核实 | — | 没有专用料箱区域加载器；清单未说明文件格式、二维/三维区域与坐标系，不能把 image.PlaneCalib 读取视为对应，先确认是否纳入机器人场景。 [1](../packs/std-image/ops/register.cpp) [2](../packs/std-image/ops/load_calib.cpp) | 待定义 · [U01](operator-completion-plan.md#u01) |
-| `MarkerPoseEstimation`<br>识别码定位 | 缺失 | — | 没有标记码解码和带相机内参的空间位姿估计；棋盘格平面 H 不能替代 marker 检测和 PnP。 [1](../packs/std-image/ops/register.cpp) [2](../packs/std-image/ops/board_calib.cpp) | P2 · [B03](operator-completion-plan.md#b03) |
+| `MarkerPoseEstimation`<br>识别码定位 | 已有对应 | `image.marker_pose` | ArUco/AprilTag字典与独立STag HD15解码、IPPE方形PnP、原图K/D重投影/歧义门控；Pose3D保相机帧，显式workspace链消费。无目标为空，不将标记误作抓取目标。 [分析](p3-analysis-markers.md) · [回归](../packs/std-image/tests/test_p3_markers.cpp) | P2阶段3限定用途已实现 · [B03](operator-completion-plan.md#b03) |
 | `MultiViewMatcher`<br>多视角定位工件 | 缺失 | — | 已有单图NCC、局部三维ICP及相机内参，但无多视角模型融合与工件三维位姿联合求解；不等同二维模板匹配。 [1](../packs/glue/ops/locate.cpp) [2](../packs/std-pointcloud/ops/register_icp_2d.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `ProfileSlicer`<br>轮廓截面器 | 缺失 | — | glue 卡尺采样的是二维灰度，gap 读取和处理二维轮廓点；均没有从线扫深度图连续截取高度截面及计算截面属性的图像算子。 [1](../packs/glue/ops/part_edges.cpp) [2](../packs/gap/ops/io.cpp) [3](../packs/gap/ops/blocks.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
 | `QrCodeRefine`<br>二维码增强 | 缺失 | — | 通用滤波和阈值不具备二维码结构约束、定位/重采样与识别效果反馈；首轮应依赖条码解码能力并确认具体增强目标。 [1](../packs/std-image/ops/image_basic.cpp) [2](../packs/std-image/ops/register.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
 | `ROIGenerator`<br>生成感兴趣区域 | 已有对应 | `image.roi_mask` | 矩形、旋转矩形、圆、圆环弧、多边形及反选/掩膜相交；像素工厂不等于相机/工件参考系变换。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
-| `SBMEstimator`<br>2D形状匹配 | 缺失 | — | glue.locate 是灰度归一化互相关及小角度扫描，不是形状/边缘模型匹配；缺形状模型创建、尺度/角度搜索及遮挡鲁棒匹配。 [1](../packs/glue/ops/locate.cpp) | P2 · [B04](operator-completion-plan.md#b04) |
+| `SBMEstimator`<br>2D形状匹配 | 已有对应 | `image.shape_template`、`image.shape_match`、显式CAD投影链 | 梯度法向/亚像素特征、角度尺度投票/精化、遮挡质量和旋转NMS；原生Tensor+小元数据配对，保原像素帧。CAD为STL采样点云投影；训练图重建模型，多模板并联融合，不兼容专有训练文件。 [分析](p3-analysis-shape.md) · [回归](../packs/std-image/tests/test_p3_shape_matching.cpp) | P2阶段3限定用途已实现 · [B04](operator-completion-plan.md#b04) |
 | `ShadingCorrection`<br>背景修正 | 部分覆盖 | `image.shading_correct` | 已提供显式平场/有界高斯背景、差分/除法、保持平均亮度和小分母拒绝；原方向性顶帽/黑帽与噪声阈值模式未等价移植。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [A04](operator-completion-plan.md#a04) |
 | `TemplateMatcher`<br>2D模板匹配 | 已有对应 | `image.template_build`、`image.template_match` | 原生模板图像+小型元数据，掩膜零均值NCC、离散旋转/尺度、多实例及旋转框NMS；使用实际重采样尺寸。无目标为空集合，不宣称亚像素或轮廓形状匹配。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B04](operator-completion-plan.md#b04) |
 | `UndistortImage`<br>图像去畸变 | 已有对应 | `image.load_camera_calib`、`image.undistort` | 校验K/D与分辨率后remap，输出零畸变内参和有效mask；缓存按完整参数及尺寸有界管理，拒绝不匹配预览比例，不复用同ID旧映射。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [B03](operator-completion-plan.md#b03) |

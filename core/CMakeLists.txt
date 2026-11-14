@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.8)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.9)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -370,6 +370,7 @@ if(BUILD_TESTING)
      "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p0_pipeline.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_highlights.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p3_calibration.cpp")
   endif()
   if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_expression.cpp")
@@ -379,6 +380,7 @@ if(BUILD_TESTING)
      "std-pointcloud" IN_LIST LYFLOW_STD_PACK_NAMES AND
      "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_cloud_rules.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p3_shape.cpp")
   endif()
   if(LYFLOW_P1_MODEL_TESTS)
     if(NOT "std-image" IN_LIST LYFLOW_STD_PACK_NAMES OR NOT "std-ml" IN_LIST LYFLOW_STD_PACK_NAMES)
@@ -416,6 +418,9 @@ if(BUILD_TESTING)
   set(_fixture_other_minor "${PROJECT_VERSION_MAJOR}.${_fixture_next_minor}.0")
   foreach(fixture matching legacy abi_patch engine_patch abi_minor engine_minor null_abi)
     add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
+    if(WIN32 AND fixture STREQUAL "matching")
+      target_link_libraries(lyflow-client-${fixture} PRIVATE winmm)
+    endif()
     target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
     # version.h 里有中文注释：中文代码页（936）下不加 /utf-8，注释会吞掉下一行的 #define
     target_compile_options(lyflow-client-${fixture} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
@@ -516,6 +521,27 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-height-rules.lyflow.js
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-matching-precise.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-model-cad.pcd"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p2-scene.pcd"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-marker-workspace.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-stag-workspace.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-workspace-native.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-workspace-legacy.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-shape-cad.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-shape-parallel.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-marker-scene.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-stag-hd15.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-shape-L-scene.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-shape-parallel-scene.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-camera.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-camera-stag.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-workspace.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-workspace-legacy.yaml"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-cad-L.stl"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-cad-H.stl"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-fixtures.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-assets.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-asset-licenses.txt"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p3-examples.md"
         DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"

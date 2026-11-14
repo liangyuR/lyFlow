@@ -6,8 +6,8 @@
     "msvcToolset": "14.44.35207",
     "windowsSdk": "10.0.26100.0"
   },
-  "vcpkgBaseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
-  "onnxruntimeVersion": "1.19.2",
+  "vcpkgBaseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd",
+  "onnxruntimeVersion": "1.32.0",
   "packs": [
     "std-value",
     "std-geometry",
@@ -144,13 +144,21 @@
     "cloud.edges_3d",
     "cloud.view_sample",
     "cloud.image_roi",
-    "image.render_model_3d"
+    "image.render_model_3d",
+    "image.marker_pose",
+    "workspace.load",
+    "image.shape_template",
+    "image.shape_match"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",
-    "opencv4": "4.12.0#9",
     "boost-filesystem": "1.92.0",
     "eigen3": "5.0.1",
-    "yaml-cpp": "0.9.0#1"
-  }
+    "yaml-cpp": "0.9.0#1",
+    "lz4": "1.11.1"
+  },
+  "onnxruntimeSha256": "aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127",
+  "onnxruntimeBytes": 96945131,
+  "opencvVersion": "5.1.0",
+  "opencvSourceRevision": "e4f78fbcf1a773fbed69e14500e8b734963eb585"
 }

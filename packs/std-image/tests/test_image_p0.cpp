@@ -71,9 +71,8 @@ TEST_CASE("P0 image arithmetic saturates integers and preserves signed floating 
 
 TEST_CASE("P0 exact gray statistics handle median ties, u16, nonfinite pixels and empty masks") {
   test::OpCall call;
-  cv::Mat values =
-      (cv::Mat_<float>(2, 4) << 1, 5, 5, 9, 1, 9, std::numeric_limits<float>::quiet_NaN(),
-       std::numeric_limits<float>::infinity());
+  cv::Mat values(cv::Matx<float, 2, 4>(1, 5, 5, 9, 1, 9, std::numeric_limits<float>::quiet_NaN(),
+                                       std::numeric_limits<float>::infinity()));
   call.inputs["image"] = Data::image(imageOf(values));
   REQUIRE(call.run("image.statistics").ok);
   const auto stats = record(call, "stats");
@@ -88,12 +87,12 @@ TEST_CASE("P0 exact gray statistics handle median ties, u16, nonfinite pixels an
   CHECK(record(call, "stats")["mean"].is_null());
   call.inputs.erase("mask");
   call.inputs["image"] =
-      Data::image(imageOf((cv::Mat_<unsigned short>(1, 4) << 1000, 2000, 3000, 4000)));
+      Data::image(imageOf(cv::Mat(cv::Matx<unsigned short, 1, 4>(1000, 2000, 3000, 4000))));
   REQUIRE(call.run("image.statistics").ok);
   CHECK(record(call, "stats")["median"] == 2500);
   CHECK(record(call, "stats")["min"] == 1000);
   const float large = 3e38f;
-  call.inputs["image"] = Data::image(imageOf((cv::Mat_<float>(1, 2) << large, large)));
+  call.inputs["image"] = Data::image(imageOf(cv::Mat(cv::Matx<float, 1, 2>(large, large))));
   REQUIRE(call.run("image.statistics").ok);
   CHECK(record(call, "stats")["valid"] == true);
   CHECK(record(call, "stats")["median"].is_number());
@@ -119,8 +118,8 @@ TEST_CASE("P0 color range supports HSV red wrap, gray intervals and nonfinite ex
                                         {"upper", Value::vec({0, 1, 1})}})
               .ok);
   CHECK(call.out("mask").asImage()->at(0, 0, 0) == 255);
-  call.inputs["image"] = Data::image(
-      imageOf((cv::Mat_<float>(1, 4) << 0.1, 0.5, 0.9, std::numeric_limits<float>::quiet_NaN())));
+  call.inputs["image"] = Data::image(imageOf(
+      cv::Mat(cv::Matx<float, 1, 4>(0.1, 0.5, 0.9, std::numeric_limits<float>::quiet_NaN()))));
   REQUIRE(call.run("image.range_mask", {{"space", Value::text("gray")},
                                         {"lower", Value::vec({0.3, 0, 0})},
                                         {"upper", Value::vec({0.7, 0, 0})},
@@ -271,7 +270,7 @@ TEST_CASE("P0 bounded translation alignment reports direction and does not mutat
   source(cv::Rect(14, 11, 17, 21)).setTo(180);
   source(cv::Rect(39, 39, 7, 9)).setTo(90);
   cv::Mat target;
-  const cv::Mat affine = (cv::Mat_<double>(2, 3) << 1, 0, 3, 0, 1, -2);
+  const cv::Mat affine(cv::Matx23d(1, 0, 3, 0, 1, -2));
   cv::warpAffine(source, target, affine, source.size());
   call.inputs["a"] = Data::image(imageOf(source));
   call.inputs["b"] = Data::image(imageOf(target));
@@ -296,7 +295,7 @@ TEST_CASE("P0 subpixel alignment requires a fully finite interpolation footprint
   cv::Mat source = clean.clone();
   source.at<float>(30, 30) = std::numeric_limits<float>::quiet_NaN();
   cv::Mat target;
-  cv::Mat affine = (cv::Mat_<double>(2, 3) << 1, 0, 0.03, 0, 1, 0.03);
+  cv::Mat affine(cv::Matx23d(1, 0, 0.03, 0, 1, 0.03));
   cv::warpAffine(clean, target, affine, clean.size());
   target.at<float>(31, 31) += 1;
   test::OpCall call;

@@ -14,6 +14,7 @@
 | 参数配方、静态算子包、库算子和 Python 节点 | [配方](recipe.md) · [算子包](op-packs.md) · [库目录](library-dirs.md) · [Python](python-nodes.md) |
 | C++ / Rust / Tauri / React 嵌入与交付 | [嵌入](embedding.md) · [发包](deployment/packaging.md) |
 | 云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测与选定模型检测 | [P1实现索引与边界](p1-operator-analysis.md) |
+| 高度规则/全局三维匹配、Marker/工作空间与梯度形状 | [六阶段P2交付](p2-sequential-delivery.md) · [标定与形状组合](p3-examples.md) |
 
 ## 仍需独立推进或验收的范围
 

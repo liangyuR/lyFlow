@@ -68,13 +68,16 @@ if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks
   & python (Join-Path $PSScriptRoot 'fetch-matching-deps.py')
   if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
 }
+if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-image' -in ($repoPacks -split ';')) {
+  & (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -ReleaseBuild:$ReleaseBuild
+}
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $releaseBuildFlag = if ($ReleaseBuild) { "ON" } else { "OFF" }
 $testingFlag = if ($runTests) { "ON" } else { "OFF" }
 $releaseArgs = " -DLYFLOW_RELEASE_BUILD=$releaseBuildFlag -DBUILD_TESTING=$testingFlag"
-foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT')) {
+foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR')) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }
 }

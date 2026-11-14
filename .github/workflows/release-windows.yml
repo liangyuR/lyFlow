@@ -28,8 +28,7 @@ env:
 jobs:
   deps:
     name: 固定发布依赖（vcpkg 二进制缓存）
-    # 只装固定基线的 vcpkg 端口、不编译或运行库代码，所以只有这个 job 拿 packages: write，
-    # 把编好的依赖推到 GitHub Packages 的 NuGet 源；编译 job 仍然只读。
+    # 只准备固定第三方依赖；只有这个 job 获得 NuGet 缓存写权限，产品构建 job 仍然只读。
     permissions:
       contents: read
       packages: write
@@ -82,7 +81,7 @@ jobs:
         if: ${{ !inputs.rebuild_deps }}
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v3
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
@@ -92,6 +91,20 @@ jobs:
           path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
           key: onnxruntime-win-x64-cpu-${{ steps.native-cache.outputs.onnx-version }}-v1
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 恢复固定 OpenCV 源码与安装
+        uses: actions/cache/restore@v4
+        id: vision-cache
+        if: ${{ !inputs.rebuild_deps }}
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: opencv5-windows-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
       - name: 准备并验证固定发布依赖
         shell: pwsh
         env:
@@ -100,7 +113,8 @@ jobs:
           LYFLOW_VCPKG_FEED_MODE: ${{ inputs.rebuild_deps && 'readwrite' || 'read' }}
           LYFLOW_ALLOW_DEPENDENCY_BUILD: ${{ inputs.rebuild_deps && 'true' || 'false' }}
         run: |
-          ./scripts/prepare-release-deps.ps1 -AllowBuild:($env:LYFLOW_ALLOW_DEPENDENCY_BUILD -eq 'true')
+          ./scripts/prepare-release-deps.ps1 -AllowBuild:($env:LYFLOW_ALLOW_DEPENDENCY_BUILD -eq 'true') -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
+          ./tests/release/test-build-vision-deps.ps1
 
       - name: 空目录验证 NuGet 二进制恢复
         if: ${{ inputs.rebuild_deps || inputs.dependencies_only }}
@@ -113,7 +127,7 @@ jobs:
           $installRoot = Join-Path $env:RUNNER_TEMP 'lyflow-nuget-proof-installed'
           $binaryCache = Join-Path $env:RUNNER_TEMP 'lyflow-nuget-proof-cache'
           if ((Test-Path -LiteralPath $installRoot) -or (Test-Path -LiteralPath $binaryCache)) { throw 'NuGet 验证目录必须为空' }
-          ./scripts/prepare-release-deps.ps1 -InstallRoot $installRoot -BinaryCache $binaryCache -DiagnosticsName nuget-proof
+          ./scripts/prepare-release-deps.ps1 -InstallRoot $installRoot -BinaryCache $binaryCache -DiagnosticsName nuget-proof -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
 
       - name: 保存已验证的 vcpkg 工具
         uses: actions/cache/save@v4
@@ -132,7 +146,7 @@ jobs:
         if: steps.native-cache-restore.outputs.cache-hit != 'true'
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v3
 
       - name: 保存 ONNX Runtime 缓存
         uses: actions/cache/save@v4
@@ -141,12 +155,23 @@ jobs:
           path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
           key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
 
+      - name: 保存已验证的 OpenCV 安装
+        uses: actions/cache/save@v4
+        if: steps.vision-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: opencv5-windows-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
       - name: 保存依赖 ABI 诊断
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-deps-diagnostics
-          path: build/release-dependency-diagnostics/
+          path: |
+            build/release-dependency-diagnostics/
+            build/vision-opencv/*.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -241,7 +266,7 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v3
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
@@ -270,12 +295,21 @@ jobs:
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
+      - name: 恢复固定 OpenCV 源码与安装
+        uses: actions/cache/restore@v4
+        id: vision-cache
+        with:
+          path: |
+            build/vision-deps
+            build/opencv5-install
+          key: opencv5-windows-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
+
       - name: 准备并验证固定发布依赖
         shell: pwsh
         env:
           LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-        run: ./scripts/prepare-release-deps.ps1
+        run: ./scripts/prepare-release-deps.ps1 -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
 
       - name: 同一本地入口构建、测试和打包
         shell: pwsh
@@ -284,6 +318,7 @@ jobs:
           LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
         run: |
           $arguments = @('-OutputDir', (Join-Path $env:RUNNER_TEMP 'lyflow-release'))
+          if ('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true') { $arguments += '-SkipVisionBuild' }
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('-ExpectedTag', $env:GITHUB_REF_NAME) }
           pnpm run package @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -311,6 +346,7 @@ jobs:
             build/release-core/**/*.log
             build/release-core/ctest-results.xml
             build/release-dependency-diagnostics/
+            build/vision-opencv/*.log
           if-no-files-found: warn
           retention-days: 7
 

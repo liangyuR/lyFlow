@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipDependencySetup,
+    [switch]$SkipVisionBuild,
     [switch]$AllowDirty,
     [string]$OutputDir,
     [string]$ExpectedTag
@@ -11,7 +12,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -40,7 +41,7 @@ try {
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics', 'matching-deps')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics', 'matching-deps', 'vision-deps', 'vision-downloads', 'vision-opencv', 'opencv5-install')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -59,7 +60,7 @@ try {
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
-    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -DiagnosticsName package-dependencies
+    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -SkipVisionBuild:$SkipVisionBuild -DiagnosticsName package-dependencies
     $fixtures = Join-Path $buildParent 'release-fixtures'
     & python (Join-Path $root 'tests/release/make_fixtures.py') --output-dir $fixtures
     Assert-ReleaseExit 'Generate release fixtures'
@@ -96,11 +97,25 @@ try {
     $openmpDirectories = @(Get-ChildItem -LiteralPath (Join-Path $redistVersions[0].FullName 'x64') -Directory | Where-Object Name -Match '^Microsoft\.VC\d+\.OpenMP$')
     if ($openmpDirectories.Count -ne 1) { throw 'Expected one x64 Visual C++ OpenMP runtime directory.' }
     Copy-Item -LiteralPath (Join-Path $openmpDirectories[0].FullName 'vcomp140.dll') -Destination $runtime -Force
-    foreach ($required in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll')) {
+    foreach ($required in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll', 'tbb12.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $runtime $required))) { throw "Runtime missing $required" }
+    }
+    foreach ($module in @('core', 'features', 'flann', 'geometry', 'imgcodecs', 'imgproc', 'objdetect')) {
+        $file = "opencv_${module}510.dll"
+        if (-not (Test-Path -LiteralPath (Join-Path $runtime $file) -PathType Leaf)) { throw "Runtime missing $file" }
     }
     $licenses = Join-Path $runtime 'licenses'
     New-Item -ItemType Directory -Path $licenses -Force | Out-Null
+    $coreLicenses = Join-Path $licenses 'core'
+    New-Item -ItemType Directory -Path $coreLicenses -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'core/third_party/README.md') -Destination (Join-Path $coreLicenses 'SOURCES.md')
+    foreach ($relative in @('nlohmann/LICENSE.MIT', 'doctest/LICENSE.txt', 'xxhash/LICENSE')) {
+        $source = Join-Path $root "core/third_party/$relative"
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Core dependency license missing: $relative" }
+        $destination = Join-Path $coreLicenses $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $source -Destination $destination
+    }
     $installed = $env:VCPKG_INSTALLED_DIR
     if (-not $installed) { throw 'Dependency preparation did not return VCPKG_INSTALLED_DIR.' }
     $share = Join-Path $installed "$($configuration.triplet)/share"
@@ -119,6 +134,36 @@ try {
         if (-not (Test-Path -LiteralPath $source)) { throw "ONNX Runtime license missing: $source" }
         Copy-Item -LiteralPath $source -Destination $ortLicenses
     }
+    if (-not $env:LYFLOW_OPENCV_ROOT -or -not $env:OpenCV_DIR -or -not $env:LYFLOW_OPENCV_BIN) {
+        throw 'Dependency preparation did not return the verified OpenCV installation.'
+    }
+    $opencvLicenses = Join-Path $licenses 'opencv'
+    $installedNotices = Join-Path $env:LYFLOW_OPENCV_ROOT 'etc/licenses'
+    foreach ($name in @('zlib-LICENSE', 'libpng-LICENSE', 'libpng-README', 'libjpeg-turbo-LICENSE.md',
+        'libjpeg-turbo-README.md', 'libjpeg-turbo-README.ijg', 'SoftFloat-COPYING.txt',
+        'mscr-chi_table_LICENSE.txt', 'annoylib-LICENSE', 'dlpack-LICENSE', 'flatbuffers-LICENSE.txt')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $installedNotices $name) -PathType Leaf)) {
+            throw "OpenCV bundled component license missing: $name"
+        }
+    }
+    New-Item -ItemType Directory -Path $opencvLicenses -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $env:LYFLOW_OPENCV_ROOT 'LICENSE') -Destination $opencvLicenses
+    Copy-Item -LiteralPath $installedNotices -Destination (Join-Path $opencvLicenses 'third-party') -Recurse
+    $visionConfig = Get-Content -LiteralPath (Join-Path $root 'packaging/vision-deps.json') -Raw | ConvertFrom-Json
+    foreach ($asset in $visionConfig.assets) {
+        $noticeRoot = if ($asset.name -eq 'opencv') { $opencvLicenses } else { Join-Path $licenses "vision/$($asset.name)" }
+        New-Item -ItemType Directory -Path $noticeRoot -Force | Out-Null
+        foreach ($name in $asset.licenseFiles) {
+            $source = Join-Path $root "build/vision-deps/$($asset.name)/$name"
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Vision dependency license missing: $source" }
+            $destination = Join-Path $noticeRoot $name
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+        "$($asset.repository)@$($asset.revision)`n$($asset.license)" | Set-Content -LiteralPath (Join-Path $noticeRoot 'SOURCE.txt') -Encoding utf8NoBOM
+    }
+    'Only the MIT-licensed STag dictionary tables are consumed. LyFlow implements contour extraction and decoding independently; upstream ED/LSD implementations are not compiled, linked, or distributed.' |
+        Set-Content -LiteralPath (Join-Path $licenses 'vision/stag/USAGE.txt') -Encoding utf8NoBOM
     $matchingConfig = Get-Content -LiteralPath (Join-Path $root 'packaging/matching-deps.json') -Raw | ConvertFrom-Json
     foreach ($asset in $matchingConfig.assets) {
         $sourceRoot = Join-Path $root "build/matching-deps/$($asset.name)"
@@ -148,7 +193,7 @@ try {
     foreach ($paragraph in ($status -split '\r?\n\r?\n')) {
         if ($paragraph -match '(?m)^Package: (.+)$') {
             $name = $Matches[1].Trim()
-            if ($paragraph -match '(?m)^Version: (.+)$') {
+            if ($paragraph -match '(?m)^Version(?:-String|-Semver|-Date)?: (.+)$' -and $paragraph -notmatch '(?m)^Feature:') {
                 $dependencyVersion = $Matches[1].Trim()
                 if ($paragraph -match '(?m)^Port-Version: (\d+)') { $dependencyVersion += "#$($Matches[1])" }
                 if ($paragraph -match "(?m)^Architecture: $([regex]::Escape($configuration.triplet))\s*$") {
@@ -158,7 +203,25 @@ try {
         }
     }
     if (-not $dependencies.Count) { throw 'Installed dependency version inventory is empty.' }
+    foreach ($bundled in @(
+        @{ name = 'core-json'; file = 'nlohmann/json.hpp'; prefix = 'NLOHMANN_JSON'; patch = 'PATCH'; scope = 'runtime' },
+        @{ name = 'core-doctest'; file = 'doctest/doctest.h'; prefix = 'DOCTEST'; patch = 'PATCH'; scope = 'test-only' },
+        @{ name = 'core-xxhash'; file = 'xxhash/xxhash.h'; prefix = 'XXH'; patch = 'RELEASE'; scope = 'runtime' }
+    )) {
+        $header = Get-Content -LiteralPath (Join-Path $root "core/third_party/$($bundled.file)") -Raw
+        $parts = foreach ($component in @('MAJOR', 'MINOR', $bundled.patch)) {
+            $macro = "$($bundled.prefix)_VERSION_$component"
+            $value = [regex]::Match($header, "(?m)^#define\s+$macro\s+(\d+)\b")
+            if (-not $value.Success) { throw "Bundled header version missing: $macro" }
+            $value.Groups[1].Value
+        }
+        $dependencies.Add([ordered]@{ name = $bundled.name; version = ($parts -join '.'); scope = $bundled.scope })
+    }
     $dependencies.Add([ordered]@{ name = 'onnxruntime'; version = $configuration.onnxruntimeVersion })
+    foreach ($asset in $visionConfig.assets) {
+        $assetVersion = if ($asset.PSObject.Properties.Name -contains 'tag') { $asset.tag } else { $asset.revision }
+        $dependencies.Add([ordered]@{ name = "vision-$($asset.name)"; version = $assetVersion; sourceRevision = $asset.revision })
+    }
     foreach ($asset in $matchingConfig.assets) {
         $dependencies.Add([ordered]@{ name = "matching-$($asset.name)"; version = $asset.revision })
     }

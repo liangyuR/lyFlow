@@ -1,0 +1,10 @@
+{
+  "type": "vision.CameraCalib.v1",
+  "data": {
+    "imageSize": [1280, 960],
+    "cameraMatrix": [900, 0, 640, 0, 880, 480, 0, 0, 1],
+    "distortion": [],
+    "frame": "camera",
+    "unit": "m"
+  }
+}

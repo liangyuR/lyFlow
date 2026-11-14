@@ -210,7 +210,11 @@ fn main() -> Result<()> {
     require(!ort_base.is_null(), "ORT API base is null")?;
     let ort_version = unsafe { std::ffi::CStr::from_ptr(((*ort_base).get_version)()).to_str()? };
     require(
-        ort_version == "1.19.2",
+        ort_version
+            == serde_json::from_str::<Value>(include_str!("../../../../packaging/release.json"))?
+                ["onnxruntimeVersion"]
+                .as_str()
+                .ok_or("release.json missing onnxruntimeVersion")?,
         format!("unexpected ONNX Runtime {ort_version}"),
     )?;
     let loaded = modules(&root)?;
