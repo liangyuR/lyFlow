@@ -6,8 +6,10 @@
 |---|---|---|
 | `ml.onnx_run` | `input: Tensor` → `output: Tensor` | `modelPath`、`inputName`、`outputName`、`intraOpThreads`（默认 1） |
 
-`Tensor` 是 core 的端口类型：`shape` + float32 数据，行主序。它不进二进制 IPC ——
-Inspector 只看得到形状与 min/max/mean。构造张量、解读张量都是领域的事
+`Tensor` 是 core 的端口类型：`shape` + float32 数据，行主序。结果元信息包含形状与 min/max/mean，
+完整数值可通过 `lyflow_output_tensor` 按 `offset` / `count` 切片读取；`Indices` 同样通过 `lyflow_output_indices` 读取 int32 下标。
+C ABI 返回的视图在释放对应 handle 前有效。编辑器 Transport 的 `getOutputTensor` / `getOutputIndices`
+使用二进制载荷（`LYTN` / `LYIX`），格式见 [HTTP 传输契约](../../docs/http-transport.md)。构造张量、解读张量都是领域的事
 （比如 `gap.profile_tensor` 与 `gap.labels_from_logits`），本包只负责「跑一次前向」。
 模型输出读取前检查元素类型、形状与元素数；仅支持 float32 稠密张量，允许零元素输出。
 其他类型、标量或无效形状返回 `bad_input`，诊断指向 `outputName`。

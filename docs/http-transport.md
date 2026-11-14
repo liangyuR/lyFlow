@@ -1,13 +1,9 @@
 # HTTP 传输契约
 
-`@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
+`@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。宿主服务按本文提供接口，实际类型定义见[Transport](../packages/editor/src/transport/types.ts)。
 
-一句话：`Transport` 接口的每个方法对着 C ABI v12 的一个入口，这里再对着一个 REST 端点。
-三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
-v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
-v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
-v10 在 `lyflow_run_options` 末尾加的 `params_json`（顶层图参数取值）见 [embedding.md](embedding.md#顶层图参数)。
-v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算）见 [embedding.md](embedding.md#部分运行targetsisolateforce)，对应下面 `/lyflow/run` 信封的同名字段。
+`Transport` 将编辑器需要的执行、文件与结果能力映射为 REST 和 WebSocket；执行接口基于当前产品版本系列兼容的 C ABI，文件、快照等能力由宿主实现。
+当前 C ABI 签名以 [`c_api.h`](../core/include/lyflow/c_api.h) 为准；版本兼容与输入注入见[嵌入指南](embedding.md)。张量/下标读回与 summary 的设计依据分别保留在 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md) 和 [ADR-0022](adr/0022-run-summary-as-core-output.md)。局部运行的 `targets`、`isolate`、`force` 与顶层参数取值必须在传输层和执行端保持一致。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，
@@ -106,7 +102,7 @@ Python 设置 GET 返回 `{supported, editable, config, status}`，PUT 接受 `{
 `graphPath` 可以是 `null`。它**只**决定相对路径参数的基准目录，不表示后端要去读那个文件。
 
 `params` 可选（`null` / 不给 = 全用图里的 `default`）：顶层图参数的取值 `{ 名字: 值 }`，编辑器合成的
-「default ← 当前配方覆盖」（[param-recipe-plan.md](param-recipe-plan.md) K3）。后端原样交给 core：
+「default ← 当前配方覆盖」（[当前指南](recipe.md) K3）。后端原样交给 core：
 run 走 `lyflow_run_options.params_json`，validate / plan 走 `lyflow_validate_params` / `lyflow_plan_params`
 （v11 里追加）。于是诊断、cacheKey、运行结果说的都是这组取值下的图（K5）。
 桩服务器把它转成 CLI 的 `--param <名字>=<json>`（每个名字一条），取点云时重跑 CLI 也带着同一组。
@@ -145,7 +141,7 @@ run 走 `lyflow_run_options.params_json`，validate / plan 走 `lyflow_validate_
 
 `mode` 是 `"full"` 或 `"preview"`（ADR-0011：预览模式下源算子先抽稀）。
 
-`force` 非空：这些节点跳过缓存、真跑一遍、结果覆盖写回（[node-run-plan.md](node-run-plan.md) §6 修订一 V1），
+`force` 非空：这些节点跳过缓存、真跑一遍、结果覆盖写回（[当前指南](interaction-checklist.md) §6 修订一 V1），
 可与 `targets`、`isolate`、preview 组合。
 
 `isolate` 非空是单节点运行（R1–R2）：`targets` 被忽略、取同一组 id；它们自己照常查缓存（真跑要另给 `force`），
@@ -310,7 +306,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 
 ### `GET /lyflow/runs/:runId/images/:nodeId/:port?level=&row=&rows=`
 
-`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI 按产品版本 主.次 系列兼容，[image-plan.md](image-plan.md) §5；
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI 按产品版本 主.次 系列兼容，[当前指南](../packs/std-image/README.md) §5；
 编码在 `bridge/src/execution.rs` 的 `encode_image`）。**小端**，帧头 12 个 `u32`：
 
 | 偏移 | 类型 | 含义 |
@@ -399,12 +395,12 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 3D 视图导出 PNG 用它。
 
 `GET /lyflow/files/cloud?path=…&graphPath=…&maxPoints=N`：读一个磁盘上的点云文件，不属于任何一次运行
-（m8-plan L15：2D 拖框的模板底图）。载荷与 `clouds` 端点**同一布局**。`path` 是相对路径时按
+（2D 拖框使用的模板底图）。载荷与 `clouds` 端点**同一布局**。`path` 是相对路径时按
 `graphPath` 所在目录解析 —— 与图里 `path` 参数同一口径；图没保存（没给 `graphPath`）而 `path` 又是相对的，
 返回 400。解析后不许逃出工作区（403）；文件不存在 404。编辑器不给这个端点时只画框、不画底图。
 
 `GET /lyflow/snippets` → `{ "dirs": [...], "snippets": [...], "problems": [...] }`：用户目录里的片段
-（m8-plan L14），每个 `*.lyflow-snippet.json` 原样放进 `snippets`（多一个 `source` 字段写明来自哪个文件）。
+（库片段），每个 `*.lyflow-snippet.json` 原样放进 `snippets`（多一个 `source` 字段写明来自哪个文件）。
 只查最低要求：是 JSON 对象、有 `id` / `label` / `nodes`；不合格的进 `problems`。扫哪些目录由服务端定，
 在 `dirs` 里报出来。算子包随附的片段在 manifest 里，不走这里。
 

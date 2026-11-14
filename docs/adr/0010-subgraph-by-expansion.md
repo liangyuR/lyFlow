@@ -85,7 +85,7 @@ C ABI v13 加 `lyflow_library_definition(op_id)`：返回库文件原样去掉 `
 `doc.subgraphs.<id>` 的形状。编辑器把它以新 id 写进 doc、节点从 `lib.<id>` 换成 `sub:<新 id>`，
 其余不动；库算子与 `sub:` 走同一条展开路径，所以展开前后 compile 出同一张平图（`test_subgraph.cpp`
 「库目录」那条钉了逐位相同）。定义由 core 给而不是 bridge 自己去读库目录：按 id 找文件、多个目录谁优先
-这套规则只留一份。设计见 [library-inline-plan.md](../library-inline-plan.md)。
+这套规则只留一份。设计见 [library-inline-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/library-inline-plan.md)。
 
 ## 修订（2026-09-29）：库目录的设置界面
 

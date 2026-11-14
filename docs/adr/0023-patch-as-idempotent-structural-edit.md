@@ -4,7 +4,7 @@
 
 ## 背景
 
-第二次真实任务（xyz-gap-inspector 上带 11 个 fallback 的多点位调参，见 [m6-plan.md](../m6-plan.md) §来源）里，
+第二次真实任务（xyz-gap-inspector 上带 11 个 fallback 的多点位调参，见 [m6-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m6-plan.md) §来源）里，
 所有**结构**实验都是这么做的：把数据库里的图复制一份，手改 JSON，再跑。为此写了两个 Python 脚本。
 
 手改 JSON 的问题不在于「麻烦」，在于**没有回执**：

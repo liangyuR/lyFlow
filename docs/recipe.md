@@ -1,8 +1,7 @@
 # 参数配方
 
 同一张 flow，不同的产品、车型、工位用不同的一组参数值：这一组值就是一个**配方**，存在独立的文件里。
-设计与分期见 [param-recipe-plan.md](param-recipe-plan.md)（K1–K8、P3），调研见 [param-recipe-research.md](param-recipe-research.md)。
-格式与规则是 P3 定下来的（§1–§7）；CLI 的 `--recipe`、MCP 的 `recipe` 与 `list_recipes`、宿主怎么按名字切配方是 P4（§8–§10）。
+本文定义配方文件、覆盖规则、失配处理，以及编辑器、CLI、MCP 和宿主的使用方式。
 
 - **配方 = 顶层图参数的稀疏覆盖**，只有一层，配方之间不继承（K1）。没写的图参数用它的 `default`，叫「基础」。
 - **有效值 = default ← 当前配方**，总是从基础重新叠，不叠在上一个配方上（K4）。

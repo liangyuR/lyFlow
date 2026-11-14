@@ -5,7 +5,7 @@
 ## 背景
 
 2026-09-15 一个 Agent 在 xyz-gap-inspector 上从零设计并调稳了 KUN10 的 19 个测点
-（51 帧同 VIN 重复采集），约 4 小时。事后复盘的硬数字（见 [m5-plan.md](../m5-plan.md) §来源）：
+（51 帧同 VIN 重复采集），约 4 小时。事后复盘的硬数字（见 [m5-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m5-plan.md) §来源）：
 
 - 九个子命令里只用了 `run` 与 `manifest` 两个。
 - 自己写了 12 个 Python 脚本，其中 **JSON Lines 解析器、批跑器、统计各一份** —— 全是重复劳动。
@@ -80,7 +80,7 @@ lyflow eval <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <no
 绝对路径写进 `--bind` 指的那个参数，`id` 取文件名去扩展名（重名时前面补上父目录名）。
 **只支持一个 `--bind`** —— 双相机那类要两个路径的情况走下面的目录模式。
 
-**目录模式**（M5 盲测补的，见 [m5-acceptance.md](../m5-acceptance.md)「盲测暴露的缺口」第 2 条）。
+**目录模式**（M5 盲测补的，见 [m5-acceptance.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m5-acceptance.md)「盲测暴露的缺口」第 2 条）。
 采集落盘几乎总是「一帧一个目录」，那就直接认这个形状：
 
 ```
@@ -218,7 +218,7 @@ Audio_1 的缝只有 0.04~0.15 mm 宽却游走 0.9 mm，**任何一条固定的�
 halfspace 的 `pointFrom:{x|y|z:{path, scale?, offset?}}` 先在未扰动的图上（位移 0）逐样本按 G3 值路径读锚点，
 再把「值 × scale + offset」写进这一帧的刀口扫位移。选区仍然只是几何，锚点是平台级的值引用，没有领域规则进平台；
 每帧的刀口写在 `perturb_anchor` 行里，可审计。取不到锚点的样本判失败。值路径同时补上数字段取数组下标
-（Point2D 的 `p.0`）。设计见 [pointfrom-plan.md](../pointfrom-plan.md)。
+（Point2D 的 `p.0`）。设计见 [pointfrom-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/pointfrom-plan.md)。
 
 ## 后果
 

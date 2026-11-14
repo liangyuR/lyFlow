@@ -177,7 +177,7 @@ manifest 导出）、编辑器（`lib/transform.ts`、`lib/curve.ts`）三方同
 ```
 
 - `semantic: "roi"` 只能标在 `vec4f` 上（`lyflow manifest --check` 查）；单位按 `unit`，`mm` 按 0.001 换成米。
-- `unit: "px"` 的 roi 是**图像上的框**（[image-plan.md](image-plan.md) 阶段 3）：算子要有 `Image` 输入、不另给 `roiBackdrop`，
+- `unit: "px"` 的 roi 是**图像上的框**（[当前指南](../packs/std-image/README.md) 阶段 3）：算子要有 `Image` 输入、不另给 `roiBackdrop`，
   编辑器在主预览的图像模式里把它画在输入那张图上（左上角原点、y 向下），例如 `image.crop.roi`。
 - 编辑器在 2D 剖面视图里把选中节点**当前可见**的 roi 参数画成可拖、可拉伸的框（拖框身平移、拖四角拉伸，
   吸附 0.1 mm，整段拖动一条撤销），与数字框是同一个参数的两种编辑方式。
@@ -247,7 +247,7 @@ V1 的规则刻意简单：
 ```
 
 > `castableTo` 目前一条都没用上，这是有意的。曾经有过一个
-> `PointCloudXYZI castableTo: ["PointCloud"]`，M2 把它删了（m2-plan.md 的 D10）：
+> `PointCloudXYZI castableTo: ["PointCloud"]`，当前类型系统不采用这一规则：
 > 强度、法线、颜色是 `PointCloud` 的**可选通道**，不是另一个类型。
 > 让类型系统承诺一件数据模型做不到的事，迟早要在
 > 「XYZI 连到 XYZ 端口之后强度去哪了」这种问题上翻车。

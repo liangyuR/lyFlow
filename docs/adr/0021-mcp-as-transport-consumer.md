@@ -5,7 +5,7 @@
 ## 背景
 
 M5 的目标是「一个只拿得到 CLI 或 MCP、拿不到仓库源码的 Agent，能独立完成给一组测点设计图并调稳参数」
-（[m5-plan.md](../m5-plan.md)）。CLI 那一半在 [ADR-0020](0020-eval-and-perturb-as-cli.md) 里定了。
+（[m5-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m5-plan.md)）。CLI 那一半在 [ADR-0020](0020-eval-and-perturb-as-cli.md) 里定了。
 剩下的问题是：Agent 要看现场数据、要连阶段 B 的业务服务，**这一段该怎么接**。
 
 仓库里已经有三种 `Transport` 实现（[packages/editor/src/transport/](../../packages/editor/src/transport/)）：

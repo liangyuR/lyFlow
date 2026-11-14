@@ -24,7 +24,7 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 |---|---|---|---|---|
 | `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
-| `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云（[image-plan.md](image-plan.md)） | OpenCV 4（core / imgproc / imgcodecs / calib3d） |
+| `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云（[图像包](../packs/std-image/README.md)） | OpenCV 4（core / imgproc / imgcodecs / calib3d） |
 | `glue` | 0.1.0 | **OFF** | 胶路（自由搜索 / 示教）、胶宽、断胶、边距、判定、人造断胶、飞拍定位与逐点卡尺（[README](../packs/glue/README.md)） | std-image 的 `lyflow_opencv_support` |
 | `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
 | `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
@@ -45,7 +45,7 @@ pnpm check          # 或 pnpm check:gap
 `LYFLOW_OP_PACKS` 是**分号分隔的目录列表**，每个目录下要有一个 `lyflow_op_pack.cmake`：
 
 ```powershell
-$env:LYFLOW_OP_PACKS = "D:\project\xyz-gap-inspector\lyflow"
+$env:LYFLOW_OP_PACKS = "$HOME\project\xyz-gap-inspector\lyflow"
 pnpm check          # 或 pnpm core:build / pnpm dev
 ```
 
@@ -429,7 +429,7 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 | `Measurement` | 值 + 单位 + ok + 消息 + 判定 + 上下限 | Inspector 的「输出」一栏 |
 | `Record` | 带类型标签的 JSON | Inspector 里显示 JSON |
 | `Tensor` | 形状 + float32 数据，行主序 | 连线查看器画成图像；Inspector 与预览里显示形状与 min/max/mean |
-| `Image` | 宽 × 高 × 通道（1/3/4，RGB(A) 顺序）、位深 u8/u16/f32，行主序、通道交错（[image-plan.md](image-plan.md)） | 连线查看器按级别取、可缩放、悬停读像素；Inspector 显示尺寸与逐通道均值 |
+| `Image` | 宽 × 高 × 通道（1/3/4，RGB(A) 顺序）、位深 u8/u16/f32，行主序、通道交错（[图像包](../packs/std-image/README.md)） | 连线查看器按级别取、可缩放、悬停读像素；Inspector 显示尺寸与逐通道均值 |
 
 领域专有的结构走 `Record`：`Record{ type: "GapAlignment", data: {...} }`。
 加一个领域结构因此不用改 core，代价是它在图上只是一团 JSON，没有专门的可视化。

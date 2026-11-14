@@ -78,7 +78,7 @@ C ABI 因此多三个入口：`lyflow_plan`、`lyflow_cache_clear`、`lyflow_cac
 > core 自己编计划算出 cacheKey 再删 —— 前端照样不碰 cacheKey（E1）；被 pin 住的跳过（「pin 不是可选的」）。
 > 预览命名空间里的结果不动：那些 cacheKey 混着预览参数，按图算不出来，而它们本来就是抽稀过的小份。
 
-> **修订（C ABI v14）：缓存落盘。** 复议条件里那一层做了，但只给 CLI、默认关（[disk-cache-plan.md](../disk-cache-plan.md)）：
+> **修订（C ABI v14）：缓存落盘。** 复议条件里那一层做了，但只给 CLI、默认关（[disk-cache-plan.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/disk-cache-plan.md)）：
 > `lyflow_cache_set_dir(dir, fingerprint)` 打开之后，`ResultStore` 的 `reuse` / `peek` 在内存里找不齐端口时查
 > `<dir>/<指纹>/`，`cached` 的预测与执行器同一个判据；执行器把确定性、耗时 ≥ 20 ms、全部端口是点云或张量的节点整个落盘。
 > **判定仍只归 core**：宿主只给目录与构建指纹，不决定哪个节点命中。cacheKey 本身没变 —— 它只看算子版本，

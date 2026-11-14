@@ -103,6 +103,6 @@ live preview 那三处原来就是后者，在 HTTP 下会静默失效。
   **修订（2026-09-29）**：先做了防呆 —— 第二个 `<LyFlowEditor>` 挂载时 `console.error`；拖分栏 / 拖参数的状态类
   改挂在编辑器根元素上（带 `lyflow-` 前缀，不再碰 `body`）；节点面板按 React Flow 自己的 `domNode` 找画布，
   不再 `document.querySelector`。完整改造的调研（单例清单、store 调用计数、context 与 iframe 两个方案）见
-  [multi-instance-research.md](../multi-instance-research.md)。
+  [multi-instance-research.md](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/multi-instance-research.md)。
 - **`dist` 构建与 npm 发布**。见上面「一」。
-- **编辑器自己的多文档 / 多标签**（阶段 A 的「不做」里就写了）。
+- **同页实例隔离仍未实现**；编辑器内部的多工作流标签已在后续版本实现，当前用法见[交互指南](../interaction-checklist.md)。
