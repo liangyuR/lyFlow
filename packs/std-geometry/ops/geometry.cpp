@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -19,7 +20,6 @@ struct Vec {
 };
 
 double dot(Vec a, Vec b) { return a.x * b.x + a.y * b.y; }
-double cross(Vec a, Vec b) { return a.x * b.y - a.y * b.x; }
 double length(Vec v) { return std::hypot(v.x, v.y); }
 bool finite(Vec v) { return std::isfinite(v.x) && std::isfinite(v.y); }
 Vec vec(const float* p) { return {p[0], p[1]}; }
@@ -28,9 +28,75 @@ bool representable(Vec v) {
   return finite(v) && std::abs(v.x) <= max && std::abs(v.y) <= max;
 }
 
+struct ExactVec {
+  Vec high, low;
+};
+
+std::pair<double, double> exactDifference(double a, double b) {
+  const double high = a - b;
+  const double virtualB = a - high;
+  const double low = (a - (high + virtualB)) + (virtualB - b);
+  return {high, low};
+}
+
+ExactVec exactDifference(Vec a, Vec b) {
+  const auto x = exactDifference(a.x, b.x), y = exactDifference(a.y, b.y);
+  return {{x.first, y.first}, {x.second, y.second}};
+}
+
+class Expansion {
+public:
+  void add(double value) {
+    if (value == 0)
+      return;
+    std::size_t size = 0;
+    for (std::size_t i = 0; i < size_; ++i) {
+      const double sum = value + parts_[i];
+      const double virtualB = sum - value;
+      const double error = (value - (sum - virtualB)) + (parts_[i] - virtualB);
+      if (error != 0)
+        parts_[size++] = error;
+      value = sum;
+    }
+    if (value != 0)
+      parts_[size++] = value;
+    size_ = size;
+  }
+
+  void addProduct(double a, double b, double sign) {
+    const double product = a * b;
+    add(sign * std::fma(a, b, -product));
+    add(sign * product);
+  }
+
+  double value() const {
+    double result = 0;
+    for (std::size_t i = 0; i < size_; ++i)
+      result += parts_[i];
+    return result;
+  }
+
+private:
+  std::array<double, 16> parts_{};
+  std::size_t size_ = 0;
+};
+
+double cross(const ExactVec& a, const ExactVec& b) {
+  Expansion result;
+  for (Vec av : {a.high, a.low}) {
+    for (Vec bv : {b.high, b.low}) {
+      result.addProduct(av.x, bv.y, 1);
+      result.addProduct(av.y, bv.x, -1);
+    }
+  }
+  return result.value();
+}
+
 struct Geometry {
   enum Kind { Point, Line, Circle } kind = Point;
-  Vec p, d;
+  Vec p, d, end;
+  ExactVec rawDirection;
+  double directionLength = 1;
   double radius = 0, hi = std::numeric_limits<double>::infinity();
   bool segment = false;
   Unit2D unit = Unit2D::Meter;
@@ -61,12 +127,17 @@ Status read(const Data& data, const std::string& port, Geometry& out) {
       const Vec end = vec(l->end);
       if (!finite(end))
         return bad("线段端点必须有限", port);
-      out.d = end - out.p;
+      out.end = end;
+      out.rawDirection = exactDifference(end, out.p);
+      out.d = out.rawDirection.high;
       out.hi = length(out.d);
       if (!(out.hi > 0))
         return bad("线段两个端点不能重合", port);
+    } else {
+      out.rawDirection = {out.d, {}};
     }
-    out.d = out.d * (1.0 / length(out.d));
+    out.directionLength = length(out.d);
+    out.d = out.d * (1.0 / out.directionLength);
   } else if (const Circle2D* c = data.asCircle2D()) {
     out.kind = Geometry::Circle;
     out.p = vec(c->center);
@@ -94,11 +165,29 @@ Status pair(const Inputs& inputs, Geometry& a, Geometry& b) {
   return a.unit == b.unit ? Status::Ok() : bad("两个几何体的单位必须一致，不自动换算", "b");
 }
 
+double projectionParameter(const ExactVec& delta, const Geometry& line) {
+  return (dot(delta.high, line.d) + dot(delta.low, line.d)) / line.directionLength;
+}
+
+Vec pointAt(const Geometry& line, double parameter) {
+  if (parameter == 0)
+    return line.p;
+  if (line.segment && parameter == 1)
+    return line.end;
+  return {std::fma(line.rawDirection.low.x, parameter,
+                   std::fma(line.rawDirection.high.x, parameter, line.p.x)),
+          std::fma(line.rawDirection.low.y, parameter,
+                   std::fma(line.rawDirection.high.y, parameter, line.p.y))};
+}
+
 double pointLineDistance(Vec p, const Geometry& line) {
-  double t = dot(p - line.p, line.d);
-  if (line.segment)
-    t = std::clamp(t, 0.0, line.hi);
-  return length(p - (line.p + line.d * t));
+  const ExactVec delta = exactDifference(p, line.p);
+  const double parameter = projectionParameter(delta, line);
+  if (line.segment && parameter < 0)
+    return length(p - line.p);
+  if (line.segment && parameter > 1)
+    return length(p - line.end);
+  return std::abs(cross(delta, line.rawDirection)) / line.directionLength;
 }
 
 struct Intersection {
@@ -107,38 +196,60 @@ struct Intersection {
 };
 
 bool onLine(Vec p, const Geometry& line, double eps) {
-  const double t = dot(p - line.p, line.d);
-  return std::abs(cross(p - line.p, line.d)) <= eps &&
-         (!line.segment || (t >= -eps && t <= line.hi + eps));
+  const ExactVec delta = exactDifference(p, line.p);
+  const double t = projectionParameter(delta, line);
+  const double slack = eps / line.directionLength;
+  return std::abs(cross(delta, line.rawDirection)) / line.directionLength <= eps &&
+         (!line.segment || (t >= -slack && t <= 1 + slack));
+}
+
+struct LineParameters {
+  bool parallel;
+  double a = 0, b = 0;
+};
+
+LineParameters lineParameters(const Geometry& a, const Geometry& b) {
+  const double denominator = cross(a.rawDirection, b.rawDirection);
+  if (denominator == 0)
+    return {true};
+  const ExactVec delta = exactDifference(b.p, a.p);
+  return {false, cross(delta, b.rawDirection) / denominator,
+          cross(delta, a.rawDirection) / denominator};
+}
+
+double collinearParameter(Vec p, const Geometry& line) {
+  const ExactVec delta = exactDifference(p, line.p);
+  if (std::abs(line.rawDirection.high.x) >= std::abs(line.rawDirection.high.y))
+    return (delta.high.x + delta.low.x) / (line.rawDirection.high.x + line.rawDirection.low.x);
+  return (delta.high.y + delta.low.y) / (line.rawDirection.high.y + line.rawDirection.low.y);
 }
 
 Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
-  const Vec delta = b.p - a.p;
-  const double den = cross(a.d, b.d);
-  if (den != 0.0) {
-    const double ta = cross(delta, b.d) / den;
-    const double tb = cross(delta, a.d) / den;
-    if ((a.segment && (ta < -eps || ta > a.hi + eps)) ||
-        (b.segment && (tb < -eps || tb > b.hi + eps)))
+  const LineParameters parameters = lineParameters(a, b);
+  const double slackA = eps / a.directionLength, slackB = eps / b.directionLength;
+  if (!parameters.parallel) {
+    if ((a.segment && (parameters.a < -slackA || parameters.a > 1 + slackA)) ||
+        (b.segment && (parameters.b < -slackB || parameters.b > 1 + slackB)))
       return {};
-    return {{a.p + a.d * ta}, false};
+    return {{pointAt(a, parameters.a)}, false};
   }
-  if (std::abs(cross(delta, a.d)) > eps)
+  const ExactVec delta = exactDifference(b.p, a.p);
+  if (std::abs(cross(delta, a.rawDirection)) / a.directionLength > eps)
     return {};
   const double inf = std::numeric_limits<double>::infinity();
   double lo = a.segment ? 0.0 : -inf;
-  double hi = a.segment ? a.hi : inf;
+  double hi = a.segment ? 1.0 : inf;
   if (b.segment) {
-    double u = dot(delta, a.d), v = dot(delta + b.d * b.hi, a.d);
+    double u = collinearParameter(b.p, a), v = collinearParameter(b.end, a);
     if (u > v)
       std::swap(u, v);
     lo = std::max(lo, u);
     hi = std::min(hi, v);
   }
-  if (lo > hi + eps)
+  if (lo > hi + slackA)
     return {};
-  if (std::isfinite(lo) && std::isfinite(hi) && hi - lo <= eps)
-    return {{a.p + a.d * ((lo + hi) * 0.5)}, false};
+  if (std::isfinite(lo) && std::isfinite(hi) && hi - lo <= slackA)
+    return {{pointAt(a, (lo + hi) * 0.5)}, false};
   return {{}, true};
 }
 
@@ -214,27 +325,25 @@ double distance(Geometry a, Geometry b) {
     const double minRadius = pointLineDistance(b.p, a);
     if (!a.segment)
       return std::max(0.0, minRadius - b.radius);
-    const double maxRadius = std::max(length(a.p - b.p), length(a.p + a.d * a.hi - b.p));
+    const double maxRadius = std::max(length(a.p - b.p), length(a.end - b.p));
     return std::max({0.0, minRadius - b.radius, b.radius - maxRadius});
   }
-  const double denominator = cross(a.d, b.d);
-  if (denominator != 0) {
+  const LineParameters parameters = lineParameters(a, b);
+  if (!parameters.parallel) {
     if (!a.segment && !b.segment)
       return 0.0;
-    const Vec delta = b.p - a.p;
-    const double ta = cross(delta, b.d) / denominator;
-    const double tb = cross(delta, a.d) / denominator;
-    if ((!a.segment || (ta >= 0 && ta <= a.hi)) && (!b.segment || (tb >= 0 && tb <= b.hi)))
+    if ((!a.segment || (parameters.a >= 0 && parameters.a <= 1)) &&
+        (!b.segment || (parameters.b >= 0 && parameters.b <= 1)))
       return 0.0;
   } else if (!a.segment && !b.segment) {
     return pointLineDistance(a.p, b);
   }
   double result = std::numeric_limits<double>::infinity();
   if (a.segment) {
-    result = std::min(pointLineDistance(a.p, b), pointLineDistance(a.p + a.d * a.hi, b));
+    result = std::min(pointLineDistance(a.p, b), pointLineDistance(a.end, b));
   }
   if (b.segment) {
-    result = std::min({result, pointLineDistance(b.p, a), pointLineDistance(b.p + b.d * b.hi, a)});
+    result = std::min({result, pointLineDistance(b.p, a), pointLineDistance(b.end, a)});
   }
   return result;
 }

@@ -216,6 +216,49 @@ TEST_CASE("geometry near-parallel intersections agree with distance and point ex
   }
 }
 
+TEST_CASE("geometry parallel predicates preserve raw directions and segment endpoints") {
+  struct Case {
+    Data a, b;
+    const char* relation;
+    double expectedDistance;
+  };
+  const std::vector<Case> cases = {
+      {segment(0, 0, 1, 3), segment(0, 0, 5, 15), "coincident", 0},
+      {segment(0, 0, 1, 3), segment(5, 15, 0, 0), "coincident", 0},
+      {segment(0, 0, 5, 15), segment(1, 3, 2, 6), "coincident", 0},
+      {segment(0, 0, 1, 3), segment(2, 6, 5, 15), "empty", std::sqrt(10.0)},
+      {segment(1, 3, 0, 0), segment(5, 15, 2, 6), "empty", std::sqrt(10.0)},
+      {segment(0, 0, 1, 3), segment(1, 3, 6, 18), "finite", 0},
+      {segment(1, 3, 0, 0), segment(6, 18, 1, 3), "finite", 0},
+      {segment(0, 0, 1, 3), segment(0, 1, 5, 16), "empty", 1 / std::sqrt(10.0)},
+      {line(0, 0, 1, 3), line(2, 6, 5, 15), "coincident", 0},
+      {line(0, 0, 1, 3), line(2, 6, -5, -15), "coincident", 0},
+      {line(0, 0, 1, 3), line(0, 1, 5, 15), "empty", 1 / std::sqrt(10.0)},
+      {line(0, 0, 1, 3), line(0, 1, -5, -15), "empty", 1 / std::sqrt(10.0)},
+  };
+  for (std::size_t i = 0; i < cases.size(); ++i) {
+    CAPTURE(i);
+    const auto& item = cases[i];
+    for (bool swap : {false, true}) {
+      CAPTURE(swap);
+      test::OpCall call;
+      const Data a = swap ? item.b : item.a, b = swap ? item.a : item.b;
+      const auto result = intersections(call, a, b);
+      CHECK(result["relation"] == item.relation);
+      CHECK(result["points"].size() == (std::string(item.relation) == "finite" ? 1 : 0));
+      CHECK(distance(a, b) == doctest::Approx(item.expectedDistance).epsilon(1e-12));
+    }
+  }
+  test::OpCall call;
+  const Data a = segment(1, 0, 1e20f, 1e20f), b = segment(0, 0, 1e20f, 1e20f);
+  const auto result = intersections(call, a, b);
+  REQUIRE(result["relation"] == "finite");
+  REQUIRE(result["points"].size() == 1);
+  CHECK(result["points"][0][0].get<double>() == static_cast<double>(1e20f));
+  CHECK(result["points"][0][1].get<double>() == static_cast<double>(1e20f));
+  CHECK(distance(a, b) == doctest::Approx(0));
+}
+
 TEST_CASE("geometry rejects invalid input types units nonfinite and degenerate geometry") {
   test::OpCall c;
   for (const std::string op :
