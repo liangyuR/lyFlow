@@ -33,6 +33,7 @@ cmake --build build/value
 | `value.from_measurement` | 显式转换有效有限测量值，保留单位 |
 | `value.field` | 从领域记录提取标量，路径使用 JSON Pointer，如 `/regions/0/area` |
 | `value.arithmetic` | 加、减、乘、除及无单位幂运算 |
+| `value.expression` | 八个可选数值/布尔输入的受限公式、比较、逻辑与条件式 |
 | `value.compare` | 六种比较，数值支持绝对/相对容差；文本与布尔支持相等/不等 |
 | `value.logic` | AND、OR、XOR、NOT、NAND、NOR、XNOR |
 | `value.concat` | 按 A、分隔符、B 拼接文本，保留空串 |
@@ -56,3 +57,17 @@ cmake --build build/value
 宿主通过顶层图参数绑定 `value.string` / `value.number`，使用公开运行接口的 `params_json` 按次覆盖信息，不需要常驻请求对象或跨运行残留。当前公开 C ABI 输入注入仅支持云与图像，不支持直接注入任意 Record；C++ 内部执行器的 Data 注入不等于公开 ABI 承诺。外部 xyz Request 的工件对象、动态云列表和原协议适配属于后续范围。本实现参考外部能力与边界，独立实现通用逻辑，不复制其 proprietary 源码，也不作未测量的性能提升承诺。
 
 验证入口为 `packs/std-value/tests/test_values.cpp`，覆盖版本/大小/深度限制、单位、算术定义域、比较阈值、稳定集合语义及真实执行器的惰性条件选择。
+
+## 受限表达式
+
+`value.expression` 提供固定可选输入 `a`..`h`，参数 `expression` 默认为 `(a+b)/2`，输出 `value` 继续使用 `std.Value.v1`。仅接受 number/boolean，实际取值的变量必须连接，未连接变量不隐式取零。更改公式保持端口身份，不动态重建连线。
+
+支持十进制/小数/科学记数、布尔常量、`+ - * / ^`、括号、一元 `+ - !`、六种数值比较、`&& ||` 和右结合 `?:`。幂右结合且高于一元符号：`2^3^2=512`、`-2^2=-4`、`2^-2=0.25`。布尔值只支持相等/不等比较和逻辑，不隐式转换数值真假；数值相等精确比较，容差可显式表达为 `abs(a-b) <= c`。
+
+函数白名单为 `abs`、`sqrt`、`floor`、`ceil`、`round`（单参），`min`、`max`、`pow`（双参），以及 `clamp(value, lower, upper)`（三参，要求有序上下界）。加减、数值比较、min/max/clamp同单位；乘除和幂沿用上文算术规则；sqrt仅无单位，abs/floor/ceil/round保留单位。round的半数远离零舍入（±2.5→±3）。无字符串、属性/下标、赋值、循环或宿主代码执行。
+
+完整语法始终验证，包括未取分支中的未知函数和错误参数个数；运行时 `&&`、`||` 和 `?:` 短路，因此 `true ? 2 : a` 不要求连接a、`false && (1/0 > 0)`不触发除零。实际选中分支决定结果类型和单位。连接的图上游仍正常求值，上游失败不会被表达式短路隐藏；需要图级惰性选择时继续使用 `flow.select`。
+
+源码最多4096字节、1024个AST节点，表达式解析嵌套最多64层，AST根到叶最多64节点，解析和计算检查取消。语法/资源超限为指向expression的bad_param并报告从1开始的字节位置；实际输入、类型、单位和数学域错误为bad_input。零除、0^0、零负幂、非法实数域和非有限结果拒绝，输入保持只读。
+
+可运行示例为 [均值与上限选择](../../examples/p2-expression.lyflow.json)；图校验与运行共享语法校验，不要求未求值的可选变量已连接。逐项参考源码分析、支持矩阵与回归入口见 [P2表达式分析](../../docs/p2-expression-analysis.md)。此项仅完成P2首个受限公式切片，不包含外部任意变量名、动态端口或原配置协议兼容。

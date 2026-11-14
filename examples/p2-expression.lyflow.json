@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "id": "01P2EXPRESSION00000000001",
+  "name": "P2 受限表达式与条件选择",
+  "nodes": [
+    {
+      "id": "left",
+      "op": "value.number",
+      "params": {
+        "unit": "mm"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "right",
+      "op": "value.number",
+      "params": {
+        "unit": "mm"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 160
+        }
+      }
+    },
+    {
+      "id": "limit",
+      "op": "value.number",
+      "params": {
+        "unit": "mm"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 320
+        }
+      }
+    },
+    {
+      "id": "mean",
+      "op": "value.expression",
+      "params": {
+        "expression": "(a + b) / 2"
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "within",
+      "op": "value.expression",
+      "params": {
+        "expression": "a <= b"
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 160
+        }
+      }
+    },
+    {
+      "id": "limited",
+      "op": "flow.select",
+      "params": {
+        "path": "value"
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 320
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "left",
+        "port": "value"
+      },
+      "to": {
+        "node": "mean",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "right",
+        "port": "value"
+      },
+      "to": {
+        "node": "mean",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "mean",
+        "port": "value"
+      },
+      "to": {
+        "node": "within",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "limit",
+        "port": "value"
+      },
+      "to": {
+        "node": "within",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "within",
+        "port": "value"
+      },
+      "to": {
+        "node": "limited",
+        "port": "cond"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "mean",
+        "port": "value"
+      },
+      "to": {
+        "node": "limited",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "limit",
+        "port": "value"
+      },
+      "to": {
+        "node": "limited",
+        "port": "b"
+      }
+    }
+  ],
+  "outputs": {
+    "mean": {
+      "node": "mean",
+      "port": "value"
+    },
+    "withinLimit": {
+      "node": "within",
+      "port": "value"
+    },
+    "limited": {
+      "node": "limited",
+      "port": "out"
+    }
+  },
+  "params": {
+    "leftValue": {
+      "type": "float",
+      "label": "左值",
+      "default": 12,
+      "unit": "mm",
+      "binds": ["left.value"]
+    },
+    "rightValue": {
+      "type": "float",
+      "label": "右值",
+      "default": 14,
+      "unit": "mm",
+      "binds": ["right.value"]
+    },
+    "upperLimit": {
+      "type": "float",
+      "label": "上限",
+      "default": 15,
+      "unit": "mm",
+      "binds": ["limit.value"]
+    }
+  }
+}

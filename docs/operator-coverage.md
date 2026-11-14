@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-14。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 实现版本 **1.3.5**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-14。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01 首项实现版本 **1.3.6**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -28,14 +28,14 @@
 | 2D图像处理 | 21 | 1 | 5 | 10 | 3 | 40 |
 | 3D点云处理 | 7 | 2 | 13 | 33 | 1 | 56 |
 | 位姿处理 | 6 | 0 | 5 | 13 | 0 | 24 |
-| 流数据运算 | 6 | 0 | 5 | 3 | 0 | 14 |
+| 流数据运算 | 7 | 0 | 5 | 2 | 0 | 14 |
 | 检查 | 0 | 0 | 0 | 5 | 0 | 5 |
 | 深度学习 | 0 | 0 | 4 | 2 | 1 | 7 |
 | 输出 | 1 | 2 | 2 | 4 | 0 | 9 |
 | 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
 | 内置 Python 脚本 | 6 | 0 | 3 | 7 | 0 | 16 |
-| **合计** | **54** | **7** | **45** | **87** | **5** | **198** |
+| **合计** | **55** | **7** | **45** | **86** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -56,7 +56,7 @@
 
 ## 逐项对照
 
-“下一步”保留初始优先级并链接到任务；已交付的 P0/P1 行列明新入口、回归入口及剩余边界。初始优先级不改写，P2条目BestFit/SearchPoseLocally的基础能力虽在P1先交付，其高级模式仍按原计划保留。
+“下一步”保留初始优先级并链接到任务；已交付的 P0/P1 行列明新入口、回归入口及剩余边界。P2 A01首项受限表达式另见[实现分析](p2-expression-analysis.md)，不表示整批P2完成。初始优先级不改写，P2条目BestFit/SearchPoseLocally的基础能力虽在P1先交付，其高级模式仍按原计划保留。
 
 ### 输入
 
@@ -227,7 +227,7 @@
 | `Decompose2DInformation`<br>提取2D信息 | 已有对应 | `pose.decompose_2d` | 显式零基index提取x/y/angle/width/height带单位值，空/越界诊断；不静默只取首项或把任意几何当作工件。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `Extend2DInformation`<br>扩展2D信息 | 缺失 | — | 没有通用2D几何/对象升维为3D的数据契约与节点；需定义Z值、法向、坐标系和单位。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P2 · [B07](operator-completion-plan.md#b07) |
 | `FetchElement`<br>获取数组元素 | 部分覆盖 | `list.get` | P0有界值列表索引提取，加P1的cloud.group_get和pose.get；越界有诊断，不产默认值。通用原生几何集合及原协议仍未覆盖。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
-| `GeneralArithmetic`<br>自定义数学运算 | 缺失 | — | 没有安全数学表达式执行节点；允许用户编写Python并非已交付表达式算子，应先补基础数值契约再限定函数域和异常语义。 [1](../core/include/lyflow/data.h) [2](../core/src/builtin_ops.cpp) [3](../python/lyflow_python/api.py) | P2 · [A01](operator-completion-plan.md#a01) |
+| `GeneralArithmetic`<br>自定义数学运算 | 已有对应 | `value.expression` | 固定a..h可选值口，受限算术/比较/布尔/条件式及9个白名单函数，单位与数学域校验、内部短路和资源/取消限制；不重建动态端口、不兼容任意变量名/原Qt配置或宿主代码。 [源码分析与边界](p2-expression-analysis.md) · [回归](../packs/std-value/tests/test_expression.cpp) | P2 A01 限定切片已实现 · [A01](operator-completion-plan.md#a01) |
 | `LogicOperation`<br>逻辑运算 | 已有对应 | `value.logic` | AND/OR/XOR/NOT/NAND/NOR/XNOR；布尔严格输入，NOT不需B。惰性调度使用flow.select。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `MergeVector`<br>元素合并数组 | 部分覆盖 | `list.pack`、`list.concat` | P0值/记录列表保留；P1另有cloud.group_pack/concat与pose.concat。各领域使用明确载荷，仍无通用Plane/GeometryVector或外部动态集合协议。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `VectorSubset`<br>取数组子集 | 部分覆盖 | `list.subset` | P0值列表子集保留顺序/重复；P1另有cloud.group_subset，保留组ID并拒绝重复身份，pose.get/filter提供实例选择。通用原生几何集合仍未覆盖。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
