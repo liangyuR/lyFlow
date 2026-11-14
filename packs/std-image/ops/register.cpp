@@ -22,6 +22,9 @@ void registerPackOps(Registry& r) {
   ops::registerCloudToDepthImage(r);
   lyflow::std_image::registerBoardCalib(r);
   lyflow::std_image::registerLoadCalib(r);
+  ops::registerImageAnalysis(r);
+  ops::registerImageCalipers(r);
+  ops::registerImageDifference(r);
 }
 
 } // namespace lyflow::packs::std_image

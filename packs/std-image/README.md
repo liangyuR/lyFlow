@@ -34,10 +34,56 @@ C:\vcpkg\vcpkg.exe install opencv4:x64-windows
 | `image.morphology` | 腐蚀 / 膨胀 / 开 / 闭 |
 | `image.find_circle` | 霍夫找圆，取最强的一个 → `Circle2D`（px） |
 | `image.region_stats` | 掩膜内的均值、面积、外接框（px，可接 `image.crop`） |
+| `image.convert_channels` | 灰度 / RGB / RGBA 互转，保留位深，补入的 alpha 为满量程 |
+| `image.arithmetic` | 同尺寸、位深、通道的加 / 减 / 绝对差；整数饱和，浮点保留符号 |
+| `image.change_stats` | 差异阈值、可选十字开运算、最小变化面积判定与统计 |
+| `image.difference_mask` | 正 / 负 / 双向差分、共同边缘抑制、可选有界平移配准 |
+| `image.range_mask` | 灰度 / RGB / HSV 范围掩膜，支持色相环绕和反选 |
+| `image.roi_mask` | 矩形、旋转矩形、圆、圆环弧和多边形的显式掩膜 |
+| `image.statistics` | 掩膜内指定通道的最小 / 最大 / 均值 / 中位数 / 众数 |
+| `image.components` | 连通域、孔洞、像素面积、质心、旋转框、长宽比及有界轮廓 |
+| `image.edge_positions` | 全 ROI 均值投影后选择单边、内外双边或多个亚像素梯度峰 |
+| `image.line_caliper` | 平行扫描、极性边缘、亚像素定位和有质量门限的鲁棒直线拟合 |
+| `image.width_range` | 外侧极端边对 / 中心邻近内侧边对的宽度最小、最大和均值 |
 | `image.to_tensor` / `tensor.to_image` | 推理前后的显式转换：scale、mean/std、NCHW 等布局 |
 | `cloud.from_depth` / `cloud.to_depth_image` | 深度图 ↔ 点云（针孔内参，x 右、y 下、z 前，米）：无效深度不出点，可选彩色图上色；投回去按 z 缓冲取最近。同一组内参、同一个 depthScale 时两者互逆（[当前指南](README.md) §4.1）。不用 OpenCV |
 
 测试在 `tests/test_image_ops.cpp`，图一律现造（合成渐变、`cv::circle` 画的圆），仓库不进图片。
+
+## 通用区域与量测契约
+
+新增算子的回归在 `tests/test_image_p0.cpp`。颜色顺序始终是 RGB(A)，不隐式按 BGR 解释；u8/u16 的强度满量程分别为 255/65535，f32 的 HSV 颜色转换约定输入 0..1。新算子不改写输入像素。需要灰度的卡尺和连通域使用单通道输入，彩色图先显式连接 `image.to_gray`；统计则显式选择 `channel`，不会偷偷转换灰度。
+
+| 能力 | u8 / u16 / f32 | 数值与边界规则 |
+|---|---|---|
+| 通道转换 / 图像算术 | 三种均支持，1/3/4 通道 | 转换不改变位深；整数加减饱和，浮点不裁零，非有限值继续保留，由后续统计/掩膜排除 |
+| 范围掩膜 | 三种均支持 | Gray 仅用 lower/upper 的第一个分量；RGB 用原强度，HSV 用 H=0..360°、S/V=0..1，H 下界大于上界表示跨零环绕；闭区间，HSV 转换比较容差为 H 的 1e-5°、S/V 的 1e-6；反选仍排除 NaN/Inf |
+| 统计 / 变化 | 三种均支持 | 掩膜有限非零处有效；NaN/Inf 不参与；变化忽略 alpha，可选 BT.601 亮度差或最大通道差；`different` 按开运算后原图像素面积严格大于 `minArea` 判定 |
+| 连通域 / 边缘 / 卡尺 | 三种均支持，单通道 | 非零有限前景；梯度阈值使用输入原始强度单位，未统一除以 255；建议按实际位深设置阈值 |
+| 抗边缘差分 | 三种均支持，1/3/4 通道 | 两输入尺寸/通道/位深必须相同，不隐式裁交集；彩色按 RGB 亮度；可选有界平移配准，不含旋转/尺度配准 |
+
+`image.statistics` 输出 `image.Statistics.v1` Record：`valid`、`sampleCount`、`invalidSamples`、`channel`、`scale`、`min/max/mean/median/mode`。空区域 `valid=false`，五个统计字段为 null；选择该 null 字段做数值运算应报诊断，而非当作零。u8/u16 分别以 256/65536 桶累计直方图，f32 对有界有效值排序；众数按精确数值，次数相同取较小值，中位数取排序后中间两数的均值。浮点众数不做隐藏分箱。
+
+`image.change_stats` 输出 `image.Change.v1` Record：`sampleCount`、`changedSamples` 为开运算前采样统计，`filteredChangedSamples` 为滤波后采样变化数，`different` 为面积判定布尔值。`changedFraction`、平均绝对差、RMS 和最大差按未滤波有效像素计算。空 ROI 的数值统计为 null、`valid=false`、`different=false`；可通过 `flow.select` 的 Record 字段路径读取 `different`。
+
+`image.components` 输出 `image.Regions.v1` Record：`count`、`regions`，每域包含 `id`、`area`、`centroid`、半开 `bbox`、`aspectRatio`、`rotatedBox` 和可选 `contours`。面积是实际前景像素数，孔洞不计入，**不是轮廓多边形面积**。旋转框是像素中心轮廓的最小框，单像素/线状域可能有零边长，长宽比在退化时为零。`scan` 使用 SAUF 行优先标签；面积降序保持相同面积的标签顺序。默认超出 `maxRegions` 报资源诊断；仅显式开启 `takeLargest` 时按所选排序截取前 N 项。该 Record 不是工件 Pose2D 或相机标定数据。
+
+所有新增图像领域 Record 坐标都显式写 `coordinateSpace=source`、`unit=px`、`scale`，几何坐标和面积已换算至原图；`sampleCount` 等采样数量不冒充全分辨率真实计数。原生 Line2D/Measurement 则按执行器的现有像素缩放契约换算，不能再次手动缩放。预览的插值、降采样可能改变小目标和边缘，正式量测须跑全分辨率。
+
+ROI 掩膜保持输入图像尺寸，不携带外部 ROI 父层/工件位姿等隐式元数据。矩形使用半开 `[x0,y0,x1,y1)`；圆和旋转矩形按像素中心判定；正角从 +X 朝 +Y。圆环弧角度跨零有效，跨度至少 360° 为完整圆环。多边形 `points` 为原图坐标的 JSON 点数组，使用整数像素栅格化。所有形状最终与可选输入 mask 相交；`invert` 先反选几何，再相交，不会反选出 mask 外的像素。
+
+直线卡尺的 `axis` 指扫描轴，`direction` 定义极性方向，`selection` 可选首/末/最强峰。梯度以中心差分计算，峰顶用抛物线亚像素细化；先 Huber 拟合，再按 `fitTolerance` 筛内点并重新拟合，低于 `minValidFraction` 或退化时返回 `edge_not_found`，不生成假直线。`position` 是沿扫描轴的平均边缘位置。
+
+投影边缘定位把整个 ROI 横向平均后取峰，与多条卡尺拟合不同；无目标有效返回空位置数组。宽度的 `outer` 模式取最左开边与最右闭边；`inner` 模式反转极性，取 ROI 中心两侧最近边。输出沿采样轴的宽度，非任意旋转形状的全局最窄宽度；无足够有效边对时返回 `ok=false`、NaN 的 Measurement 和可诊断样本。
+
+抗边缘差分先按配置做平移对齐，再输出正/负/绝对差阈值掩膜；Canny 距离抑制仅移除同时靠近两幅图边缘的差异，保留单幅图新出现的边缘。配准响应或位移不合格返回 `alignment_failed`，不静默退回无配准差分。其首版不宣称与外部 ORB/直接法的旋转及尺度模式等价。
+
+## 资源限制
+
+- 新增基础分析/卡尺输入不超过 `16 × 1024²` 像素；精确 f32 全统计、连通域及抗边缘差分不超过 `4 × 1024²` 像素。预算限制是显式诊断，不静默降采样。
+- 连通域最多 4096 项，局部包围框扫描总和最多 `32 × 1024²` 像素，推导轮廓共最多 262144 点，导出轮廓共最多 32768 点，并受每域 `maxContourPoints` 约束；Record 最多 1 MiB。只在局部标签框取轮廓，嵌套/重叠包围框同样计预算。
+- 卡尺最多 256 条、平均带宽最多 31；扫描数量 × 扫描长度 × 带宽不超过 `32 × 1024²`。投影边缘输出最多 256 峰。非矩形 ROI 循环、逐像素统计/扫描和逐域处理轮询取消；OpenCV 单次调用由上述规模上限限制，不宣称可抢占其内部线程。
+- 多边形 JSON 最多 64 KiB、4096 点；不支持通过图像 Record 嵌入大数组、图像字节或进程指针。
 
 ## 相机输入与工作平面标定
 

@@ -82,7 +82,7 @@ jobs:
         if: ${{ !inputs.rebuild_deps }}
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
@@ -132,7 +132,7 @@ jobs:
         if: steps.native-cache-restore.outputs.cache-hit != 'true'
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
 
       - name: 保存 ONNX Runtime 缓存
         uses: actions/cache/save@v4
@@ -241,7 +241,7 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
@@ -353,7 +353,7 @@ jobs:
               '',
               `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
               '',
-              '固定算子包：std-pointcloud、std-image、std-ml、glue、gap。ONNX Runtime 使用 CPU 版；不含 dts、客户模型、桌面安装程序或调试符号。',
+              '固定算子包：std-value、std-geometry、std-pointcloud、std-image、std-ml、glue、gap。ONNX Runtime 使用 CPU 版；不含 dts、客户模型、桌面安装程序或调试符号。',
               '',
               `\`lyflow-editor-v${version}.tgz\` 是 \`@lyflow/editor\` 的 TypeScript 源码包（npm pack），宿主按 tarball 依赖安装、用自己的打包器编译。`,
               '',

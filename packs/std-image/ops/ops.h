@@ -20,6 +20,9 @@ void registerImageToTensor(Registry& r);
 void registerTensorToImage(Registry& r);
 void registerCloudFromDepth(Registry& r);
 void registerCloudToDepthImage(Registry& r);
+void registerImageAnalysis(Registry& r);
+void registerImageCalipers(Registry& r);
+void registerImageDifference(Registry& r);
 
 } // namespace lyflow::ops
 

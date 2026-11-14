@@ -33,6 +33,8 @@
 
 | 领域 | 入口 |
 |---|---|
+| 数值、布尔、文本与有界值列表 | [std-value](../packs/std-value/README.md) |
+| 点线圆/平面构造、距离、垂足与求交 | [std-geometry](../packs/std-geometry/README.md) |
 | 点云、拟合、配准与通用量测 | [std-pointcloud](../packs/std-pointcloud/README.md) |
 | 图像、标定与深度转换 | [std-image](../packs/std-image/README.md) |
 | ONNX 推理 | [std-ml](../packs/std-ml/README.md) |
@@ -44,7 +46,7 @@
 
 ## 外部库能力参考
 
-[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。原文的算子数量、分类和描述属于该外部库，未在本仓库逐项核验；不表示 LyFlow 已实现相同能力，也不保证流程、端口或参数兼容。它用于后续能力对照，LyFlow 当前契约仍以上面的 manifest、包指南和源码为准。
+[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。[198 项能力对照](operator-coverage.md)按实际算法、数据模型和接口区分已有、可组合、部分覆盖及缺失；[补齐计划](operator-completion-plan.md)跟踪交付与后续依赖。P0 的 23 项已逐个参考本机源码分析并实现限定用途，见[分析与示例](p0-operator-analysis.md)。对照不代表流程、端口或参数兼容；当前契约仍以 manifest、包指南和源码为准。
 
 ## 开发与交付
 
