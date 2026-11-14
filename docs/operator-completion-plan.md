@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [198 项能力对照](operator-coverage.md) · [当前范围](roadmap.md)
 
-状态：**P0/P1限定切片、P2 A01受限表达式及A05高光限定用途已实现；六阶段交付当前阶段1进行中，其余按原优先级继续**。初始基线为 `32a3700e435c753df46916e1dc029a9d59b8d95e`；实现版本 1.3.7，日期 2026-11-14。P0 按 23 项外部源码逐个核实、优化后实现，详见[分析与剩余边界](p0-operator-analysis.md)及 [ADR-0029](adr/0029-p0-values-geometry-and-image-contracts.md)。P1新增55个算子，逐条分析与可用链见[P1实现索引](p1-operator-analysis.md)。外部名称用于追踪需求，不作为 LyFlow 新 ID 或接口设计。
+状态：**P0/P1限定切片、P2 A01受限表达式及A05高光限定用途已实现；六阶段交付阶段1已合并，当前阶段2进行中，其余按原优先级继续**。初始基线为 `32a3700e435c753df46916e1dc029a9d59b8d95e`；当前阶段2开发版本 1.3.8，日期 2026-11-15。P0 按 23 项外部源码逐个核实、优化后实现，详见[分析与剩余边界](p0-operator-analysis.md)及 [ADR-0029](adr/0029-p0-values-geometry-and-image-contracts.md)。P1新增55个算子，逐条分析与可用链见[P1实现索引](p1-operator-analysis.md)。外部名称用于追踪需求，不作为 LyFlow 新 ID 或接口设计。
 
 ## 决策摘要
 
@@ -144,7 +144,7 @@ P0 实现已分别归入 [std-value](../packs/std-value/README.md)、[std-geomet
 
 **验收**：合成几何和实测样本给出误差、重复性及失败率；低对比、遮挡、反向极性和异常点不产生虚假成功；输出边缘点/拟合质量/量测值可叠加检查。
 
-**P2阶段1实施状态**：高光直线检测、碎片分组、有限线段、旋转区域与质量/叠图已实现并通过本地专项及完整适用回归，见[源码分析](p2-highlights-analysis.md)及[交付状态](p2-sequential-delivery.md)。原生Box2D仅轴对齐，旋转区域沿用受校验Pose2D；阶段1在对应PR的CI与Codex审查通过并合并前保持进行中，不提前开始阶段2。
+**P2阶段1实施状态**：高光直线检测、碎片分组、有限线段、旋转区域与质量/叠图已实现并通过本地专项及完整适用回归，见[源码分析](p2-highlights-analysis.md)及[交付状态](p2-sequential-delivery.md)。原生Box2D仅轴对齐，旋转区域沿用受校验Pose2D；阶段1已在最新提交CI七项全部通过且Codex审查无发现后，由[PR #54](https://github.com/liangyuR/lyFlow/pull/54)合并；阶段2另开独立分支推进。
 
 <a id="b01"></a>
 ### B01 · 点云统计、包围盒、三维聚类与多平面（P1 基础；P2 统计规则，M–L）

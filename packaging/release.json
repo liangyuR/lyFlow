@@ -130,7 +130,21 @@
     "cloud.pca",
     "cloud.bounds_obb",
     "value.expression",
-    "image.highlights"
+    "image.highlights",
+    "cloud.top_layer",
+    "cloud.neighbor_height",
+    "cloud.empty_tote",
+    "cloud.plane_patches",
+    "image.height_extract",
+    "register.constraints_3d",
+    "register.constrained_fit_3d",
+    "register.pose_search_3d",
+    "cloud.template_3d",
+    "register.global_3d",
+    "cloud.edges_3d",
+    "cloud.view_sample",
+    "cloud.image_roi",
+    "image.render_model_3d"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

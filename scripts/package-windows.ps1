@@ -40,7 +40,7 @@ try {
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics', 'matching-deps')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -119,6 +119,21 @@ try {
         if (-not (Test-Path -LiteralPath $source)) { throw "ONNX Runtime license missing: $source" }
         Copy-Item -LiteralPath $source -Destination $ortLicenses
     }
+    $matchingConfig = Get-Content -LiteralPath (Join-Path $root 'packaging/matching-deps.json') -Raw | ConvertFrom-Json
+    foreach ($asset in $matchingConfig.assets) {
+        $sourceRoot = Join-Path $root "build/matching-deps/$($asset.name)"
+        $noticeRoot = Join-Path $licenses "matching/$($asset.name)"
+        foreach ($name in $asset.licenseFiles) {
+            $source = Join-Path $sourceRoot $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Matching dependency license missing: $source" }
+            $destination = Join-Path $noticeRoot $name
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination
+        }
+        "$($asset.repository)@$($asset.revision)`n$($asset.license)" | Set-Content -LiteralPath (Join-Path $noticeRoot 'SOURCE.txt') -Encoding utf8NoBOM
+    }
+    Copy-Item -LiteralPath (Join-Path $root 'packaging/licenses/matching-small-gicp-NOTICES.txt') -Destination (Join-Path $licenses 'matching/small-gicp/THIRD-PARTY-NOTICES.txt')
+    Copy-Item -LiteralPath (Join-Path $root 'packaging/licenses/matching-kiss-NOTICES.txt') -Destination (Join-Path $licenses 'matching/kiss-matcher/THIRD-PARTY-NOTICES.txt')
     $crtLicenseDir = Join-Path $licenses 'visual-cpp'
     New-Item -ItemType Directory -Path $crtLicenseDir -Force | Out-Null
     $vsLicenses = Join-Path $vs 'Licenses'
@@ -144,6 +159,9 @@ try {
     }
     if (-not $dependencies.Count) { throw 'Installed dependency version inventory is empty.' }
     $dependencies.Add([ordered]@{ name = 'onnxruntime'; version = $configuration.onnxruntimeVersion })
+    foreach ($asset in $matchingConfig.assets) {
+        $dependencies.Add([ordered]@{ name = "matching-$($asset.name)"; version = $asset.revision })
+    }
     $dependencies.Add([ordered]@{ name = 'visual-cpp-crt'; version = (Get-Item -LiteralPath (Join-Path $runtime 'vcruntime140.dll')).VersionInfo.FileVersion })
     $inspectionPath = Join-Path $stage 'inspection.json'
     & (Join-Path $PSScriptRoot 'inspect-runtime.ps1') -RuntimeDir $runtime -ReportPath $inspectionPath

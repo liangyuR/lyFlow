@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "id": "01P2MATCHFAST",
+  "name": "P2-matching-fast",
+  "nodes": [
+    {
+      "id": "cad",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "cad"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "scene",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "camera"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 240
+        }
+      }
+    },
+    {
+      "id": "template",
+      "op": "cloud.template_3d",
+      "params": {
+        "sourceFrame": "cad",
+        "modelFrame": "model",
+        "sampleDistance": 0,
+        "maxModelPoints": 8192
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "match",
+      "op": "register.global_3d",
+      "params": {
+        "sceneFrame": "camera",
+        "voxelSize": 0.002,
+        "normalRadiusFactor": 3,
+        "featureRadiusFactor": 5,
+        "maxCorrespondences": 256,
+        "maxBackendPoints": 4096,
+        "maxIterations": 30,
+        "maxPasses": 8,
+        "maxCorrespondenceDistance": 0.003,
+        "maxRmse": 0.001,
+        "minInlierRatio": 0.5,
+        "minUniqueSceneRatio": 0.5
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 120
+        }
+      }
+    },
+    {
+      "id": "visible",
+      "op": "cloud.view_sample",
+      "params": {
+        "modelFrame": "model",
+        "cameraFrame": "camera",
+        "transformByPose": true
+      },
+      "ui": {
+        "position": {
+          "x": 980,
+          "y": 120
+        }
+      }
+    },
+    {
+      "id": "edges",
+      "op": "cloud.edges_3d",
+      "params": {
+        "mode": "unorganized",
+        "neighborRadius": 0.006
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 370
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "0",
+      "from": {
+        "node": "cad",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "template",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "1",
+      "from": {
+        "node": "template",
+        "port": "model"
+      },
+      "to": {
+        "node": "match",
+        "port": "model"
+      }
+    },
+    {
+      "id": "2",
+      "from": {
+        "node": "template",
+        "port": "template"
+      },
+      "to": {
+        "node": "match",
+        "port": "template"
+      }
+    },
+    {
+      "id": "3",
+      "from": {
+        "node": "scene",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "match",
+        "port": "scene"
+      }
+    },
+    {
+      "id": "4",
+      "from": {
+        "node": "template",
+        "port": "model"
+      },
+      "to": {
+        "node": "visible",
+        "port": "model"
+      }
+    },
+    {
+      "id": "5",
+      "from": {
+        "node": "match",
+        "port": "instances"
+      },
+      "to": {
+        "node": "visible",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "6",
+      "from": {
+        "node": "scene",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "edges",
+        "port": "cloud"
+      }
+    }
+  ],
+  "outputs": {
+    "instances": {
+      "node": "match",
+      "port": "instances"
+    },
+    "quality": {
+      "node": "match",
+      "port": "quality"
+    },
+    "supports": {
+      "node": "match",
+      "port": "indices"
+    },
+    "groups": {
+      "node": "match",
+      "port": "groups"
+    },
+    "template": {
+      "node": "template",
+      "port": "template"
+    },
+    "visible": {
+      "node": "visible",
+      "port": "cloud"
+    },
+    "visibleGroups": {
+      "node": "visible",
+      "port": "cloudGroups"
+    },
+    "edges": {
+      "node": "edges",
+      "port": "cloud"
+    },
+    "edgeQuality": {
+      "node": "edges",
+      "port": "quality"
+    }
+  },
+  "params": {
+    "modelFile": {
+      "type": "path",
+      "default": "p2-model-cad.pcd",
+      "binds": ["cad.path"]
+    },
+    "sceneFile": {
+      "type": "path",
+      "default": "p2-scene.pcd",
+      "binds": ["scene.path"]
+    },
+    "maxInstances": {
+      "type": "int",
+      "default": 4,
+      "binds": ["match.maxInstances"]
+    }
+  }
+}

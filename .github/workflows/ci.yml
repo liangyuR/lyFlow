@@ -53,6 +53,9 @@ jobs:
       - name: 前端 / MCP / workflow 格式检查（Prettier）
         run: pnpm format:check
 
+      - name: 固定匹配依赖准备安全测试
+        run: python tests/release/test_fetch_matching_deps.py
+
       - name: C++ 格式检查（clang-format 20.1.8）
         shell: bash
         run: |

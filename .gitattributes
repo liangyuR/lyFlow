@@ -2,3 +2,4 @@
 *.png binary
 *.pcd binary
 *.ply binary
+packaging/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

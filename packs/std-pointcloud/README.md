@@ -1,6 +1,6 @@
 # std-pointcloud —— LyFlow 的标准点云算子包
 
-版本 **0.1.0**。仓库内的标准算子包（[ADR-0014](../../docs/adr/0014-std-as-pack-core-zero-dep.md)），
+版本 **0.3.0**。仓库内的标准算子包（[ADR-0014](../../docs/adr/0014-std-as-pack-core-zero-dep.md)），
 走的是和外部领域包完全相同的 `lyflow_op_pack` 机制（[ADR-0013](../../docs/adr/0013-op-packs-static.md)、
 [docs/op-packs.md](../../docs/op-packs.md)）。
 
@@ -21,7 +21,7 @@ pnpm check
 
 ## 算子
 
-本包注册 20 个算子。下表采用当前显示名称与分类；运行库实际提供的算子及版本以 manifest 为准。
+基础算子如下；P1/P2 扩展见下方专题。运行库实际提供的算子及版本以 manifest 为准。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
@@ -67,6 +67,20 @@ x 均值小的从 `left` 出。与 split.rs 逐位一致（`test_2d_ops.cpp` 拿
 剩下不到两簇报 `split_failed`。
 
 长度参数一律是**米**，与点云同单位。
+
+## 高度规则与三维模板匹配
+
+P1 的点云集合、统计、PCA、包围盒、聚类、多平面、三维刚体拟合与配准、PCD/PLY/STL 输入见[点云分析](../../docs/p1-analysis-cloud.md)。
+
+P2 新增 `cloud.top_layer`、`cloud.neighbor_height`、`cloud.empty_tote` 和 `cloud.plane_patches`；空框状态需要有效观测证据，未知状态不能当空框。平面片按交付 Pose 的实际支持点计算质量，完整契约见[高度分析](../../docs/p2-analysis-height.md)。
+
+`register.constraints_3d` 构造有界几何约束，`register.constrained_fit_3d` 支持点、线、面混合加权及 3-2-1 模式；`register.pose_search_3d` 提供有界六轴 Cartesian/分级局部搜索。它们是局部优化，不能代替无初值定位，见[高级拟合分析](../../docs/p2-analysis-advanced-fit.md)。
+
+`cloud.template_3d` 以完整源 CAD 点云的 AABB 中心建立模型坐标；`register.global_3d` 使用 KISS-Matcher 全局候选和 small_gicp 精化，输出模型到场景的实例与原场景索引。显式 ROI、对称等价姿态、最终米制质量和多实例预算见[匹配契约](../../docs/p2-analysis-matching.md)。另有 `cloud.edges_3d`、`cloud.view_sample`，以及图像包的 `cloud.image_roi` / `image.render_model_3d` 标定投影组合。
+
+首次构建本包前运行 `python scripts/fetch-matching-deps.py`；`scripts/build-core.ps1` 会自动准备。五个固定源码依赖和最小 Windows 补丁在 `packaging/matching-deps.json` 声明，已有来源通过 `--verify-only --offline` 检查。PMC 不编译或交付；经典 MSVC OpenMP 与 TBB 的部署范围见[后端选型](../../docs/p2-3d-matching-backends.md)。关闭标准包时不引入这条依赖链。
+
+`examples/p2-matching-fast.lyflow.json`、`p2-matching-balanced.lyflow.json`、`p2-matching-precise.lyflow.json` 展开同一引擎的显式参数，不通过档位隐藏覆盖质量门限。模板持久化保存完整原 CAD 采样云，再加载并按相同参数重建；不能把已稀疏居中模型当作原 CAD 自动恢复 anchor。
 
 ## 目录
 

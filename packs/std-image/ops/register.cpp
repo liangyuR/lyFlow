@@ -32,6 +32,8 @@ void registerPackOps(Registry& r) {
   ops::registerImageP1Matching(r);
   ops::registerImageP1Circles(r);
   ops::registerImageHighlights(r);
+  ops::registerP2ModelProjection(r);
+  ops::registerP2HeightExtraction(r);
 }
 
 } // namespace lyflow::packs::std_image

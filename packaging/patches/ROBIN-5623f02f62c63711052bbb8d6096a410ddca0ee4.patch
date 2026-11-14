@@ -1,0 +1,394 @@
+--- a/include/robin/core.hpp
++++ b/include/robin/core.hpp
+@@ -1,3 +1,4 @@
++#include "lyflow_matching_runtime.hpp"
+ // Copyright (c) 2020, Massachusetts Institute of Technology,
+ // Cambridge, MA 02139
+ // All Rights Reserved
+@@ -137,12 +138,12 @@
+     size_t nr_subsets = robin::Choose(N, CompCheckFuncArity);
+ 
+     // for each possible subset, check compatibility
+-#pragma omp parallel default(none) shared(N, nr_subsets, edge_queue)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(N, nr_subsets, edge_queue)
+     {
+       auto* subset_indices = new size_t[CompCheckFuncArity];
+       auto* edge_pair_indices = new size_t[2];
+ #pragma omp for
+-      for (size_t i = 0; i < nr_subsets; ++i) {
++      for (std::ptrdiff_t i = 0; i < nr_subsets; ++i) {
+         // compute current subset indices
+         robin::CombinationDecode(N, CompCheckFuncArity, i, subset_indices);
+ 
+@@ -215,13 +216,13 @@
+     // parallel compatibility graph building
+     // 1. each thread initialize a queue for storing edges
+     // 2. a critical section for dequeuing edges into graph
+-#pragma omp parallel default(none) shared(g, N)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N)
+     {
+       auto* subset_indices = new size_t[2];
+       std::queue<EdgeType> edge_buffer;
+ 
+ #pragma omp for
+-      for (size_t k = 0; k < N * (N - 1) / 2; ++k) {
++      for (std::ptrdiff_t k = 0; k < N * (N - 1) / 2; ++k) {
+         size_t i = k / N;
+         size_t j = k % N;
+         if (j <= i) {
+@@ -287,13 +288,13 @@
+     // parallel compatibility graph building
+     // 1. each thread initialize a queue for storing edges
+     // 2. a critical section for dequeuing edges into graph
+-#pragma omp parallel default(none) shared(g, N, adj_list, edge_count)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N, adj_list, edge_count)
+     {
+       auto* subset_indices = new size_t[2];
+ 
+ #pragma omp for
+       // visit each edge twice
+-      for (size_t i = 0; i < N; ++i) {
++      for (std::ptrdiff_t i = 0; i < N; ++i) {
+         for (size_t j = 0; j < N; ++j) {
+           subset_indices[0] = i;
+           subset_indices[1] = j;
+@@ -325,14 +326,14 @@
+     memset(offsets, 0, sizeof(size_t) * (N + 1));
+ 
+     // loop through n(n-1) possibilities without atomic add
+-#pragma omp parallel default(none) shared(g, N, offsets)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N, offsets)
+     {
+       // subset_indices: a buffer for each thread
+       auto* subset_indices = new size_t[2];
+ 
+ #pragma omp for
+       // for loop that goes through each (i,j) edge twice
+-      for (size_t i = 0; i < N; ++i) {
++      for (std::ptrdiff_t i = 0; i < N; ++i) {
+         for (size_t j = 0; j < N; ++j) {
+           subset_indices[0] = i;
+           subset_indices[1] = j;
+@@ -359,14 +360,14 @@
+     memset(vertex_local_offsets, 0, sizeof(size_t) * N);
+ 
+     // second pass: insert indices to the edge array
+-#pragma omp parallel default(none) shared(g, N, edges, offsets, vertex_local_offsets)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N, edges, offsets, vertex_local_offsets)
+     {
+       // subset_indices: a buffer for each thread
+       auto* subset_indices = new size_t[2];
+ 
+ #pragma omp for
+       // for loop that goes through each (i,j) edge twice
+-      for (size_t i = 0; i < N; ++i) {
++      for (std::ptrdiff_t i = 0; i < N; ++i) {
+         for (size_t j = 0; j < N; ++j) {
+           subset_indices[0] = i;
+           subset_indices[1] = j;
+@@ -405,13 +406,13 @@
+     }
+ 
+     // for loop through n*(n-1)/2 possibilities and use atomic operations
+-#pragma omp parallel default(none) shared(g, N, offsets)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N, offsets)
+     {
+       // subset_indices: a buffer for each thread
+       auto* subset_indices = new size_t[2];
+ 
+ #pragma omp for
+-      for (size_t k = 0; k < N * (N - 1) / 2; ++k) {
++      for (std::ptrdiff_t k = 0; k < N * (N - 1) / 2; ++k) {
+         size_t i = k / N;
+         size_t j = k % N;
+         if (j <= i) {
+@@ -445,13 +446,13 @@
+     }
+ 
+     // second pass: insert indices to the edge array
+-#pragma omp parallel default(none) shared(g, N, edges, offsets, vertex_local_offsets)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(g, N, edges, offsets, vertex_local_offsets)
+     {
+       // subset_indices: a buffer for each thread
+       auto* subset_indices = new size_t[2];
+ 
+ #pragma omp for
+-      for (size_t k = 0; k < N * (N - 1) / 2; ++k) {
++      for (std::ptrdiff_t k = 0; k < N * (N - 1) / 2; ++k) {
+         size_t i = k / N;
+         size_t j = k % N;
+         if (j <= i) {
+--- a/include/robin/platform_atomic.hpp
++++ b/include/robin/platform_atomic.hpp
+@@ -0,0 +1,19 @@
++#pragma once
++#if defined(_MSC_VER)
++#include <intrin.h>
++#endif
++namespace robin {
++template <typename T, typename V> T platformFetchAdd(T* address, V value) {
++#if defined(_MSC_VER)
++  if constexpr (sizeof(T) == 8)
++    return static_cast<T>(_InterlockedExchangeAdd64(reinterpret_cast<volatile long long*>(address), static_cast<long long>(value)));
++  else
++    return static_cast<T>(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(address), static_cast<long>(value)));
++#else
++  return __sync_fetch_and_add(address, value);
++#endif
++}
++template <typename T, typename V> T platformFetchSub(T* address, V value) {
++  return platformFetchAdd(address, -static_cast<T>(value));
++}
++}
+--- a/src/graph.cpp
++++ b/src/graph.cpp
+@@ -9,7 +9,6 @@
+ #include <omp.h>
+ #include <random>
+ 
+-#include <pmc/pmc.h>
+ #include <robin/graph.hpp>
+ #include <robin/pkc.hpp>
+ 
+--- a/src/graph_solvers.cpp
++++ b/src/graph_solvers.cpp
+@@ -4,7 +4,9 @@
+ // Authors: Jingnan Shi, et al. (see THANKS for the full author list)
+ // See LICENSE for the license information
+ 
++#if defined(ROBIN_WITH_PMC)
+ #include <pmc/pmc.h>
++#endif
+ #include <robin/pkc.hpp>
+ #include <robin/graph_core.hpp>
+ #include <robin/graph_solvers.hpp>
+@@ -59,6 +61,7 @@
+ //
+ // Definitions for the MaxCliqueSolver class
+ //
++#if defined(ROBIN_WITH_PMC)
+ std::vector<size_t> MaxCliqueSolver::FindMaxClique(const IGraph& graph) const {
+   // Create a PMC graph from the robin graph
+   std::vector<int> edges;
+@@ -155,4 +158,6 @@
+   return C_result;
+ }
+ 
++#endif
++
+ }
+\ No newline at end of file
+--- a/src/pkc.cpp
++++ b/src/pkc.cpp
+@@ -1,3 +1,4 @@
++#include "lyflow_matching_runtime.hpp"
+ // Copyright (c) 2020, Massachusetts Institute of Technology,
+ // Cambridge, MA 02139
+ // All Rights Reserved
+@@ -5,6 +6,7 @@
+ // See LICENSE for the license information
+ 
+ #include <robin/pkc.hpp>
++#include <robin/platform_atomic.hpp>
+ 
+ int free_graph(robin::pkc::graph_t* g) {
+   if (g->num_edges != nullptr) {
+@@ -20,7 +22,7 @@
+ 
+ void robin::pkc::PKC_optimized(const IGraph& g, size_t* deg) {
+   double frac = 0.98;
+-  size_t MAX_NUM_THREADS = omp_get_max_threads();
++  size_t MAX_NUM_THREADS = static_cast<size_t>(lyflow_matching_runtime::threadCount());
+   long n = g.VertexCount();
+   long reduceN = 0;
+   long Size = 0;
+@@ -29,13 +31,13 @@
+   size_t* newDeg = NULL;
+   size_t* mapIndexToVtx = NULL;
+   vid_t* vertexToIndex = (vid_t*)malloc(n * sizeof(vid_t));
+-  size_t cumNumEdges[MAX_NUM_THREADS];
++  std::vector<size_t> cumNumEdges(MAX_NUM_THREADS);
+   long part = 0;
+   graph_t g_small;
+   g_small.num_edges = NULL;
+   g_small.adj = NULL;
+ 
+-#pragma omp parallel default(none) shared(std::cout, std::cerr, reduceN, Size, frac, part, cumNumEdges, deg, newDeg, visited, g, g_small, vertexToIndex, mapIndexToVtx) firstprivate(n)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(std::cout, std::cerr, reduceN, Size, frac, part, cumNumEdges, deg, newDeg, visited, g, g_small, vertexToIndex, mapIndexToVtx) firstprivate(n)
+   {
+     auto NUM_THREADS = omp_get_num_threads();
+     int level = 0;
+@@ -49,7 +51,7 @@
+     int useSmallQ = 0;
+ 
+ #pragma omp for schedule(static)
+-    for (size_t i = 0; i < n; i++) {
++    for (std::ptrdiff_t i = 0; i < n; i++) {
+       deg[i] = (g.GetVertexDegree(i));
+     }
+ 
+@@ -71,7 +73,7 @@
+ #pragma omp barrier
+ 
+ #pragma omp for schedule(static)
+-        for (size_t i = 0; i < n; i++) {
++        for (std::ptrdiff_t i = 0; i < n; i++) {
+           if (deg[i] >= level) {
+             buff_vec.push_back(i);
+             //buff[end] = i;
+@@ -80,7 +82,7 @@
+         }
+ 
+         // Now add them atomically
+-        size_t begin = __sync_fetch_and_add(&Size, end);
++        size_t begin = robin::platformFetchAdd(&Size, end);
+ 
+         for (size_t i = 0; i < end; i++) {
+           //newDeg[begin + i] = deg[buff[i]];
+@@ -240,7 +242,7 @@
+       if (useSmallQ == 0) {
+ 
+ #pragma omp for schedule(static)
+-        for (size_t i = 0; i < n; i++) {
++        for (std::ptrdiff_t i = 0; i < n; i++) {
+           if (deg[i] == level) {
+             //buff[end] = i;
+             buff_vec.push_back(i);
+@@ -261,7 +263,7 @@
+             size_t deg_u = deg[u];
+ 
+             if (deg_u > level) {
+-              size_t du = __sync_fetch_and_sub(&deg[u], 1);
++              size_t du = robin::platformFetchSub(&deg[u], 1);
+ 
+               if (du == (level + 1)) {
+                 //buff[end] = u;
+@@ -270,7 +272,7 @@
+               }
+ 
+               if (du <= level) {
+-                __sync_fetch_and_add(&deg[u], 1);
++                robin::platformFetchAdd(&deg[u], 1);
+               }
+             } // deg_u > level
+ 
+@@ -279,7 +281,7 @@
+       } else {
+ 
+ #pragma omp for schedule(static)
+-        for (size_t i = 0; i < Size; i++) {
++        for (std::ptrdiff_t i = 0; i < Size; i++) {
+           if (newDeg[i] == level) {
+             //buff[end] = i;
+             buff_vec.push_back(i);
+@@ -300,7 +302,7 @@
+             size_t deg_u = newDeg[u];
+ 
+             if (deg_u > level) {
+-              size_t du = __sync_fetch_and_sub(&newDeg[u], 1);
++              size_t du = robin::platformFetchSub(&newDeg[u], 1);
+ 
+               if (du == (level + 1)) {
+                 //buff[end] = u;
+@@ -309,14 +311,14 @@
+               }
+ 
+               if (du <= level) {
+-                __sync_fetch_and_add(&newDeg[u], 1);
++                robin::platformFetchAdd(&newDeg[u], 1);
+               }
+             } // deg_u > level
+           }   // visit adjacencies
+         }     // end of while loop
+       }
+ 
+-      __sync_fetch_and_add(&visited, end);
++      robin::platformFetchAdd(&visited, end);
+ 
+ #pragma omp barrier
+       start = 0;
+@@ -330,7 +332,7 @@
+ 
+     // copy core values from newDeg to deg
+ #pragma omp for schedule(static)
+-    for (size_t i = 0; i < Size; i++) {
++    for (std::ptrdiff_t i = 0; i < Size; i++) {
+       deg[mapIndexToVtx[i]] = newDeg[i];
+     }
+ 
+@@ -346,7 +348,7 @@
+   long n = g.VertexCount();
+   long visited = 0;
+ 
+-#pragma omp parallel default(none) shared(std::cout, g, visited, deg) firstprivate(n)
++#pragma omp parallel num_threads(lyflow_matching_runtime::threadCount()) default(none) shared(std::cout, g, visited, deg) firstprivate(n)
+   {
+     int level = 0;
+ 
+@@ -357,14 +359,14 @@
+     long start = 0, end = 0;
+ 
+ #pragma omp for schedule(static)
+-    for (size_t i = 0; i < n; i++) {
++    for (std::ptrdiff_t i = 0; i < n; i++) {
+       deg[i] = g.GetVertexDegree(i);
+     }
+ 
+     while (visited < n) {
+ 
+ #pragma omp for schedule(static)
+-      for (vid_t i = 0; i < n; i++) {
++      for (std::ptrdiff_t i = 0; i < n; i++) {
+         if (deg[i] == level) {
+           buff_vec.push_back(i);
+           end++;
+@@ -384,21 +386,21 @@
+ 
+           if (deg_u > level) {
+             // TODO: Consider https://en.cppreference.com/w/cpp/atomic/atomic/fetch_sub
+-            int du = __sync_fetch_and_sub(&deg[u], 1);
++            int du = robin::platformFetchSub(&deg[u], 1);
+ 
+             if (du == (level + 1)) {
+               buff_vec.push_back(u);
+               end++;
+             }
+             if (du <= level) {
+-              __sync_fetch_and_add(&deg[u], 1);
++              robin::platformFetchAdd(&deg[u], 1);
+             }
+           } // deg_u > level
+ 
+         } // visit adjacencies
+       }   // end of while loop
+ 
+-      __sync_fetch_and_add(&visited, end);
++      robin::platformFetchAdd(&visited, end);
+ 
+ #pragma omp barrier
+       start = 0;
+--- a/src/robin.cpp
++++ b/src/robin.cpp
+@@ -5,6 +5,7 @@
+ // See LICENSE for the license information
+ 
+ #include <robin/robin.hpp>
++#include <stdexcept>
+ 
+ std::vector<size_t> robin::FindInlierStructure(const IGraph* g,
+                                                InlierGraphStructure graph_structure) {
+@@ -17,10 +18,14 @@
+     return k_core_decomposition_solver.GetMaxKCore();
+   }
+   case InlierGraphStructure::MAX_CLIQUE: {
++#if defined(ROBIN_WITH_PMC)
+     robin::MaxCliqueSolver::Params clique_params;
+     clique_params.solver_mode = robin::MaxCliqueSolver::CLIQUE_SOLVER_MODE::PMC_EXACT;
+     robin::MaxCliqueSolver clique_solver(clique_params);
+     return clique_solver.FindMaxClique(*g);
++#else
++    throw std::invalid_argument("PMC max-clique is not included in this build");
++#endif
+   }
+   }
+ }

@@ -64,6 +64,11 @@ if ($stdPacks -eq "0") { Write-Host "标准包: 关（纯平台构建）" -Foreg
 $repoPacks = if ($env:LYFLOW_PACKS) { $env:LYFLOW_PACKS } else { "" }
 if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
+if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks -split ';')) {
+  & python (Join-Path $PSScriptRoot 'fetch-matching-deps.py')
+  if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
+}
+
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $releaseBuildFlag = if ($ReleaseBuild) { "ON" } else { "OFF" }
