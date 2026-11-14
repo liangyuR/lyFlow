@@ -115,7 +115,7 @@ bool onLine(Vec p, const Geometry& line, double eps) {
 Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
   const Vec delta = b.p - a.p;
   const double den = cross(a.d, b.d);
-  if (std::abs(den) > 1e-12) {
+  if (den != 0.0) {
     const double ta = cross(delta, b.d) / den;
     const double tb = cross(delta, a.d) / den;
     if ((a.segment && (ta < -eps || ta > a.hi + eps)) ||

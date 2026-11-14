@@ -191,6 +191,31 @@ TEST_CASE("geometry point membership midpoint and pixel unit survive roundtrip")
   CHECK(c.outputs.at("point").asPoint2D()->p[0] == 2);
 }
 
+TEST_CASE("geometry near-parallel intersections agree with distance and point extraction") {
+  for (float slope : {1e-13f, -1e-13f}) {
+    const double expected = -1.0 / static_cast<double>(slope);
+    const Data horizontal = line(0, 0, 1, 0);
+    const Data tilted = line(0, 1, 1, slope);
+    for (bool reverse : {false, true}) {
+      test::OpCall c;
+      const auto result =
+          intersections(c, reverse ? tilted : horizontal, reverse ? horizontal : tilted);
+      REQUIRE(result["relation"] == "finite");
+      REQUIRE(result["points"].size() == 1);
+      CHECK(result["points"][0][0].get<double>() == doctest::Approx(expected));
+      CHECK(result["points"][0][1].get<double>() == doctest::Approx(0));
+      const Data payload = c.outputs.at("intersections");
+      c.inputs = {{"intersections", payload}};
+      REQUIRE(c.run("geometry.point_at").ok);
+      const auto* p = c.outputs.at("point").asPoint2D();
+      REQUIRE(p != nullptr);
+      CHECK(p->p[0] == doctest::Approx(expected).epsilon(1e-6));
+      CHECK(p->p[1] == doctest::Approx(0));
+      CHECK(distance(horizontal, tilted) == 0);
+    }
+  }
+}
+
 TEST_CASE("geometry rejects invalid input types units nonfinite and degenerate geometry") {
   test::OpCall c;
   for (const std::string op :
