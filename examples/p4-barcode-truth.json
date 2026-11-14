@@ -1,0 +1,54 @@
+{
+  "origin": "LyFlow generated barcode artwork; no external image or font is distributed",
+  "generator": "scripts/generate-p4-barcode-fixtures.py",
+  "qr": {
+    "text": "LyFlow-P4",
+    "format": "QRCode",
+    "version": 1,
+    "moduleCount": 21,
+    "errorCorrection": "L",
+    "mode": "byte",
+    "quietZoneModules": 4,
+    "sourceModulePixels": 8,
+    "sourceSize": [232, 232],
+    "modules": [
+      "111111101011101111111",
+      "100000100011001000001",
+      "101110101101001011101",
+      "101110101100101011101",
+      "101110101001001011101",
+      "100000100111101000001",
+      "111111101010101111111",
+      "000000000001100000000",
+      "111100101111110011101",
+      "001111001101100000011",
+      "001001111011001100011",
+      "010111010111010111010",
+      "011101100010111010111",
+      "000000001111011010001",
+      "111111100001110010100",
+      "100000100100000011110",
+      "101110100010101101100",
+      "101110101011001101110",
+      "101110101000101000100",
+      "100000101110010110001",
+      "111111101100010100100"
+    ]
+  },
+  "linear": {
+    "text": "AAAA",
+    "format": "Code39",
+    "wideNarrowRatio": 3
+  },
+  "mixedSize": [740, 300],
+  "files": {
+    "p4-qr-source.png": {
+      "bytes": 2867,
+      "sha256": "799a719554676df05b2c9f4da9f5808cddc3fd90658266eea87d5f41abbfc25d"
+    },
+    "p4-barcodes.png": {
+      "bytes": 6946,
+      "sha256": "29c29a3eb50d97c09439b6ec1477eea1ee04156a010837a9f1f82a22e79740c6"
+    }
+  }
+}

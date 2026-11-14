@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05 与阶段3 B03/B04 开发版本 **1.3.9**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05、阶段3 B03/B04 及阶段4 B05 开发版本 **1.3.10**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -25,17 +25,17 @@
 | 外部分类 | 已有对应 | 可组合替代 | 部分覆盖 | 缺失 | 待核实 | 合计 |
 |---|---:|---:|---:|---:|---:|---:|
 | 输入 | 8 | 0 | 4 | 3 | 0 | 15 |
-| 2D图像处理 | 24 | 1 | 5 | 7 | 3 | 40 |
+| 2D图像处理 | 26 | 1 | 5 | 5 | 3 | 40 |
 | 3D点云处理 | 17 | 3 | 10 | 25 | 1 | 56 |
 | 位姿处理 | 6 | 0 | 5 | 13 | 0 | 24 |
 | 流数据运算 | 7 | 0 | 5 | 2 | 0 | 14 |
 | 检查 | 0 | 0 | 0 | 5 | 0 | 5 |
-| 深度学习 | 0 | 0 | 4 | 2 | 1 | 7 |
+| 深度学习 | 3 | 0 | 2 | 1 | 1 | 7 |
 | 输出 | 1 | 2 | 2 | 4 | 0 | 9 |
 | 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
 | 内置 Python 脚本 | 6 | 0 | 3 | 7 | 0 | 16 |
-| **合计** | **69** | **8** | **42** | **74** | **5** | **198** |
+| **合计** | **74** | **8** | **40** | **71** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -82,7 +82,7 @@
 
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
-| `BarcodeDetector`<br>检测条形码/二维码 | 缺失 | — | 没有一维条码/二维码定位、解码及内容输出；图像读取和阈值处理不构成识码器。 [1](../packs/std-image/ops/register.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
+| `BarcodeDetector`<br>检测条形码/二维码 | 已有对应 | `image.barcode_decode` | ZXing-C++3.1.1固定只读后端，多码定位/解码、原图像素四边形、Unicode/原始字节和合法空内容分别表达；ROI/旋转区域显式互斥，资源超限不截断目标。 [分析与回归](p4-analysis-barcodes.md) | P2 限定用途已实现 · [B05](operator-completion-plan.md#b05) |
 | `BaselineCalibration`<br>基准校正 | 待核实 | — | 清单未定义基准面、校正量及输入输出；平面 H 标定与模板偏移定位不能直接证明等价，先确认是透视校正、基准对齐还是测量补偿。 [1](../packs/std-image/ops/board_calib.cpp) [2](../packs/glue/ops/locate.cpp) | 待定义 · [U01](operator-completion-plan.md#u01) |
 | `BlobDetector`<br>斑点检测 | 已有对应 | `image.components` | 稳定连通域、孔洞、像素面积、质心/包围框/旋转框、长宽比、排序和有界轮廓；不是外部Primitive2D对象，像素面积不等于轮廓多边形面积。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `CalculateArea`<br>计算区域大小 | 可组合替代 | `image.threshold`、`image.region_stats` | 非空区域可用非零二值 mask 统计前景面积；黑色区域先反相阈值。单位为 px²，不分连通域。空区域当前返回 NaN Measurement，不是数值 0；物理面积需另有标定。 [1](../packs/std-image/ops/image_segment.cpp) | 无需补齐 |
@@ -116,7 +116,7 @@
 | `MarkerPoseEstimation`<br>识别码定位 | 已有对应 | `image.marker_pose` | ArUco/AprilTag字典与独立STag HD15解码、IPPE方形PnP、原图K/D重投影/歧义门控；Pose3D保相机帧，显式workspace链消费。无目标为空，不将标记误作抓取目标。 [分析](p3-analysis-markers.md) · [回归](../packs/std-image/tests/test_p3_markers.cpp) | P2阶段3限定用途已实现 · [B03](operator-completion-plan.md#b03) |
 | `MultiViewMatcher`<br>多视角定位工件 | 缺失 | — | 已有单图NCC、局部三维ICP及相机内参，但无多视角模型融合与工件三维位姿联合求解；不等同二维模板匹配。 [1](../packs/glue/ops/locate.cpp) [2](../packs/std-pointcloud/ops/register_icp_2d.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `ProfileSlicer`<br>轮廓截面器 | 缺失 | — | glue 卡尺采样的是二维灰度，gap 读取和处理二维轮廓点；均没有从线扫深度图连续截取高度截面及计算截面属性的图像算子。 [1](../packs/glue/ops/part_edges.cpp) [2](../packs/gap/ops/io.cpp) [3](../packs/gap/ops/blocks.cpp) | P2 · [C01](operator-completion-plan.md#c01) |
-| `QrCodeRefine`<br>二维码增强 | 缺失 | — | 通用滤波和阈值不具备二维码结构约束、定位/重采样与识别效果反馈；首轮应依赖条码解码能力并确认具体增强目标。 [1](../packs/std-image/ops/image_basic.cpp) [2](../packs/std-image/ops/register.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
+| `QrCodeRefine`<br>二维码增强 | 已有对应 | `image.qr_refine` | 显式二维码区域和标准模块数，透视校正、单元均值/局部阈值重绘及四模块静区，返回同几何增强前后解码反馈；模块数由调用方指定，不猜测任意损伤内容。 [源码与效果](p4-analysis-barcodes.md) | P2 限定用途已实现 · [B05](operator-completion-plan.md#b05) |
 | `ROIGenerator`<br>生成感兴趣区域 | 已有对应 | `image.roi_mask` | 矩形、旋转矩形、圆、圆环弧、多边形及反选/掩膜相交；像素工厂不等于相机/工件参考系变换。 [1](../packs/std-image/README.md) [2](../packs/std-image/tests/test_image_p0.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `SBMEstimator`<br>2D形状匹配 | 已有对应 | `image.shape_template`、`image.shape_match`、显式CAD投影链 | 梯度法向/亚像素特征、角度尺度投票/精化、遮挡质量和旋转NMS；原生Tensor+小元数据配对，保原像素帧。CAD为STL采样点云投影；训练图重建模型，多模板并联融合，不兼容专有训练文件。 [分析](p3-analysis-shape.md) · [回归](../packs/std-image/tests/test_p3_shape_matching.cpp) | P2阶段3限定用途已实现 · [B04](operator-completion-plan.md#b04) |
 | `ShadingCorrection`<br>背景修正 | 部分覆盖 | `image.shading_correct` | 已提供显式平场/有界高斯背景、差分/除法、保持平均亮度和小分母拒绝；原方向性顶帽/黑帽与噪声阈值模式未等价移植。 [源码与边界](p1-analysis-image.md) · [回归](../packs/std-image/tests/test_image_p1.cpp) | P1 限定切片已实现 · [A04](operator-completion-plan.md#a04) |
@@ -249,10 +249,10 @@
 | `AIAssistant`<br>AI助手 | 待核实 | — | 清单只说深度学习模块后的辅助操作，未定义任务、端口和规则；不能按名字理解为聊天助手，也不能把 gap 专用 logits 后处理直接映射为对应。 [1](../packs/std-ml/ops/register.cpp) [2](../packs/gap/ops/model_roi.cpp) | 待定义 · [U01](operator-completion-plan.md#u01) |
 | `Detection2D`<br>目标检测 | 部分覆盖 | `image.yolox_preprocess/decode`、`image.yolo_preprocess/decode`、`ml.onnx_run` | 已按明确契约支持YOLOX及YOLOv8/11/26检测：预处理、CPU float32推理、解码、NMS/端到端输出及原图坐标回映，返回vision.Poses2D.v1。不是任意YOLO导出格式通用解码；实例分割、可抓区域、旋转检测框、多ROI批处理和原Workspace/Request协议仍缺失。 [模型契约](p1-analysis-detection.md) · [解码回归](../packs/std-image/tests/test_detection_p1.cpp) | P1 限定切片已实现 · [B05](operator-completion-plan.md#b05) |
 | `InstanceDetector`<br>目标检测V2 | 部分覆盖 | `image.yolox_preprocess/decode`、`image.yolo_preprocess/decode`、`ml.onnx_run` | 已按明确契约支持YOLOX及YOLOv8/11/26检测：预处理、CPU float32推理、解码、NMS/端到端输出及原图坐标回映，返回vision.Poses2D.v1。不是任意YOLO导出格式通用解码；实例分割、可抓区域、旋转检测框、多ROI批处理和原Workspace/Request协议仍缺失。 [模型契约](p1-analysis-detection.md) · [解码回归](../packs/std-image/tests/test_detection_p1.cpp) | P1 限定切片已实现 · [B05](operator-completion-plan.md#b05) |
-| `LoadAnnotations`<br>加载标注信息 | 缺失 | — | 没有按时间戳检索数据集标注及对应图片/实例的加载节点；gap 专用类别标签记录不等于通用数据集标注读取。 [1](../packs/std-ml/ops/register.cpp) [2](../packs/gap/ops/model_roi.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
-| `OCR`<br>字符识别 | 部分覆盖 | `image.to_tensor`、`ml.onnx_run` | 通用 ONNX 推理只能承载部分模型执行；无文字检测、方向/透视校正、识别字典/CTC 解码、文本排序及文字位置/置信度输出的 OCR 流程。 [1](../packs/std-ml/ops/ml_onnx_run.cpp) [2](../packs/std-image/ops/image_tensor.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
+| `LoadAnnotations`<br>加载标注信息 | 已有对应 | `image.load_annotations` | 显式native JSON/xyz-samples-v2 CSV索引与时间戳，同步加载图像和多部分/孔洞标注；稳定实例ID、独立重叠掩膜、可抓/遮挡属性与无掩膜状态保留。路径限制在索引目录，禁止穿越和链接逃逸。 [格式与边界](p4-analysis-annotations.md) | P2 限定用途已实现 · [B05](operator-completion-plan.md#b05) |
+| `OCR`<br>字符识别 | 已有对应 | `image.ocr_preprocess/db_decode/crops/orient/ctc_decode`、`ml.onnx_run` | PP-OCRv6检测/识别与配套方向分类，DB几何、原图坐标、透视/方向校正、固定UTF-8字典、CTC/排序/五种字符集；串行批次支持合法空结果。Unicode文本与置信保留，不把归一化裁图宽度当测量。 [模型/过滤契约](p4-analysis-ocr.md) | P2 限定用途已实现 · [B05](operator-completion-plan.md#b05) |
 | `PredictPoseFromROI`<br>预测工件位姿(ROI) | 缺失 | — | 没有从二维目标 ROI 结合深度/相机/尺寸先验恢复逐工件 3D Pose 的算子；深度反投影或执行未知 ONNX 模型不能证明该算法已有。 [1](../packs/std-ml/ops/register.cpp) [2](../packs/std-image/ops/image_cloud.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `SemanticSegmentor`<br>语义分割 | 部分覆盖 | `image.to_tensor`、`ml.onnx_run`、`tensor.to_image` | 有张量推理和图像转换；gap.labels_from_logits 是轮廓序列专用后处理，缺通用二维语义 logits/类别 mask 解码、ROI 回贴、类别映射和逐图结果契约。 [1](../packs/std-ml/ops/ml_onnx_run.cpp) [2](../packs/std-image/ops/image_tensor.cpp) [3](../packs/gap/ops/model_roi.cpp) | P2 · [B05](operator-completion-plan.md#b05) |
+| `SemanticSegmentor`<br>语义分割 | 已有对应 | `image.segmentation_preprocess/decode`、`ml.onnx_run` | 固定PPHumanSeg及显式NCHW语义头，逐ROI推理/已有mask保留或替换、原图类别u16与unknown、Unicode类别映射、连通实例及原生NHW掩膜；保留实例类别冲突不伪装成模型类别。并非YOLO实例分割或可抓区域模型。 [分析/真实模型](p4-analysis-segmentation.md) | P2 限定用途已实现 · [B05](operator-completion-plan.md#b05) |
 
 ### 输出
 

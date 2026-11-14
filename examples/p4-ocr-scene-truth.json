@@ -1,0 +1,17 @@
+{
+  "origin": "LyFlow generated text fixture, not a photograph",
+  "text": ["LYFLOW 12345", "INDUSTRIAL OCR", "工业视觉 12345", "HELLO 2026"],
+  "lastLineRotationDegrees": 180,
+  "fonts": [
+    {
+      "file": "arialbd.ttf",
+      "source": "Windows installed Arial Bold, raster output only, font not distributed"
+    },
+    {
+      "file": "simhei.ttf",
+      "source": "Windows installed SimHei, raster output only, font not distributed"
+    }
+  ],
+  "bytes": 38459,
+  "sha256": "4500bca54f297693855cabb9a02871c7cf71e7ff7469e18f9e7e5d733efe8cf9"
+}

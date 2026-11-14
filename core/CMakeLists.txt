@@ -14,11 +14,12 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.9)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.10)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
 option(LYFLOW_P1_MODEL_TESTS "Test the fixed P1 detector with explicitly prepared model assets" OFF)
+option(LYFLOW_P4_MODEL_TESTS "Test fixed P4 segmentation and OCR models with prepared public assets" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -371,6 +372,7 @@ if(BUILD_TESTING)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p0_pipeline.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_highlights.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p3_calibration.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p4_recognition.cpp")
   endif()
   if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_expression.cpp")
@@ -411,6 +413,15 @@ if(BUILD_TESTING)
     target_compile_options(lyflow-core-tests PRIVATE /wd5285)
   endif()
   target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
+  if("std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
+    lyflow_add_barcode_contract_tests(lyflow-core-tests)
+  endif()
+  if(LYFLOW_P4_MODEL_TESTS)
+    if(NOT "std-image" IN_LIST LYFLOW_STD_PACK_NAMES OR NOT "std-ml" IN_LIST LYFLOW_STD_PACK_NAMES)
+      message(FATAL_ERROR "LYFLOW_P4_MODEL_TESTS requires std-image and std-ml")
+    endif()
+    target_compile_definitions(lyflow-core-tests PRIVATE LYFLOW_P4_MODEL_TESTS=1)
+  endif()
 
   math(EXPR _fixture_next_patch "${PROJECT_VERSION_PATCH} + 1")
   set(_fixture_other_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${_fixture_next_patch}")
@@ -543,6 +554,37 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-marker-workspace.lyflo
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p3-asset-licenses.txt"
               "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p3-examples.md"
         DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-native.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-legacy.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-index.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-native.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-xyz.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-annotations-samples_v2.txt"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/1700000000000-工件,样例.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-segmentation.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-segmentation-retained.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-ocr.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-ocr-scene.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-ocr-scene-truth.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-barcodes.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-qr-refine.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-barcodes.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-qr-source.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p4-barcode-truth.json"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/fetch-p4-model-assets.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate-p4-ocr-fixture.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate-p4-barcode-fixtures.py"
+        DESTINATION scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/p4-model-assets.json"
+        DESTINATION packaging)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-assets.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-examples.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-annotations.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-barcodes.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-ocr.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-segmentation.md"
+        DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-pose-flow.lyflow.json"

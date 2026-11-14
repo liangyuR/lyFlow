@@ -59,6 +59,8 @@ foreach(_target IN LISTS _lyflow_opencv_targets)
 endforeach()
 include("${LYFLOW_PACK_DIR}/../../core/cmake/vision-deps.cmake")
 lyflow_configure_marker_dictionary()
+include("${LYFLOW_PACK_DIR}/../../core/cmake/barcode-deps.cmake")
+lyflow_configure_barcode_cpu()
 if(OpenCV_VERSION VERSION_LESS "4.7.0")
   find_package(OpenCV 4.6 CONFIG REQUIRED COMPONENTS core imgproc imgcodecs calib3d objdetect aruco)
   list(APPEND LYFLOW_MARKER_OPENCV_TARGETS opencv_aruco)
@@ -75,11 +77,11 @@ file(GLOB STD_IMAGE_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         std-image
-  VERSION      0.6.0
+  VERSION      0.7.0
   DEFAULT      ON
   SOURCES      ${STD_IMAGE_SOURCES}
   TEST_SOURCES ${STD_IMAGE_TESTS}
   PCH          "${LYFLOW_PACK_DIR}/include/lyflow_cv/cv_pch.h"
   INCLUDES     "${LYFLOW_PACK_DIR}/include" "${LYFLOW_PACK_DIR}"
-  LINK         lyflow_opencv_support
+  LINK         lyflow_opencv_support lyflow_barcode_backend
 )

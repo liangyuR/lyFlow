@@ -148,7 +148,17 @@
     "image.marker_pose",
     "workspace.load",
     "image.shape_template",
-    "image.shape_match"
+    "image.shape_match",
+    "image.segmentation_preprocess",
+    "image.segmentation_decode",
+    "image.ocr_preprocess",
+    "image.ocr_db_decode",
+    "image.ocr_crops",
+    "image.ocr_orient",
+    "image.ocr_ctc_decode",
+    "image.barcode_decode",
+    "image.qr_refine",
+    "image.load_annotations"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

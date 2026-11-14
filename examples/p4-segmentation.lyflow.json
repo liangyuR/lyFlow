@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "id": "p4-segmentation",
+  "name": "P4 PP-HumanSeg 原生语义分割",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "prepare",
+      "op": "image.segmentation_preprocess",
+      "params": {
+        "modelContract": "pphumanseg_2023mar",
+        "headKind": "multiclass",
+        "classNames": "[\"background\",\"person\"]",
+        "frame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "infer",
+      "op": "ml.onnx_run",
+      "params": {
+        "batchMode": "serial",
+        "modelContract": "pphumanseg_2023mar"
+      },
+      "ui": {
+        "position": {
+          "x": 600,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "decode",
+      "op": "image.segmentation_decode",
+      "params": {
+        "outputKind": "probabilities"
+      },
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-prepare-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "prepare",
+        "port": "image"
+      }
+    },
+    {
+      "id": "source-image-decode-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "decode",
+        "port": "image"
+      }
+    },
+    {
+      "id": "prepare-tensor-infer-input",
+      "from": {
+        "node": "prepare",
+        "port": "tensor"
+      },
+      "to": {
+        "node": "infer",
+        "port": "input"
+      }
+    },
+    {
+      "id": "infer-output-decode-output",
+      "from": {
+        "node": "infer",
+        "port": "output"
+      },
+      "to": {
+        "node": "decode",
+        "port": "output"
+      }
+    },
+    {
+      "id": "prepare-mapping-decode-mapping",
+      "from": {
+        "node": "prepare",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "decode",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "prepare-retainedInstances-decode-retainedInstances",
+      "from": {
+        "node": "prepare",
+        "port": "retainedInstances"
+      },
+      "to": {
+        "node": "decode",
+        "port": "retainedInstances"
+      }
+    },
+    {
+      "id": "prepare-retainedMasks-decode-retainedMasks",
+      "from": {
+        "node": "prepare",
+        "port": "retainedMasks"
+      },
+      "to": {
+        "node": "decode",
+        "port": "retainedMasks"
+      }
+    },
+    {
+      "id": "prepare-retainedMaskInfo-decode-retainedMaskInfo",
+      "from": {
+        "node": "prepare",
+        "port": "retainedMaskInfo"
+      },
+      "to": {
+        "node": "decode",
+        "port": "retainedMaskInfo"
+      }
+    }
+  ],
+  "params": {
+    "model": {
+      "type": "path",
+      "default": "p4-assets/human_segmentation_pphumanseg_2023mar.onnx",
+      "binds": ["infer.modelPath"]
+    },
+    "minArea": {
+      "type": "int",
+      "default": 1,
+      "binds": ["decode.minArea"]
+    },
+    "image": {
+      "type": "path",
+      "default": "p4-assets/astronaut.png",
+      "binds": ["source.path"]
+    }
+  },
+  "outputs": {
+    "instances": {
+      "node": "decode",
+      "port": "instances"
+    },
+    "masks": {
+      "node": "decode",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "decode",
+      "port": "maskInfo"
+    },
+    "labels": {
+      "node": "decode",
+      "port": "labels"
+    },
+    "overlay": {
+      "node": "decode",
+      "port": "overlay"
+    },
+    "quality": {
+      "node": "decode",
+      "port": "quality"
+    }
+  }
+}

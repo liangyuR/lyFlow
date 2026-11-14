@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "id": "p4-qr-refine",
+  "name": "P4 二维码模块重建与前后解码审计",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "before",
+      "op": "image.barcode_decode",
+      "params": {
+        "formats": "QRCodeModel2",
+        "frame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "refine",
+      "op": "image.qr_refine",
+      "params": {
+        "frame": "image",
+        "outputFrame": "qr_refined",
+        "moduleCount": 21
+      },
+      "ui": {
+        "position": {
+          "x": 600,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "after",
+      "op": "image.barcode_decode",
+      "params": {
+        "formats": "QRCodeModel2",
+        "frame": "qr_refined"
+      },
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-before-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "before",
+        "port": "image"
+      }
+    },
+    {
+      "id": "source-image-refine-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "refine",
+        "port": "image"
+      }
+    },
+    {
+      "id": "before-detections-refine-detections",
+      "from": {
+        "node": "before",
+        "port": "detections"
+      },
+      "to": {
+        "node": "refine",
+        "port": "detections"
+      }
+    },
+    {
+      "id": "refine-image-after-image",
+      "from": {
+        "node": "refine",
+        "port": "image"
+      },
+      "to": {
+        "node": "after",
+        "port": "image"
+      }
+    }
+  ],
+  "params": {
+    "image": {
+      "type": "path",
+      "default": "p4-qr-source.png",
+      "binds": ["source.path"]
+    },
+    "modulePixels": {
+      "type": "int",
+      "default": 8,
+      "binds": ["refine.modulePixels"]
+    }
+  },
+  "outputs": {
+    "before": {
+      "node": "before",
+      "port": "detections"
+    },
+    "image": {
+      "node": "refine",
+      "port": "image"
+    },
+    "feedback": {
+      "node": "refine",
+      "port": "feedback"
+    },
+    "after": {
+      "node": "after",
+      "port": "detections"
+    },
+    "instances": {
+      "node": "after",
+      "port": "instances"
+    }
+  }
+}

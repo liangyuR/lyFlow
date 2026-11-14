@@ -1,0 +1,74 @@
+--- a/core/src/DecoderResult.h
++++ b/core/src/DecoderResult.h
+@@ -1,3 +1,4 @@
++// LyFlow modification: retain verified empty QR Model2 decode state.
+ /*
+ * Copyright 2016 Nu-book Inc.
+ * Copyright 2016 ZXing authors
+@@ -31,6 +32,7 @@
+ 	StructuredAppendInfo _structuredAppend;
+ 	bool _isMirrored = false;
+ 	bool _readerInit = false;
++	bool _validEmptyQRCode = false;
+ 	Error _error;
+ 	std::string _json;
+ 	std::shared_ptr<CustomData> _customData;
+@@ -48,8 +50,11 @@
+ 
+ 	bool isValid(bool includeErrors = false) const
+ 	{
+-		return (!_content.bytes.empty() && !_error) || (includeErrors && !!_error);
++		return ((!_content.bytes.empty() || _validEmptyQRCode) && !_error) || (includeErrors && !!_error);
+ 	}
++
++	bool hasValidEmptyQRCode() const { return _validEmptyQRCode && !_error; }
++	void markValidEmptyQRCode() { _validEmptyQRCode = true; }
+ 
+ 	const Content& content() const & { return _content; }
+ 	Content&& content() && { return std::move(_content); }
+--- a/core/src/BarcodeData.h
++++ b/core/src/BarcodeData.h
+@@ -1,3 +1,4 @@
++// LyFlow modification: retain verified empty QR Model2 decode state.
+ /*
+  * Copyright 2026 Axel Waggershauser
+  */
+@@ -52,10 +53,11 @@
+ 	int lineCount = 0;
+ 	bool isMirrored = false;
+ 	bool isInverted = false;
++	bool validEmptyQRCode = false;
+ 
+ 	bool operator==(const BarcodeData& other) const;
+ 
+-	inline bool isValid() const { return format != BarcodeFormat::None && !content.bytes.empty() && !error; }
++	inline bool isValid() const { return format != BarcodeFormat::None && (!content.bytes.empty() || (format == BarcodeFormat::QRCode && validEmptyQRCode)) && !error; }
+ 
+ 	inline int orientation() const { return narrow_cast<int>(std::lround(position.orientation() * 180 / std::numbers::pi)); }
+ };
+@@ -94,7 +96,8 @@
+ 			.sai = std::move(decodeResult).structuredAppend(),
+ 			.symbol = std::move(detectorResult).bits(),
+ 			.lineCount = decodeResult.lineCount(),
+-			.isMirrored = decodeResult.isMirrored()};
++			.isMirrored = decodeResult.isMirrored(),
++			.validEmptyQRCode = decodeResult.hasValidEmptyQRCode()};
+ }
+ 
+ } // namespace ZXing
+--- a/core/src/qrcode/QRDecoder.cpp
++++ b/core/src/qrcode/QRDecoder.cpp
+@@ -1,3 +1,4 @@
++// LyFlow modification: retain verified empty QR Model2 decode state.
+ /*
+ * Copyright 2016 Nu-book Inc.
+ * Copyright 2016 ZXing authors
+@@ -353,6 +354,8 @@
+ 		;
+ 	if (error)
+ 		ret.setError(error);
++	if (version.isModel2() && totalBytes > 0 && !error && !ret.error() && ret.content().bytes.empty())
++		ret.markValidEmptyQRCode();
+ 	return ret;
+ }
+ 

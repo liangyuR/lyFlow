@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "p4-barcodes",
+  "name": "P4 Code39 与二维码多符号原生解码",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "decode",
+      "op": "image.barcode_decode",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-decode-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "decode",
+        "port": "image"
+      }
+    }
+  ],
+  "params": {
+    "image": {
+      "type": "path",
+      "default": "p4-barcodes.png",
+      "binds": ["source.path"]
+    },
+    "formats": {
+      "type": "string",
+      "default": "Any",
+      "binds": ["decode.formats"]
+    }
+  },
+  "outputs": {
+    "instances": {
+      "node": "decode",
+      "port": "instances"
+    },
+    "detections": {
+      "node": "decode",
+      "port": "detections"
+    },
+    "overlay": {
+      "node": "decode",
+      "port": "image"
+    }
+  }
+}
