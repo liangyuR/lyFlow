@@ -143,6 +143,70 @@ TEST_CASE(
   CHECK(call.outputs.empty());
 }
 
+TEST_CASE("P3 shape ROI and mask edges cannot become features from outside image content") {
+  const cv::Rect selected(20, 20, 120, 120);
+  const ParamMap parameters{{"smoothSigma", Value::number(0)}};
+  for (const auto origin : {cv::Point(32, 40), cv::Point(3, 7), cv::Point(68, 76)}) {
+    CAPTURE(origin.x);
+    CAPTURE(origin.y);
+    const auto interior = transformedShape(shapeTemplate(), {160, 160}, {0, 0}, origin, 0, 1);
+    for (const bool useMask : {false, true}) {
+      CAPTURE(useMask);
+      test::OpCall baseline;
+      if (useMask) {
+        cv::Mat mask(interior.size(), CV_8U, cv::Scalar(0));
+        mask(selected).setTo(255);
+        baseline.inputs["mask"] = shapeImage(mask);
+      } else {
+        Box2D box;
+        box.min[0] = box.min[1] = 20;
+        box.max[0] = box.max[1] = 139;
+        box.unit = Unit2D::Pixel;
+        baseline.inputs["roi"] = Data::box2d(box);
+      }
+      baseline.inputs["image"] = shapeImage(interior);
+      REQUIRE_MESSAGE(baseline.run("image.shape_template", parameters).ok, baseline.status.message);
+      const auto expectedFeatures = baseline.outputs.at("features");
+      const auto expectedModel = baseline.outputs.at("model");
+      for (int side = 0; side < 5; ++side) {
+        CAPTURE(side);
+        const auto paintOutside = [&](cv::Mat& image) {
+          if (side == 0 || side == 4)
+            image(cv::Rect(19, 20, 1, 120)).setTo(255);
+          if (side == 1 || side == 4)
+            image(cv::Rect(20, 19, 120, 1)).setTo(255);
+          if (side == 2 || side == 4)
+            image(cv::Rect(140, 20, 1, 120)).setTo(255);
+          if (side == 3 || side == 4)
+            image(cv::Rect(20, 140, 120, 1)).setTo(255);
+        };
+        auto image = interior.clone();
+        paintOutside(image);
+        const auto original = image.clone();
+        test::OpCall call;
+        call.inputs = baseline.inputs;
+        call.inputs["image"] = shapeImage(image);
+        REQUIRE_MESSAGE(call.run("image.shape_template", parameters).ok, call.status.message);
+        CHECK(call.outputs.at("features").asTensor()->data == expectedFeatures.asTensor()->data);
+        CHECK(call.outputs.at("model").asRecord()->data == expectedModel.asRecord()->data);
+        CHECK(cv::norm(image, original, cv::NORM_INF) == 0);
+
+        cv::Mat empty(interior.size(), CV_8U, cv::Scalar(0));
+        paintOutside(empty);
+        call.inputs["image"] = shapeImage(empty);
+        CHECK(call.run("image.shape_template", parameters).code == "degenerate_template");
+        CHECK(call.outputs.empty());
+        call.inputs["features"] = expectedFeatures;
+        call.inputs["model"] = expectedModel;
+        REQUIRE_MESSAGE(matchShape(call, {{"smoothSigma", Value::number(0)}}).ok,
+                        call.status.message);
+        CHECK(shapeItems(call).empty());
+        CHECK(cv::countNonZero(cvx::view(*call.outputs.at("edges").asImage())) == 0);
+      }
+    }
+  }
+}
+
 TEST_CASE(
     "P3 shape angle scale search recovers two instances with rotated NMS and real residuals") {
   const auto model = trainShape();

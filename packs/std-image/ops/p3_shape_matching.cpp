@@ -177,7 +177,8 @@ EdgeMap extract(const cv::Mat& gray, const cv::Mat& mask, double sigma, double c
   cv::Sobel(smoothed, gx, CV_32F, 1, 0, 3, 1.0 / 8);
   cv::Sobel(smoothed, gy, CV_32F, 0, 1, 3, 1.0 / 8);
   cv::magnitude(gx, gy, magnitudes);
-  cv::erode(mask, interior, cv::Mat::ones(3, 3, CV_8U), {}, 1, cv::BORDER_CONSTANT, cv::Scalar(0));
+  cv::erode(mask, interior, cv::Mat::ones(3, 3, CV_8U), cv::Point(-1, -1), 2, cv::BORDER_CONSTANT,
+            cv::Scalar(0));
   EdgeMap result{cv::Mat(gray.size(), CV_8U, cv::Scalar(0)), {}};
   for (int y = 1; y + 1 < gray.rows; ++y) {
     check(ctx);

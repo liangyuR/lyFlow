@@ -184,6 +184,7 @@ TEST_CASE("P2 matching examples preserve CAD anchors across save load C ABI and 
   save.inputs = {{"cloud", loader.outputs.at("cloud")}};
   REQUIRE(save.run("io.save_pcd", {{"path", Value::text(temporary.u8string())}}).ok);
   for (const char* preset : {"fast", "balanced", "precise"}) {
+    CAPTURE(preset);
     const std::string name = std::string("p2-matching-") + preset + ".lyflow.json";
     const auto graph = example(name.c_str());
     const std::string id = std::string("p2-match-") + preset;

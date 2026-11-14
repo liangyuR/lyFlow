@@ -27,6 +27,33 @@ function Reject([ScriptBlock]$Action, [string]$Name) {
     $script:count++
 }
 try {
+    $forwarding = Join-Path $work 'forwarding'
+    foreach ($name in @('build-core.ps1', 'build-vision-deps.ps1')) {
+        Put-File (Join-Path $forwarding $name) @'
+param([switch]$SkipBuild, [switch]$SkipVisionBuild, [switch]$ReleaseBuild, [string]$BuildDir)
+[pscustomobject]@{ SkipBuild = [bool]$SkipBuild; SkipVisionBuild = [bool]$SkipVisionBuild; ReleaseBuild = [bool]$ReleaseBuild }
+'@
+    }
+    foreach ($case in @(
+        @{ source = 'scripts/build-core.ps1'; target = 'build-vision-deps.ps1'; argument = 'SkipBuild' },
+        @{ source = 'scripts/package-windows.ps1'; target = 'build-core.ps1'; argument = 'SkipVisionBuild' }
+    )) {
+        $errors = $null; $tokens = $null
+        $scriptAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repository $case.source), [ref]$tokens, [ref]$errors)
+        if ($errors.Count -or 'SkipVisionBuild' -notin @($scriptAst.ParamBlock.Parameters.Name.VariablePath.UserPath)) { throw "Missing wrapper parameter: $($case.source)" }
+        $calls = @($scriptAst.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.CommandAst] -and $node.Extent.Text -match '^&\s+\(' -and $node.Extent.Text.Contains("'$($case.target)'")
+        }, $true))
+        if ($calls.Count -ne 1) { throw "Expected unique production forwarding call: $($case.source)" }
+        $wrapper = Join-Path $forwarding 'invoke.ps1'
+        Put-File $wrapper ('param([switch]$SkipVisionBuild,[switch]$ReleaseBuild,[string]$coreBuild)' + "`n" + $calls[0].Extent.Text)
+        foreach ($skip in @($true, $false)) {
+            $result = & $wrapper -SkipVisionBuild:$skip -ReleaseBuild -coreBuild fixture
+            if ($result.($case.argument) -ne $skip -or -not $result.ReleaseBuild) { throw "Wrapper lost skip/release parameter: $($case.source)" }
+            $count++
+        }
+    }
     $release = Get-Content -LiteralPath (Join-Path $repository 'packaging/release.json') -Raw
     Put-File (Join-Path $root 'packaging/release.json') $release
     $vision = Get-Content -LiteralPath (Join-Path $repository 'packaging/vision-deps.json') -Raw | ConvertFrom-Json

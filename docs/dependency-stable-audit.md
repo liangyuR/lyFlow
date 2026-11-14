@@ -84,4 +84,6 @@ xxHash升级另由主验证比较原0.8.2与新0.8.4的108组长短输入、内�
 当前ORT安装缓存的复用检查仍以必需文件和VERSION_NUMBER为基础，不逐文件重新验证已解压DLL来源；下载归档才做固定字节数/SHA检查。完整打包的实际DLL检查另查询ORT版本/加载目录。这是保留的缓存校验边界，没有把缓存命中写成新DLL已再次完成来源认证。
 
 
-完整Windows本地集成已执行：发布七包组合的562组原生测试/99893断言全部通过，0跳过；包含四个实际检测模型、六例保存重载/参数隔离的scheduler+C ABI+SDK流程。编辑器94项及React18/19类型检查通过；安装后独立头文件SDK消费六例通过，移除geometry DLL后即使CWD/PATH有有效诱饵仍拒绝。该本地集成使用开发MSVC19.51，正式14.44/new-vcpkg-baseline及Linux构建以本PR最终CI为准；不把独立依赖probe替代发布工具链验证。
+完整Windows本地集成已执行：发布七包组合的564组原生测试/137237断言全部通过，0跳过；包含四个实际检测模型、六例保存重载/参数隔离的scheduler+C ABI+SDK流程。编辑器94项及React18/19类型检查通过；安装后独立头文件SDK消费六例通过，移除geometry DLL后即使CWD/PATH有有效诱饵仍拒绝。该本地集成使用开发MSVC19.51，正式14.44/new-vcpkg-baseline及Linux构建以本PR最终CI为准；不把独立依赖probe替代发布工具链验证。
+
+Codex审查修复后，OpenCV缓存跳过参数贯穿package→core→vision且继续执行受管校验，永久校验累计23场景（19项安装profile+4项实际调用透传）；形状有效邻域明确排除2个工作像素。并行FasterPFH的packed-bit有效标记改为独立字节，固定补丁修订3与2049点串并行语义回归见[匹配分析](p2-analysis-matching.md)，未改匹配预设或质量门限。

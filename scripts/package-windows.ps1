@@ -66,7 +66,7 @@ try {
     Assert-ReleaseExit 'Generate release fixtures'
     $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $fixtures 'channels-6-to-8.onnx'
     if (-not (Test-Path -LiteralPath $env:LYFLOW_TEST_ONNX_MODEL)) { throw 'Release ONNX fixture is missing.' }
-    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild
+    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild -SkipVisionBuild:$SkipVisionBuild
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
     & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |

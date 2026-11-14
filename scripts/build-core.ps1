@@ -5,6 +5,7 @@ param(
   [string]$Configuration = "RelWithDebInfo",
   [switch]$NoTests,
   [switch]$ReleaseBuild,
+  [switch]$SkipVisionBuild,
   [string]$BuildDir
 )
 $ErrorActionPreference = "Stop"
@@ -69,7 +70,7 @@ if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks
   if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
 }
 if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-image' -in ($repoPacks -split ';')) {
-  & (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -ReleaseBuild:$ReleaseBuild
+  & (Join-Path $PSScriptRoot 'build-vision-deps.ps1') -ReleaseBuild:$ReleaseBuild -SkipBuild:$SkipVisionBuild
 }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。

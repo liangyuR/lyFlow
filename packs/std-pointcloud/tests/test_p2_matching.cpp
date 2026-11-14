@@ -1,6 +1,8 @@
 #include <doctest/doctest.h>
 
 #include <Eigen/Geometry>
+#include <kiss_matcher/FasterPFH.hpp>
+#include <tbb/task_arena.h>
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -11,6 +13,7 @@
 #include "lyflow/cloud_groups.h"
 #include "lyflow/pose.h"
 #include "../ops/p1_common.h"
+#include "../algo/lyflow_matching_runtime.hpp"
 
 namespace {
 using namespace lyflow;
@@ -427,4 +430,43 @@ TEST_CASE(
             .code == "resource_limit");
   CHECK(call.status.message.find("16Mi") != std::string::npos);
   CHECK(call.outputs.empty());
+}
+
+TEST_CASE(
+    "P2 FasterPFH preserves a non-word-aligned plane point set with serial and parallel extraction") {
+  std::vector<Eigen::Vector3f> input;
+  std::vector<std::array<float, 3>> expected;
+  for (int y = 0; y < 50; ++y)
+    for (int x = 0; x < 41; ++x)
+      if (y != 49 || x != 40) {
+        input.emplace_back(x * .01f, y * .01f, 1.f);
+        expected.push_back({input.back().x(), input.back().y(), input.back().z()});
+      }
+  REQUIRE(input.size() == 2049);
+  std::sort(expected.begin(), expected.end());
+  for (const int threads : {1, 16})
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      CAPTURE(threads);
+      CAPTURE(repeat);
+      kiss_matcher::FasterPFH extractor(.045f, .08f, .99f, "L2", false);
+      std::vector<Eigen::Vector3f> points;
+      std::vector<Eigen::VectorXf> descriptors;
+      tbb::task_arena arena(threads);
+      arena.execute([&] {
+        lyflow_matching_runtime::ThreadBudget budget(threads);
+        extractor.setInputCloud(input);
+        extractor.ComputeFeature(points, descriptors);
+      });
+      REQUIRE(points.size() == input.size());
+      REQUIRE(descriptors.size() == input.size());
+      std::vector<std::array<float, 3>> actual;
+      for (std::size_t i = 0; i < points.size(); ++i) {
+        CHECK(points[i].allFinite());
+        REQUIRE(descriptors[i].size() > 0);
+        CHECK(descriptors[i].allFinite());
+        actual.push_back({points[i].x(), points[i].y(), points[i].z()});
+      }
+      std::sort(actual.begin(), actual.end());
+      CHECK(actual == expected);
+    }
 }

@@ -78,4 +78,4 @@ ArUco夹具为 `DICT_4X4_50` ID7、物理边长0.1m。相机真值位置[0.12,0.
 
 永久跨接口回归位于 `core/tests/integration/p3_calibration.cpp`（四张识别码/工作空间图）和 `p3_shape.cpp`（两张CAD图）。每例把图与依赖资产保存到独立Unicode临时目录并重载，按默认→运行覆写→默认三轮分别执行原scheduler、真实C ABI和动态C++ Client SDK，共54次图执行。检查预设真值、稳定Record/Transform、覆写隔离与磁盘图恢复；CAD例另通过原生Tensor借阅接口检查Nx4特征、单位法向和跨接口数据一致性，不把特征正文转存为工作流JSON。图像集成只在所需图像/几何包开启时编译，CAD集成另要求点云包。
 
-本次Windows完整core套件已通过562组、99893断言、0失败、0跳过，其中包含上述六例；证据为 `build/core-full-p3-final.log`。这是本次构建的测试结果，不是只统计P3的数量。
+本次Windows完整core套件已通过564组、137237断言、0失败、0跳过，其中包含上述六例；证据为 `build/core-full-p3-final.log`。这是本次构建的测试结果，不是只统计P3的数量。

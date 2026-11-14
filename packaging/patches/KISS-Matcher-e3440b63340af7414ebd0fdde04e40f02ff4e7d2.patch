@@ -429,3 +429,22 @@
  
    bool swapped_ = false;
  
+--- a/cpp/kiss_matcher/core/kiss_matcher/FasterPFH.hpp
++++ b/cpp/kiss_matcher/core/kiss_matcher/FasterPFH.hpp
+@@ -8,6 +8,7 @@
+ #pragma once
+ 
+ #include <chrono>
++#include <cstdint>
+ #include <iostream>
+ #include <limits>
+ #include <mutex>
+@@ -164,7 +165,7 @@
+   std::vector<Eigen::Vector3f> normals_;
+   std::vector<Correspondences> corrs_fpfh_;
+   std::vector<Eigen::Vector3i> voxel_indices_;
+-  std::vector<bool> is_valid_;
++  std::vector<std::uint8_t> is_valid_;
+   std::vector<bool> is_visited_;
+ 
+   std::vector<uint32_t> spfh_indices_;  // voxels whose normals are valid
