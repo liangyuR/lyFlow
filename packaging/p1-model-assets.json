@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "model": "yolox-nano-0.1.1rc0",
+  "input": {
+    "name": "images",
+    "shape": [
+      1,
+      3,
+      416,
+      416
+    ],
+    "dtype": "float32"
+  },
+  "output": {
+    "name": "output",
+    "shape": [
+      1,
+      3549,
+      85
+    ],
+    "dtype": "float32"
+  },
+  "assets": [
+    {
+      "name": "yolox_nano.onnx",
+      "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx",
+      "bytes": 3659407,
+      "license": "YOLOX upstream Apache-2.0 repository license; unchanged official release asset"
+    },
+    {
+      "name": "YOLOX-LICENSE",
+      "url": "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/0.1.1rc0/LICENSE",
+      "bytes": 11352,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "astronaut.png",
+      "url": "https://raw.githubusercontent.com/scikit-image/scikit-image/v0.22.0/skimage/data/astronaut.png",
+      "bytes": 791555,
+      "license": "NASA public-domain photograph of Eileen Collins, as documented by scikit-image"
+    },
+    {
+      "name": "chelsea.png",
+      "url": "https://raw.githubusercontent.com/scikit-image/scikit-image/v0.22.0/skimage/data/chelsea.png",
+      "bytes": 240512,
+      "license": "CC0 photograph by Stefan van der Walt, as documented by scikit-image"
+    },
+    {
+      "name": "yolov8n.pt",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.pt",
+      "bytes": 6549796,
+      "license": "Ultralytics AGPL-3.0 / Enterprise; unchanged official model weights, external assets only"
+    },
+    {
+      "name": "yolo11n.pt",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.pt",
+      "bytes": 5613764,
+      "license": "Ultralytics AGPL-3.0 / Enterprise; unchanged official model weights, external assets only"
+    },
+    {
+      "name": "yolo26n.pt",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt",
+      "bytes": 5544453,
+      "license": "Ultralytics AGPL-3.0 / Enterprise; unchanged official model weights, external assets only"
+    },
+    {
+      "name": "Ultralytics-LICENSE",
+      "url": "https://raw.githubusercontent.com/ultralytics/ultralytics/v8.4.21/LICENSE",
+      "bytes": 34523,
+      "license": "AGPL-3.0"
+    }
+  ],
+  "yoloProfiles": [
+    {
+      "family": "yolov8",
+      "weights": "yolov8n.pt",
+      "export": "yolov8n.onnx",
+      "input": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "output": [
+        1,
+        84,
+        8400
+      ],
+      "format": "raw"
+    },
+    {
+      "family": "yolo11",
+      "weights": "yolo11n.pt",
+      "export": "yolo11n.onnx",
+      "input": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "output": [
+        1,
+        84,
+        8400
+      ],
+      "format": "raw"
+    },
+    {
+      "family": "yolo26",
+      "weights": "yolo26n.pt",
+      "export": "yolo26n.onnx",
+      "input": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "output": [
+        1,
+        300,
+        6
+      ],
+      "format": "end2end"
+    }
+  ]
+}

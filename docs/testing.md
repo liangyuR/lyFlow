@@ -78,3 +78,13 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 - 缺包、缺模型、缺数据要明确报失败或说明跳过，不能让分组提前返回后仍显示全部通过。
 - e2e 的启动、等待及必要前提用 `mustOk`；行为断言要说明真正验证的结果，避免只断言元素存在。
 - 现场精度、标定单位、客户数据效果及产品节拍，需要对应宿主和数据的独立验证。基准、模拟结果或历史算法对拍不能自动转成现场结论。
+
+## P1 三维与真实模型门禁
+
+CI 的 `vision` 在 Linux 运行无PCL的值/几何/位姿/图像包；`vision-native` 在 Windows 使用发布组合同一固定PCL 1.15.1与OpenCV/ORT依赖，运行三维点云/配准和真实YOLOv8、YOLO11、YOLO26、YOLOX检测回归。该job只读恢复依赖缓存，不降级PCL版本或静默跳过重依赖。
+
+本地执行 `python scripts/fetch-p1-model-assets.py` 并按[示例说明](../examples/p1-detection-README.md)导出三种YOLO模型，配置 `-DLYFLOW_P1_MODEL_TESTS=ON`、`LYFLOW_P1_ASSETS=<资产目录>`。此选项默认关闭以保留离线开发；显式开启后缺模型或图片即失败。原有推理夹具另由 `tests/release/make_fixtures.py --output-dir build/p1-fixtures` 生成，测试时设置 `LYFLOW_TEST_ONNX_MODEL` 指向 `channels-6-to-8.onnx`。不使用“未配置模型”的日志代替真实推理验证。
+
+检测门禁比较执行器、C ABI和动态C++ SDK输出，对公开人像、猫图和空背景验证类别与有效空集合；点云/位姿有完整组合图与失败门限回归。公开数据验证不等于客户模型质量或现场节拍验收。
+
+若P1原生job在编译前报固定依赖缺包，先比对失败诊断中的 `environment.json` 和 `*abi_info.txt`。Windows runner 更新可能替换相同 MSVC toolset 目录中的编译器文件，改变 vcpkg 的实际编译器身份及整张依赖图 ABI；固定目录名不能证明既有二进制缓存仍适用。此时在可信 main 上运行现有 `Windows release` 手动入口，设置 `rebuild_deps=true`、`dependencies_only=true`，仅预热依赖并空目录验证 NuGet 恢复，再重跑失败的PR检查。不要降低PCL版本、跳过P1测试或向普通PR job开放依赖源码编译。

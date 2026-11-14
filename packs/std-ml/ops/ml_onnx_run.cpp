@@ -103,6 +103,62 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_param", message, "modelPath");
   }
 
+  if (params.choice("modelContract") == "yolox-nano-0.1.1rc0") {
+    try {
+      if (cached->session.GetInputCount() != 1 || cached->session.GetOutputCount() != 1)
+        return Status::Error(Phase::Execute, "bad_param",
+                             "YOLOX-Nano 契约要求恰好一个输入和一个输出", "modelPath");
+      const auto inputType = cached->session.GetInputTypeInfo(0);
+      const auto outputType = cached->session.GetOutputTypeInfo(0);
+      const auto inputInfo = inputType.GetTensorTypeAndShapeInfo();
+      const auto outputInfo = outputType.GetTensorTypeAndShapeInfo();
+      if (inputInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+          outputInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+          inputInfo.GetShape() != std::vector<std::int64_t>({1, 3, 416, 416}) ||
+          outputInfo.GetShape() != std::vector<std::int64_t>({1, 3549, 85}) ||
+          in->shape != inputInfo.GetShape())
+        return Status::Error(Phase::Execute, "bad_param",
+                             "YOLOX-Nano 契约需要 float32 [1,3,416,416] → [1,3549,85]",
+                             "modelPath");
+    } catch (const Ort::Exception& e) {
+      return Status::Error(Phase::Execute, "bad_param", std::string("模型契约不匹配: ") + e.what(),
+                           "modelPath");
+    }
+  }
+
+  if (params.choice("modelContract") == "yolo-detection") {
+    try {
+      if (cached->session.GetInputCount() != 1 || cached->session.GetOutputCount() != 1)
+        return Status::Error(Phase::Execute, "bad_param", "YOLO检测契约要求恰好一个输入和一个输出",
+                             "modelPath");
+      const auto inputType = cached->session.GetInputTypeInfo(0);
+      const auto outputType = cached->session.GetOutputTypeInfo(0);
+      const auto inputInfo = inputType.GetTensorTypeAndShapeInfo();
+      const auto outputInfo = outputType.GetTensorTypeAndShapeInfo();
+      const auto inputShape = inputInfo.GetShape(), outputShape = outputInfo.GetShape();
+      if (inputInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+          outputInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+          inputShape.size() != 4 || inputShape[0] != 1 || inputShape[1] != 3 ||
+          inputShape[2] < 32 || inputShape[2] > 2048 || inputShape[3] < 32 ||
+          inputShape[3] > 2048 || inputShape[2] % 32 || inputShape[3] % 32 ||
+          in->shape != inputShape || outputShape.size() != 3 || outputShape[0] != 1)
+        return Status::Error(Phase::Execute, "bad_param",
+                             "YOLO检测需要静态float32 RGB NCHW batch=1，宽高为32倍数且32..2048",
+                             "modelPath");
+      std::int64_t anchors = 0;
+      for (int stride : {8, 16, 32})
+        anchors += (inputShape[2] / stride) * (inputShape[3] / stride);
+      const bool raw = outputShape[1] >= 5 && outputShape[1] <= 516 && outputShape[2] == anchors;
+      const bool end2end = outputShape[1] >= 1 && outputShape[1] <= 4096 && outputShape[2] == 6;
+      if ((!raw && !end2end) || outputInfo.GetElementCount() > 16u * 1024u * 1024u)
+        return Status::Error(Phase::Execute, "bad_param",
+                             "YOLO检测输出需要[1,4+C,N]常规头或[1,N,6]端到端格式", "modelPath");
+    } catch (const Ort::Exception& e) {
+      return Status::Error(Phase::Execute, "bad_param",
+                           std::string("YOLO模型契约不匹配: ") + e.what(), "modelPath");
+    }
+  }
+
   const std::string& inName =
       params.text("inputName").empty() ? cached->inputName : params.text("inputName");
   const std::string& outName =
@@ -208,11 +264,23 @@ void registerMlOnnxRun(Registry& r) {
   threads.min = 1.0;
   threads.max = static_cast<double>(std::numeric_limits<int>::max());
 
+  Param contract;
+  contract.name = "modelContract";
+  contract.type = ParamType::Enum;
+  contract.label = "模型契约";
+  contract.def = Value::text("generic");
+  contract.options = {
+      {"generic", "通用张量", "沿用现有指定输入输出名约定。"},
+      {"yolox-nano-0.1.1rc0", "YOLOX-Nano 0.1.1rc0",
+       "固定单输入/输出、位深与形状，不静默丢弃其他输出。"},
+      {"yolo-detection", "YOLOv8 / YOLO11 / YOLO26", "静态batch=1 float32常规或端到端检测输出。"}};
+
   op.params = {
       model,
       textParam("inputName", "Input Name", "模型的输入名。留空用第 0 个。"),
       textParam("outputName", "Output Name", "模型的输出名。留空用第 0 个。"),
       threads,
+      contract,
   };
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;

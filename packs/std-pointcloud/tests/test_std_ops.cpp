@@ -59,7 +59,7 @@ TEST_CASE("包里的 20 个算子都注册了，且都带 pack 标记") {
     CAPTURE(id);
     const OperatorDesc* op = ensureRegistry().find(id);
     REQUIRE(op != nullptr);
-    CHECK(op->pack == "std-pointcloud@0.1.0");
+    CHECK(op->pack == "std-pointcloud@0.2.0");
   }
   // D10：PointCloudXYZI 已从类型表删除
   CHECK(ensureRegistry().findType("PointCloudXYZI") == nullptr);

@@ -34,10 +34,10 @@
 | 领域 | 入口 |
 |---|---|
 | 数值、布尔、文本与有界值列表 | [std-value](../packs/std-value/README.md) |
-| 点线圆/平面构造、距离、垂足与求交 | [std-geometry](../packs/std-geometry/README.md) |
+| 点线圆/平面几何、工件位姿/集合与帧变换 | [std-geometry](../packs/std-geometry/README.md) |
 | 点云、拟合、配准与通用量测 | [std-pointcloud](../packs/std-pointcloud/README.md) |
-| 图像、标定与深度转换 | [std-image](../packs/std-image/README.md) |
-| ONNX 推理 | [std-ml](../packs/std-ml/README.md) |
+| 图像、标定、模板定位、量测与深度转换 | [std-image](../packs/std-image/README.md) |
+| ONNX推理与选定模型检测链 | [std-ml](../packs/std-ml/README.md) · [四模型检测](p1-analysis-detection.md) |
 | 涂胶检测 | [glue 包](../packs/glue/README.md) · [接入指南](glue-integration.md) · [测量算子契约](glue-measure-ops.md) |
 | 间隙与段差 | [gap 包](../packs/gap/README.md) · [宿主接入](gap-inspector-integration-design.md) |
 | 车门胶条面差 | [dts 包](../packs/dts/README.md) |
@@ -46,7 +46,7 @@
 
 ## 外部库能力参考
 
-[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。[198 项能力对照](operator-coverage.md)按实际算法、数据模型和接口区分已有、可组合、部分覆盖及缺失；[补齐计划](operator-completion-plan.md)跟踪交付与后续依赖。P0 的 23 项已逐个参考本机源码分析并实现限定用途，见[分析与示例](p0-operator-analysis.md)。对照不代表流程、端口或参数兼容；当前契约仍以 manifest、包指南和源码为准。
+[xyz-vision-lib 算子清单](<xyz-vision-lib 算子清单.md>)是用户提供的外部库快照，标注修订为 `72d7885c`。[198 项能力对照](operator-coverage.md)按实际算法、数据模型和接口区分已有、可组合、部分覆盖及缺失；[补齐计划](operator-completion-plan.md)跟踪交付与后续依赖。P0 的 23 项已逐个参考本机源码分析并实现限定用途，见[分析与示例](p0-operator-analysis.md)。P1新增55个节点，覆盖云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测及YOLOX、YOLOv8/11/26检测，见[P1实现索引与保留边界](p1-operator-analysis.md)。47个P1外部条目仍有21项部分覆盖，不能把限定切片当作全部模式完成。对照不代表流程、端口或参数兼容；当前契约仍以manifest、包指南和源码为准。
 
 ## 开发与交付
 

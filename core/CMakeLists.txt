@@ -14,10 +14,11 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.4)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.5)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
+option(LYFLOW_P1_MODEL_TESTS "Test the fixed P1 detector with explicitly prepared model assets" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -364,6 +365,12 @@ if(BUILD_TESTING)
      "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p0_pipeline.cpp")
   endif()
+  if(LYFLOW_P1_MODEL_TESTS)
+    if(NOT "std-image" IN_LIST LYFLOW_STD_PACK_NAMES OR NOT "std-ml" IN_LIST LYFLOW_STD_PACK_NAMES)
+      message(FATAL_ERROR "LYFLOW_P1_MODEL_TESTS requires std-image and std-ml")
+    endif()
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p1_detection.cpp")
+  endif()
   add_executable(lyflow-core-tests
     ${LYFLOW_TEST_SOURCES} ${LYFLOW_PACK_TEST_SOURCES}
     "${LYFLOW_MANIFEST}"
@@ -478,6 +485,22 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lyflow-utf8.manifest"
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-inspection.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p0-stripe.pgm"
         DESTINATION examples)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-pose-flow.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-detection.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-yolo-detection.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-detection-README.md"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/fetch-p1-model-assets.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/export-p1-yolo-models.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/requirements-model-export.txt"
+        DESTINATION scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/p1-model-assets.json"
+        DESTINATION packaging)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/licenses/"
+        DESTINATION packaging/licenses)
 
 # 库算子目录（ADR-0010）。宿主往里放 *.lyflow-op.json，所以布局里要有它。
 install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/library\")")

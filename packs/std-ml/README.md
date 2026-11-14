@@ -1,10 +1,10 @@
 # std-ml — LyFlow 标准算子包：推理
 
-版本 0.1.0，默认启用。全仓库唯一一处 onnxruntime 依赖（ADR-0015）。
+版本 0.2.0，默认启用。全仓库唯一一处 onnxruntime 依赖（ADR-0015）。
 
 | id | 输入 → 输出 | 参数 |
 |---|---|---|
-| `ml.onnx_run` | `input: Tensor` → `output: Tensor` | `modelPath`、`inputName`、`outputName`、`intraOpThreads`（默认 1） |
+| `ml.onnx_run` | `input: Tensor` → `output: Tensor` | `modelPath`、`inputName`、`outputName`、`intraOpThreads`（默认 1）、`modelContract` |
 
 `Tensor` 是 core 的端口类型：`shape` + float32 数据，行主序。结果元信息包含形状与 min/max/mean，
 完整数值可通过 `lyflow_output_tensor` 按 `offset` / `count` 切片读取；`Indices` 同样通过 `lyflow_output_indices` 读取 int32 下标。
@@ -52,3 +52,9 @@ core 的 `bin/`，`bridge/build.rs` 整目录搬走它。
 同会话的输入缓冲调整、输入复制、ORT 张量构造、推理和输出复制由同一把互斥锁保护，
 输入与输出的 ORT 句柄在解锁前销毁。即使模型输出引用输入缓冲，下次推理也不会改写已经交付的张量。
 不同会话各有独立缓冲与互斥锁；线程数仍由显式 `intraOpThreads` 决定。
+
+## 显式模型契约
+
+`modelContract=generic` 保持既有按名称选择输入/输出的通用行为。`yolox-nano-0.1.1rc0` 要求唯一 float32 输入 `[1,3,416,416]` 与输出 `[1,3549,85]`。`yolo-detection` 要求唯一 float32 静态输入 `[1,3,H,W]`（H/W是32的倍数、32..2048），输出为 `[1,4+C,N]`（1..512类、8/16/32步长锚点数）或 `[1,N,6]`（1..4096条端到端检测）。额外IO、动态尺寸及不兼容元素类型均拒绝，不静默丢弃其他输出。模型色序、归一化和类别语义由对应图像预处理/解码节点明确约束。
+
+真实 YOLOv8/11/26 与 YOLOX 的外部模型准备和许可见 [检测示例](../../examples/p1-detection-README.md)。这不改变通用 ONNX 算子的默认契约。

@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "p1-pose-flow",
+  "name": "P1 位姿变换与文本往返",
+  "nodes": [
+    {
+      "id": "world",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "world-frame",
+        "position": [10, 0, 0],
+        "quaternion": [0, 0, 0.7071067811865476, 0.7071067811865476]
+      },
+      "ui": { "position": { "x": 0, "y": 0 } }
+    },
+    {
+      "id": "matrix",
+      "op": "pose.to_transform",
+      "params": {},
+      "ui": { "position": { "x": 260, "y": 0 } }
+    },
+    {
+      "id": "part",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "part-1",
+        "frame": "source",
+        "position": [1, 0, 0],
+        "size": [0.1, 0.2, 0.03]
+      },
+      "ui": { "position": { "x": 0, "y": 250 } }
+    },
+    {
+      "id": "move",
+      "op": "pose.transform_3d",
+      "params": { "sourceFrame": "source", "targetFrame": "world" },
+      "ui": { "position": { "x": 520, "y": 100 } }
+    },
+    {
+      "id": "offset",
+      "op": "pose.offset_3d",
+      "params": { "offset": [1, 0, 0], "reference": "local" },
+      "ui": { "position": { "x": 780, "y": 100 } }
+    },
+    {
+      "id": "text",
+      "op": "pose.to_text",
+      "params": {},
+      "ui": { "position": { "x": 1040, "y": 100 } }
+    },
+    {
+      "id": "restored",
+      "op": "pose.from_text",
+      "params": {},
+      "ui": { "position": { "x": 1300, "y": 100 } }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": { "node": "world", "port": "pose" },
+      "to": { "node": "matrix", "port": "poses" }
+    },
+    {
+      "id": "e1",
+      "from": { "node": "matrix", "port": "transform" },
+      "to": { "node": "move", "port": "transform" }
+    },
+    {
+      "id": "e2",
+      "from": { "node": "part", "port": "pose" },
+      "to": { "node": "move", "port": "poses" }
+    },
+    {
+      "id": "e3",
+      "from": { "node": "move", "port": "poses" },
+      "to": { "node": "offset", "port": "poses" }
+    },
+    {
+      "id": "e4",
+      "from": { "node": "offset", "port": "poses" },
+      "to": { "node": "text", "port": "poses" }
+    },
+    {
+      "id": "e5",
+      "from": { "node": "text", "port": "text" },
+      "to": { "node": "restored", "port": "text" }
+    }
+  ],
+  "outputs": {
+    "pose": { "node": "restored", "port": "poses" },
+    "text": { "node": "text", "port": "text" }
+  }
+}

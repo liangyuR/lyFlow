@@ -1,5 +1,14 @@
 # 版本变更
 
+## 1.3.5
+
+- P1 新增 55 个节点：原生点云集合、统计/PCA/包围盒、聚类与多平面、三维配准、剖面、PLY/STL；受校验位姿及集合、坐标变换；图像颜色/拼接/实例矩形掩膜、圆弧/环宽、相机标定、棋盘外参、离散 NCC 模板匹配。
+- 检测链支持 YOLOv8、YOLO11、YOLO26，以及固定 YOLOX-Nano；显式区分常规检测头与端到端输出，复用原生 Tensor、ONNX Runtime 和 Pose2D 结果。SDK 提供固定公开模型准备脚本，运行库不内置权重。
+- std-pointcloud、std-geometry、std-ml 为 0.2.0，std-image 为 0.3.0；产品及 ABI 字符串为 1.3.5，不新增 Data::Kind 或 C ABI 符号，保持 1.3 系列兼容。
+- 增加真实模型、三维链与接口一致性门禁；小型版本化 Record 仅承载元数据，点云、索引、图像和 Tensor 保持原生数据。配准与剖面质量以实际 float32 输出重新验证。
+
+详细支持范围和仍未覆盖的外部模式见 [P1 点云](p1-analysis-cloud.md)、[位姿](p1-analysis-pose.md)、[图像](p1-analysis-image.md)、[检测](p1-analysis-detection.md)。软件回归不代表工业现场精度、节拍或设备验收。
+
 ## 1.3.4
 
 - 新增无 PCL/OpenCV 依赖的 std-value、std-geometry 包：有限数值/布尔/文本、有界列表、算术/比较/逻辑、原生点线圆/平面、距离/垂足/求交。采用受校验的版本化 Record，不增加 Data::Kind 或 C ABI 符号。

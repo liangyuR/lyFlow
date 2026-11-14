@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "id": "01P1YOLODETECTION000000001",
+  "name": "P1 YOLOv8 / YOLO11 / YOLO26 检测",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "preprocess",
+      "op": "image.yolo_preprocess",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "model",
+      "op": "ml.onnx_run",
+      "params": {
+        "modelContract": "yolo-detection",
+        "intraOpThreads": 1
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "decode",
+      "op": "image.yolo_decode",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "preprocess",
+        "port": "image"
+      }
+    },
+    {
+      "id": "tensor",
+      "from": {
+        "node": "preprocess",
+        "port": "tensor"
+      },
+      "to": {
+        "node": "model",
+        "port": "input"
+      }
+    },
+    {
+      "id": "prediction",
+      "from": {
+        "node": "model",
+        "port": "output"
+      },
+      "to": {
+        "node": "decode",
+        "port": "prediction"
+      }
+    },
+    {
+      "id": "mapping",
+      "from": {
+        "node": "preprocess",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "decode",
+        "port": "mapping"
+      }
+    }
+  ],
+  "outputs": {
+    "detections": {
+      "node": "decode",
+      "port": "detections"
+    }
+  },
+  "params": {
+    "imageFile": {
+      "type": "path",
+      "label": "输入图片",
+      "default": "../build/p1-assets/astronaut.png",
+      "binds": ["source.path"]
+    },
+    "modelFile": {
+      "type": "path",
+      "label": "固定模型",
+      "default": "../build/p1-assets/yolo26n.onnx",
+      "binds": ["model.modelPath"]
+    },
+    "modelFamily": {
+      "type": "enum",
+      "label": "模型系列",
+      "default": "yolo26",
+      "options": [
+        {
+          "value": "yolov8",
+          "label": "YOLOv8"
+        },
+        {
+          "value": "yolo11",
+          "label": "YOLO11"
+        },
+        {
+          "value": "yolo26",
+          "label": "YOLO26"
+        }
+      ],
+      "binds": ["preprocess.modelFamily"]
+    }
+  }
+}

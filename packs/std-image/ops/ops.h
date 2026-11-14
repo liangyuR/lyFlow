@@ -23,6 +23,12 @@ void registerCloudToDepthImage(Registry& r);
 void registerImageAnalysis(Registry& r);
 void registerImageCalipers(Registry& r);
 void registerImageDifference(Registry& r);
+void registerImageDetection(Registry& r);
+void registerImageYolo(Registry& r);
+void registerImageP1Basic(Registry& r);
+void registerImageP1Calibration(Registry& r);
+void registerImageP1Matching(Registry& r);
+void registerImageP1Circles(Registry& r);
 
 } // namespace lyflow::ops
 

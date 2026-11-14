@@ -281,7 +281,7 @@ jobs:
           retention-days: 7
 
   vision:
-    name: P0 值 / 几何 / 图像算子与组合流程
+    name: 值 / 位姿 / 几何 / 图像算子与组合流程
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -292,7 +292,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y ninja-build libopencv-dev
 
-      - name: 配置 P0 算子测试
+      - name: 配置通用视觉算子测试
         run: cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
       - name: 编译并自检算子契约
@@ -312,5 +312,108 @@ jobs:
             build/vision/test-results.xml
             build/vision/Testing/Temporary/*.log
             build/vision/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  vision-native:
+    name: P1 三维点云 / 配准 / 固定模型检测链
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 固定依赖版本
+        id: dependency
+        shell: pwsh
+        run: |
+          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
+          "baseline=$($configuration.vcpkgBaseline)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "toolset=$($configuration.dependencyToolchain.msvcToolset)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sdk=$($configuration.dependencyToolchain.windowsSdk)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ort=$($configuration.onnxruntimeVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: ${{ steps.dependency.outputs.toolset }}
+          sdk: ${{ steps.dependency.outputs.sdk }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/release-tools/vcpkg/*
+            !build/release-tools/vcpkg/downloads/**
+            !build/release-tools/vcpkg/buildtrees/**
+            !build/release-tools/vcpkg/packages/**
+            !build/release-tools/vcpkg/installed/**
+          key: vcpkg-tool-windows-x64-${{ steps.dependency.outputs.baseline }}-v1
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/release-deps/binary-cache
+          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-glue-gap-v2
+          restore-keys: |
+            windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.dependency.outputs.ort }}
+          key: onnxruntime-win-x64-cpu-${{ steps.dependency.outputs.ort }}-v1
+
+      - name: 准备固定公开模型和测试图
+        shell: pwsh
+        run: |
+          python -m pip install -r scripts/requirements.txt
+          python scripts/fetch-p1-model-assets.py
+          if ($LASTEXITCODE -ne 0) { throw '固定模型或测试图准备失败' }
+          python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { throw 'CPU模型导出依赖准备失败' }
+          python -m pip install -r scripts/requirements-model-export.txt
+          if ($LASTEXITCODE -ne 0) { throw '固定模型导出工具准备失败' }
+          python scripts/export-p1-yolo-models.py
+          if ($LASTEXITCODE -ne 0) { throw 'YOLOv8/11/26固定导出失败' }
+          python tests/release/make_fixtures.py --output-dir build/p1-fixtures
+          if ($LASTEXITCODE -ne 0) { throw '原生推理回归夹具准备失败' }
+
+      - name: 固定依赖恢复与完整 P1 链验证
+        shell: pwsh
+        env:
+          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
+          LYFLOW_VCPKG_FEED_MODE: read
+          CMAKE_BUILD_PARALLEL_LEVEL: '2'
+        run: |
+          ./scripts/prepare-release-deps.ps1
+          $env:LYFLOW_STD_PACKS = '1'
+          $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
+          $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
+          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
+          cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
+          ./build/p1-native/bin/lyflow-dump-manifest.exe --check
+          if ($LASTEXITCODE -ne 0) { throw 'P1 算子契约失败' }
+          ctest --test-dir build/p1-native --output-on-failure --no-tests=error --output-junit test-results.xml
+          if ($LASTEXITCODE -ne 0) { throw 'P1 点云/检测组合回归失败' }
+
+      - name: 保存 P1 诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-native-diagnostics
+          path: |
+            build/p1-native/test-results.xml
+            build/p1-native/Testing/Temporary/*.log
+            build/p1-native/CMakeFiles/CMakeConfigureLog.yaml
+            build/release-dependency-diagnostics/
           if-no-files-found: ignore
           retention-days: 7
