@@ -95,76 +95,78 @@ try {
   });
   await cdp.eval('window.__lyflow.stores.ui.getState().setAutoRun(false);return true;');
   await newDoc(cdp);
-  const ids = await buildGraph(
-    cdp,
-    [
-      {
-        key: 'a',
-        op: 'pose.construct_3d',
-        params: { id: '真实工件', frame: 'camera', position: [0, 0, 1], size: [0.1, 0.2, 0.3] },
-      },
-    ],
-    [],
-  );
-  const nativeRun = await runAndWait(cdp, () => cdp.eval('return window.__lyflow.run();'));
-  await select(cdp, ids.a);
-  await cdp.waitFor("document.querySelector('[data-testid=viewer-pose-controls]') !== null");
-  assert.equal(await cdp.eval("return document.querySelector('.viewer').dataset.overlay;"), '1');
-  await clickSelector(
-    cdp,
-    '[data-testid=viewer-pose-controls] input[type=checkbox]:nth-of-type(1)',
-  );
-  await screenshot('native-pose3d');
-  record('native CLI-backed Pose3D view', { nativeRun });
-  const modelGraph = JSON.parse(
-    await fs.readFile(path.join(root, 'examples/p6-model-viewer.lyflow.json'), 'utf8'),
-  );
-  await cdp.eval(
-    `window.__lyflow.stores.graph.getState().loadDoc(${JSON.stringify(modelGraph)}, ${JSON.stringify(path.join(root, 'examples/p6-model-viewer.lyflow.json'))});return true;`,
-  );
-  const modelRun = await runAndWait(cdp, () => cdp.eval('return window.__lyflow.run();'));
-  await select(cdp, 'render');
-  await cdp.waitFor("document.querySelector('[aria-label=图像输出端口]')?.options.length===5");
-  for (const imagePort of ['mask', 'edge_mask', 'depth', 'normal']) {
-    await change('[aria-label=图像输出端口]', imagePort);
-    await cdp.waitFor(
-      "document.querySelector('[data-testid=viewer-image-export]')?.disabled===false",
+  if (!process.env.LYFLOW_P6_QUICK) {
+    const ids = await buildGraph(
+      cdp,
+      [
+        {
+          key: 'a',
+          op: 'pose.construct_3d',
+          params: { id: '真实工件', frame: 'camera', position: [0, 0, 1], size: [0.1, 0.2, 0.3] },
+        },
+      ],
+      [],
     );
-    await sleep(200);
-    assert.deepEqual(
+    const nativeRun = await runAndWait(cdp, () => cdp.eval('return window.__lyflow.run();'));
+    await select(cdp, ids.a);
+    await cdp.waitFor("document.querySelector('[data-testid=viewer-pose-controls]') !== null");
+    assert.equal(await cdp.eval("return document.querySelector('.viewer').dataset.overlay;"), '1');
+    await clickSelector(
+      cdp,
+      '[data-testid=viewer-pose-controls] input[type=checkbox]:nth-of-type(1)',
+    );
+    await screenshot('native-pose3d');
+    record('native CLI-backed Pose3D view', { nativeRun });
+    const modelGraph = JSON.parse(
+      await fs.readFile(path.join(root, 'examples/p6-model-viewer.lyflow.json'), 'utf8'),
+    );
+    await cdp.eval(
+      `window.__lyflow.stores.graph.getState().loadDoc(${JSON.stringify(modelGraph)}, ${JSON.stringify(path.join(root, 'examples/p6-model-viewer.lyflow.json'))});return true;`,
+    );
+    const modelRun = await runAndWait(cdp, () => cdp.eval('return window.__lyflow.run();'));
+    await select(cdp, 'render');
+    await cdp.waitFor("document.querySelector('[aria-label=图像输出端口]')?.options.length===5");
+    for (const imagePort of ['mask', 'edge_mask', 'depth', 'normal']) {
+      await change('[aria-label=图像输出端口]', imagePort);
+      await cdp.waitFor(
+        "document.querySelector('[data-testid=viewer-image-export]')?.disabled===false",
+      );
+      await sleep(200);
+      assert.deepEqual(
+        await cdp.eval(
+          "const c=document.querySelector('[data-testid=viewer-image-canvas]');return [c.width,c.height];",
+        ),
+        [1280, 960],
+      );
+      await screenshot(`native-model-${imagePort}`);
+    }
+    await clickSelector(cdp, '[data-testid=viewer-image-export]');
+    record('native STL sampling and four scientific render ports', { modelRun });
+    await fixture('groups');
+    await cdp.waitFor("document.querySelector('[aria-label=点云分组来源]')?.options.length===2");
+    await change('[aria-label=点云分组来源]', 'fixture:groups');
+    await cdp.waitFor("document.querySelector('[aria-label=点云组身份]')?.options.length===3");
+    await change('[aria-label=点云组身份]', '乙');
+    await cdp.waitFor("document.querySelector('.viewer__count')?.textContent.startsWith('1 / 3')");
+    record(
+      'lossless group source and identity selection',
       await cdp.eval(
-        "const c=document.querySelector('[data-testid=viewer-image-canvas]');return [c.width,c.height];",
+        "return {count:document.querySelector('.viewer__count')?.textContent,controls:document.querySelector('[data-testid=viewer-group-controls]').textContent};",
       ),
-      [1280, 960],
     );
-    await screenshot(`native-model-${imagePort}`);
+    await screenshot('group-selection');
+    await fixture('scene');
+    await cdp.waitFor("document.querySelector('[data-testid=result-scene] img')?.naturalWidth>0");
+    assert.ok(
+      await cdp.eval(
+        "return document.querySelector('[data-testid=result-scene]').textContent.includes('profile');",
+      ),
+    );
+    await clickSelector(cdp, '[aria-label=放大结构化结果]');
+    await clickSelector(cdp, '[data-testid=result-scene] a[download]');
+    await screenshot('structured-scene');
+    record('SceneSpec SVG and zoom', { pass: true });
   }
-  await clickSelector(cdp, '[data-testid=viewer-image-export]');
-  record('native STL sampling and four scientific render ports', { modelRun });
-  await fixture('groups');
-  await cdp.waitFor("document.querySelector('[aria-label=点云分组来源]')?.options.length===2");
-  await change('[aria-label=点云分组来源]', 'fixture:groups');
-  await cdp.waitFor("document.querySelector('[aria-label=点云组身份]')?.options.length===3");
-  await change('[aria-label=点云组身份]', '乙');
-  await cdp.waitFor("document.querySelector('.viewer__count')?.textContent.startsWith('1 / 3')");
-  record(
-    'lossless group source and identity selection',
-    await cdp.eval(
-      "return {count:document.querySelector('.viewer__count')?.textContent,controls:document.querySelector('[data-testid=viewer-group-controls]').textContent};",
-    ),
-  );
-  await screenshot('group-selection');
-  await fixture('scene');
-  await cdp.waitFor("document.querySelector('[data-testid=result-scene] img')?.naturalWidth>0");
-  assert.ok(
-    await cdp.eval(
-      "return document.querySelector('[data-testid=result-scene]').textContent.includes('profile');",
-    ),
-  );
-  await clickSelector(cdp, '[aria-label=放大结构化结果]');
-  await clickSelector(cdp, '[data-testid=result-scene] a[download]');
-  await screenshot('structured-scene');
-  record('SceneSpec SVG and zoom', { pass: true });
   await fixture('image');
   await cdp.waitFor("document.querySelector('[aria-label=叠加工件]')?.options.length===2");
   await clickSelector(cdp, '[data-testid=image-result-tools] summary');
@@ -193,60 +195,140 @@ try {
   assert.deepEqual(normal.slice(4, 8), [128, 128, 0, 255]);
   record('native image port selection and scientific normal mapping', { normal });
   await screenshot('normal-image');
-  await fixture('image3d');
-  await cdp.waitFor("document.querySelector('[aria-label=叠加工件]')?.options.length===2");
-  if (!(await cdp.eval("return document.querySelector('[data-testid=image-result-tools]').open;")))
-    await clickSelector(cdp, '[data-testid=image-result-tools] summary');
-  await change('[aria-label=叠加工件]', 'fixture:poses');
-  await cdp.waitFor("document.querySelector('[aria-label=投影相机]')?.options.length===2");
-  await change('[aria-label=图像坐标系]', 'camera');
-  await change('[aria-label=投影相机]', 'fixture:camera');
+  await change('[aria-label=图像输出端口]', 'image');
   await cdp.waitFor(
-    "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent.includes('explicit')",
+    "document.querySelector('[data-testid=viewer-image-export]')?.disabled===false && document.querySelector('[data-testid=viewer-image-canvas]')?.dataset.imageEpoch.includes('|image|')",
   );
-  const transform = {
-    fromFrame: 'world',
-    toFrame: 'camera',
-    matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-  };
-  await cdp.eval(
-    `const input=document.querySelector('[aria-label=投影外参]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input, ${JSON.stringify(JSON.stringify(transform))});input.dispatchEvent(new Event('input',{bubbles:true}));return true;`,
-  );
-  await cdp.waitFor(
-    "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent==='' && document.querySelector('img[alt=工件与点云投影]')?.naturalWidth>0",
-  );
-  await clickSelector(cdp, '[data-testid=image-result-tools] summary');
-  await screenshot('pose3d-camera-projection');
-  record('camera overlay requires and consumes explicit cross-frame transform', { pass: true });
-  await fixture('cloudimage');
-  await cdp.waitFor(
-    "document.querySelector('[data-testid=viewer-camera] option[value=image]')?.disabled===false",
-  );
-  await change('[data-testid=viewer-camera]', 'image');
-  await cdp.waitFor("document.querySelector('[aria-label=投影点云组]')?.options.length===2");
-  if (!(await cdp.eval("return document.querySelector('[data-testid=image-result-tools]').open;")))
-    await clickSelector(cdp, '[data-testid=image-result-tools] summary');
-  await change('[aria-label=图像坐标系]', 'camera');
-  await change('[aria-label=投影相机]', 'fixture:camera');
-  await change('[aria-label=投影点云组]', 'fixture:groups');
-  await change('[aria-label=投影云组身份]', '乙');
-  await cdp.waitFor(
-    "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent==='点云投影上限 10 万点，按身份着色' && document.querySelector('img[alt=工件与点云投影]')?.naturalWidth>0",
-  );
-  const cloudSvg = await cdp.eval(
+  const svgA = await cdp.eval(
     "return await (await fetch(document.querySelector('img[alt=工件与点云投影]').src)).text();",
   );
-  assert.ok(cloudSvg.includes('cx="7.5"') && (cloudSvg.match(/<circle/g) ?? []).length === 1);
-  await clickSelector(cdp, '[data-testid=image-result-tools] summary');
-  await screenshot('cloud-group-image-projection');
-  record('cloud identity, group selection and calibrated image projection', { pass: true });
+  const pixelsA = await cdp.eval(
+    "return [...document.querySelector('[data-testid=viewer-image-canvas]').getContext('2d').getImageData(0,0,1,1).data];",
+  );
+  await cdp.eval(`
+    const t=window.__lyflow.transport, e=window.__lyflow.stores.execution;
+    const oldInfo=t.getOutputInfo.bind(t),oldImage=t.getOutputImage.bind(t);
+    const next=JSON.parse(JSON.stringify(e.getState().nodes.get('fixture').stats.outputs)).filter(o=>!['maskInfo','masks'].includes(o.port));
+    Object.assign(next.find(o=>o.port==='image').value,{channels:3,depth:'f32'});
+    Object.assign(next.find(o=>o.port==='poses').value.data,{position:[6,6],angle:0});
+    next.find(o=>o.port==='quality').value.data.outputs.image={encoding:'camera-unit-vector-xyz'};
+    const meta=new Promise(resolve=>window.__p6ReleaseMetadata=resolve),pixels=new Promise(resolve=>window.__p6ReleasePixels=resolve);
+    t.getOutputInfo=async(run,node)=>{if(run!=='fixture-image-delayed')return oldInfo(run,node);window.__p6MetadataRequested=true;await meta;return next;};
+    t.getOutputImage=async(run,...args)=>{if(run!=='fixture-image-delayed')return oldImage(run,...args);window.__p6PixelsRequested=true;await pixels;const b=new ArrayBuffer(48+64*3*4),h=new DataView(b);[0x4d49594c,8,8,3,4,0,8,8,0,8,96,0].forEach((n,i)=>h.setUint32(i*4,n,true));const values=new Float32Array(b,48);for(let n=1;n<64;n++)values.set([0,0,-1],n*3);return b;};
+    e.setState({runId:'fixture-image-delayed',resultRunId:'fixture-image-delayed',runStatus:'ok',nodes:new Map([['fixture',{state:'done',errors:[],stats:{outputs:next}}]])});
+    return true;
+  `);
+  await cdp.waitFor('window.__p6MetadataRequested===true');
+  assert.equal(
+    await cdp.eval(
+      "return document.querySelector('[data-testid=viewer-image-pane]').dataset.showingRun;",
+    ),
+    'fixture-image',
+  );
+  assert.equal(
+    await cdp.eval(
+      "return await (await fetch(document.querySelector('img[alt=工件与点云投影]').src)).text();",
+    ),
+    svgA,
+  );
+  await cdp.eval('window.__p6ReleaseMetadata();return true;');
+  await cdp.waitFor(
+    "window.__p6PixelsRequested===true && document.querySelector('[data-testid=viewer-image]').dataset.stale==='1'",
+  );
+  assert.equal(
+    await cdp.eval("return document.querySelector('[data-testid=viewer-image-export]').disabled;"),
+    true,
+  );
+  assert.equal(
+    await cdp.eval("return document.querySelector('img[alt=工件与点云投影]')===null;"),
+    true,
+  );
+  assert.deepEqual(
+    await cdp.eval(
+      "return [...document.querySelector('[data-testid=viewer-image-canvas]').getContext('2d').getImageData(0,0,1,1).data];",
+    ),
+    pixelsA,
+  );
+  await cdp.eval('window.__p6ReleasePixels();return true;');
+  await cdp.waitFor(
+    "document.querySelector('[data-testid=viewer-image-export]').disabled===false && document.querySelector('[data-testid=viewer-image-canvas]').dataset.imageEpoch.startsWith('fixture-image-delayed|') && document.querySelector('img[alt=工件与点云投影]')?.naturalWidth>0",
+  );
+  assert.deepEqual(
+    await cdp.eval(
+      "return [...document.querySelector('[data-testid=viewer-image-canvas]').getContext('2d').getImageData(1,0,1,1).data];",
+    ),
+    [128, 128, 0, 255],
+  );
+  assert.ok(
+    await cdp.eval(
+      "return (await (await fetch(document.querySelector('img[alt=工件与点云投影]').src)).text()).includes('M4.5,5.5');",
+    ),
+  );
+  await clickSelector(cdp, '[data-testid=viewer-image-export]');
+  await screenshot('image-epoch-final');
+  record('delayed metadata and delayed native pixels keep result/encoding/PNG epochs coherent', {
+    pass: true,
+  });
+  if (!process.env.LYFLOW_P6_QUICK) {
+    await fixture('image3d');
+    await cdp.waitFor("document.querySelector('[aria-label=叠加工件]')?.options.length===2");
+    if (
+      !(await cdp.eval("return document.querySelector('[data-testid=image-result-tools]').open;"))
+    )
+      await clickSelector(cdp, '[data-testid=image-result-tools] summary');
+    await change('[aria-label=叠加工件]', 'fixture:poses');
+    await cdp.waitFor("document.querySelector('[aria-label=投影相机]')?.options.length===2");
+    await change('[aria-label=图像坐标系]', 'camera');
+    await change('[aria-label=投影相机]', 'fixture:camera');
+    await cdp.waitFor(
+      "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent.includes('explicit')",
+    );
+    const transform = {
+      fromFrame: 'world',
+      toFrame: 'camera',
+      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    };
+    await cdp.eval(
+      `const input=document.querySelector('[aria-label=投影外参]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input, ${JSON.stringify(JSON.stringify(transform))});input.dispatchEvent(new Event('input',{bubbles:true}));return true;`,
+    );
+    await cdp.waitFor(
+      "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent==='' && document.querySelector('img[alt=工件与点云投影]')?.naturalWidth>0",
+    );
+    await clickSelector(cdp, '[data-testid=image-result-tools] summary');
+    await screenshot('pose3d-camera-projection');
+    record('camera overlay requires and consumes explicit cross-frame transform', { pass: true });
+    await fixture('cloudimage');
+    await cdp.waitFor(
+      "document.querySelector('[data-testid=viewer-camera] option[value=image]')?.disabled===false",
+    );
+    await change('[data-testid=viewer-camera]', 'image');
+    await cdp.waitFor("document.querySelector('[aria-label=投影点云组]')?.options.length===2");
+    if (
+      !(await cdp.eval("return document.querySelector('[data-testid=image-result-tools]').open;"))
+    )
+      await clickSelector(cdp, '[data-testid=image-result-tools] summary');
+    await change('[aria-label=图像坐标系]', 'camera');
+    await change('[aria-label=投影相机]', 'fixture:camera');
+    await change('[aria-label=投影点云组]', 'fixture:groups');
+    await change('[aria-label=投影云组身份]', '乙');
+    await cdp.waitFor(
+      "document.querySelector('[data-testid=image-result-tools] [role=status]')?.textContent==='点云投影上限 10 万点，按身份着色' && document.querySelector('img[alt=工件与点云投影]')?.naturalWidth>0",
+    );
+    const cloudSvg = await cdp.eval(
+      "return await (await fetch(document.querySelector('img[alt=工件与点云投影]').src)).text();",
+    );
+    assert.ok(cloudSvg.includes('cx="7.5"') && (cloudSvg.match(/<circle/g) ?? []).length === 1);
+    await clickSelector(cdp, '[data-testid=image-result-tools] summary');
+    await screenshot('cloud-group-image-projection');
+    record('cloud identity, group selection and calibrated image projection', { pass: true });
+  }
   await sleep(400);
   const files = await fs.readdir(output);
-  assert.ok(files.some((name) => name.endsWith('.svg')));
+  if (!process.env.LYFLOW_P6_QUICK) assert.ok(files.some((name) => name.endsWith('.svg')));
   assert.ok(files.some((name) => name.startsWith('image-result-') && name.endsWith('.png')));
   assert.deepEqual(errors, []);
   await fs.writeFile(
-    path.join(output, 'evidence.json'),
+    path.join(output, process.env.LYFLOW_P6_QUICK ? 'epoch-evidence.json' : 'evidence.json'),
     JSON.stringify({ evidence, errors, files }, null, 2),
   );
 } catch (error) {
