@@ -359,6 +359,8 @@ TEST_CASE("P5 scheduler all five lifting inputs publish explicit poses and geome
     OperatorDesc source;
     source.id = "test.p5_geometry_record_source";
     source.version = "1.0.0";
+    source.label = "P5几何记录夹具";
+    source.category = "测试/夹具";
     source.outputs = {{"record", "Record", "Fixture", "Injected record fixture", true}};
     source.compute = [](const Inputs&, const ParamView&, Outputs&, ExecContext&) {
       return Status::Error(Phase::Execute, "missing_fixture", "测试源必须显式注入记录");

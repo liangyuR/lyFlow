@@ -88,4 +88,6 @@ python tests/release/p5_contract.py --cli build/rust/release/lyflow.exe
 
 独立安装的 C++17 SDK 门禁使用 `tests/release/p5_sdk_consumer`，必须显式传入 `LYFLOW_CONSUMER_VERSION=X.Y.Z` 并以 EXACT 查找安装包，编译时不读取源码构建路径或 vcpkg。`p5_sdk_contract.py --sdk <安装目录> --consumer <编译后的程序> --bait-dir <构建bin> --output-dir <日志目录>` 实际运行八图、核物理真值和资产不变，并在 Windows 暂移SDK内OpenCV依赖时验证有效CWD/PATH诱饵仍被拒绝。该门禁纳入原生Windows CI；不能把旧补丁客户端兼容运行冒充当前头文件重新编译。
 
+本轮 Windows 本地完整验证实际执行七个算子包、P1四模型、P4分割/OCR真实模型与全部平台回归：690组、370887断言通过，0失败/0跳过。最终DLL安装后，八图CLI默认→覆盖→默认24次通过，当前1.3.11 EXACT/C++17独立消费工程的八图和依赖诱饵负例通过。编辑器94项及React18/19类型检查通过。CI与Codex结论仍以PR最新提交为准，这些软件证据不替代现场精度、吞吐或安全验收。
+
 详细算法、预算和坐标契约见 [深度投影](p5-analysis-projection.md)、[点云检查](p5-analysis-cloud-inspection.md)、[姿态几何](p5-analysis-pose-geometry.md)及 [ADR-0031](adr/0031-depth-grid-association-and-derived-observations.md)。
