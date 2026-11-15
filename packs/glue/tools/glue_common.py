@@ -1,6 +1,6 @@
 """packs/glue/tools 的共用件：找 lyflow CLI、找数据、跑 lyflow eval、读回每一行（D14：只调 CLI，不自己做检测）。
 
-数据目录由 LYFLOW_GLUE_DATA（或 --data）给，下面是 Glue1/、Glue2/ 两个子目录，帧叫 FrameN_1.jpg。
+数据目录由 LYFLOW_GLUE_DATA（或 --data）给，下面是 Glue1/、Glue2/ 两个子目录；支持 FrameN_1.jpg 和 cam1_N.png。
 真实帧与它们的叠画都是客户数据（D12）：这里产出的一切都写到仓库外（--out，默认 %TEMP%\\lyflow-glue-*）。
 """
 
@@ -80,18 +80,23 @@ def out_dir(explicit: str | None, name: str) -> Path:
 
 
 def frames(data: Path, dataset: str) -> list[Path]:
-    """FrameN_1.jpg，按 N 排序（_2 / _3 与 _1 字节相同，只用 _1）。"""
+    """按帧号读取通道 1，兼容原始 JPEG 与整理后的无损 PNG。"""
     out = []
-    for p in (data / dataset).glob("Frame*_1.jpg"):
-        m = re.fullmatch(r"Frame(\d+)_1\.jpg", p.name)
-        if m:
-            out.append((int(m.group(1)), p))
+    seen = set()
+    for p in (data / dataset).iterdir():
+        number = frame_no(p)
+        if not p.is_file() or number < 0:
+            continue
+        if number in seen:
+            raise ValueError(f"{dataset} 通道 1 的帧号 {number} 重复，请勿混放转换前后两套图片")
+        seen.add(number)
+        out.append((number, p))
     return [p for _, p in sorted(out)]
 
 
 def frame_no(path: str | Path) -> int:
-    m = re.search(r"Frame(\d+)_1", Path(path).name)
-    return int(m.group(1)) if m else -1
+    m = re.fullmatch(r"(?:Frame(\d+)_1\.(?:jpg|jpeg)|cam1_(\d+)\.(?:png|pgm|jpg|jpeg))", Path(path).name, re.I)
+    return int(m.group(1) or m.group(2)) if m else -1
 
 
 def write_samples(path: Path, rows: list[dict]) -> None:

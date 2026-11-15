@@ -132,7 +132,7 @@ def default_lyflow() -> Path | None:
     here = Path(__file__).resolve()
     # packs/gap/tools/ -> 仓库根
     found = []
-    for repo in (here.parents[3], Path("D:/project/LyFlow")):
+    for repo in (here.parents[3], Path.home() / "project" / "LyFlow"):
         for profile in ("release", "debug"):
             exe = repo / "bridge" / "target" / profile / "lyflow.exe"
             if exe.is_file():
