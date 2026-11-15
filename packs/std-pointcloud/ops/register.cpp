@@ -22,7 +22,6 @@ void registerPackOps(Registry& r) {
   ops::registerSegmentRansacPlane(r);
   ops::registerSegmentExtractIndices(r);
 
-  ops::registerTransformMake(r);
   ops::registerTransformApply(r);
   ops::registerUtilMerge(r);
 

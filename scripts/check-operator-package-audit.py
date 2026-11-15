@@ -17,8 +17,12 @@ CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/man
                     'core/src/runtime*.cpp', 'core/src/exec/disk_cache.cpp',
                     'core/src/exec/graph.cpp', 'core/src/status.cpp',
                     'core/include/lyflow/*.h', 'core/include/lyflow/*.hpp', 'core/CMakeLists.txt',
+                    'core/cmake/*.cmake', 'core/cmake/*.cmake.in',
+                    'kernels/include/**/*.h', 'kernels/src/*.cpp',
                     'packs/*/ops/*.cpp', 'packs/*/ops/*.h', 'packs/*/include/**/*.h',
                     'packs/*/include/**/*.hpp', 'packs/*/lyflow_op_pack.cmake',
+                    'packs/*/lyflow_pack_dependencies.cmake',
+                    'examples/public_kernels.cpp', 'examples/public-kernels/CMakeLists.txt',
                     'python/lyflow_python/*.py',
                     'python/examples/**/*.py', 'packaging/release.json')
 
@@ -52,6 +56,10 @@ def validate(data, manifests, generated_docs=None):
                 require(bool(re.fullmatch(r'[0-9a-f]{64}', proof.get('sha256', ''))) and
                         proof.get('operatorCount') == stage.get('expectedNativeCount') and
                         bool(stage.get('reviewedSourceChanges')), '阶段缺少真实manifest或源码复核证据')
+            if stage.get('stage') == 'M1' and stage.get('status') == 'complete':
+                require(stage.get('mergeEvidence', {}).get('pr') == 62 and
+                        bool(re.fullmatch(r'[0-9a-f]{40}', stage.get('mergeEvidence', {}).get('revision', ''))),
+                        'M1完成状态缺少PR62合并证据')
     native = data.get('operators', [])
     examples = data.get('pythonExamples', [])
     rows = native + examples
@@ -75,6 +83,27 @@ def validate(data, manifests, generated_docs=None):
     orders = [r.get('migrationOrder') for r in rows]
     require(sorted(orders) == list(range(1, len(rows) + 1)), '迁移序号必须唯一连续')
     by_id = {r['id']: r for r in rows}
+    m2 = next((s for s in data.get('stageLedger', []) if s.get('stage') == 'M2'), None)
+    if m2 is not None:
+        scoped = {r['id'] for r in native if r['wave'] == 'M2'}
+        require(len(scoped) == 38 and set(m2.get('scopeNativeIds', [])) == scoped, 'M2必须完整登记原38项边界验收范围')
+        require(m2.get('expectedNativeCount') == 256 and m2.get('expectedPythonExampleCount') == 8 and
+                m2.get('introducedNativeIds') == [] and m2.get('introducedPythonIds') == [], 'M2不得隐式增加算子ID')
+        for identifier in scoped:
+            assessments = [a for a in by_id[identifier].get('stageAssessments', []) if a.get('stage') == 'M2']
+            require(len(assessments) == 1 and assessments[0].get('status') in {'pending_manifest', 'manifest_verified'} and
+                    bool(assessments[0].get('publicInterfaces')) and bool(assessments[0].get('dependencyBoundary')),
+                    f'{identifier}: 缺少M2边界验收记录')
+        if m2.get('status') in {'validated_manifest', 'complete'}:
+            moves = m2.get('packageMoves', [])
+            require(len(moves) == 3 and {m.get('id') for m in moves} ==
+                    {'transform.make', 'register.constraints_3d', 'image.calibrated_distance'}, 'M2迁包范围必须精确为已审3项')
+            for move in moves:
+                row = by_id.get(move.get('id'), {})
+                require(row.get('currentPack') == move.get('toPack') and any(
+                    entry.get('stage') == 'M2' and entry.get('fromPack') == move.get('fromPack') and
+                    entry.get('toPack') == move.get('toPack') and bool(entry.get('sourceRevision'))
+                    for entry in row.get('packageHistory', [])), f"{move.get('id')}: M2迁包缺少原包/源码历史")
     targets = set(data.get('targetPackages', []))
     waves = set(data.get('migrationWaves', {}))
     for row in rows:

@@ -1,36 +1,8 @@
 # std-pointcloud 逐算子迁移清单
 
-状态：实施中；当前 52 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 50 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
-
-## 061 · register.constraints_3d
-
-- 当前：`std-pointcloud` / `1.0.0` / 三维几何约束构造。目标：`std-geometry`；迁移归属；**M2**。
-- 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:684](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L684)。
-- 端口：无 → `constraints:Record`。
-- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
-- 依赖：小Record JSON构造及fit3共享约束字段校验；当前p1_common/Eigen与p2_fit头耦合；目标拆出无PCL/OpenCV的公共约束schema与校验接口
-- 当前契约：无 → constraints:Record。最多64KiB items JSON→cloud.Constraints3D.v1；校验类型、单位、权重及3-2-1结构，几何可观性由拟合器判断，不收任意大数组。
-- 目标契约：迁std-geometry的约束描述构造；保留米制source/target帧和有界schema，校验独立于PCL空间搜索后端。
-- 迁移前置：M1
-- 关联算子：无额外逐ID前置；公共协议见前置项
-- 验收：字段/单位/权重/3-2-1合法性、大小上限、非有限值和拟合器schema一致；几何包单独构建不加载PCL。
-- 说明：构造Record不等于实现配准；不得把拟合可观性检查提前伪造成构造成功即定位成功。
-
-## 062 · transform.make
-
-- 当前：`std-pointcloud` / `1.0.0` / 刚体变换构造。目标：`std-geometry`；迁移归属；**M2**。
-- 源码：[packs/std-pointcloud/ops/transform_make.cpp:56](../../packs/std-pointcloud/ops/transform_make.cpp#L56)。
-- 端口：无 → `transform:Transform`。
-- 参数单位标注：translation=m, rotation=°。
-- 依赖：C++标准库三角函数；原生Transform；当前整包传递PCL；目标std-geometry无PCL/OpenCV
-- 当前契约：无 → transform:Transform。平移m、欧拉角deg构造4×4；现有矩阵顺序Rz·Ry·Rx，不能等同其他节点的Rx·Ry·Rz约定。
-- 目标契约：归std-geometry的刚体构造adapter；保留此节点的角度单位与矩阵乘序，逐步提供带source/target帧的明确契约。
-- 迁移前置：M1
-- 关联算子：无额外逐ID前置；公共协议见前置项
-- 验收：非交换XYZ旋转、deg/rad、行主序、平移m、正交/末行验证及旧工作流矩阵逐项一致。
-- 说明：不能直接替换为现有pose构造节点；重复接口合并须显式图迁移。
 
 ## 071 · profile.analyze
 
@@ -105,7 +77,7 @@
 ## 211 · cloud.crop_primitives
 
 - 当前：`std-pointcloud` / `1.0.0` / 按工件有限体裁云与碰撞检查。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
-- 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:330](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L330)。
+- 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:464](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L464)。
 - 端口：`cloud:PointCloud`, `poses:Record`, `posesToCloud:Transform?` → `cloud:PointCloud`, `inner:PointCloud`, `outer:PointCloud`, `innerIndices:Indices`, `outerIndices:Indices`, `invalidIndices:Indices`, `groupIndices:Indices`, `groups:Record`, `freePoses:Record`, `collisionPoses:Record`, `unknownPoses:Record`, `validity:Tensor`, `quality:Record`。
 - 参数单位标注：maxHeight=m。
 - 依赖：Eigen与原生PointCloud/Indices/Pose几何判断；当前直接包含std-geometry/ops私有头；model_radius移除分支使用PCL kdtree；纯shape裁剪分支无需PCL查询；目标公共有限几何接口+点云adapter，清除跨包私有头包含
@@ -273,7 +245,7 @@
 ## 223 · cloud.remove_primitives
 
 - 当前：`std-pointcloud` / `1.0.0` / 按工件有限体或模型移除点云。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
-- 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:330](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L330)。
+- 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:464](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L464)。
 - 端口：`cloud:PointCloud`, `poses:Record`, `posesToCloud:Transform?`, `model:PointCloud?` → `cloud:PointCloud`, `inner:PointCloud`, `outer:PointCloud`, `innerIndices:Indices`, `outerIndices:Indices`, `invalidIndices:Indices`, `groupIndices:Indices`, `groups:Record`, `freePoses:Record`, `collisionPoses:Record`, `unknownPoses:Record`, `validity:Tensor`, `quality:Record`。
 - 参数单位标注：maxHeight=m, radius=m。
 - 依赖：Eigen与原生PointCloud/Indices/Pose几何判断；当前直接包含std-geometry/ops私有头；model_radius移除分支使用PCL kdtree；纯shape裁剪分支无需PCL查询；目标公共有限几何接口+点云adapter，清除跨包私有头包含
@@ -539,7 +511,7 @@
 ## 242 · register.constrained_fit_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维加权几何约束拟合。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
-- 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:701](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L701)。
+- 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:582](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L582)。
 - 端口：`constraints:Record`, `initial:Transform?`, `cloud:PointCloud?` → `transform:Transform`, `aligned:PointCloud`, `quality:Record`。
 - 参数单位标注：huberDelta=m, maxRmse=m, maxError=m, translationTolerance=m, rotationTolerance=rad。
 - 依赖：Eigen加权SE3/Huber与可观性求解；PointCloud对齐adapter；当前与含PCL最近邻的p2_fit公共TU耦合；目标分离小几何求解内核与点云适配
@@ -609,7 +581,7 @@
 ## 247 · register.pose_search_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维工件六轴局部搜索。目标：`std-pointcloud`；保留并验边界；**M6**。
-- 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:724](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L724)。
+- 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:605](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L605)。
 - 端口：`source:PointCloud`, `target:PointCloud`, `initial:Transform?`, `poses:Record?` → `poses:Record`, `aligned:PointCloud`, `indices:Indices`, `groups:Record`, `quality:Record`。
 - 参数单位标注：maxCorrespondenceDistance=m, maxRmse=m, translationTolerance=m, rotationTolerance=rad。
 - 依赖：Eigen位姿枚举与fit3/PCL最近邻质量计算；可选ICP；目标std-pointcloud/registration与公共Pose schema

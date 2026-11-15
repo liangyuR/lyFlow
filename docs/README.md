@@ -26,6 +26,7 @@
 | [JSON Schema](../schema/README.md)           | 可由机器校验的图、事件、配方和样本格式                  |
 | [嵌入指南](embedding.md)                     | C ABI、C++ / Rust 客户端、输入注入与 React / Tauri 宿主 |
 | [Profile 宿主协议](profile-host-protocol.md) | 1.4 ABI、稳定载荷与缓存、Frame、LYPR 二进制及宿主接入   |
+| [公共 C++ 内核](public-kernels.md) | C++17 静态几何/度量目标、约束解析与源码树外 SDK 消费 |
 | [React 编辑器](../packages/editor/README.md) | 组件属性、Transport、依赖与宿主样式                     |
 | [HTTP 契约](http-transport.md)               | REST、WebSocket、结果载荷与快照                         |
 

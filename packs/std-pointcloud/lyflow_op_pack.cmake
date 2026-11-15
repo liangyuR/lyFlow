@@ -1,62 +1,15 @@
-# LyFlow 标准算子包：点云域的 14 个算子（ADR-0014）。
-# 同时是全仓库唯一一处 find_package(PCL)：别的包链 lyflow_pcl_support 就好。
-
-set(LYFLOW_PCL_COMPONENTS common io filters kdtree search segmentation sample_consensus features)
-find_package(PCL 1.15.1 REQUIRED COMPONENTS ${LYFLOW_PCL_COMPONENTS})
-
-# PCL::common 与 pcl_common 两种目标名都认，都没有时退回 ${PCL_LIBRARIES}。
-# 为什么不能硬写一种见 core/README.md「构建」。
-set(LYFLOW_PCL_LIBS "")
-foreach(comp IN LISTS LYFLOW_PCL_COMPONENTS)
-  if(TARGET PCL::${comp})
-    list(APPEND LYFLOW_PCL_LIBS PCL::${comp})
-  elseif(TARGET pcl_${comp})
-    list(APPEND LYFLOW_PCL_LIBS pcl_${comp})
-  endif()
-endforeach()
-message(STATUS "lyflow: PCL targets = ${LYFLOW_PCL_LIBS}")
-
-# S3：需要 PCL 的包链这一个目标就够了 —— include 目录、库、告警屏蔽一次配齐。
-add_library(lyflow_pcl_support INTERFACE)
-target_include_directories(lyflow_pcl_support INTERFACE "${LYFLOW_PACK_DIR}/include")
-if(LYFLOW_PCL_LIBS)
-  target_link_libraries(lyflow_pcl_support INTERFACE ${LYFLOW_PCL_LIBS})
-else()
-  target_link_libraries(lyflow_pcl_support INTERFACE ${PCL_LIBRARIES})
-  target_include_directories(lyflow_pcl_support INTERFACE ${PCL_INCLUDE_DIRS})
-  target_compile_definitions(lyflow_pcl_support INTERFACE ${PCL_DEFINITIONS})
-endif()
-if(MSVC)
-  # PCL/Eigen 自己的告警不是我们能修的，但包自己的代码仍然 /W4
-  target_compile_options(lyflow_pcl_support INTERFACE /wd4127 /wd4267 /wd4244 /wd4324)
-endif()
-# src/pcd_ascii.cpp 判断文件在不在要和 PCL 用同一个 boost::filesystem::exists（窄字符串按 ANSI 代码页
-# 解释，std::filesystem 在 setlocale(".UTF-8") 之后按 UTF-8）。boost_filesystem 本来就是 PCL 的依赖、DLL 早已随包分发。
-find_package(Boost REQUIRED COMPONENTS filesystem)
-target_link_libraries(lyflow_pcl_support INTERFACE Boost::filesystem)
-
-# T2：第二个 INTERFACE 目标，导出 algo/ 的头文件给别的包（gap）直接调。
-# include 根是包目录本身，所以调用方写的是 #include "algo/fit2d.h"。
-add_library(lyflow_std_algo INTERFACE)
-target_include_directories(lyflow_std_algo INTERFACE "${LYFLOW_PACK_DIR}")
-target_link_libraries(lyflow_std_algo INTERFACE lyflow_pcl_support)
-
-include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/matching-deps.cmake")
-lyflow_configure_matching_cpu()
-
 file(GLOB STD_PC_SOURCES CONFIGURE_DEPENDS
-  "${LYFLOW_PACK_DIR}/ops/*.cpp" "${LYFLOW_PACK_DIR}/src/*.cpp"
-  "${LYFLOW_PACK_DIR}/algo/*.cpp")
+  "${LYFLOW_PACK_DIR}/ops/*.cpp")
 file(GLOB STD_PC_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         std-pointcloud
-  VERSION      0.4.0
+  VERSION      0.5.0
   DEFAULT      ON
   SOURCES      ${STD_PC_SOURCES}
   TEST_SOURCES ${STD_PC_TESTS}
   PCH          "${LYFLOW_PACK_DIR}/include/lyflow_pcl/pcl_pch.h"
-  LINK         lyflow_pcl_support lyflow_std_algo lyflow_matching_cpu
+  LINK         lyflow_pcl_support lyflow_std_algo lyflow_matching_algorithms lyflow_geometry_kernel lyflow_metrology_kernel
   # Eigen 5 把 jacobiSvd 的旧签名标了 deprecated，而迁来的 ICP 用的就是它
   OPTIONS      /wd4996
 )

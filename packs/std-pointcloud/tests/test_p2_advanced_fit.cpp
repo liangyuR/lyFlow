@@ -1,11 +1,13 @@
 #include <doctest/doctest.h>
 #include <Eigen/Geometry>
 #include <limits>
+#include <random>
 
 #include "helpers.h"
 #include "../algo/p2_fit.h"
 #include "../ops/p1_common.h"
 #include "lyflow/pose.h"
+#include "lyflow/kernel/constraints.h"
 
 namespace lyflow::ops {
 void registerAdvancedFit3D(Registry&);
@@ -157,49 +159,43 @@ TEST_CASE("P2 advanced fit observes mixed weighted point line and plane constrai
   }
   CHECK(q["weightedRmse"].get<double>() == doctest::Approx(std::sqrt(sum / weights)).epsilon(1e-9));
   CHECK(q["maxError"].get<double>() == doctest::Approx(maximum).epsilon(1e-9));
-  test::OpCall construct(advancedRegistry());
-  REQUIRE(construct.run("register.constraints_3d", {{"items", Value::text(items.dump())}}).ok);
-  REQUIRE(construct.out("constraints").asRecord() != nullptr);
-  CHECK(construct.out("constraints").asRecord()->type == "cloud.Constraints3D.v1");
-  CHECK(construct.out("constraints").asRecord()->data["items"] == items);
-  for (const std::string invalid : {std::string("["), std::string("[]"), std::string("{}"),
-                                    std::string(65537, ' '), std::string("[{}]")}) {
-    CHECK_FALSE(construct.run("register.constraints_3d", {{"items", Value::text(invalid)}}).ok);
-    CHECK(construct.outputs.empty());
+}
+
+TEST_CASE("P2 extracted constraint directions retain Eigen stable norm semantics") {
+  std::mt19937_64 random(20261116);
+  std::uniform_real_distribution<double> component(-1, 1);
+  std::vector<std::array<double, 3>> directions{
+      {0, 0, 0},
+      {0, 3, 4},
+      {1e308, 0, 0},
+      {std::numeric_limits<double>::denorm_min(), 0, 0},
+      {std::numeric_limits<double>::denorm_min(), std::numeric_limits<double>::denorm_min(), 0},
+      {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), 0},
+      {1, 1e-8, 0},
+      {1, 1e-200, 1e-100}};
+  for (unsigned i = 0; i < 512; ++i) {
+    const double scale = std::pow(10.0, static_cast<int>(random() % 617) - 308);
+    directions.push_back(
+        {component(random) * scale, component(random) * scale, component(random) * scale});
   }
-  Json graph = test::makeGraph(
-      {{"constant", "register.constraints_3d", Json::object()},
-       {"fit", "register.constrained_fit_3d", {{"maxRmse", 2e-6}, {"maxError", 3e-6}}}},
-      {{"constant.constraints", "fit.constraints"}});
-  graph["params"] = {
-      {"constraintsJson",
-       {{"type", "text"}, {"default", items.dump()}, {"binds", {"constant.items"}}}}};
-  REQUIRE(ensureRegistry().find("register.constraints_3d") != nullptr);
-  test::Session session(graph, {}, {}, false, 1, true);
-  const auto& log = session.wait();
-  REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-  CHECK(log.finalState("constant") == "done");
-  CHECK(log.finalState("fit") == "done");
-  Data fitted;
-  REQUIRE(exec::ResultStore::instance().get(log.runId, "fit", "transform", fitted));
-  REQUIRE(fitted.asTransform() != nullptr);
-  closeTransform(*fitted.asTransform(), truth);
-  Json overridden = items;
-  for (auto& item : overridden)
-    item["target"][0] = item["target"][0].get<double>() + 0.05;
-  exec::RunOptions options;
-  options.runId = log.runId + "-constraints-override";
-  options.maxParallel = 1;
-  options.noReuse = true;
-  options.paramsJson = Json{{"constraintsJson", overridden.dump()}}.dump();
-  test::RunLog overriddenLog;
-  exec::Run run(graph.dump(), options, &test::detail::collect, &overriddenLog);
-  run.join();
-  REQUIRE_MESSAGE(overriddenLog.runStatus() == "ok", Json(overriddenLog.events).dump());
-  REQUIRE(exec::ResultStore::instance().get(options.runId, "fit", "transform", fitted));
-  Mat4 expected = truth;
-  expected(0, 3) += 0.05;
-  closeTransform(*fitted.asTransform(), expected);
+  for (const auto& direction : directions) {
+    const Vec3 before(direction[0], direction[1], direction[2]);
+    const double magnitude = before.stableNorm();
+    Json item = pointConstraint("line", Vec3::Zero(), Vec3::Zero());
+    item["type"] = "line";
+    item["direction"] = direction;
+    kernel::constraints::Error error;
+    std::vector<kernel::constraints::Constraint> parsed;
+    const bool accepted = kernel::constraints::parse3D(constraintRecord(Json::array({item})).data,
+                                                       "source", "target", "mixed", parsed, error);
+    CHECK(accepted == (magnitude > 0 && std::isfinite(magnitude)));
+    if (accepted) {
+      REQUIRE(parsed.size() == 1);
+      const Vec3 expected = before / magnitude;
+      for (int axis = 0; axis < 3; ++axis)
+        CHECK(parsed[0].direction[axis] == expected[axis]);
+    }
+  }
 }
 
 TEST_CASE("P2 weighted 321 datum constraints recover all six degrees with signed offsets") {

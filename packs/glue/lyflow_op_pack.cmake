@@ -1,7 +1,3 @@
-# LyFlow 领域算子包：涂胶检测（glue-plan G2）。对胶枪相机的一帧图量胶宽、查断胶、量胶边距、判 OK / NG。
-# 默认关（ADR-0015），LYFLOW_PACKS=glue 打开。OpenCV 只经 std-image 的 lyflow_opencv_support（D13），
-# 本包不自己 find_package。
-
 file(GLOB GLUE_SOURCES CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/ops/*.cpp" "${LYFLOW_PACK_DIR}/algo/*.cpp")
 file(GLOB GLUE_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
@@ -36,9 +32,3 @@ lyflow_op_pack(
   INCLUDES     "${LYFLOW_PACK_DIR}" "${GLUE_GENERATED}"
   LINK         lyflow_opencv_support
 )
-
-if(LYFLOW_PACK_ENABLED AND NOT TARGET lyflow_opencv_support)
-  message(FATAL_ERROR
-    "glue 包要 lyflow_opencv_support —— 它由 packs/std-image 提供，别把 LYFLOW_STD_PACKS 关掉；"
-    "OpenCV 未准备时先运行 scripts/build-vision-deps.ps1 并将其 OpenCV_DIR 传给 CMake。")
-endif()

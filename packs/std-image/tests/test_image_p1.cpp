@@ -240,7 +240,7 @@ TEST_CASE("P1 camera undistortion preserves zero-distortion pixels and enforces 
   CHECK_FALSE(c.run("image.undistort").ok);
 }
 
-TEST_CASE("P1 homography warp and calibrated distance respect physical units and coverage") {
+TEST_CASE("P1 homography warp respects physical units and coverage") {
   test::OpCall c;
   Record plane{calibration::kPlaneType,
                {{"H", {2., 0., 0., 0., 2., 0., 0., 0., 1.}}, {"unit", "mm"}}};
@@ -260,29 +260,6 @@ TEST_CASE("P1 homography warp and calibrated distance respect physical units and
   CHECK_FALSE(c.run("image.warp_perspective",
                     {{"width", Value::integer(16)}, {"height", Value::integer(12)}})
                   .ok);
-  Point2D a, b;
-  a.p[0] = 1;
-  a.p[1] = 2;
-  a.unit = Unit2D::Pixel;
-  b.p[0] = 4;
-  b.p[1] = 6;
-  b.unit = Unit2D::Pixel;
-  c.inputs = {{"a", Data::point2d(a)}, {"b", Data::point2d(b)}, {"calib", Data::record(plane)}};
-  REQUIRE(c.run("image.calibrated_distance").ok);
-  CHECK(c.outputs.at("distance").asMeasurement()->value == doctest::Approx(0.01));
-  CHECK(c.outputs.at("distance").asMeasurement()->unit == "m");
-  Record canonical;
-  std::string why;
-  REQUIRE(calibration::upgradeLegacyPlane(plane, "mm", "camera-A", "table", canonical, why));
-  c.inputs["calib"] = Data::record(canonical);
-  CHECK_FALSE(c.run("image.calibrated_distance").ok);
-  CHECK_FALSE(c.run("image.calibrated_distance", {{"imageFrame", Value::text("camera-B")}}).ok);
-  REQUIRE(c.run("image.calibrated_distance", {{"imageFrame", Value::text("camera-A")}}).ok);
-  CHECK(c.outputs.at("distance").asMeasurement()->value == doctest::Approx(0.01));
-  CHECK(canonical.data["imageFrame"] == "camera-A");
-  a.unit = Unit2D::Meter;
-  c.inputs["a"] = Data::point2d(a);
-  CHECK_FALSE(c.run("image.calibrated_distance").ok);
 }
 
 TEST_CASE(

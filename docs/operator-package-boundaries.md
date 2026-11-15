@@ -1,6 +1,6 @@
 # 算子包边界重整
 
-状态：目标边界保持，M1公共契约正在实施。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
+状态：目标边界保持；M1公共契约已合并，M2公共核与依赖整理正在验收。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
 
 本方案以实际注册和实现为依据，重划通用能力、测量语义、场景组合及内部后端的责任。当前构建方式以[算子包机制](op-packs.md)为准；`std-profile`目前已提供M1显式适配，本页其余新包、模块和依赖声明仍为后续目标，不能据此启用尚未交付的构建选项。
 
@@ -91,19 +91,19 @@ flowchart BT
 | Measurement/质量  | gap/DTS/glue 的符号、基准与领域判据不同；基础 geometry.distance 也有多种合法定义                      | metrology 明确 datum、方向、定义、单位、support 和 valid/reason；算法有效不等于产品合格，不把未测得当作数值零                                   |
 | Bundle/Record     | gap 的 ScanPair/RoiSet 与 glue 的图像响应/路径结构混有公共和场景语义                                  | 逐种记录发布所有者、schema 与共享字段，先迁消费者再删除旧声明；标识迁移不能只修改命名空间字符串                                                 |
 
-Profile 的目标是有类型、可校验、可由原生缓冲共享的契约。M1 必须完成新原生端口/原生 Frame 视图方案的 ABI、Rust、Python、CLI、Transport 及编辑器评审和夹具后才定版；当前实现并不存在一个可以直接使用的 Profile 端口。不能先往普通 Record 放完整数组，之后再补大数据和生命周期语义。
+Profile 采用有类型、可校验、可由原生缓冲共享的契约。M1 已交付原生端口、Frame 视图及 C ABI、Rust、Python、CLI、Transport、编辑器适配，见[数据契约](profile-data-contract.md)和[宿主协议](profile-host-protocol.md)。大数组保留原生所有权和生命周期，不放入普通 Record；M3–M4 的轮廓与场景算法仍待迁移。
 
 公共契约至少覆盖只读输入、复制/共享所有权、附加通道长度、空集合、无效槽、取消、缓存指纹和诊断原子性。不同方法可并存：TLS、RANSAC、固定半径、软先验不是重复算子的同义词，分包不构成替换算法的理由。
 
 ## 必须处理的实际耦合
 
-- `lyflow_std_algo` 当前由 std-pointcloud 导出并传递 PCL；DTS 轻量拟合不能直接改接它。应先提取可独立编译的数值核，PCL 拟合继续作为独立实现后端。
-- `packs/std-pointcloud/ops/p5_primitive_crop.cpp` 包含 std-geometry 私有实现头；图像的模型/位姿辅助代码也需逐处核对。公开数据校验和算法服务必须先形成明确内部接口，再移走原文件。
+- M2 将 `lyflow_std_algo` 配置为独立的 pointcloud-algorithms 模块，仍显式依赖 PCL；DTS 轻量拟合不能直接改接它。公开几何与度量静态核不依赖 PCL，PCL 拟合继续作为独立实现后端。
+- M2 已将 primitive_crop、workspace 和 pose_projection 的跨包私有头依赖替换为公开几何/刚体核；各节点只保留端口、参数和诊断包装，独立核的验证入口见[公共内核](public-kernels.md)。
 - `workspace.load` 的实际读取依赖是 YAML 与轻量位姿契约，不应因为目前位于 image 就要求 OpenCV；归入 geometry 的可选 workspace-io 模块。
 - YOLO/OCR 的纯 Tensor 解码归 ml/adapters，纯Tensor/Record数值坐标回映可随解码器迁移；图像采样、重采样和叠画继续归 image。移动前抽取共享检测/OCR记录，避免反向 include。
-- 同名 `image.PlaneCalib` 当前有两种校验语义：图像私有旧解析器默认毫米并接受非空单位字符串，core公开解析器要求显式m/mm并归一化齐次H。统一验证必须先定义版本/旧输入迁移，不能把替换include误记成无行为变化的搬包。
+- `image.PlaneCalib` 的版本化分支已在 M1 统一为显式 m/mm、frame 与归一化齐次 H；图像私有的非版本化旧解析分支保留至 M5 显式迁移。不能把删除旧分支误记为无行为变化的搬包。
 - `gen.synthetic` 最终归 std-pointcloud 的 portable-generation。纯 core 从当前 4 个节点收敛为 3 个透传/调度节点，相关测试与发布断言必须先改用明确的 fixture 或启用生成模块。
-- CMake 当前使用包优先级列表安排 include 顺序。目标改为显式声明包/模块及后端依赖，配置期检查环、缺依赖、ID 冲突和不完整能力组合，不能依赖目录字母序或全局变量先后赋值。
+- M2 已用显式包/模块声明替换 CMake 包优先级列表，配置期检查环、缺依赖、重复声明及目标提供者冲突；默认关闭的包不会先配置后端再决定跳过。实际组合构建和安装消费仍是每次迁移的独立验收门槛。
 
 ## 包迁移与 ID、版本、图迁移
 

@@ -5,7 +5,7 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
-本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1新增的`std-profile`目前提供显式数据适配；轮廓算法将在M3迁入，`std-metrology`及`solution-*`仍为待实施目标。
+本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，轮廓算法与 `solution-*` 仍按后续波次迁移。
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
@@ -25,12 +25,13 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
-| `std-geometry`   | 0.4.0  | ON      | 35项几何、位姿、坐标变换与刚体关系                                                               | core与标准库                                                                        |
+| `std-geometry`   | 0.5.0  | ON      | 37项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
+| `std-metrology`  | 0.1.0  | ON      | 1项版本化平面标定距离；后续场景度量尚未迁入                                                     | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
 | `std-profile`    | 0.1.0  | ON      | 3项点云/轮廓、单位及轴映射显式适配；[数据契约](profile-data-contract.md)                         | core与标准库，无PCL/OpenCV/ORT                                                      |
-| `std-pointcloud` | 0.4.0  | ON      | 52项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子                                                     | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
+| `std-pointcloud` | 0.5.0  | ON      | 50项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子                                                     | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.3.0  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
-| `std-image`      | 0.10.0 | ON      | 77项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
-| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | std-image的`lyflow_opencv_support`                                                  |
+| `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                                                  |
 | `gap`            | 0.2.0  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
 | `dts`            | 0.2.0  | **OFF** | 9项`dts.*`，含旧版毫米几何显式米制适配                                                           | 无（零第三方，不链 PCL）                                                            |
 
@@ -67,10 +68,7 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 | `LYFLOW_PACKS`     | 分号分隔的**包名** | 空   | 点名编 `packs/*` 里的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
 | `LYFLOW_OP_PACKS`  | 分号分隔的**目录** | 空   | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编                                                                                              |
 
-`LYFLOW_STD_PACKS=0` 之下的取舍：被点名的包才会被 `include()`，没点名的**连 cmake 文件都不读**。
-`std-pointcloud` 的 `find_package(PCL REQUIRED)`、`std-ml` 的 onnxruntime 检查写在
-`lyflow_op_pack()` 调用之外，光 include 就会在 configure 期失败，所以跳过必须发生在扫描时。
-每个包编与不编的原因都有一行 `-- lyflow: 纯平台构建，……` 的 STATUS 输出。
+M2 先读取仓库内包的 `lyflow_pack_dependencies.cmake` 声明，再按选择计算模块依赖闭包；只有启用的包才加载 `lyflow_op_pack.cmake` 和创建对象库。第三方发现集中在模块 setup 中，未启用的 PCL/OpenCV/ORT 模块不会执行查找。缺模块、缺显式包依赖、重复声明和依赖环均在配置阶段拒绝，不依靠目录字母序猜测提供方。
 
 包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
 所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样；
@@ -112,8 +110,7 @@ cargo build -p lyflow-app --no-default-features --bin lyflow
 
 点名是「就编这个」，不看 `DEFAULT`：`LYFLOW_PACKS="std-pointcloud;dts"` 配
 `LYFLOW_STD_PACKS=0` 同样合法，得到 core + 这两个包（而 `std-ml`、`gap` 仍然不编）。
-反过来，依赖 `lyflow_pcl_support` 的包（gap、以及任何用 PCL 的包）单独点名会在
-configure 期直接报错 —— 那个目标由 `std-pointcloud` 提供，得把它一起点上。
+依赖后端目标无需同时注册提供方包的算子。例如 gap 声明所需 PCL/点云算法/ORT/YAML 模块，单独选择 gap 会创建这些后端，仍不注册 `std-pointcloud` 或 `std-ml` 的节点。只有声明 `PACKS` 的依赖才要求把对应算子包一同选入。glue 的 `glue.bead_inspect` 片段引用 `io.load_image`，因此显式声明 `PACKS std-image`；纯平台只选 glue 会在配置阶段提示缺包。该注册要求不表示 OpenCV 模块由 std-image 的注册过程提供。
 
 门禁的其余各步照跑，只有**要标准包算子的用例不跑，而且看得出没跑**：
 
@@ -227,16 +224,17 @@ mypack/
 
 ### 包之间的顺序
 
-`packs/*` 按字母序 include，但**提供公共设施的包排在前面**（core 的 CMakeLists 里
-有一小段显式优先级）：`std-pointcloud` 定义 `lyflow_pcl_support` 与 `lyflow_std_algo`，
-`std-ml` 解析 `LYFLOW_ONNXRUNTIME_ROOT`，两者都要早于用它们的 `gap`。
-加一个提供公共目标的包时记得也加进那张表。
+仓库内包提供独立的依赖声明，例如：
+
+```cmake
+lyflow_pack_dependencies(NAME mypack DEFAULT ON MODULES geometry-kernel)
+```
+
+`MODULES` 是共享目标依赖，`PACKS` 是必须显式启用的算子包依赖。配置器先拓扑排序并创建模块，再注册所选包，不再维护“优先 include 哪个包”的表。外部包可提供同名声明文件；没有声明的旧外部包仍走兼容路径，新增共享依赖应使用声明式入口。后端模块实现位于 `core/cmake/backend-modules.cmake`，公共静态核位于 `core/cmake/kernel-modules.cmake`。
 
 ### 要 PCL 的包
 
-标准包 `packs/std-pointcloud` 是全仓库唯一一处 `find_package(PCL)`，
-并导出一个 INTERFACE 目标 `lyflow_pcl_support`：include 目录、PCL 的库、
-针对 PCL/Eigen 头的告警屏蔽都在里面。别的包链它就够了，不要自己 `find_package`。
+共享模块 `pcl-support` 集中执行 `find_package(PCL)` 并创建静态目标 `lyflow_pcl_support`：适配源码、include 目录、PCL 的库及针对 PCL/Eigen 头的告警屏蔽都在其中。包先声明该模块，再链接此目标，不要重复发现后端。
 
 它同时把 `packs/std-pointcloud/include/` 挂上，所以链了它的包可以直接
 `#include "lyflow_pcl/adapter.h"`（LyFlow 点云 ↔ `pcl::PointCloud` 的唯一转换点，
@@ -244,8 +242,7 @@ ADR-0005）与 `#include "lyflow_pcl/pcl_path.h"`（中文路径下喂给 PCL �
 
 ### 要 2D 量测算法的包
 
-标准包还导出第二个 INTERFACE 目标 **`lyflow_std_algo`**（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)），
-把 `packs/std-pointcloud/algo/` 挂成 include 根：
+共享模块 `pointcloud-algorithms` 提供静态目标 **`lyflow_std_algo`**，依赖 `pcl-support` 并将 `packs/std-pointcloud/algo/` 挂成 include 根；现存拟合/轮廓算法仍处于该目录，后续按方法和数据契约迁移，不把它称为已完成的轻量轮廓核。匹配适配 `p2_matching.cpp` 单独由 `matching-pointcloud` 模块承载，继承 `matching-cpu` 的编译和链接要求，避免 gap 的点云算法依赖携带全局匹配后端：
 
 ```cpp
 #include "algo/fit2d.h"    // fitLine2D / fitAxisLine2D / fitCircle2D / fitCircleFixedRadius2D

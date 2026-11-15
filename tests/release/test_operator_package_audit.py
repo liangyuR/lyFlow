@@ -77,6 +77,22 @@ class PackageAuditTests(unittest.TestCase):
             for dependency in row['dependencies']:
                 self.assertIn(dependency, content)
         self.assertEqual(rendered, REFRESH.render_details(self.baseline))
+        prepared = REFRESH.prepare(self.baseline, 'M2')
+        original = {row['id']: row for row in before['operators'] + before['pythonExamples']}
+        for row in prepared['operators'] + prepared['pythonExamples']:
+            for key in ('targetPack', 'action', 'wave', 'dependencies', 'currentContract', 'targetContract',
+                        'migrationPrerequisites', 'acceptance', 'notes'):
+                self.assertEqual(row.get(key), original[row['id']].get(key), (row['id'], key))
+        m1 = next(stage for stage in prepared['stageLedger'] if stage['stage'] == 'M1')
+        self.assertEqual(m1['status'], 'complete')
+        self.assertEqual(m1['mergeEvidence']['pr'], 62)
+        self.assertEqual(m1['mergeEvidence']['revision'], REFRESH.M1_MERGED_REVISION)
+        self.assertEqual(m1['manifestEvidence'], next(stage for stage in before['stageLedger'] if stage['stage'] == 'M1')['manifestEvidence'])
+        scoped = [row for row in prepared['operators'] if row['wave'] == 'M2']
+        self.assertEqual(len(scoped), 38)
+        self.assertTrue(all(any(item['stage'] == 'M2' for item in row['stageAssessments']) for row in scoped))
+        self.assertFalse(any(any(item['stage'] == 'M2' for item in row.get('stageAssessments', []))
+                             for row in prepared['operators'] if row['wave'] == 'M3'))
 
     def test_m1_additions_are_explicit_semantic_definitions_not_manifest_placeholders(self):
         self.assertEqual(set(REFRESH.ADDITIONS), {'profile.from_cloud', 'profile.remap_axes', 'profile.to_cloud',
@@ -91,6 +107,32 @@ class PackageAuditTests(unittest.TestCase):
         self.assertEqual(REFRESH.manifest_generator({'generatedBy': 'lyflow-core/1.4.0'}), 'lyflow-core/1.4.0')
         with self.assertRaisesRegex(ValueError, 'generatedBy'):
             REFRESH.manifest_generator({'coreVersion': '1.4.0'})
+        self.assertEqual(set(REFRESH.M2_MOVES), {'transform.make', 'register.constraints_3d', 'image.calibrated_distance'})
+        by_id = {row['id']: row for row in self.baseline['operators']}
+        for identifier, move in REFRESH.M2_MOVES.items():
+            with self.subTest(move=identifier):
+                row = copy.deepcopy(by_id[identifier])
+                row['currentPack'] = move['fromPack']
+                row.pop('packageHistory', None)
+                original = copy.deepcopy(row)
+                op = dict(id=identifier, pack=move['toPack'] + '@0.1.0', version=row['currentVersion'],
+                          inputs=row['currentPorts']['inputs'], outputs=row['currentPorts']['outputs'], params=row['currentParams'])
+                REFRESH.relocate_operator(row, op, 'M2')
+                self.assertEqual(row['currentPack'], move['toPack'])
+                self.assertEqual(row['packageHistory'][0]['fromPack'], move['fromPack'])
+                for key in ('targetPack', 'dependencies', 'currentContract', 'targetContract', 'acceptance', 'notes'):
+                    self.assertEqual(row[key], original[key])
+                moved = copy.deepcopy(row)
+                REFRESH.relocate_operator(row, op, 'M2')
+                self.assertEqual(row, moved)
+                with self.assertRaisesRegex(ValueError, '保持原版本'):
+                    REFRESH.relocate_operator(row, {**op, 'version': '99.0.0'}, 'M2')
+                self.assertEqual(row, moved)
+        row = copy.deepcopy(by_id['flow.select'])
+        original = copy.deepcopy(row)
+        with self.assertRaisesRegex(ValueError, '先人工审计'):
+            REFRESH.relocate_operator(row, {'pack': 'std-metrology@0.1.0'}, 'M2')
+        self.assertEqual(row, original)
 
     def test_baseline_reference_and_stage_proof_cannot_be_silently_dropped(self):
         data = copy.deepcopy(self.baseline)
@@ -115,6 +157,12 @@ class PackageAuditTests(unittest.TestCase):
                 with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
                     with self.assertRaisesRegex(ValueError, '丢失原基线ID'):
                         REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.0')
+        for identifier in REFRESH.ADDITIONS:
+            damaged = copy.deepcopy(self.baseline)
+            damaged['operators'] = [row for row in damaged['operators'] if row['id'] != identifier]
+            with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
+                with self.assertRaisesRegex(ValueError, '丢失原基线ID'):
+                    REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.1', 'M2')
 
 
 if __name__ == '__main__':

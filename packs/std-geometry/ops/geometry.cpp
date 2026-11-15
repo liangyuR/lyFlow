@@ -8,537 +8,50 @@
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
 #include "lyflow/value.h"
+#include "lyflow/kernel/geometry.h"
 
 namespace lyflow::packs::std_geometry {
 void registerPoseOps(Registry&);
 void registerGeometryTransforms(Registry&);
 void registerP5PoseGeometry(Registry&);
+void registerTransformMake(Registry&);
+void registerConstraints3D(Registry&);
 namespace {
 
-struct Vec {
-  double x = 0, y = 0;
-  Vec operator+(Vec b) const { return {x + b.x, y + b.y}; }
-  Vec operator-(Vec b) const { return {x - b.x, y - b.y}; }
-  Vec operator*(double k) const { return {x * k, y * k}; }
-};
-
-double length(Vec v) { return std::hypot(v.x, v.y); }
-bool finite(Vec v) { return std::isfinite(v.x) && std::isfinite(v.y); }
-Vec vec(const float* p) { return {p[0], p[1]}; }
-bool representable(Vec v) {
-  const double max = std::numeric_limits<float>::max();
-  return finite(v) && std::abs(v.x) <= max && std::abs(v.y) <= max;
-}
-
-struct ExactVec {
-  Vec high, low;
-};
-
-std::pair<double, double> exactDifference(double a, double b) {
-  const double high = a - b;
-  const double virtualB = a - high;
-  const double low = (a - (high + virtualB)) + (virtualB - b);
-  return {high, low};
-}
-
-ExactVec exactDifference(Vec a, Vec b) {
-  const auto x = exactDifference(a.x, b.x), y = exactDifference(a.y, b.y);
-  return {{x.first, y.first}, {x.second, y.second}};
-}
-
-class Expansion {
-public:
-  void add(double value) {
-    if (value == 0)
-      return;
-    std::size_t size = 0;
-    for (std::size_t i = 0; i < size_; ++i) {
-      const double sum = value + parts_[i];
-      const double virtualB = sum - value;
-      const double error = (value - (sum - virtualB)) + (parts_[i] - virtualB);
-      if (error != 0)
-        parts_[size++] = error;
-      value = sum;
-    }
-    if (value != 0)
-      parts_[size++] = value;
-    size_ = size;
-  }
-
-  void addProduct(double a, double b, double sign) {
-    const double product = a * b;
-    add(sign * std::fma(a, b, -product));
-    add(sign * product);
-  }
-
-  void addScaled(const Expansion& value, double factor) {
-    for (std::size_t i = 0; i < value.size_; ++i)
-      addProduct(value.parts_[i], factor, 1);
-  }
-
-  void addProduct(const Expansion& a, const Expansion& b, double sign) {
-    for (std::size_t i = 0; i < a.size_; ++i)
-      for (std::size_t j = 0; j < b.size_; ++j)
-        addProduct(a.parts_[i], b.parts_[j], sign);
-  }
-
-  double value() const {
-    double result = 0;
-    for (std::size_t i = 0; i < size_; ++i)
-      result += parts_[i];
-    return result;
-  }
-
-private:
-  std::array<double, 128> parts_{};
-  std::size_t size_ = 0;
-};
-
-Expansion crossExpansion(const ExactVec& a, const ExactVec& b) {
-  Expansion result;
-  for (Vec av : {a.high, a.low}) {
-    for (Vec bv : {b.high, b.low}) {
-      result.addProduct(av.x, bv.y, 1);
-      result.addProduct(av.y, bv.x, -1);
-    }
-  }
-  return result;
-}
-
-double cross(const ExactVec& a, const ExactVec& b) { return crossExpansion(a, b).value(); }
-
-void addDot(Expansion& result, const ExactVec& a, const ExactVec& b, double sign) {
-  for (Vec av : {a.high, a.low}) {
-    for (Vec bv : {b.high, b.low}) {
-      result.addProduct(av.x, bv.x, sign);
-      result.addProduct(av.y, bv.y, sign);
-    }
-  }
-}
-
-double dot(const ExactVec& a, const ExactVec& b) {
-  Expansion result;
-  addDot(result, a, b, 1);
-  return result.value();
-}
-
-Expansion dotExpansion(const ExactVec& a, const ExactVec& b) {
-  Expansion result;
-  addDot(result, a, b, 1);
-  return result;
-}
-
-struct Geometry {
-  enum Kind { Point, Line, Circle } kind = Point;
-  Vec p, d, end;
-  ExactVec rawDirection;
-  double directionLength = 1;
-  double radius = 0;
-  bool segment = false;
-  Unit2D unit = Unit2D::Meter;
-};
-
+using Vec = kernel::Vec2;
+using kernel::finite;
+using kernel::length;
+using kernel::representable;
+using Geometry = kernel::Geometry2D;
 Status bad(const std::string& message, const std::string& port = {}) {
   return Status::Error(Phase::Execute, "bad_input", message, {}, port);
 }
 Status badParam(const std::string& message, const std::string& name) {
   return Status::Error(Phase::Execute, "bad_param", message, name);
 }
-
 Status read(const Data& data, const std::string& port, Geometry& out) {
-  if (const Point2D* p = data.asPoint2D()) {
-    out.kind = Geometry::Point;
-    out.p = vec(p->p);
-    out.unit = p->unit;
-  } else if (const Line2D* l = data.asLine2D()) {
-    out.kind = Geometry::Line;
-    out.unit = l->unit;
-    out.segment = l->hasSegment;
-    out.p = vec(l->point);
-    out.d = vec(l->dir);
-    if (!finite(out.d) || !(length(out.d) > 0))
-      return bad("直线方向必须有限且非零", port);
-    if (l->hasSegment) {
-      out.p = vec(l->start);
-      const Vec end = vec(l->end);
-      if (!finite(end))
-        return bad("线段端点必须有限", port);
-      out.end = end;
-      out.rawDirection = exactDifference(end, out.p);
-      out.d = out.rawDirection.high;
-      if (!(length(out.d) > 0))
-        return bad("线段两个端点不能重合", port);
-    } else {
-      out.rawDirection = {out.d, {}};
-    }
-    out.directionLength = length(out.d);
-    out.d = out.d * (1.0 / out.directionLength);
-  } else if (const Circle2D* c = data.asCircle2D()) {
-    out.kind = Geometry::Circle;
-    out.p = vec(c->center);
-    out.radius = c->radius;
-    out.unit = c->unit;
-    if (!std::isfinite(out.radius) || !(out.radius > 0))
-      return bad("圆半径必须有限且为正", port);
-  } else {
+  if (const auto* value = data.asPoint2D())
+    out = *value;
+  else if (const auto* value = data.asLine2D())
+    out = *value;
+  else if (const auto* value = data.asCircle2D())
+    out = *value;
+  else
     return bad("只接受 Point2D、Line2D 或 Circle2D", port);
-  }
-  if (!finite(out.p) || (out.kind == Geometry::Line && !finite(out.d)))
-    return bad("几何坐标必须有限", port);
-  if (out.unit != Unit2D::Meter && out.unit != Unit2D::Pixel)
-    return bad("未知二维几何单位", port);
-  return Status::Ok();
+  std::string why;
+  return kernel::validateGeometry2D(out, why) ? Status::Ok() : bad(why, port);
 }
-
 Status pair(const Inputs& inputs, Geometry& a, Geometry& b) {
-  Status s = read(inputs.get("a"), "a", a);
-  if (!s.ok)
-    return s;
-  s = read(inputs.get("b"), "b", b);
-  if (!s.ok)
-    return s;
-  return a.unit == b.unit ? Status::Ok() : bad("两个几何体的单位必须一致，不自动换算", "b");
+  auto status = read(inputs.get("a"), "a", a);
+  if (!status.ok)
+    return status;
+  status = read(inputs.get("b"), "b", b);
+  if (!status.ok)
+    return status;
+  return kernel::geometryUnit(a) == kernel::geometryUnit(b)
+             ? Status::Ok()
+             : bad("两个几何体的单位必须一致，不自动换算", "b");
 }
-
-Vec pointFromAnchor(Vec anchor, const Geometry& line, double parameter) {
-  if (parameter == 0)
-    return anchor;
-  return {std::fma(line.rawDirection.low.x, parameter,
-                   std::fma(line.rawDirection.high.x, parameter, anchor.x)),
-          std::fma(line.rawDirection.low.y, parameter,
-                   std::fma(line.rawDirection.high.y, parameter, anchor.y))};
-}
-
-double endpointProjection(Vec point, Vec anchor, const Geometry& line) {
-  return dot(exactDifference(point, anchor), line.rawDirection) / line.directionLength;
-}
-
-bool inSegment(Vec point, const Geometry& line, double eps) {
-  return !line.segment || (endpointProjection(point, line.p, line) >= -eps &&
-                           endpointProjection(point, line.end, line) <= eps);
-}
-
-double perpendicular(Vec point, const Geometry& line) {
-  return cross(line.rawDirection, exactDifference(point, line.p)) / line.directionLength;
-}
-
-Vec rationalPoint(Vec anchor, const ExactVec& direction, const Expansion& numerator,
-                  const Expansion& denominator) {
-  Expansion x, y;
-  x.addScaled(denominator, anchor.x);
-  x.addScaled(numerator, direction.high.x);
-  x.addScaled(numerator, direction.low.x);
-  y.addScaled(denominator, anchor.y);
-  y.addScaled(numerator, direction.high.y);
-  y.addScaled(numerator, direction.low.y);
-  return {x.value() / denominator.value(), y.value() / denominator.value()};
-}
-
-Vec projectedPoint(Vec point, const Geometry& line, bool clamp) {
-  if (clamp && line.segment) {
-    if (endpointProjection(point, line.p, line) < 0)
-      return line.p;
-    if (endpointProjection(point, line.end, line) > 0)
-      return line.end;
-  }
-  const Expansion denominator = dotExpansion(line.rawDirection, line.rawDirection);
-  const Expansion along = dotExpansion(exactDifference(point, line.p), line.rawDirection);
-  return rationalPoint(line.p, line.rawDirection, along, denominator);
-}
-
-double pointLineDistance(Vec p, const Geometry& line) {
-  if (line.segment && endpointProjection(p, line.p, line) < 0)
-    return length(p - line.p);
-  if (line.segment && endpointProjection(p, line.end, line) > 0)
-    return length(p - line.end);
-  return std::abs(perpendicular(p, line));
-}
-
-struct Intersection {
-  std::vector<Vec> points;
-  bool coincident = false;
-};
-
-bool onLine(Vec p, const Geometry& line, double eps) {
-  return std::abs(perpendicular(p, line)) <= eps && inSegment(p, line, eps);
-}
-
-struct LinePosition {
-  double start = 0, end = 0;
-};
-
-struct LineParameters {
-  bool parallel;
-  LinePosition a, b;
-};
-
-LineParameters lineParameters(const Geometry& a, const Geometry& b) {
-  const double denominator = cross(a.rawDirection, b.rawDirection);
-  if (denominator == 0)
-    return {true};
-  const ExactVec delta = exactDifference(b.p, a.p);
-  return {false,
-          {cross(delta, b.rawDirection) / denominator,
-           a.segment ? cross(exactDifference(b.p, a.end), b.rawDirection) / denominator : 0},
-          {cross(delta, a.rawDirection) / denominator,
-           b.segment ? cross(exactDifference(b.end, a.p), a.rawDirection) / denominator : 0}};
-}
-
-bool inSegment(LinePosition position, const Geometry& line, double eps) {
-  return !line.segment || (position.start * line.directionLength >= -eps &&
-                           position.end * line.directionLength <= eps);
-}
-
-Vec intersectionPoint(const Geometry& a, const Geometry& b) {
-  const Expansion denominator = crossExpansion(a.rawDirection, b.rawDirection);
-  const Expansion along = crossExpansion(exactDifference(b.p, a.p), b.rawDirection);
-  return rationalPoint(a.p, a.rawDirection, along, denominator);
-}
-
-Intersection collinearOverlap(const Geometry& a, const Geometry& b, double eps) {
-  const bool xAxis = std::abs(a.rawDirection.high.x) >= std::abs(a.rawDirection.high.y);
-  const auto axis = [&](Vec p) { return xAxis ? p.x : p.y; };
-  const double component = xAxis ? a.rawDirection.high.x : a.rawDirection.high.y;
-  const double axisScale = a.directionLength / std::abs(component);
-  const double inf = std::numeric_limits<double>::infinity();
-  double lo = a.segment ? std::min(axis(a.p), axis(a.end)) : -inf;
-  double hi = a.segment ? std::max(axis(a.p), axis(a.end)) : inf;
-  if (b.segment) {
-    lo = std::max(lo, std::min(axis(b.p), axis(b.end)));
-    hi = std::min(hi, std::max(axis(b.p), axis(b.end)));
-  }
-  if ((lo - hi) * axisScale > eps)
-    return {};
-  if (std::isfinite(lo) && std::isfinite(hi) && (hi - lo) * axisScale <= eps) {
-    const double coordinate = lo + (hi - lo) * 0.5;
-    const Geometry* reference = &a;
-    Vec anchor = a.p;
-    const auto consider = [&](const Geometry& line, Vec p) {
-      if (std::abs(coordinate - axis(p)) < std::abs(coordinate - axis(anchor))) {
-        reference = &line;
-        anchor = p;
-      }
-    };
-    if (a.segment)
-      consider(a, a.end);
-    consider(b, b.p);
-    if (b.segment)
-      consider(b, b.end);
-    const auto delta = exactDifference(coordinate, axis(anchor));
-    const double direction =
-        xAxis ? reference->rawDirection.high.x : reference->rawDirection.high.y;
-    return {{pointFromAnchor(anchor, *reference, (delta.first + delta.second) / direction)}, false};
-  }
-  return {{}, true};
-}
-
-Intersection lineLine(const Geometry& a, const Geometry& b, double eps) {
-  const LineParameters parameters = lineParameters(a, b);
-  if (!parameters.parallel) {
-    if (!inSegment(parameters.a, a, eps) || !inSegment(parameters.b, b, eps))
-      return {};
-    return {{intersectionPoint(a, b)}, false};
-  }
-  const ExactVec delta = exactDifference(b.p, a.p);
-  if (std::abs(cross(delta, a.rawDirection)) / a.directionLength > eps)
-    return {};
-  return collinearOverlap(a, b, eps);
-}
-
-double perpendicularGap(const Geometry& line, const Geometry& circle) {
-  const Expansion normal = crossExpansion(line.rawDirection, exactDifference(circle.p, line.p));
-  const Expansion squaredLength = dotExpansion(line.rawDirection, line.rawDirection);
-  Expansion power;
-  power.addProduct(normal, normal, 1);
-  power.addScaled(squaredLength, -circle.radius * circle.radius);
-  const double d = std::abs(normal.value()) / line.directionLength;
-  return power.value() / (squaredLength.value() * (d + circle.radius));
-}
-
-Intersection circleOnImplicitLine(const ExactVec& direction, const Expansion& lineIntercept,
-                                  const Geometry& circle, double eps, bool single = false) {
-  const auto coordinates = [&](bool xAxis) {
-    const auto axis = [&](Vec p) { return xAxis ? p.x : p.y; };
-    const auto other = [&](Vec p) { return xAxis ? p.y : p.x; };
-    Expansion u, v;
-    u.add(axis(direction.high));
-    u.add(axis(direction.low));
-    v.add(other(direction.high));
-    v.add(other(direction.low));
-    Expansion offset;
-    offset.addScaled(lineIntercept, xAxis ? 1 : -1);
-    offset.addScaled(u, -other(circle.p));
-    Expansion uu, a, b, c;
-    uu.addProduct(u, u, 1);
-    a.addProduct(u, u, 1);
-    a.addProduct(v, v, 1);
-    b.addProduct(v, offset, 1);
-    b.addScaled(uu, -axis(circle.p));
-    c.addProduct(offset, offset, 1);
-    c.addScaled(uu, axis(circle.p) * axis(circle.p));
-    c.addScaled(uu, -circle.radius * circle.radius);
-    Expansion discriminant;
-    discriminant.addProduct(b, b, 1);
-    discriminant.addProduct(a, c, -1);
-    const double root = std::sqrt(std::max(0.0, discriminant.value()));
-    const double q = -b.value() - std::copysign(root, b.value());
-    std::array<double, 2> result{q / a.value(), q != 0 ? c.value() / q : -b.value() / a.value()};
-    if (single || discriminant.value() <= 0)
-      result.fill(-b.value() / a.value());
-    std::sort(result.begin(), result.end());
-    return result;
-  };
-  const auto x = coordinates(true);
-  auto y = coordinates(false);
-  if (std::signbit(direction.high.x) != std::signbit(direction.high.y))
-    std::reverse(y.begin(), y.end());
-  Intersection result;
-  for (std::size_t i = 0; i < x.size(); ++i) {
-    const Vec point{x[i], y[i]};
-    if (result.points.empty() || length(point - result.points.front()) > eps)
-      result.points.push_back(point);
-  }
-  return result;
-}
-
-Intersection lineCircle(const Geometry& line, const Geometry& circle, double eps) {
-  if (perpendicularGap(line, circle) > eps)
-    return {};
-  const Expansion intercept = crossExpansion(line.rawDirection, ExactVec{line.p, {}});
-  Intersection result = circleOnImplicitLine(line.rawDirection, intercept, circle, eps);
-  result.points.erase(std::remove_if(result.points.begin(), result.points.end(),
-                                     [&](Vec point) { return !inSegment(point, line, eps); }),
-                      result.points.end());
-  return result;
-}
-
-struct CircleRelation {
-  double outsideGap = 0, insideGap = 0, height = 0;
-};
-
-CircleRelation circleRelation(const Geometry& a, const Geometry& b) {
-  const ExactVec delta = exactDifference(b.p, a.p);
-  const double d = length(b.p - a.p);
-  const double big = std::max(a.radius, b.radius), small = std::min(a.radius, b.radius);
-  Expansion outside, inside;
-  addDot(outside, delta, delta, 1);
-  outside.addProduct(big, big, -1);
-  outside.addProduct(big, small, -2);
-  outside.addProduct(small, small, -1);
-  addDot(inside, delta, delta, -1);
-  inside.addProduct(big, big, 1);
-  inside.addProduct(big, small, -2);
-  inside.addProduct(small, small, 1);
-  const double outerPower = outside.value(), innerPower = inside.value();
-  const double innerDenominator = big - small + d;
-  return {outerPower / (d + big + small), innerDenominator > 0 ? innerPower / innerDenominator : 0,
-          d > 0 ? std::sqrt(std::max(0.0, (-outerPower / (2 * d)) * (-innerPower / (2 * d)))) : 0};
-}
-
-double endpointCircleGap(Vec point, const Geometry& circle) {
-  Geometry endpoint;
-  endpoint.p = point;
-  return circleRelation(endpoint, circle).outsideGap;
-}
-
-double lineCircleGap(const Geometry& line, const Geometry& circle) {
-  if (line.segment && endpointProjection(circle.p, line.p, line) < 0)
-    return endpointCircleGap(line.p, circle);
-  if (line.segment && endpointProjection(circle.p, line.end, line) > 0)
-    return endpointCircleGap(line.end, circle);
-  return perpendicularGap(line, circle);
-}
-
-Intersection circleCircle(Geometry a, Geometry b, double eps) {
-  if (a.radius > b.radius ||
-      (a.radius == b.radius && (a.p.x > b.p.x || (a.p.x == b.p.x && a.p.y > b.p.y))))
-    std::swap(a, b);
-  const ExactVec delta = exactDifference(b.p, a.p);
-  const double d = length(b.p - a.p);
-  if (d <= eps)
-    return {{}, std::abs(a.radius - b.radius) <= eps};
-  const CircleRelation relation = circleRelation(a, b);
-  if (relation.outsideGap > eps || relation.insideGap > eps)
-    return {};
-  Expansion intercept;
-  addDot(intercept, ExactVec{b.p, {}}, ExactVec{b.p, {}}, 0.5);
-  addDot(intercept, ExactVec{a.p, {}}, ExactVec{a.p, {}}, -0.5);
-  intercept.addProduct(a.radius, a.radius, 0.5);
-  intercept.addProduct(b.radius, b.radius, -0.5);
-  const ExactVec direction{{delta.high.y, -delta.high.x}, {delta.low.y, -delta.low.x}};
-  return circleOnImplicitLine(direction, intercept, a, eps, relation.height <= eps);
-}
-
-Intersection intersect(Geometry a, Geometry b, double eps) {
-  if (a.kind > b.kind)
-    std::swap(a, b);
-  if (a.kind == Geometry::Point) {
-    bool contains = false;
-    if (b.kind == Geometry::Point)
-      contains = length(a.p - b.p) <= eps;
-    else if (b.kind == Geometry::Line)
-      contains = onLine(a.p, b, eps);
-    else
-      contains = std::abs(circleRelation(a, b).outsideGap) <= eps;
-    return contains ? Intersection{{a.p}, false} : Intersection{};
-  }
-  if (a.kind == Geometry::Line)
-    return b.kind == Geometry::Line ? lineLine(a, b, eps) : lineCircle(a, b, eps);
-  return circleCircle(a, b, eps);
-}
-
-double distance(Geometry a, Geometry b) {
-  if (a.kind > b.kind)
-    std::swap(a, b);
-  if (a.kind == Geometry::Point) {
-    if (b.kind == Geometry::Point)
-      return length(a.p - b.p);
-    if (b.kind == Geometry::Line)
-      return pointLineDistance(a.p, b);
-    return std::abs(circleRelation(a, b).outsideGap);
-  }
-  if (a.kind == Geometry::Circle) {
-    const CircleRelation relation = circleRelation(a, b);
-    return std::max({0.0, relation.outsideGap, relation.insideGap});
-  }
-  if (b.kind == Geometry::Circle) {
-    const double minGap = lineCircleGap(a, b);
-    if (!a.segment)
-      return std::max(0.0, minGap);
-    const double maxGap = std::max(endpointCircleGap(a.p, b), endpointCircleGap(a.end, b));
-    return std::max({0.0, minGap, -maxGap});
-  }
-  const LineParameters parameters = lineParameters(a, b);
-  if (!parameters.parallel) {
-    if (!a.segment && !b.segment)
-      return 0.0;
-    if (inSegment(parameters.a, a, 0) && inSegment(parameters.b, b, 0))
-      return 0.0;
-  } else if (!a.segment && !b.segment) {
-    return pointLineDistance(a.p, b);
-  }
-  double result = std::numeric_limits<double>::infinity();
-  if (a.segment) {
-    result = std::min(pointLineDistance(a.p, b), pointLineDistance(a.end, b));
-  }
-  if (b.segment) {
-    result = std::min({result, pointLineDistance(b.p, a), pointLineDistance(b.end, a)});
-  }
-  return result;
-}
-
-double clearance(Geometry a, Geometry b) {
-  if (a.kind > b.kind)
-    std::swap(a, b);
-  if (b.kind == Geometry::Line)
-    return pointLineDistance(a.p, b);
-  if (a.kind == Geometry::Line)
-    return lineCircleGap(a, b);
-  if (a.kind == Geometry::Circle || b.kind == Geometry::Circle)
-    return circleRelation(a, b).outsideGap;
-  return length(a.p - b.p) - a.radius - b.radius;
-}
-
 Status scalar(const Inputs& in, const char* port, double fallback, const std::string& expectedUnit,
               double& value) {
   value = fallback;
@@ -765,6 +278,8 @@ void registerConstructors(Registry& r) {
 } // namespace
 
 void registerPackOps(Registry& r) {
+  registerTransformMake(r);
+  registerConstraints3D(r);
   registerPoseOps(r);
   registerGeometryTransforms(r);
   registerConstructors(r);
@@ -791,27 +306,20 @@ void registerPackOps(Registry& r) {
     const Status s = pair(in, a, b);
     if (!s.ok)
       return s;
-    if (p.flag("useFirstCenter") && a.kind == Geometry::Circle) {
-      a.kind = Geometry::Point;
-      a.radius = 0;
-    }
-    if (p.flag("useSecondCenter") && b.kind == Geometry::Circle) {
-      b.kind = Geometry::Point;
-      b.radius = 0;
-    }
-    const std::string mode = p.choice("mode");
-    if ((mode == "first_anchor" && (a.kind != Geometry::Line || b.kind != Geometry::Line)) ||
-        (mode == "signed_clearance" && a.kind == Geometry::Line && b.kind == Geometry::Line))
-      return badParam("此距离定义不支持输入的几何组合", "mode");
-    const double d = mode == "first_anchor"       ? pointLineDistance(a.p, b)
-                     : mode == "signed_clearance" ? clearance(a, b)
-                                                  : distance(a, b);
-    if (!std::isfinite(d))
-      return bad("距离计算超出可表示范围");
+    const auto mode = p.choice("mode");
+    const kernel::DistanceOptions options{mode == "first_anchor" ? kernel::DistanceMode::FirstAnchor
+                                          : mode == "signed_clearance"
+                                              ? kernel::DistanceMode::SignedClearance
+                                              : kernel::DistanceMode::Minimum,
+                                          p.flag("useFirstCenter"), p.flag("useSecondCenter")};
+    double d = 0;
+    kernel::GeometryIssue issue;
+    if (!kernel::distance2D(a, b, options, d, issue))
+      return issue.parameter ? badParam(issue.message, "mode") : bad(issue.message);
     Measurement result;
     result.value = d;
     result.ok = true;
-    result.unit = a.unit == Unit2D::Pixel ? "px" : "m";
+    result.unit = kernel::geometryUnit(a) == Unit2D::Pixel ? "px" : "m";
     out.set("distance", Data::measurement(std::move(result)));
     return Status::Ok();
   };
@@ -834,12 +342,13 @@ void registerPackOps(Registry& r) {
     const double eps = p.number("tolerance");
     if (!std::isfinite(eps) || eps <= 0)
       return badParam("坐标容差必须有限且为正", "tolerance");
-    Intersection result = intersect(a, b, eps);
-    std::sort(result.points.begin(), result.points.end(),
-              [](Vec u, Vec v) { return u.x < v.x || (u.x == v.x && u.y < v.y); });
+    kernel::Intersections2D result;
+    kernel::GeometryIssue issue;
+    if (!kernel::intersect2D(a, b, eps, result, issue))
+      return bad(issue.message);
     Record record;
     record.type = "geometry.Intersections2D.v1";
-    record.data = {{"unit", a.unit == Unit2D::Pixel ? "px" : "m"},
+    record.data = {{"unit", kernel::geometryUnit(a) == Unit2D::Pixel ? "px" : "m"},
                    {"relation", result.coincident       ? "coincident"
                                 : result.points.empty() ? "empty"
                                                         : "finite"},
@@ -862,13 +371,12 @@ void registerPackOps(Registry& r) {
     const Status s = pair(in, a, b);
     if (!s.ok)
       return s;
-    if (a.kind != Geometry::Point || b.kind != Geometry::Point)
+    if (!std::holds_alternative<Point2D>(a) || !std::holds_alternative<Point2D>(b))
       return bad("中点只接受两个 Point2D");
-    const Vec mid = (a.p + b.p) * 0.5;
     Point2D point;
-    point.p[0] = static_cast<float>(mid.x);
-    point.p[1] = static_cast<float>(mid.y);
-    point.unit = a.unit;
+    kernel::GeometryIssue issue;
+    if (!kernel::midpoint2D(std::get<Point2D>(a), std::get<Point2D>(b), point, issue))
+      return bad(issue.message);
     out.set("point", Data::point2d(point));
     return Status::Ok();
   };
@@ -895,17 +403,13 @@ void registerPackOps(Registry& r) {
     s = read(in.get("line"), "line", line);
     if (!s.ok)
       return s;
-    if (point.kind != Geometry::Point || line.kind != Geometry::Line)
+    if (!std::holds_alternative<Point2D>(point) || !std::holds_alternative<Line2D>(line))
       return bad("需要一个 Point2D 和一个 Line2D");
-    if (point.unit != line.unit)
-      return bad("点和直线的单位必须一致", "line");
-    const Vec projection = projectedPoint(point.p, line, p.flag("clampToSegment"));
-    if (!representable(projection))
-      return bad("投影点超出 Point2D 范围");
     Point2D result;
-    result.p[0] = static_cast<float>(projection.x);
-    result.p[1] = static_cast<float>(projection.y);
-    result.unit = point.unit;
+    kernel::GeometryIssue issue;
+    if (!kernel::projectPoint2D(std::get<Point2D>(point), std::get<Line2D>(line),
+                                p.flag("clampToSegment"), result, issue))
+      return bad(issue.message, issue.operand == 1 ? "line" : "");
     out.set("point", Data::point2d(result));
     return Status::Ok();
   };

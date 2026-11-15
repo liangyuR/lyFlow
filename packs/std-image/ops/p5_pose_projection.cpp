@@ -1,12 +1,146 @@
 #include "p1_common.h"
 #include "p5_projection_common.h"
-#include "../../std-geometry/ops/p5_pose_geometry_common.h"
+#include "lyflow/kernel/rigid.h"
 #include <opencv2/imgproc.hpp>
 #include <map>
 
 namespace lyflow::ops {
 namespace {
-namespace g = lyflow::packs::std_geometry::p5;
+namespace g {
+using namespace lyflow::kernel;
+inline Status bad(const std::string& text, const char* port = "poses") {
+  return Status::Error(Phase::Execute, "bad_input", text, {}, port);
+}
+inline Status badParam(const std::string& text, const char* name) {
+  return Status::Error(Phase::Execute, "bad_param", text, name);
+}
+inline Param text(const char* name, const char* label, const char* def = "") {
+  Param p;
+  p.name = name;
+  p.label = label;
+  p.type = ParamType::String;
+  p.def = Value::text(def);
+  return p;
+}
+inline Param number(const char* name, const char* label, double def = 0, const char* unit = "") {
+  Param p;
+  p.name = name;
+  p.label = label;
+  p.type = ParamType::Float;
+  p.def = Value::number(def);
+  p.unit = unit;
+  return p;
+}
+inline Param integer(const char* name, const char* label, std::int64_t def = 0) {
+  Param p = number(name, label);
+  p.type = ParamType::Int;
+  p.def = Value::integer(def);
+  return p;
+}
+inline Param flag(const char* name, const char* label, bool def = false) {
+  Param p = text(name, label);
+  p.type = ParamType::Bool;
+  p.def = Value::boolean(def);
+  return p;
+}
+inline Param vec(const char* name, const char* label, std::vector<double> values) {
+  Param p = text(name, label);
+  p.type = values.size() == 2   ? ParamType::Vec2f
+           : values.size() == 3 ? ParamType::Vec3f
+                                : ParamType::Vec4f;
+  p.def = Value::vec(std::move(values));
+  return p;
+}
+inline Param choice(const char* name, const char* label, const char* def,
+                    std::initializer_list<const char*> values) {
+  Param p = text(name, label, def);
+  p.type = ParamType::Enum;
+  for (const char* value : values)
+    p.options.push_back({value, value, ""});
+  return p;
+}
+inline OperatorDesc descriptor(const char* id, const char* label, const char* keywords) {
+  OperatorDesc op;
+  op.id = id;
+  op.version = "1.0.0";
+  op.label = label;
+  op.category = "几何/工件位姿";
+  op.keywords = {keywords, label, "pose", "工件", "位姿", "坐标系"};
+  op.capabilities = {true, false, true};
+  return op;
+}
+inline Port record(const char* name, bool required = true) {
+  return {name, "Record", name, "版本化 Record，具体载荷与单位见算子说明。", required};
+}
+inline Port scalarPort(const char* name, bool required = false) {
+  return withContract(
+      Port{name, "Record", name, "std.Value.v1；数值单位必须匹配算子声明。", required},
+      {{"recordType", values::kValueType}});
+}
+inline V3 vector(const ParamView& p, const char* name) {
+  const auto found = p.raw().find(name);
+  if (found != p.raw().end() && found->second.kind() == Value::Kind::FloatVec) {
+    const auto& v = found->second.vecValue();
+    if (v.size() == 3)
+      return {v[0], v[1], v[2]};
+  }
+  const auto nan = std::numeric_limits<double>::quiet_NaN();
+  return {nan, nan, nan};
+}
+inline Status list(const Inputs& in, const char* name, Record& r) {
+  std::string why;
+  if (!poses::read3DList(in.get(name), r, why))
+    return bad(why, name);
+  return Status::Ok();
+}
+inline Status checked(Record& r) {
+  std::string why;
+  return poses::validate(r, why) ? Status::Ok() : bad(why);
+}
+inline void unsafe(Json& item) { item["pickable"] = false; }
+inline Status cancelled() { return Status::Error(Phase::Execute, "cancelled", "已取消"); }
+inline Status resource() {
+  return Status::Error(Phase::Execute, "resource_limit", "超过几何工作量或存储预算");
+}
+inline ComputeFn atomic(ComputeFn compute) {
+  return [compute = std::move(compute)](const Inputs& in, const ParamView& p, Outputs& out,
+                                        ExecContext& ctx) {
+    if (ctx.cancelled())
+      return cancelled();
+    std::unordered_map<std::string, Data> pending;
+    Outputs temporary(pending);
+    try {
+      auto status = compute(in, p, temporary, ctx);
+      if (!status.ok)
+        return status;
+      if (ctx.cancelled())
+        return cancelled();
+      for (auto& item : pending)
+        out.set(item.first, std::move(item.second));
+      return Status::Ok();
+    } catch (const std::bad_alloc&) {
+      return resource();
+    } catch (const Json::exception& e) {
+      return bad(e.what());
+    }
+  };
+}
+inline Status transformList(const Inputs& in, const char* port, Record& r,
+                            const std::string& target) {
+  if (in.has(port) && !in.get(port).asTransform())
+    return bad("需要原生 Transform", port);
+  std::string why;
+  bool invalidResult = false;
+  return kernel::transformPoses3D(r, in.has(port) ? in.get(port).asTransform() : nullptr, target,
+                                  why, &invalidResult)
+             ? Status::Ok()
+             : bad(why, invalidResult ? "poses" : port);
+}
+inline Port port(const char* name, const char* type, bool required = true) {
+  return {name, type, name, "显式帧/单位及绑定见算子契约", required};
+}
+}
+
 using Json = nlohmann::json;
 constexpr std::size_t kPixels = 4U * 1024U * 1024U, kMasks = 32U * 1024U * 1024U,
                       kWork = 64U * 1024U * 1024U;
@@ -832,7 +966,7 @@ Status removeMask(const Inputs& in, const ParamView& p, Outputs& out, ExecContex
           unknown.push_back(static_cast<std::int32_t>(i));
           continue;
         }
-        auto point = lyflow::packs::std_geometry::pose_detail::apply(m, source);
+        auto point = kernel::apply(m, source);
         if (!g::finite(point) || point[2] <= 0) {
           keep.push_back(static_cast<std::int32_t>(i));
           unknown.push_back(static_cast<std::int32_t>(i));

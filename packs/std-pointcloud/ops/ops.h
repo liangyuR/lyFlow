@@ -12,7 +12,6 @@ void registerFilterVoxelGrid(Registry& r);
 void registerFilterCropBox(Registry& r);
 void registerFilterRandomSample(Registry& r);
 void registerSegmentExtractIndices(Registry& r);
-void registerTransformMake(Registry& r);
 void registerTransformApply(Registry& r);
 void registerUtilMerge(Registry& r);
 void registerEditTranslateRegion(Registry& r);

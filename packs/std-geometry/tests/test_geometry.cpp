@@ -102,6 +102,22 @@ TEST_CASE("geometry constructors normalize geometry without changing plane equat
   const Plane* plane = c.outputs.at("plane").asPlane();
   CHECK(plane->normal[2] == 1);
   CHECK(plane->d == -3);
+  const auto* transformOp = c.registry->find("transform.make");
+  REQUIRE(transformOp != nullptr);
+  CHECK(transformOp->version == "1.0.0");
+  CHECK(transformOp->params[0].unit == "m");
+  CHECK(transformOp->params[1].unit == "°");
+  REQUIRE(c.run("transform.make",
+                {{"translation", Value::vec({1, 2, 3})}, {"rotation", Value::vec({90, 90, 0})}})
+              .ok);
+  const auto* transform = c.outputs.at("transform").asTransform();
+  REQUIRE(transform != nullptr);
+  CHECK(transform->m[1] == doctest::Approx(1));
+  CHECK(transform->m[6] == doctest::Approx(-1));
+  CHECK(transform->m[8] == doctest::Approx(-1));
+  CHECK(transform->m[3] == 1);
+  CHECK(transform->m[7] == 2);
+  CHECK(transform->m[11] == 3);
 }
 
 TEST_CASE("geometry plane normalization preserves extreme finite normal directions") {
