@@ -34,6 +34,8 @@
 
 `lyflow replay <目录>` 只读取保存的原生结果，不执行算法；`--recompute` 使用保存的图与源输出作原生注入，计算节点重新运行。替换目标图必须 `--graph ... --bind sourceNode.sourcePort=targetNode.targetPort`，不通过同名猜测绑定。`--from-sequence/--to-sequence` 与 `--from-timestamp-ns/--to-timestamp-ns` 为包含边界的过滤，可用 `--paced` 按原始相对时间回放。缺失源结果、非法引用、损坏归档或不同帧/标定索引会报错。归档不打包外部算子库和第三方模型，重算依赖由宿主提供。
 
+自动重算只绑定未标记 `virtual:true` 的实际输出端口，Bundle 的虚拟字段由完整 Bundle 载荷恢复，不根据端口是否含点号判断。显式绑定可从 Bundle 字段读取：例如 `--bind scan.scan.merged=source.cloud`；源地址按元信息中的真实 nodeId/port 对解析，存在歧义时可用 `node:port` 明确分隔，目标端口也支持这种写法。
+
 `lyflow log <目录> --node pose3d.pose --output <日志路径> --log-kind poses3d --length-unit mm --pose-format ZYX --angle-unit deg`
 默认 JSONL，每行保留时间戳/帧/标定与原始实例。`--selection first|all` 显式控制旧脚本的首项习惯；m/mm 固定5/2位、px固定4位、角度 rad/deg 固定5/3位、四元数固定5位。24种轴序支持内禀大写与外禀小写，奇异点返回等价旋转并标记 gimbalLock；约定参考 [SciPy Rotation.as_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.as_euler.html)，用独立矩阵重建测试验证。`--log-format text` 保留逐行 JSON 转义值，换行字符串不会拆成假记录。默认按 UTC Unix 日分组为 `<日志路径>.day-<Unix日>`，也可 `--log-archive none`；文件保留由宿主管理，本轮不会自动删除历史。默认 conflict=fail，追加需要 `--conflict append`，目标独占锁与 max-bytes 上限阻止并发写冲突和无界增长。
 

@@ -170,6 +170,39 @@ def queued_recording(core, recording, destination):
             lib.lyflow_session_free(session)
 
 
+def bundle_source_contract(cli, examples, output):
+    profile = (examples / "p5-scene.pcd").as_posix()
+    graph = {"schemaVersion": 1, "id": "p6-bundle-source", "name": "P6 Bundle source replay", "nodes": [
+        {"id": "scan", "op": "gap.read_scan", "params": {"source": "files", "primaryFile": profile,
+         "secondaryFile": profile, "removeOutliers": False}}], "edges": [], "outputs": {
+        "scan": {"node": "scan", "port": "scan"},
+        **{name: {"node": "scan", "port": f"scan.{name}"} for name in ("primary", "secondary", "merged")}}}
+    path = output / "bundle-source.lyflow.json"
+    path.write_text(json.dumps(graph), encoding="utf-8")
+    recording = output / "bundle-recording"
+    execute(cli, "record", path, "--recording", recording)
+    original = execute(cli, "replay", recording)[0]
+    restored = execute(cli, "replay", recording, "--recompute", "--no-cache")[0]
+    require(restored["status"] == "ok", "Bundle source recompute injected virtual fields as target ports")
+    require(original["outputs"]["scan"]["type"] == "Bundle<gap.ScanPair>", "real Bundle source was not recorded")
+    for name in ("primary", "secondary", "merged"):
+        require(original["outputs"][name]["type"] == restored["outputs"][name]["type"] == "PointCloud", "Bundle field native type changed")
+        require(original["outputs"][name]["elementCount"] == restored["outputs"][name]["elementCount"] > 0, "Bundle field payload lost")
+    virtual = [entry for entry in original["metadata"]["entries"] if entry.get("virtual") is True]
+    require({entry["port"] for entry in virtual} == {"scan.primary", "scan.secondary", "scan.merged"}, "Bundle virtual-port identity missing")
+    target = {"schemaVersion": 1, "id": "p6-bundle-field-binding", "name": "P6 explicit Bundle source", "nodes": [
+        {"id": "source", "op": "gen.synthetic", "params": {"pointCount": 1}},
+        {"id": "stats", "op": "cloud.statistics", "params": {"frame": "measurement"}}],
+        "edges": [{"id": "cloud-stats", "from": {"node": "source", "port": "cloud"}, "to": {"node": "stats", "port": "cloud"}}],
+        "outputs": {"statistics": {"node": "stats", "port": "statistics"}}}
+    target_path = output / "bundle-target.lyflow.json"
+    target_path.write_text(json.dumps(target), encoding="utf-8")
+    explicit = execute(cli, "replay", recording, "--graph", target_path, "--bind", "scan.scan.merged=source.cloud", "--no-cache")[0]
+    require(explicit["status"] == "ok", "explicit Bundle field source binding rejected")
+    require(explicit["outputs"]["statistics"]["value"]["data"]["count"] == original["outputs"]["merged"]["elementCount"],
+            "explicit Bundle field binding did not feed the real target port")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cli", type=Path, required=True)
@@ -294,6 +327,7 @@ def main():
     require(restored_match["status"] == "ok", "loaded Template3D/model rejected by real global matching consumer")
     require(restored_match["outputs"]["nativeIdentity"]["value"]["data"]["value"] is True,
             "loaded ViewSampling.cloudId disagrees with actual downstream cloud.statistics/value.field/value.compare")
+    bundle_source_contract(args.cli, examples, output)
     execute(args.cli, "run", fixture)
     print(json.dumps({"ok": True, "type": "lyflow.P6DeliveryAcceptance.v1", "output": str(output),
                       "frames": 2, "nativePayloads": list(expected), "receipts": len(receipts), "noSkipped": True}))

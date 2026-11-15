@@ -359,6 +359,16 @@ TEST_CASE("结果仓查询：保持端口和 Bundle 字段顺序，精确端口�
     CHECK(infos[i].port == ports[i]);
   CHECK(nlohmann::json::parse(infos[3].valueJson)["value"] == 3.0);
   CHECK(nlohmann::json::parse(infos[4].valueJson)["value"] == 9.0);
+  const auto bindings = nlohmann::json::parse(store.bindingsJson("order"));
+  std::size_t virtualFields = 0, actualDottedPorts = 0;
+  for (const auto& entry : bindings["entries"]) {
+    if (entry.value("virtual", false))
+      ++virtualFields;
+    if (entry["port"] == "pair.first" && !entry.value("virtual", false))
+      ++actualDottedPorts;
+  }
+  CHECK(virtualFields == 2);
+  CHECK(actualDottedPorts == 1);
   exec::OutputInfo exact, field;
   REQUIRE(store.outputInfo("order", "n", "pair.first", exact));
   REQUIRE(store.outputInfo("order", "n", "pair.last", field));

@@ -112,6 +112,11 @@ TEST_CASE("Frame archives own native payloads preserve bits and rebind declared 
   captureFixture(original, "frame-native");
   auto info = Json::parse(takeFrameString(lyflow_frame_metadata(original.value)));
   REQUIRE(info["injectedInputs"].size() == 1);
+  std::size_t virtualFields = 0;
+  for (const auto& entry : info["entries"])
+    if (entry.value("virtual", false))
+      ++virtualFields;
+  CHECK(virtualFields == 7);
   CHECK(info["missing"].size() == 1);
   const auto inputNode = info["injectedInputs"][0]["sourceNode"].get<std::string>();
   FrameDirectory directory;

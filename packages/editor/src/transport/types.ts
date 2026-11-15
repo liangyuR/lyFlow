@@ -37,6 +37,7 @@ export interface RunBindings {
     byteSize: number;
     sourceCloudId?: string;
     recordType?: string;
+    virtual?: boolean;
   }[];
   missing: { nodeId: string; port: string }[];
 }

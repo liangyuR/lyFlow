@@ -37,7 +37,7 @@ lyflow replay build/new-recording --recompute
 lyflow log build/new-recording --node pose3d.pose --output build/poses --log-kind poses3d --length-unit mm --pose-format ZYX --angle-unit deg
 ```
 
-record保存有效图、参数、逐帧归档和小索引。默认replay只读；重算只注入展开计划的源结果与原始中间端口注入，让计算节点真正执行。替换图必须显式绑定，缺失源结果会失败，不假装成功。支持时间/序列筛选与按时间节奏回放。
+record保存有效图、参数、逐帧归档和小索引。默认replay只读；重算只注入展开计划的源结果与原始中间端口注入，让计算节点真正执行。RunBindings/帧查看元数据用`virtual:true`标记Bundle展开字段；自动重算只注入真实顶层端口，Bundle字段由整体载荷保留。显式绑定仍可把Bundle字段作为源，不凭端口名称是否带点判断类型。替换图必须显式绑定，缺失源结果会失败，不假装成功。支持时间/序列筛选与按时间节奏回放。
 
 `publish`只发送到显式TCP端点，包含完整归档与版本化元信息；接收器验证并持久化后返回匹配frameId、session ID/epoch/sequence的ACK。完整发送后断线、超时或取消仍为未确认，不自动重试；下一次显式发布才重连。仅使用本机loopback验收。线格式、接收器命令、日志24轴欧拉约定/首项/全部/固定精度/UTC日归档及冲突策略见[宿主交付分析](p6-analysis-delivery.md)。
 
@@ -52,6 +52,6 @@ C++17示例为`examples/p6-delivery_host.cpp`，使用安装SDK的`lyflow/frames
 
 软件门禁不证明传感器同步、生产精度、遮挡/对称件质量、现场节拍或长期稳定性。
 
-本地最终原生全量门禁：698组、375098断言，零失败、零跳过；包含全部七个包、真实Python worker及选定检测/分割/OCR模型。独立安装1.3.12 SDK的Release CLI/C++17原生帧验收、前阶段8个SDK工作流及缺失OpenCV诱导加载负例通过；同8图CLI默认/覆写/恢复共24次也通过。这些是软件契约验证，不替代上述现场验收。
+本地最终原生全量门禁：698组、375101断言，零失败、零跳过；包含全部七个包、真实Python worker及选定检测/分割/OCR模型。独立安装1.3.12 SDK的Release CLI/C++17原生帧验收、前阶段8个SDK工作流及缺失OpenCV诱导加载负例通过；同8图CLI默认/覆写/恢复共24次也通过。这些是软件契约验证，不替代上述现场验收。
 
 编辑器完整94项与共享可视化7项均通过且零跳过，React18/19类型检查通过；跨运行底图/叠加/导出一致性及空掩膜分配预算已由交叉审查补回归并复核。CI和机器审查状态见[PR #59](https://github.com/liangyuR/lyFlow/pull/59)。

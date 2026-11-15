@@ -608,7 +608,9 @@ fn bindings(frame: &Frame, specs: &[String], sources: &Value) -> Result<Value, S
                 items.iter().any(|binding| {
                     binding["nodeId"] == node
                         && !entries.iter().any(|entry| {
-                            entry["nodeId"] == node && entry["port"] == binding["port"]
+                            entry["nodeId"] == node
+                                && entry["port"] == binding["port"]
+                                && entry["virtual"] != true
                         })
                 })
             });
@@ -623,7 +625,10 @@ fn bindings(frame: &Frame, specs: &[String], sources: &Value) -> Result<Value, S
                     "source node {node} has uncaptured declared outputs; provide explicit --bind"
                 ));
             }
-            let ports: Vec<_> = entries.iter().filter(|e| e["nodeId"] == node).collect();
+            let ports: Vec<_> = entries
+                .iter()
+                .filter(|e| e["nodeId"] == node && e["virtual"] != true)
+                .collect();
             if ports.is_empty() {
                 return Err(format!(
                     "source node {node} has no captured outputs; provide explicit --bind"
@@ -666,26 +671,48 @@ fn bindings(frame: &Frame, specs: &[String], sources: &Value) -> Result<Value, S
             let (source, target) = spec
                 .split_once('=')
                 .ok_or("--bind requires sourceNode.sourcePort=nodeId.port")?;
-            let (node, port) = source
-                .rsplit_once('.')
-                .ok_or("binding source needs node.port")?;
+            let (node, port) = source_address(entries, source)?;
             let (target_node, target_port) = target
-                .rsplit_once('.')
+                .split_once(':')
+                .or_else(|| target.rsplit_once('.'))
                 .filter(|(n, p)| !n.is_empty() && !p.is_empty())
                 .ok_or("binding target needs node.port")?;
-            if !entries
-                .iter()
-                .any(|e| e["nodeId"] == node && e["port"] == port)
-            {
-                return Err(format!("binding source {source} is absent from frame"));
-            }
-            if !destinations.insert(target) {
+            if !destinations.insert((target_node.to_owned(), target_port.to_owned())) {
                 return Err(format!("duplicate binding destination {target}"));
             }
             bindings.push(json!({"sourceNode":node,"sourcePort":port,"nodeId":target_node,"port":target_port}));
         }
     }
     Ok(Value::Array(bindings))
+}
+
+fn source_address<'a>(entries: &'a [Value], source: &str) -> Result<(&'a str, &'a str), String> {
+    let mut dotted = std::collections::BTreeSet::new();
+    let mut explicit = std::collections::BTreeSet::new();
+    for entry in entries {
+        let node = entry["nodeId"]
+            .as_str()
+            .ok_or("invalid frame node address")?;
+        let port = entry["port"].as_str().ok_or("invalid frame port address")?;
+        if format!("{node}.{port}") == source {
+            dotted.insert((node, port));
+        }
+        if format!("{node}:{port}") == source {
+            explicit.insert((node, port));
+        }
+    }
+    let addresses = if explicit.is_empty() {
+        dotted
+    } else {
+        explicit
+    };
+    match addresses.len() {
+        0 => Err(format!("binding source {source} is absent from frame")),
+        1 => Ok(*addresses.iter().next().unwrap()),
+        _ => Err(format!(
+            "binding source {source} is ambiguous; use node:port"
+        )),
+    }
 }
 
 fn publish(parsed: &Parsed, out: &Sink, cancel: &Cancellation) -> Result<(), String> {
@@ -853,6 +880,33 @@ mod tests {
     }
     fn index() -> Value {
         json!({"type":"lyflow.Recording.v1","schemaVersion":1,"complete":false,"frames":[{"sequence":"0","file":"first.lyframe","bytes":"3","metadata":{"frameId":"a","timestampNs":"100"}},{"sequence":"1","file":"second.lyframe","bytes":"3","metadata":{"frameId":"b","timestampNs":"200"}}]})
+    }
+    #[test]
+    fn explicit_binding_resolves_dotted_ports_and_node_ids_without_guessing_ambiguous_addresses() {
+        let entries = json!([
+            {"nodeId":"source","port":"pair.first","virtual":true},
+            {"nodeId":"source","port":"pair.first"},
+            {"nodeId":"source.pair","port":"first"}
+        ]);
+        let entries = entries.as_array().unwrap();
+        assert!(source_address(entries, "source.pair.first")
+            .unwrap_err()
+            .contains("ambiguous"));
+        assert_eq!(
+            source_address(entries, "source:pair.first").unwrap(),
+            ("source", "pair.first")
+        );
+        assert_eq!(
+            source_address(entries, "source.pair:first").unwrap(),
+            ("source.pair", "first")
+        );
+        assert_eq!(
+            source_address(&entries[..2], "source.pair.first").unwrap(),
+            ("source", "pair.first")
+        );
+        assert!(source_address(entries, "missing.port")
+            .unwrap_err()
+            .contains("absent"));
     }
     #[test]
     fn recording_index_contract_preserves_last_checkpoint_selection_integrity_and_containment() {

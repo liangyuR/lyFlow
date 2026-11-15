@@ -567,12 +567,15 @@ std::string ResultStore::bindingsJson(const std::string& runId) const {
   }
   using Json = nlohmann::json;
   Json entries = Json::array(), missing = Json::array();
-  auto describe = [&](const std::string& node, const std::string& port, const Data& data) {
+  auto describe = [&](const std::string& node, const std::string& port, const Data& data,
+                      bool virtualField = false) {
     Json item{{"nodeId", node},
               {"port", port},
               {"type", data.typeName()},
               {"elementCount", data.elementCount()},
               {"byteSize", data.byteSize()}};
+    if (virtualField)
+      item["virtual"] = true;
     if (const auto* cloud = data.asCloud())
       item["sourceCloudId"] = std::to_string(cloud->id);
     if (const auto* record = data.asRecord())
@@ -583,7 +586,7 @@ std::string ResultStore::bindingsJson(const std::string& runId) const {
     describe(entry.nodeId, entry.port, entry.data);
     if (const auto* bundle = entry.data.asBundle())
       for (const auto& field : bundle->fields)
-        describe(entry.nodeId, entry.port + "." + field.first, field.second);
+        describe(entry.nodeId, entry.port + "." + field.first, field.second, true);
   }
   for (const auto& name : named) {
     Data value;
