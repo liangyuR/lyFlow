@@ -23,6 +23,23 @@ const Json kBadLeaf = Json{{"leaf", {0.0, 0.01, 0.01}}};
 
 } // namespace
 
+TEST_CASE("缺失算子的运行返回原有诊断且不产生伪造结果") {
+  const auto doc = makeGraph({{"missing", "__lyflow_unregistered_optional_operator__"}}, {});
+  Session session(doc);
+  const auto& log = session.wait();
+  CHECK(log.runStatus() == "error");
+  CHECK(log.seqIsDense());
+  bool hasUnknownOperator = false;
+  for (const auto& event : log.events)
+    if (event.contains("error") && event["error"].is_object() &&
+        event["error"].value("code", "") == "unknown_op")
+      hasUnknownOperator = true;
+  CHECK(hasUnknownOperator);
+  CHECK(exec::ResultStore::instance().outputsOf(session.runId(), "missing").empty());
+  const auto bindings = Json::parse(exec::ResultStore::instance().bindingsJson(session.runId()));
+  CHECK(bindings["entries"].empty());
+}
+
 TEST_CASE("两节点图：事件顺序与 seq 连续") {
   ensureTestOps();
   const Json doc =

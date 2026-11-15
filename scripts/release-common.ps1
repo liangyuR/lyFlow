@@ -47,7 +47,7 @@ function Get-ReleaseVersion {
         $actual = (Get-Content -LiteralPath (Join-Path $Root $relative) -Raw | ConvertFrom-Json).version
         if ($actual -ne $version) { throw "Version mismatch in ${relative}: expected $version, got $actual" }
     }
-    foreach ($relative in @('bridge/Cargo.toml', 'crates/lyflow-client/Cargo.toml')) {
+    foreach ($relative in @('bridge/Cargo.toml', 'crates/lyflow-client/Cargo.toml', 'python/pyproject.toml')) {
         $source = Get-Content -LiteralPath (Join-Path $Root $relative) -Raw
         if ($source -notmatch '(?m)^version\s*=\s*"([^"\r\n]+)"' -or $Matches[1] -ne $version) { throw "Version mismatch in $relative" }
     }

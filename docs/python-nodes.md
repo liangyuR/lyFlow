@@ -37,9 +37,14 @@ SDK 随运行库放在 `python/lyflow_python`，worker 自动加入 SDK 搜索�
 | 端口 | Python 对象 | 约定 |
 |---|---|---|
 | PointCloud | `PointCloud(xyz, intensity=None, normals=None, rgb=None)` | xyz 为 float32 `[N,3]`，坐标单位米；可选 intensity 为 float32 `[N]`，normals 为 float32 `[N,3]`，rgb 为 uint8 `[N,3]`。 |
-| Image | `Image(pixels)` | `[H,W]` 或 `[H,W,C]`，C 为 1、3、4；uint8、uint16 或 float32，RGB/RGBA 顺序。浮点图像不自动归一化。 |
+| Image | `Image(pixels, scale=1)` | `[H,W]` 或 `[H,W,C]`，C 为 1、3、4；uint8、uint16 或 float32，RGB/RGBA 顺序。浮点图像不自动归一化。 |
 | Measurement | `Measurement(value, unit=...)` | 引擎测量对象，携带有效性、单位等字段。有效数值必须有限。 |
 | Record | `Record(data, record_type=...)` | JSON 值及记录类型。 |
+| Tensor | `Tensor(values, scale=1)` | NumPy float32、最多8维，支持空轴，memmap传输。 |
+| Transform / Plane | `Transform(matrix)` / `Plane(normal, d)` | float32，4×4行主序变换；平面米制。 |
+| Point2D / Line2D / Circle2D / Box2D | 同名 SDK 类型 | 坐标为 float32，unit 显式为 m 或 px。 |
+
+协议固定 `dataProtocolVersion=2`，加载与执行均校验；旧节点源码可由本版worker重新加载，混用旧worker会明确失败。标准值/列表、Pose2D/3D集合、Features3D通过 `lyflow_python.records` helper生成既有Record，不增加平行数据模型。完整输入、单位、身份与5个可运行样例见 [P6 Python分析](p6-analysis-python.md)。Indices/Bundle没有Python直接端口，不宣称已移植全部16个外部脚本。
 
 输入数组只读。通过 `.copy()` 创建可写副本。返回字典的键必须与声明的输出端口完全一致；类型、维度、通道长度或数值错误成为当前节点诊断，不修改上游结果。数组通过请求专用临时文件与 NumPy memmap 交换，返回后复制到引擎自有数据并清理临时文件。不要把输入映射保存到下一次调用。
 

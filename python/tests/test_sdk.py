@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lyflow_python import Context, Image, Measurement, NodeCancelled, NodeError, PointCloud, Record, node
+from lyflow_python import Box2D, Circle2D, Context, Image, Line2D, Measurement, NodeCancelled, NodeError, Plane, Point2D, PointCloud, Record, Tensor, Transform, node, pose2d, pose3d, poses, scalar, value_list
 from lyflow_python.api import resolve_params
 from lyflow_python.codec import DataCodec
 from lyflow_python.discovery import Discovery
@@ -46,7 +46,7 @@ class SDKTests(unittest.TestCase):
         with self.assertRaisesRegex(NodeError, "signature"):
             node(id="py.test.bad", version="1.0.0", label="坏签名", inputs={"cloud": "PointCloud"}, outputs={"out": "Record"})(lambda: None)
         with self.assertRaisesRegex(NodeError, "unsupported type"):
-            node(id="py.test.bad", version="1.0.0", label="不支持张量", outputs={"out": "Tensor"})
+            node(id="py.test.bad", version="1.0.0", label="不支持不透明集合", outputs={"out": "Bundle"})
         for default, options, expected_default, expected_values in [
             (2, [{"value": 1, "label": "低"}, {"value": 2, "label": "高", "doc": "高精度"}], "2", ["1", "2"]),
             (2.5, [{"value": -1}, {"value": 2.5}, {"value": "auto", "label": "自动"}], "2.5", ["-1", "2.5", "auto"]),
@@ -286,6 +286,7 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(self.thread.is_alive(), "worker主线程应在管道关闭后退出")
 
     def request(self, request):
+        request = {"dataProtocolVersion": 2, **request}
         write_frame(self.client, request)
         return self.until_terminal(request["id"])
 
@@ -305,6 +306,59 @@ class WorkerTests(unittest.TestCase):
     def execution(self, identifier, **extra):
         return {"id": identifier, "command": "execute", "operatorId": "py.test.run", "requestDir": str(self.root),
                 "inputs": {}, "params": {}, "baseDir": str(self.root), "threadBudget": 2, **extra}
+
+    def test_p6_protocol_and_portable_package_execute_with_standard_contracts(self):
+        package = Path(__file__).resolve().parents[1] / "examples" / "p6_adapters"
+        for wrong in [None, 1, 3, True, "2"]:
+            with self.subTest(version=wrong):
+                result = self.request({"id": "wrong-version", "command": "discover",
+                                       "dataProtocolVersion": wrong, "packagePaths": [str(package)]})[-1]
+                self.assertEqual(result["code"], "python_protocol_error")
+        discovered = self.discover(package)
+        self.assertEqual(discovered["dataProtocolVersion"], 2)
+        self.assertEqual(len(discovered["operators"]), 5)
+        self.assertEqual(discovered["problems"], [])
+        self.assertTrue(any("offset" in op.get("keywords", []) and "偏移" in op["keywords"] for op in discovered["operators"]))
+        codec = DataCodec(str(self.root))
+        try:
+            def execute(name, inputs, params=None):
+                encoded = {key: codec.encode(value, "Tensor" if isinstance(value, Tensor) else "Record") for key, value in inputs.items()}
+                result = self.request(self.execution(name, operatorId="py.p6_adapters." + name,
+                                                      inputs=encoded, params=params or {}))[-1]
+                self.assertEqual(result["event"], "result", result)
+                self.assertEqual(result["dataProtocolVersion"], 2)
+                return {key: codec.decode(value, value["type"]) for key, value in result["outputs"].items()}
+
+            source = poses([
+                pose3d("keep", [1, 2, 3], [.1, .2, .3], rotation=[0, 0, 1, 1],
+                       frame="camera", pickable=True, attributes={"job": "中文"}),
+                pose3d("drop", [4, 5, 6], [.1, .2, .3], frame="camera", pickable=False),
+                pose3d("unknown", [7, 8, 9], [.1, .2, .3], frame="camera"),
+            ], 3)
+            shifted = execute("offset_poses3d", {"poses": source}, {"offset": [.1, 0, 0], "local": True})["poses"]
+            np.testing.assert_allclose(shifted.data["items"][0]["position"], [1, 2.1, 3])
+            self.assertEqual(source.data["items"][0]["position"], [1, 2, 3])
+            filtered = execute("filter_pickable", {"poses": shifted})["poses"]
+            self.assertEqual([item["id"] for item in filtered.data["items"]], ["keep"])
+            text = execute("poses_to_json", {"poses": filtered})["text"]
+            restored = execute("poses_from_json", {"text": text})["poses"]
+            self.assertEqual(restored.copy().data, filtered.copy().data)
+            self.assertEqual(restored.record_type, "vision.Poses3D.v1")
+            source2 = poses([pose2d("pixel", [10, 20], [5, 6], pickable=True)], 2)
+            json2 = execute("poses_to_json", {"poses": source2})["text"]
+            self.assertEqual(execute("poses_from_json", {"text": json2})["poses"].copy().data, source2.data)
+            tensor = Tensor(np.arange(12, dtype=np.float32).reshape(3, 4)[:, ::-1], scale=3)
+            actual = execute("tensor_affine", {"tensor": tensor}, {"gain": 2, "bias": .5})["tensor"]
+            np.testing.assert_array_equal(actual.values, tensor.values * 2 + .5)
+            self.assertEqual(actual.scale, 3)
+            np.testing.assert_array_equal(tensor.values, np.arange(12, dtype=np.float32).reshape(3, 4)[:, ::-1])
+            invalid = scalar('{"type":"vision.Poses3D.v2","data":{}}')
+            error = self.request(self.execution("invalid-standard", operatorId="py.p6_adapters.poses_from_json",
+                                               inputs={"text": codec.encode(invalid, "Record")}))[-1]
+            self.assertEqual(error["code"], "python_exception")
+            self.assertIn("NodeError", error["traceback"])
+        finally:
+            codec.close()
 
     def test_discover_execute_progress_defaults_and_exact_output_ports(self):
         file = self.root / "node.py"
@@ -404,7 +458,7 @@ class WorkerTests(unittest.TestCase):
         image_file = self.root / "example-image.bin"
         image.tofile(image_file)
         image_result = self.request(self.execution("image", operatorId="py.example.image_metrics", params={"gain": 2},
-            inputs={"image": {"type": "Image", "pixels": {"file": str(image_file), "shape": [2, 3, 3], "dtype": "u8"}}}))[-1]
+            inputs={"image": {"type": "Image", "scale": 1, "pixels": {"file": str(image_file), "shape": [2, 3, 3], "dtype": "u8"}}}))[-1]
         self.assertEqual(image_result["event"], "result", image_result)
         outputs = image_result["outputs"]
         self.assertEqual(outputs["mean"]["value"], float(image.mean() * 2))
@@ -417,9 +471,9 @@ class WorkerTests(unittest.TestCase):
         np.zeros((2, 3), np.float32).tofile(array_file)
         file.write_text(source("py.test.run", "import time\nctx.log('started')\nwhile True:\n    ctx.check_cancelled()\n    time.sleep(0.005)", inputs="{'cloud':'PointCloud'}"), encoding="utf-8")
         self.discover(file)
-        write_frame(self.client, self.execution("long", inputs={"cloud": {"type": "PointCloud", "xyz": {"file": str(array_file), "shape": [2, 3], "dtype": "f32"}}}))
+        write_frame(self.client, {"dataProtocolVersion": 2, **self.execution("long", inputs={"cloud": {"type": "PointCloud", "xyz": {"file": str(array_file), "shape": [2, 3], "dtype": "f32"}}})})
         self.assertEqual(read_frame(self.client)["message"], "started")
-        write_frame(self.client, self.execution("missing", operatorId="py.test.missing"))
+        write_frame(self.client, {"dataProtocolVersion": 2, **self.execution("missing", operatorId="py.test.missing")})
         write_frame(self.client, {"id": "long", "command": "cancel"})
         self.assertEqual(self.until_terminal("long")[-1]["event"], "cancelled")
         array_file.unlink()

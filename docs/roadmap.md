@@ -16,6 +16,8 @@
 | 云分组/三维配准、工件/帧变换、标定/NCC/圆弧量测与选定模型检测 | [P1实现索引与边界](p1-operator-analysis.md) |
 | 高度规则/全局三维匹配、Marker/工作空间与梯度形状 | [六阶段P2交付](p2-sequential-delivery.md) · [标定与形状组合](p3-examples.md) |
 
+| Python几何端口、工件/云组查看、FIFO与原生帧录制回放/发布 | [P6指南](p6-examples.md) |
+
 ## 仍需独立推进或验收的范围
 
 - **同一页面的多个编辑器实例**：当前 store 和 Transport 仍为模块级单例，一页只支持一个编辑器。编辑器内部的多工作流标签已经实现，不等于实例隔离。支持方式见[嵌入指南](embedding.md)。

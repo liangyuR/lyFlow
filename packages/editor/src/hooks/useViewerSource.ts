@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { cloudPortsOf, findBaseCloud, firstCloudPort, type BaseCloud } from '../lib/basecloud';
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from '../lib/cloudCache';
 import { augmentOperators, levelOf, resolveOutput } from '../lib/subgraph';
-import { viewerContentFor, type ViewerContent } from '../lib/viewRule';
+import { hasPoseScene, viewerContentFor, type ViewerContent } from '../lib/viewRule';
 import { transport } from '../transport';
 import type { CompareSlot, CompareSnapshot } from '../store/compare';
 import { aggregatedNodes, useExecutionStore } from '../store/execution';
@@ -134,6 +134,7 @@ export function useViewerSource({
             op.outputs.map((o) => outputs?.find((st) => st.port === o.name)?.type ?? o.type),
             bundles,
             op.inputs.map((i) => i.type),
+            outputs,
           )
         : 'cloud',
     [op, outputs, bundles],
@@ -210,7 +211,8 @@ export function useViewerSource({
         });
       };
       dropOtherRuns(runId);
-      const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
+      const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
+      const key = cacheKey(runId, resolved.nodeId, resolved.port, cap);
       const hit = cloudCache.get(key);
       if (hit) {
         // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
@@ -223,10 +225,19 @@ export function useViewerSource({
       void (async () => {
         try {
           // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
-          const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
-          const payload = await fetchCloud(key, async () =>
-            decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap)),
-          );
+          const payload = await fetchCloud(key, async () => {
+            const [buffer, infos] = await Promise.all([
+              transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap),
+              transport.getOutputInfo(runId, resolved.nodeId).catch(() => []),
+            ]);
+            const cloud = decodeCloud(buffer);
+            const sourceCloudId = infos.find((info) => info.port === resolved.port)?.sourceCloudId;
+            return {
+              ...cloud,
+              ...(sourceCloudId ? { sourceCloudId } : {}),
+              sampleStride: cap > 0 ? Math.max(1, Math.ceil(cloud.totalPoints / cap)) : 1,
+            };
+          });
           if (cancelled) return;
           shown(statusOf(payload), payload);
         } catch (e) {
@@ -304,6 +315,11 @@ export function useViewerSource({
       return;
     }
     if (!port) {
+      if (hasPoseScene(liveOutputs)) {
+        setLoading(false);
+        show(null);
+        return;
+      }
       base = findBaseCloud(doc, path, node.id, ops, bundles);
       resolved = base?.resolved ?? null;
     }

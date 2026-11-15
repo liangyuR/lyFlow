@@ -21,6 +21,11 @@ try {
     Set-Content -LiteralPath (Join-Path $runtime 'python/README.md') -Value 'Python SDK'
     Set-Content -LiteralPath (Join-Path $runtime 'python/pyproject.toml') -Value '[project]'
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
+    foreach ($relative in $configuration.requiredRuntimeFiles) {
+        $target = Join-Path $runtime $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Set-Content -LiteralPath $target -Value 'P6 SDK fixture'
+    }
     $metadata = [ordered]@{
         schemaVersion = 1; architecture = 'x64'; localValidationOnly = $false
         engineVersion = '1.1.0'; abiVersion = '1.1.0'; sourceRevision = $revision
@@ -38,6 +43,17 @@ try {
         if (-not $rejected) { throw "Expected rejection: $Name" }
         $script:tests++
     }
+    $current = $original | ConvertFrom-Json -AsHashtable
+    $current.engineVersion = $current.abiVersion = '1.3.12'
+    $current | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
+    [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.3.12' -ExpectedRevision $revision)
+    $tests++
+    $records = Join-Path $runtime 'python/lyflow_python/records.py'
+    Remove-Item -LiteralPath $records
+    $current.files = @($current.files | Where-Object { $_.path -ne 'python/lyflow_python/records.py' })
+    $current | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
+    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.3.12' -ExpectedRevision $revision } 'missing P6 records module despite consistent inventory'
+    Set-Content -LiteralPath $records -Value 'P6 SDK fixture'
     foreach ($change in @(
         @{ key = 'abiVersion'; value = '1.1.1' },
         @{ key = 'engineVersion'; value = '1.2.0' },

@@ -1,6 +1,7 @@
 #include "exec/result_store.h"
 
 #include "exec/disk_cache.h"
+#include <nlohmann/json.hpp>
 
 #include <set>
 #include <algorithm>
@@ -27,8 +28,9 @@ struct OutputSnapshot {
 
 OutputInfo snapshotInfo(const OutputSnapshot& snapshot) {
   const Data& data = snapshot.data;
-  return OutputInfo{snapshot.port, data.typeName(), data.elementCount(), snapshot.bytes,
-                    data.valueJson()};
+  auto info = describeOutput(snapshot.port, data);
+  info.byteSize = snapshot.bytes;
+  return info;
 }
 
 void fillSnapshotInfos(const std::vector<OutputSnapshot>& snapshots,
@@ -42,6 +44,15 @@ void fillSnapshotInfos(const std::vector<OutputSnapshot>& snapshots,
 }
 
 } // namespace
+
+OutputInfo describeOutput(const std::string& port, const Data& data) {
+  return {port,
+          data.typeName(),
+          data.elementCount(),
+          data.byteSize(),
+          data.valueJson(),
+          data.asCloud() ? std::to_string(data.asCloud()->id) : std::string{}};
+}
 
 bool splitFieldAddress(const std::string& address, std::string* port, std::string* field) {
   const std::size_t dot = address.rfind('.');
@@ -58,8 +69,7 @@ void appendBundleFieldInfos(const std::string& port, const Data& data,
   if (!b)
     return;
   for (const auto& f : b->fields) {
-    out.push_back(OutputInfo{port + "." + f.first, f.second.typeName(), f.second.elementCount(),
-                             f.second.byteSize(), f.second.valueJson()});
+    out.push_back(describeOutput(port + "." + f.first, f.second));
   }
 }
 
@@ -205,6 +215,17 @@ bool ResultStore::get(const std::string& runId, const std::string& nodeId, const
 
 bool ResultStore::getLocked(const std::string& runId, const std::string& nodeId,
                             const std::string& port, Data& out) const {
+  const auto view = views_.find(runId);
+  if (view != views_.end()) {
+    const auto node = view->second.nodes.find(nodeId);
+    if (node == view->second.nodes.end())
+      return false;
+    const auto value = node->second.find(port);
+    if (value == node->second.end())
+      return false;
+    out = value->second;
+    return true;
+  }
   auto run = index_.find(runId);
   if (run == index_.end())
     return false;
@@ -368,17 +389,26 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
   std::vector<OutputSnapshot> snapshots;
   {
     std::lock_guard<std::mutex> lock(mu_);
-    auto run = index_.find(runId);
-    if (run == index_.end())
-      return {};
-    auto node = run->second.find(nodeId);
-    if (node == run->second.end())
-      return {};
-    snapshots.reserve(node->second.size());
-    for (const auto& kv : node->second) {
-      auto data = byKey_.find(kv.second);
-      if (data != byKey_.end())
-        snapshots.push_back(OutputSnapshot{kv.first, data->second.data, data->second.bytes});
+    const auto view = views_.find(runId);
+    if (view != views_.end()) {
+      const auto node = view->second.nodes.find(nodeId);
+      if (node == view->second.nodes.end())
+        return {};
+      for (const auto& entry : node->second)
+        snapshots.push_back({entry.first, entry.second, entry.second.byteSize()});
+    } else {
+      auto run = index_.find(runId);
+      if (run == index_.end())
+        return {};
+      auto node = run->second.find(nodeId);
+      if (node == run->second.end())
+        return {};
+      snapshots.reserve(node->second.size());
+      for (const auto& kv : node->second) {
+        auto data = byKey_.find(kv.second);
+        if (data != byKey_.end())
+          snapshots.push_back(OutputSnapshot{kv.first, data->second.data, data->second.bytes});
+      }
     }
   }
   std::vector<OutputInfo> infos;
@@ -388,6 +418,14 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
 
 bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId,
                              const std::string& port, OutputInfo& out) const {
+  if (isView(runId)) {
+    Data data;
+    if (!get(runId, nodeId, port, data))
+      return false;
+    out = describeOutput(port, data);
+    return true;
+  }
+
   OutputSnapshot snapshot{port, {}, 0};
   bool bundleField = false;
   {
@@ -432,8 +470,135 @@ void ResultStore::setNamedOutputs(const std::string& runId, std::vector<NamedOut
 
 std::vector<NamedOutput> ResultStore::namedOutputs(const std::string& runId) const {
   std::lock_guard<std::mutex> lock(mu_);
+  const auto view = views_.find(runId);
+  if (view != views_.end())
+    return view->second.named;
   auto it = namedOutputs_.find(runId);
   return it == namedOutputs_.end() ? std::vector<NamedOutput>{} : it->second;
+}
+
+bool ResultStore::capture(const std::string& runId, std::vector<CapturedOutput>& outputs,
+                          std::vector<NamedOutput>& named, std::string& summary,
+                          std::string& error) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  outputs.clear();
+  named.clear();
+  summary.clear();
+  error.clear();
+  const auto view = views_.find(runId);
+  if (view != views_.end()) {
+    named = view->second.named;
+    for (const auto& node : view->second.nodes)
+      for (const auto& port : node.second)
+        outputs.push_back({node.first, port.first, port.second});
+    return true;
+  }
+  const auto names = namedOutputs_.find(runId);
+  if (names != namedOutputs_.end())
+    named = names->second;
+  const auto status = summaries_.find(runId);
+  if (status != summaries_.end())
+    summary = status->second;
+  const auto run = index_.find(runId);
+  if (run == index_.end()) {
+    error = "运行没有可用结果";
+    return false;
+  }
+  for (const auto& node : run->second)
+    for (const auto& port : node.second) {
+      const auto value = byKey_.find(port.second);
+      if (value == byKey_.end())
+        error = "运行中的部分结果已被淘汰";
+      else
+        outputs.push_back({node.first, port.first, value->second.data});
+    }
+  return error.empty();
+}
+
+void ResultStore::addView(const std::string& id, const std::vector<CapturedOutput>& outputs,
+                          const std::vector<NamedOutput>& named) {
+  View view;
+  view.named = named;
+  for (const auto& entry : outputs)
+    if (!view.nodes[entry.nodeId].emplace(entry.port, entry.data).second)
+      throw std::invalid_argument("帧包含重复的节点端口");
+  std::lock_guard<std::mutex> lock(mu_);
+  if (index_.count(id) || views_.count(id) || namedOutputs_.count(id))
+    throw std::invalid_argument("帧视图标识已存在");
+  views_.emplace(id, std::move(view));
+}
+
+void ResultStore::removeView(const std::string& id) {
+  std::lock_guard<std::mutex> lock(mu_);
+  views_.erase(id);
+}
+
+bool ResultStore::isView(const std::string& id) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return views_.count(id) != 0;
+}
+
+void ResultStore::setRunInputs(const std::string& runId, std::vector<CapturedOutput> inputs) {
+  std::lock_guard<std::mutex> lock(mu_);
+  runInputs_[runId] = std::move(inputs);
+}
+
+std::vector<CapturedOutput> ResultStore::runInputs(const std::string& runId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  const auto found = runInputs_.find(runId);
+  return found == runInputs_.end() ? std::vector<CapturedOutput>{} : found->second;
+}
+
+void ResultStore::setDeclaredOutputs(const std::string& runId, std::vector<NamedOutput> outputs) {
+  std::lock_guard<std::mutex> lock(mu_);
+  declaredOutputs_[runId] = std::move(outputs);
+}
+
+std::string ResultStore::bindingsJson(const std::string& runId) const {
+  std::vector<CapturedOutput> values;
+  std::vector<NamedOutput> named;
+  std::string summary, error;
+  capture(runId, values, named, summary, error);
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto declared = declaredOutputs_.find(runId);
+    if (declared != declaredOutputs_.end())
+      named.insert(named.end(), declared->second.begin(), declared->second.end());
+  }
+  using Json = nlohmann::json;
+  Json entries = Json::array(), missing = Json::array();
+  auto describe = [&](const std::string& node, const std::string& port, const Data& data,
+                      bool virtualField = false) {
+    Json item{{"nodeId", node},
+              {"port", port},
+              {"type", data.typeName()},
+              {"elementCount", data.elementCount()},
+              {"byteSize", data.byteSize()}};
+    if (virtualField)
+      item["virtual"] = true;
+    if (const auto* cloud = data.asCloud())
+      item["sourceCloudId"] = std::to_string(cloud->id);
+    if (const auto* record = data.asRecord())
+      item["recordType"] = record->type;
+    entries.push_back(std::move(item));
+  };
+  for (const auto& entry : values) {
+    describe(entry.nodeId, entry.port, entry.data);
+    if (const auto* bundle = entry.data.asBundle())
+      for (const auto& field : bundle->fields)
+        describe(entry.nodeId, entry.port + "." + field.first, field.second, true);
+  }
+  for (const auto& name : named) {
+    Data value;
+    if (!get(runId, name.nodeId, name.port, value))
+      missing.push_back({{"nodeId", name.nodeId}, {"port", name.port}});
+  }
+  return Json{{"schemaVersion", 1},
+              {"type", "lyflow.RunBindings.v1"},
+              {"runId", runId},
+              {"entries", entries},
+              {"missing", missing}}
+      .dump();
 }
 
 void ResultStore::setSummary(const std::string& runId, std::string json) {
@@ -519,6 +684,8 @@ void ResultStore::freeRun(const std::string& runId) {
   index_.erase(runId);
   namedOutputs_.erase(runId);
   summaries_.erase(runId);
+  runInputs_.erase(runId);
+  declaredOutputs_.erase(runId);
   evictLocked();
 }
 
@@ -556,6 +723,8 @@ void ResultStore::clear() {
   index_.clear();
   namedOutputs_.clear();
   summaries_.clear();
+  runInputs_.clear();
+  declaredOutputs_.clear();
   byKey_.clear();
   lru_.clear();
   bytes_ = 0;

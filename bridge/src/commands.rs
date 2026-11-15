@@ -217,6 +217,28 @@ pub fn get_core_info() -> Result<CoreInfo, String> {
 }
 
 #[tauri::command]
+pub fn get_runtime_capabilities() -> Result<serde_json::Value, String> {
+    let core = core_ffi::core()?;
+    match core.runtime_capabilities() {
+        Ok(raw) => serde_json::from_str(&raw)
+            .map_err(|e| format!("core 返回的运行时能力不是合法 JSON: {e}")),
+        Err(lyflow_client::CoreError::MissingSymbol(_)) => Ok(
+            serde_json::json!({"schemaVersion":1,"resultBindings":false,"frames":false,"sessions":false}),
+        ),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_run_bindings(
+    #[allow(non_snake_case)] runId: String,
+) -> Result<serde_json::Value, String> {
+    let core = core_ffi::core()?;
+    let raw = core.run_bindings(&runId).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("core 返回的运行结果绑定不是合法 JSON: {e}"))
+}
+
+#[tauri::command]
 pub fn save_graph<R: Runtime>(
     app: tauri::AppHandle<R>,
     path: String,

@@ -47,7 +47,7 @@ function Assert-RuntimeNuGetMetadata {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime cannot contain reparse points.' }
         if (-not $item.PSIsContainer) {
             $relative = [IO.Path]::GetRelativePath($RuntimeDir, $item.FullName).Replace('\', '/')
-            $pythonFile = $relative -in @('python/README.md', 'python/pyproject.toml') -or (($relative -like 'python/lyflow_python/*' -or $relative -like 'python/examples/*') -and $item.Extension -ceq '.py')
+            $pythonFile = $relative -in @('python/README.md', 'python/pyproject.toml') -or (($relative -like 'python/lyflow_python/*' -or $relative -like 'python/examples/*') -and $item.Extension -ceq '.py') -or $relative -clike 'python/examples/*/README.md'
             if ($relative -ne 'lyflow-runtime.json' -and $relative -notlike 'licenses/*' -and -not $pythonFile -and ($relative.Contains('/') -or $item.Extension -ine '.dll')) { throw "Unexpected runtime content: $relative" }
             if ($item.Extension -ieq '.dll') {
                 $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($item.FullName))
@@ -66,6 +66,11 @@ function Assert-RuntimeNuGetMetadata {
         if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $name) -PathType Leaf)) { throw "Runtime missing $name" }
     }
     $configuration = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging/release.json') -Raw | ConvertFrom-Json
+    if ([version]$ExpectedVersion -ge [version]'1.3.12') {
+        foreach ($relative in $configuration.requiredRuntimeFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $relative) -PathType Leaf)) { throw "Runtime missing $relative" }
+        }
+    }
     foreach ($id in $configuration.requiredOperators) {
         if ($id -cnotin @($metadata.operators | ForEach-Object { $_.id })) { throw "Runtime metadata missing required operator: $id" }
     }

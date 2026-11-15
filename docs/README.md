@@ -14,6 +14,7 @@
 | 配置 AI Agent 工具 | [MCP 服务](mcp.md) · [glue 调参](mcp-glue-tuning.md) · [结果可视化](mcp-visualization.md) |
 | 管理工况、参数覆盖与算子库 | [参数配方](recipe.md) · [库目录](library-dirs.md) |
 | 编写自定义 Python 节点 | [Python SDK 与运行环境](python-nodes.md) |
+| 查看工件/云分组、FIFO、录制回放与日志发布 | [原生帧与宿主组合](p6-examples.md) |
 
 ## 契约与嵌入
 

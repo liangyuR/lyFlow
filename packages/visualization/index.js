@@ -1,3 +1,5 @@
+export * from './results.js';
+
 const esc = (v) =>
   String(v).replace(
     /[&<>"']/g,
@@ -27,8 +29,20 @@ function check(scene) {
   if (scene.schemaVersion !== 1 || !Array.isArray(scene.layers))
     throw new Error('Invalid SceneSpec');
   validateFrame(scene.frame);
+  if (scene.layers.length > 16384) throw new Error('Scene layer budget exceeded');
+  let pointBudget = 0;
   if (scene.view?.bounds && !validBounds(scene.view.bounds)) throw new Error('Invalid view bounds');
   for (const layer of scene.layers) {
+    if (
+      [layer.color, ...(layer.colors ?? [])].some(
+        (color) =>
+          color !== undefined && !/^(#[\da-f]{3,8}|[a-z]+|rgba?\([\d.,% \t+-]+\))$/i.test(color),
+      )
+    )
+      throw new Error('Colors must be local CSS color values');
+    pointBudget += layer.points?.length ?? 0;
+    pointBudget += (layer.segments?.length ?? 0) * 2;
+    if (pointBudget > 2_000_000) throw new Error('Scene point budget exceeded');
     validateFrame(layer.frame);
     const same =
       JSON.stringify(layer.frame.axes) === JSON.stringify(scene.frame.axes) &&
@@ -231,6 +245,54 @@ export function renderSvg(scene) {
     body += `<text x="${x}" y="${y}" fill="${esc(l.color ?? colors[i % colors.length])}" font-size="11">${esc(shorten(l.label ?? l.id, Math.max(8, Math.floor((w - 48) / 3 / 6) - points.length - 8)) + points + (bad ? ` | ${bad} non-finite` : '') + (l.missing ? ` | MISSING` : ''))}</text>`;
   });
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" font-family="Arial, sans-serif" fill="#253247">${body}</svg>`;
+}
+export function renderImageOverlaySvg(scene, width, height) {
+  check(scene);
+  if (
+    scene.frame.unit !== 'px' ||
+    scene.frame.yDirection !== 'down' ||
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    width * height > 16_777_216
+  )
+    throw new Error('Pixel overlay requires an explicit image frame and at most 16777216 pixels');
+  let body = '';
+  for (const layer of scene.layers) {
+    const color = esc(layer.color ?? '#5ec9d8');
+    body += `<g data-instance-id="${esc(layer.instanceId ?? '')}" stroke="${color}" fill="none" stroke-width="${Number.isFinite(layer.lineWidth) ? Math.max(0.1, Math.min(20, layer.lineWidth)) : 2}" opacity="${Number.isFinite(layer.opacity) ? Math.max(0, Math.min(1, layer.opacity)) : 1}">`;
+    if (layer.kind === 'image') {
+      const [x0, y0, x1, y1] = layer.bounds;
+      body += `<image href="${layer.dataUrl}" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" preserveAspectRatio="none"/>`;
+    } else if (layer.kind === 'text') {
+      const [x, y] = transform(layer.position, layer);
+      body += `<text x="${x + 0.5}" y="${y + 0.5}" fill="${color}" stroke="none" font-family="sans-serif" font-size="12">${esc(layer.text ?? '')}</text>`;
+    } else if (layer.kind === 'points') {
+      for (const [i, point] of layer.points.entries())
+        if (finitePoint(point)) {
+          const [x, y] = transform(point, layer);
+          body += `<circle cx="${x + 0.5}" cy="${y + 0.5}" r="1" fill="${esc(layer.colors?.[i] ?? layer.color ?? '#5ec9d8')}" stroke="none"/>`;
+        }
+    } else
+      for (const points of paths(layer)) {
+        let path = '',
+          broken = true;
+        for (const point of points) {
+          if (!finitePoint(point)) {
+            broken = true;
+            continue;
+          }
+          const [x, y] = transform(point, layer);
+          path += `${broken ? 'M' : 'L'}${x + 0.5},${y + 0.5}`;
+          broken = false;
+        }
+        if (layer.closed && points.every(finitePoint)) path += 'Z';
+        body += `<path d="${path}"/>`;
+      }
+    body += '</g>';
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`;
 }
 export function gridScenes(scenes, options = {}) {
   if (!scenes.length || scenes.length > 100) throw new Error('Grid requires 1..100 scenes');

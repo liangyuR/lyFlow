@@ -3,6 +3,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import type { ResultOptions } from '@lyflow/visualization';
+import { poseCloudFrame, poseLines, poseRecords } from '../lib/resultShapes';
 
 import {
   applyViewPreset,
@@ -62,6 +64,7 @@ import { ValuePane } from './ValuePane';
 import { useFocusOnDoubleClick } from '../hooks/useFocusOnDoubleClick';
 import { measureAttrs, useMeasure } from '../hooks/useMeasure';
 import { useViewerSource, type ViewerSource } from '../hooks/useViewerSource';
+import { useCloudGroups } from '../hooks/useCloudGroups';
 import '../styles.viewer.css';
 import type { ViewPreset } from '../lib/viewFit';
 import { ViewPresetButtons, useViewPresetEvents } from './ViewPresetButtons';
@@ -130,6 +133,7 @@ function drawShapes(
   shapes: readonly OutputStat[],
   cloud: CloudPayload | null,
   typesByName: ReadonlyMap<string, { color?: string }>,
+  options: ResultOptions & { solid?: boolean; confirmedFrame?: string } = {},
 ): void {
   disposeOverlay(group);
   if (shapes.length === 0) return;
@@ -142,6 +146,7 @@ function drawShapes(
     const color = new THREE.Color(hex).getHex();
     for (const line of shapesOf(out, color, span)) group.add(line);
   }
+  for (const object of poseLines(shapes, cloud, options)) group.add(object);
 }
 
 function sideOf(src: ViewerSource): CompareSide {
@@ -230,7 +235,33 @@ export function Viewer3D({
   } = source;
   // 20：出错节点画的是它的输入（failed 只在取到云时才置）：哪怕节点自己只输出值，栏与工具也按点云场景给
   const content = display.failed ? 'cloud' : source.content;
-  const { cloud } = display;
+  const groups = useCloudGroups(
+    display.runId,
+    display.cloud,
+    maxPoints,
+    !compareOn && content === 'cloud',
+  );
+  const cloud = groups.cloud;
+  const [posePick, setPosePick] = useState('');
+  const [poseAxes, setPoseAxes] = useState(true);
+  const [poseSolid, setPoseSolid] = useState(false);
+  const [poseLabels, setPoseLabels] = useState(true);
+  const [confirmedFrame, setConfirmedFrame] = useState('');
+  const poses = useMemo(() => poseRecords(activeOutputs), [activeOutputs]);
+  const poseOptions = useMemo(
+    () => ({
+      selectedId: posePick || null,
+      showAxes: poseAxes,
+      solid: poseSolid,
+      showLabels: poseLabels,
+      ...(confirmedFrame ? { confirmedFrame } : {}),
+    }),
+    [posePick, poseAxes, poseSolid, poseLabels, confirmedFrame],
+  );
+  useEffect(() => {
+    setPosePick('');
+    setConfirmedFrame('');
+  }, [activeKey, display.runId]);
   const extent = cloud && cloud.pointCount > 0 ? extentText(cloud.bounds) : null;
 
   // -- 对比（交互清单 #35）：A 就是上面那个（跟随选中 / 钉住），B 是一个显式的槽 ---------------
@@ -459,8 +490,13 @@ export function Viewer3D({
   useEffect(() => {
     const points = sceneRef.current?.points[0];
     if (!points || !cloud || cloud.pointCount === 0) return;
-    paintPoints(points, cloud, { shading: effectiveShading, ramp, lo, hi });
-  }, [cloud, effectiveShading, ramp, lo, hi]);
+    paintPoints(points, cloud, {
+      shading: groups.preview ? 'rgb' : effectiveShading,
+      ramp,
+      lo,
+      hi,
+    });
+  }, [cloud, effectiveShading, ramp, lo, hi, groups.preview]);
   useEffect(() => {
     const points = sceneRef.current?.points[1];
     if (!points || !cloudB || cloudB.pointCount === 0) return;
@@ -487,8 +523,20 @@ export function Viewer3D({
       const k = o.value?.kind;
       if (k === 'Box2D' || k === 'Line2D' || k === 'Circle2D' || k === 'Point2D') n += 1;
     }
-    return n;
-  }, [overlayShapes]);
+    const frame = cloud
+      ? (poseCloudFrame(overlayShapes, cloud) ?? confirmedFrame)
+      : confirmedFrame || poses[0]?.poses.frame;
+    return (
+      n +
+      poses
+        .filter(({ poses: result }) => result.unit === 'm' && result.frame === frame)
+        .reduce(
+          (count, { poses: result }) =>
+            count + result.items.filter((item) => !posePick || item.id === posePick).length,
+          0,
+        )
+    );
+  }, [overlayShapes, cloud, confirmedFrame, poses, posePick]);
 
   const overlayShapesB = useMemo(
     () => (compareOn ? (sourceB.outputs ?? []).filter((o) => o.value !== undefined) : []),
@@ -497,8 +545,8 @@ export function Viewer3D({
 
   useEffect(() => {
     const scene = sceneRef.current;
-    if (scene) drawShapes(scene.overlays[0], overlayShapes, cloud, typesByName);
-  }, [overlayShapes, cloud, typesByName]);
+    if (scene) drawShapes(scene.overlays[0], overlayShapes, cloud, typesByName, poseOptions);
+  }, [overlayShapes, cloud, typesByName, poseOptions]);
   useEffect(() => {
     const scene = sceneRef.current;
     if (scene) drawShapes(scene.overlays[1], overlayShapesB, cloudB, typesByName);
@@ -876,7 +924,18 @@ export function Viewer3D({
         >
           <option value="3d">3D</option>
           <option value="2d">2D 剖面</option>
-          <option value="image" disabled={!activeKey || autoContent !== 'image'}>
+          <option
+            value="image"
+            disabled={
+              !activeKey ||
+              !(
+                autoContent === 'image' ||
+                activeOutputs?.some((output) => output.type === 'Image') ||
+                activeOp?.inputs.some((port) => port.type === 'Image') ||
+                activeOp?.outputs.some((port) => port.type === 'Image')
+              )
+            }
+          >
             图像
           </option>
           <option value="value" disabled={!activeKey}>
@@ -1127,6 +1186,135 @@ export function Viewer3D({
         </div>
       )}
 
+      {!compareOn && content === 'cloud' && groups.groupOutputs.length > 0 && (
+        <div className="viewer__bar" data-testid="viewer-group-controls">
+          <select
+            aria-label="点云分组来源"
+            value={groups.pick}
+            onChange={(event) => groups.setPick(event.target.value)}
+          >
+            <option value="">原始着色</option>
+            {groups.groupOutputs.map((output) => (
+              <option
+                key={`${output.nodeId}:${output.port}`}
+                value={`${output.nodeId}:${output.port}`}
+              >
+                {output.nodeId}.{output.port}
+              </option>
+            ))}
+          </select>
+          {groups.indexOutputs.length > 1 && (
+            <select
+              aria-label="分组索引端口"
+              value={groups.indicesPick}
+              onChange={(event) => groups.setIndicesPick(event.target.value)}
+            >
+              <option value="">选择配套 Indices</option>
+              {groups.indexOutputs.map((output) => (
+                <option key={output.port} value={output.port}>
+                  {output.port}
+                </option>
+              ))}
+            </select>
+          )}
+          {groups.preview && (
+            <>
+              <span>{groups.preview.frame} · m</span>
+              <select
+                aria-label="点云组身份"
+                value={groups.selectedId}
+                onChange={(event) => groups.setSelectedId(event.target.value)}
+              >
+                <option value="">全部组</option>
+                {groups.preview.groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.id} · {group.count} 点
+                  </option>
+                ))}
+              </select>
+              <span>
+                显示 {cloud?.pointCount ?? 0} / 原云 {groups.preview.totalPoints} 点 · 按 ID 着色
+              </span>
+            </>
+          )}
+          {groups.error && <span role="alert">{groups.error}</span>}
+        </div>
+      )}
+      {!compareOn && content === 'cloud' && poses.length > 0 && (
+        <div className="viewer__bar" data-testid="viewer-pose-controls">
+          <span>
+            {poses.map(({ poses: result }) => `${result.frame} · ${result.unit}`).join(' / ')}
+          </span>
+          {!cloud && new Set(poses.map(({ poses: result }) => result.frame)).size > 1 && (
+            <select
+              aria-label="工件场景坐标系"
+              value={confirmedFrame || poses[0]!.poses.frame}
+              onChange={(event) => setConfirmedFrame(event.target.value)}
+            >
+              {[...new Set(poses.map(({ poses: result }) => result.frame))].map((frame) => (
+                <option key={frame} value={frame}>
+                  {frame}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            aria-label="工件身份"
+            value={posePick}
+            onChange={(event) => setPosePick(event.target.value)}
+          >
+            <option value="">全部工件</option>
+            {poses.flatMap(({ output, poses: result }) =>
+              result.items.map((item) => (
+                <option key={`${output.port}:${item.id}`} value={item.id}>
+                  {item.name || item.id} · {item.id}
+                </option>
+              )),
+            )}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={poseAxes}
+              onChange={(event) => setPoseAxes(event.target.checked)}
+            />
+            位姿轴
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={poseSolid}
+              onChange={(event) => setPoseSolid(event.target.checked)}
+            />
+            尺寸实体
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={poseLabels}
+              onChange={(event) => setPoseLabels(event.target.checked)}
+            />
+            标签（最多 256）
+          </label>
+          {cloud && !poseCloudFrame(overlayShapes, cloud) && (
+            <label title="点云不自带坐标系；仅在确认坐标已对齐时选择">
+              点云坐标系
+              <select
+                aria-label="确认点云坐标系"
+                value={confirmedFrame}
+                onChange={(event) => setConfirmedFrame(event.target.value)}
+              >
+                <option value="">未确认，不叠加工件</option>
+                {[...new Set(poses.map(({ poses: result }) => result.frame))].map((frame) => (
+                  <option key={frame} value={frame}>
+                    {frame}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
       <div className="viewer__stage">
         <div className="viewer__canvas" ref={hostRef} data-testid="viewer3d-canvas" />
         {compareOn && (

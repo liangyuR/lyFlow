@@ -11,6 +11,34 @@ export interface FetchedLevel {
   pixels: Uint8Array | Uint16Array | Float32Array;
 }
 
+export interface ImageResultBinding<T> {
+  key: string;
+  ownerNodeId: string;
+  outputs: T | undefined;
+}
+
+export function bindImageResults<T>(
+  key: string,
+  ownerNodeId: string,
+  outputs: T | undefined,
+  current: boolean,
+  previous: ImageResultBinding<T> | null,
+): ImageResultBinding<T> {
+  return {
+    key,
+    ownerNodeId,
+    outputs: current
+      ? outputs
+      : previous?.key === key && previous.ownerNodeId === ownerNodeId
+        ? previous.outputs
+        : undefined,
+  };
+}
+
+export function imageEpochReady(expected: string, actual: string | null | undefined): boolean {
+  return expected !== '' && expected === actual;
+}
+
 /** `Transport.getOutputImage` 的形状：第 level 级、从 row 起 rows 行（0 = 到底），LYIM 载荷。 */
 export type GetImage = (
   runId: string,

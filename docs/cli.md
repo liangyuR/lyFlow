@@ -143,3 +143,7 @@ lyflow cache clear --cache-dir .cache/lyflow --stale
 | `4` | 命令参数错误 |
 
 CLI 当前的完整选项以 `lyflow --help` 为准。MCP 的对应工具和字段见 [MCP 服务](mcp.md)，冻结试验与预算搜索见 [glue 调参流程](mcp-glue-tuning.md)。
+
+## 原生帧录制、回放与发布
+
+`lyflow record` 保存有效图/参数与完整原生帧；`lyflow replay` 默认只读，`--recompute` 才执行算法。`lyflow log` 导出字符串/位姿，`lyflow publish` 发往显式TCP端点并等待精确ACK。格式、容量、时间戳、取消、归档冲突与完整命令见 [P6指南](p6-examples.md)及[宿主交付分析](p6-analysis-delivery.md)。

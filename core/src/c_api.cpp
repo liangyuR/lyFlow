@@ -14,6 +14,7 @@
 #include "exec/executor.h"
 #include "exec/library.h"
 #include "exec/result_store.h"
+#include "runtime_frames.h"
 #include "lyflow/cloud_io.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
@@ -313,12 +314,21 @@ char* lyflow_plan_inputs(const char* graph_json, const char* base_dir, const cha
 }
 
 char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
+  return lyflow_effective_params_inputs(graph_json, base_dir, nullptr, nullptr, 0, nullptr, 0);
+}
+
+char* lyflow_effective_params_inputs(const char* graph_json, const char* base_dir,
+                                     const char* params_json, const lyflow_run_input* inputs,
+                                     size_t input_count, const lyflow_run_image_input* image_inputs,
+                                     size_t image_input_count) {
   try {
     std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::effectiveParamsJson(
-        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
+        fromC(params_json),
+        injectedInputsOf(inputs, input_count, image_inputs, image_input_count)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal",
@@ -395,8 +405,9 @@ char* lyflow_cache_stats(void) {
   }
 }
 
-lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
-                             lyflow_event_cb cb, void* user) {
+static lyflow_run* startRun(const char* graph_json, const lyflow_run_options* opts,
+                            const lyflow_frame* frame, const char* bindings, lyflow_event_cb cb,
+                            void* user) {
   try {
     std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
@@ -427,6 +438,10 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       options.inputs = injectedInputsOf(opts->inputs, opts->input_count, opts->image_inputs,
                                         opts->image_input_count);
     }
+    if (frame) {
+      auto values = lyflow::runtime::frameInputs(frame, fromC(bindings));
+      options.inputs.insert(options.inputs.end(), values.begin(), values.end());
+    }
     if (options.runId.empty())
       options.runId = "run";
     return reinterpret_cast<lyflow_run*>(
@@ -434,6 +449,19 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
   } catch (...) {
     return nullptr;
   }
+}
+
+lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
+                             lyflow_event_cb cb, void* user) {
+  return startRun(graph_json, opts, nullptr, nullptr, cb, user);
+}
+
+lyflow_run* lyflow_run_start_frame(const char* graph_json, const lyflow_run_options* opts,
+                                   const lyflow_frame* frame, const char* bindings,
+                                   lyflow_event_cb cb, void* user) {
+  if (!frame)
+    return nullptr;
+  return startRun(graph_json, opts, frame, bindings, cb, user);
 }
 
 void lyflow_run_cancel(lyflow_run* run) {
@@ -653,6 +681,7 @@ char* lyflow_output_info(const char* run_id, const char* node_id) {
       w.field("port", i.port);
       w.field("type", i.type);
       w.field("elementCount", static_cast<std::int64_t>(i.elementCount));
+      w.fieldIfSet("sourceCloudId", i.sourceCloudId);
       w.field("byteSize", static_cast<std::int64_t>(i.byteSize));
       if (!i.valueJson.empty()) {
         w.key("value");

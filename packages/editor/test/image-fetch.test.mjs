@@ -4,7 +4,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { FetchAbandoned, fetchImageLevel } from '../src/lib/imageFetch.ts';
+import {
+  bindImageResults,
+  FetchAbandoned,
+  fetchImageLevel,
+  imageEpochReady,
+} from '../src/lib/imageFetch.ts';
 import { IMAGE_HEADER_BYTES, IMAGE_MAGIC } from '../src/types/execution.ts';
 
 /** 一段 LYIM 载荷：值 = 行号 × 100 + 列号 × channels + 通道（与像素位置一一对应，拼错一行就对不上）。 */
@@ -110,4 +115,42 @@ test('作废了就不再要后面几段：取第一段之后作废，抛 FetchAb
   );
   await assert.rejects(pending, FetchAbandoned);
   assert.equal(asked.length, 1);
+  const first = [{ id: 'A', position: [1, 2], encoding: 'rgb' }];
+  const second = [{ id: 'B', position: [6, 7], encoding: 'camera-unit-vector-xyz' }];
+  let metadata = bindImageResults('A|node|image', 'node', first, true, null);
+  let rendered = metadata.key;
+  let releaseMetadata;
+  let releasePixels;
+  const metadataB = new Promise((resolve) => {
+    releaseMetadata = resolve;
+  }).then(() => {
+    metadata = bindImageResults('B|node|image', 'node', second, true, metadata);
+  });
+  const pixelsB = new Promise((resolve) => {
+    releasePixels = resolve;
+  }).then(() => {
+    rendered = 'B|node|image';
+  });
+  metadata = bindImageResults(metadata.key, 'node', second, false, metadata);
+  assert.equal(
+    metadata.outputs,
+    first,
+    'B has finished, but delayed metadata keeps A results with A pixels',
+  );
+  assert.equal(imageEpochReady(metadata.key, rendered), true);
+  releaseMetadata();
+  await metadataB;
+  assert.equal(metadata.outputs, second);
+  assert.equal(
+    imageEpochReady(metadata.key, rendered),
+    false,
+    'B metadata cannot authorize A pixels for overlays, encoding or PNG',
+  );
+  releasePixels();
+  await pixelsB;
+  assert.equal(imageEpochReady(metadata.key, rendered), true);
+  assert.equal(
+    bindImageResults(metadata.key, 'other-node', second, false, metadata).outputs,
+    undefined,
+  );
 });

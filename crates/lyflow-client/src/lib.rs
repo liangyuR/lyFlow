@@ -15,6 +15,9 @@ use std::sync::Arc;
 
 use libloading::{Library, Symbol};
 
+mod frames;
+pub use frames::{Frame, Session};
+
 // ------------- C ABI 的类型镜像，与 core/include/lyflow/c_api.h 一一对应
 
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
@@ -370,6 +373,8 @@ pub enum CoreError {
     NulInArgument(#[from] std::ffi::NulError),
     #[error("core 没有该结果（节点没跑完，或该输出不是点云）")]
     NoSuchOutput,
+    #[error("core 操作失败: {0}")]
+    Operation(String),
 }
 
 /// 函数表的签名。写成 alias 是因为取符号的宏需要一个具名类型
@@ -529,6 +534,7 @@ pub struct Core {
     configure_python: Option<FnPythonConfigure>,
     python_status: Option<FnJson>,
     refresh_python: Option<FnJson>,
+    frames: frames::Functions,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -646,6 +652,7 @@ impl Core {
             configure_python: sym_opt!(lib, "lyflow_configure_python", FnPythonConfigure),
             python_status: sym_opt!(lib, "lyflow_python_status", FnJson),
             refresh_python: sym_opt!(lib, "lyflow_refresh_python", FnJson),
+            frames: frames::Functions::load(&lib),
             lib,
         })
     }
@@ -1510,6 +1517,7 @@ pub struct RunHandle {
     /// 等第一个 join 返回，否则「join 返回后不再回调」对它不成立。
     joined: std::sync::Mutex<bool>,
     run_id: String,
+    _frame: Option<Frame>,
 }
 
 // 跨线程共享的依据：cancel 是 relaxed 原子写；join 在 core 侧自己持一把 mutex，
@@ -1532,6 +1540,32 @@ impl RunHandle {
         cb: EventCb,
         user: Box<T>,
     ) -> Result<Self, CoreError> {
+        Self::start_inner(core, spec, cb, user, None)
+    }
+
+    unsafe fn start_inner<T>(
+        core: Arc<Core>,
+        spec: RunSpec<'_>,
+        cb: EventCb,
+        user: Box<T>,
+        frame: Option<(&Frame, &str)>,
+    ) -> Result<Self, CoreError> {
+        let frame_call = if let Some((frame, bindings)) = frame {
+            if !Arc::ptr_eq(&core, frame.core()) {
+                return Err(CoreError::Operation(
+                    "frame belongs to a different Core".into(),
+                ));
+            }
+            Some((
+                core.frames
+                    .run_start
+                    .ok_or(CoreError::MissingSymbol("lyflow_run_start_frame"))?,
+                frame,
+                CString::new(bindings)?,
+            ))
+        } else {
+            None
+        };
         let graph = CString::new(spec.graph_json)?;
         let rid = CString::new(spec.run_id)?;
         let base = CString::new(spec.base_dir)?;
@@ -1598,7 +1632,17 @@ impl RunHandle {
             drop(Box::from_raw(p as *mut T));
         }
 
-        let handle = (core.run_start)(graph.as_ptr(), &options, Some(cb), user_ptr);
+        let handle = match &frame_call {
+            Some((call, frame, bindings)) => call(
+                graph.as_ptr(),
+                &options,
+                frame.raw(),
+                bindings.as_ptr(),
+                Some(cb),
+                user_ptr,
+            ),
+            None => (core.run_start)(graph.as_ptr(), &options, Some(cb), user_ptr),
+        };
         if handle.is_null() {
             drop_user::<T>(user_ptr);
             return Err(CoreError::NullReturn);
@@ -1610,6 +1654,7 @@ impl RunHandle {
             drop_user: drop_user::<T>,
             joined: std::sync::Mutex::new(false),
             run_id: spec.run_id.to_string(),
+            _frame: frame_call.map(|(_, frame, _)| frame.clone()),
         })
     }
 
@@ -1655,6 +1700,79 @@ mod load_contract_tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn older_patch_loads_and_reports_new_frame_operations_only_when_called() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixtures = Fixtures(
+            std::env::temp_dir().join(format!("lyflow-old-patch-{}-{unique}", std::process::id())),
+        );
+        std::fs::create_dir_all(&fixtures.0).unwrap();
+        let old_version = format!("{}.0", ABI_VERSION.rsplit_once('.').unwrap().0);
+        let mut source=format!("#[no_mangle] pub extern \"C\" fn lyflow_version()->*const u8{{b\"{old_version}\\0\".as_ptr()}}\n#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string()->*const u8{{b\"{old_version}\\0\".as_ptr()}}\n");
+        for line in include_str!("lib.rs")
+            .lines()
+            .filter(|line| line.contains(": sym!(lib, \""))
+        {
+            let name = line
+                .split("sym!(lib, \"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            source.push_str(&format!("#[no_mangle] pub extern \"C\" fn {name}(){{}}\n"));
+        }
+        let input = fixtures.0.join("fixture.rs");
+        let library = fixtures
+            .0
+            .join(format!("old.{}", std::env::consts::DLL_EXTENSION));
+        std::fs::write(&input, source).unwrap();
+        let mut command = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
+        command
+            .args(["--crate-type=cdylib", "--edition=2021"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&library);
+        #[cfg(windows)]
+        command.args(["-C", "target-feature=+crt-static"]);
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let core = Arc::new(Core::load_from(&library).unwrap());
+        assert!(matches!(
+            core.runtime_capabilities(),
+            Err(CoreError::MissingSymbol("lyflow_runtime_capabilities"))
+        ));
+        assert!(matches!(
+            core.capture_frame("run", "{}", "{}"),
+            Err(CoreError::MissingSymbol("lyflow_frame_capture"))
+        ));
+        assert!(matches!(
+            core.load_frame(Path::new("missing.lyframe"), 1024),
+            Err(CoreError::MissingSymbol("lyflow_frame_load"))
+        ));
+        assert!(matches!(
+            core.create_session("{}"),
+            Err(CoreError::MissingSymbol("lyflow_session_create"))
+        ));
+        assert!(matches!(
+            core.run_bindings("run"),
+            Err(CoreError::MissingSymbol("lyflow_run_bindings"))
+        ));
+        assert!(matches!(
+            core.effective_params_with_inputs("{}", "", None, &[], &[]),
+            Err(CoreError::MissingSymbol("lyflow_effective_params_inputs"))
+        ));
+        drop(core);
+        std::fs::remove_file(library).unwrap();
     }
 
     #[test]

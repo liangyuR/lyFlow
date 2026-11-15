@@ -375,7 +375,7 @@ jobs:
   vision-native:
     name: 原生点云 / 配准 / 检测 / P4识别分割链
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
@@ -487,7 +487,7 @@ jobs:
           $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
           $env:LYFLOW_P4_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p4-assets'
           $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
-          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
+          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACKS=gap -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
           cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
@@ -509,6 +509,46 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 编译失败' }
           python tests/release/p5_sdk_contract.py --sdk "$sdk" --consumer build/p5-sdk-consumer/p5_sdk_consumer.exe --bait-dir build/p1-native/bin --output-dir build/p5-sdk-contract
           if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 工作流或依赖隔离失败' }
+
+      - name: 准备阶段6 CLI 的 Rust 工具链
+        shell: pwsh
+        run: |
+          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          rustup toolchain install $channel --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'P6 Rust 工具链安装失败' }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bridge -> ../build/p6-cli-ci
+          key: p6-headless-native
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: 阶段6新 CLI 与独立 C++17 宿主交付验收
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
+          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
+          foreach ($relative in $configuration.requiredSdkFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative) -PathType Leaf)) { throw "P6 SDK 缺少 $relative" }
+          }
+          $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p1-native/bin'
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p6-cli-ci'
+          cargo build --locked --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
+          if ($LASTEXITCODE -ne 0) { throw 'P6 新 CLI 编译失败' }
+          Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'debug/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
+          python bridge/tests/p6_delivery_contract.py --cli "$sdk/bin/lyflow.exe" --core "$sdk/bin/lyflow_core.dll" --examples "$sdk/examples" --output-dir build/p6-delivery-contract
+          if ($LASTEXITCODE -ne 0) { throw 'P6 CLI 录制/回放/日志/发布验收失败' }
+          $consumer = Join-Path $env:GITHUB_WORKSPACE 'build/p6-host-consumer'
+          New-Item -ItemType Directory -Path $consumer -Force | Out-Null
+          & cl.exe /nologo /std:c++17 /EHsc /MD /utf-8 "/I$sdk/include" "$sdk/examples/p6-delivery_host.cpp" "/Fe:$consumer/p6-delivery-host.exe" "/Fo:$consumer/p6-delivery-host.obj"
+          if ($LASTEXITCODE -ne 0) { throw 'P6 独立安装 C++17 宿主编译失败' }
+          & "$consumer/p6-delivery-host.exe" "$sdk/bin/lyflow_core.dll"
+          if ($LASTEXITCODE -ne 0) { throw 'P6 C++17 帧/会话生命周期与重算验收失败' }
+          $recording = Get-ChildItem -LiteralPath build/p6-delivery-contract -Directory | Select-Object -First 1
+          $archive = Get-ChildItem -LiteralPath (Join-Path $recording.FullName 'recording') -Filter '*.lyframe' -File | Select-Object -First 1
+          if (-not $archive) { throw 'P6 录制未产出可用于宿主验收的原生帧' }
+          & "$consumer/p6-delivery-host.exe" "$sdk/bin/lyflow_core.dll" $archive.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'P6 C++17 跨宿主读取与持有原生帧失败' }
 
       - name: 保存已验证的 OpenCV 安装
         if: github.ref == 'refs/heads/main' && steps.vision-cache.outputs.cache-hit != 'true'
@@ -533,5 +573,7 @@ jobs:
             build/barcode-deps/prepared.json
             build/p5-sdk-contract/
             build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
+            build/p6-delivery-contract/
+            build/p6-host-consumer/
           if-no-files-found: ignore
           retention-days: 7

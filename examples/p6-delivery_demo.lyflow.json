@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "p6-delivery-demo",
+  "name": "P6 原生载荷录制、日志与端点交付",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "gen.synthetic",
+      "params": { "pointCount": 100000, "withIntensity": true, "seed": 17 }
+    },
+    {
+      "id": "filtered",
+      "op": "filter.passthrough",
+      "params": { "field": "z", "min": 0, "max": 0.5 }
+    },
+    { "id": "message", "op": "value.string", "params": { "value": "P6 结果已计算\n保留原始换行" } },
+    {
+      "id": "pose2d",
+      "op": "pose.construct_2d",
+      "params": {
+        "id": "image-part",
+        "frame": "camera",
+        "unit": "px",
+        "position": [24, 32],
+        "size": [8, 6],
+        "angle": 0.35
+      }
+    },
+    {
+      "id": "pose3d",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "part-17",
+        "frame": "world",
+        "position": [0.1, -0.2, 0.35],
+        "size": [0.01, 0.02, 0.03],
+        "quaternion": [0.2, -0.3, 0.4, 0.8426149773176358]
+      }
+    },
+    {
+      "id": "image",
+      "op": "io.load_image",
+      "params": { "path": "p5-circle-front.png", "mode": "unchanged" }
+    },
+    { "id": "tensor", "op": "image.to_tensor", "params": {} }
+  ],
+  "edges": [
+    {
+      "id": "source-filtered",
+      "from": { "node": "source", "port": "cloud" },
+      "to": { "node": "filtered", "port": "cloud" }
+    },
+    {
+      "id": "image-tensor",
+      "from": { "node": "image", "port": "image" },
+      "to": { "node": "tensor", "port": "image" }
+    }
+  ],
+  "outputs": {
+    "sourceCloud": { "node": "source", "port": "cloud" },
+    "filteredCloud": { "node": "filtered", "port": "cloud" },
+    "selection": { "node": "filtered", "port": "indices" },
+    "message": { "node": "message", "port": "value" },
+    "pose2d": { "node": "pose2d", "port": "pose" },
+    "pose3d": { "node": "pose3d", "port": "pose" },
+    "image": { "node": "image", "port": "image" },
+    "tensor": { "node": "tensor", "port": "tensor" }
+  }
+}

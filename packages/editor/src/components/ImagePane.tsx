@@ -3,7 +3,7 @@
 // - 节点输出的是像素几何（找圆、区域统计的框）→ 画它**输入**的那张图，几何叠在上面；
 // - 节点带像素框参数（unit = px 的 roi，例如 image.crop）→ 画输入的那张图，框可拖、四角可拉（写回走 setParam，一次拖动一条撤销）。
 // 画布、取数、缩放平移、悬停读数都是 ImageCanvas（与连线查看器共用）；这里只管「画哪张图」与叠画。
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { effectiveParams } from '../lib/params';
 import { imageRoiParams } from '../lib/roiFrames';
@@ -17,6 +17,8 @@ import type { OperatorDesc } from '../types/manifest';
 import type { SubPath } from '../lib/subgraph';
 import { ImageCanvas, type Depth, type ImageOverlayView } from './ImageCanvas';
 import { ViewerStatus } from './ViewerStatus';
+import { useImageResults } from '../hooks/useImageResults';
+import { bindImageResults, imageEpochReady } from '../lib/imageFetch';
 
 /** 与点云拖框同一组颜色（Viewer3D 的 ROI_COLORS）。 */
 const ROI_COLORS = ['#34d399', '#f472b6', '#60a5fa', '#fbbf24', '#a78bfa', '#f87171'];
@@ -37,8 +39,11 @@ function sourceOf(
   node: GraphNode,
   op: OperatorDesc,
   wantInput: boolean,
+  selectedPort?: string,
 ): Source | null {
-  const outPort = op.outputs.find((p) => p.type === 'Image');
+  const outPort =
+    op.outputs.find((p) => p.type === 'Image' && p.name === selectedPort) ??
+    op.outputs.find((p) => p.type === 'Image');
   if (outPort && !wantInput) {
     const r = resolveOutput(doc, path, node.id, outPort.name);
     return r ? { ...r, from: 'output' } : null;
@@ -61,6 +66,8 @@ interface Meta {
   depth: Depth;
   /** 预览缩小过的图是 > 1（ADR-0028） */
   scale: number;
+  ownerNodeId: string;
+  outputs: readonly OutputStat[] | undefined;
 }
 
 export interface ImagePaneProps {
@@ -93,12 +100,13 @@ export function ImagePane({
   onRunToNode,
 }: ImagePaneProps) {
   const rois = useMemo(() => imageRoiParams(op, roiNode), [op, roiNode]);
-  const shapes = useMemo(() => (outputs ?? []).filter((o) => o.value?.unit === 'px'), [outputs]);
+  const [imagePort, setImagePort] = useState('');
+  useEffect(() => setImagePort(''), [node.id]);
   // 有框要拖、或者要叠几何而自己没有图像输出时，画输入的那张图
   const wantInput = rois.length > 0 || !op.outputs.some((p) => p.type === 'Image');
   const src = useMemo(
-    () => sourceOf(doc, path, node, op, wantInput),
-    [doc, path, node, op, wantInput],
+    () => sourceOf(doc, path, node, op, wantInput, imagePort),
+    [doc, path, node, op, wantInput, imagePort],
   );
   const srcKey = src ? `${src.nodeId}|${src.port}` : '';
   const typesByName = useManifestStore((s) => s.typesByName);
@@ -120,8 +128,40 @@ export function ImagePane({
   const [meta, setMeta] = useState<Meta | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
   const metaKey = src && shownRunId ? `${shownRunId}|${srcKey}` : '';
-  /** 同一个节点、端口的旧元信息（只是换了 runId）：新的还没到时先顶着。 */
   const sameSource = (key: string) => srcKey !== '' && key.slice(key.indexOf('|') + 1) === srcKey;
+  const m = meta && (meta.key === metaKey || sameSource(meta.key)) ? meta : null;
+  const imageRun = m ? m.key.slice(0, m.key.indexOf('|')) : null;
+  const imageOutputs = m?.ownerNodeId === node.id ? m.outputs : undefined;
+  const shapes = useMemo(
+    () => (imageOutputs ?? []).filter((output) => output.value?.unit === 'px'),
+    [imageOutputs],
+  );
+  const imageResults = useImageResults(
+    m?.ownerNodeId === node.id ? imageRun : null,
+    node.id,
+    imageOutputs,
+    m ? m.width * m.scale : 0,
+    m ? m.height * m.scale : 0,
+  );
+  const [renderedKey, setRenderedKey] = useState<string | null>(null);
+  const imageCanvasRef = imageResults.canvasRef;
+  const onRendered = useCallback(
+    (canvas: HTMLCanvasElement | null, epoch?: string) => {
+      imageCanvasRef.current = canvas;
+      setRenderedKey(canvas ? (epoch ?? null) : null);
+    },
+    [imageCanvasRef],
+  );
+  const modelQuality = imageOutputs?.find(
+    (output) => output.value?.type === 'image.ModelProjection.v1',
+  )?.value?.data;
+  const normalInfo = src
+    ? (modelQuality?.outputs as Record<string, { encoding?: string }> | undefined)?.[src.port]
+    : undefined;
+  const valueEncoding =
+    normalInfo?.encoding === 'camera-unit-vector-xyz'
+      ? ('camera-unit-vector-xyz' as const)
+      : undefined;
   useEffect(() => {
     if (!src || !shownRunId) {
       setMetaError(null);
@@ -142,14 +182,14 @@ export function ImagePane({
           return;
         }
         setMetaError(null);
-        setMeta({
-          key: metaKey,
-          width: v.width,
+        setMeta((previous) => ({
+          ...bindImageResults(metaKey, node.id, outputs, ready && shownRunId === runId, previous),
+          width: v.width!,
           height: v.height ?? 0,
           channels: v.channels ?? 0,
           depth: v.depth ?? 'u8',
           scale: typeof v.scale === 'number' && v.scale > 1 ? v.scale : 1,
-        });
+        }));
       } catch (e) {
         if (cancelled) return;
         setMeta((prev) => (prev && sameSource(prev.key) ? prev : null));
@@ -161,7 +201,7 @@ export function ImagePane({
     };
     // src 每次渲染可能是新对象；它的内容已经在 metaKey 里。节点状态变了也再问一次：同一个 runId
     // 先前问的时候结果还没到（取不到就停在「不是图像」），跑完之后 metaKey 不变、不重问就一直停在那（review 第二轮）
-  }, [metaKey, ready, nodeState]);
+  }, [metaKey, ready, nodeState, node.id]);
 
   // 说的是节点运行状态（status 来自 useViewerSource）时跟着给下一步；没图、取图出错这些不给
   const centered = (text: string, fromRun: boolean) => (
@@ -176,7 +216,6 @@ export function ImagePane({
       status !== null,
     );
   }
-  const m = meta && (meta.key === metaKey || sameSource(meta.key)) ? meta : null;
   if (!m)
     return centered(
       status ?? metaError ?? (shownRunId ? '正在取图像…' : '未运行'),
@@ -186,7 +225,6 @@ export function ImagePane({
   const colorOf = (type: string) => typesByName.get(type)?.color ?? '#fbbf24';
   // 取图用元信息所属的那一次运行（review 修正）：新一次运行的元信息还没到时，尺寸与比例还是上一次的 ——
   // 拿新 runId 配旧尺寸，预览 ↔ 正式之间切换时取到的是另一种尺度的图，画面重新适配、叠画偏一倍
-  const imageRun = m.key.slice(0, m.key.indexOf('|'));
   return (
     <div
       className="viewer__image"
@@ -195,8 +233,41 @@ export function ImagePane({
       data-source-node={src.nodeId}
       data-shapes={shapes.length}
       data-rois={rois.length}
-      data-showing-run={shownRunId ?? ''}
+      data-showing-run={imageRun ?? ''}
+      data-rendered-epoch={renderedKey ?? ''}
     >
+      {
+        <div className="viewer__result-tools">
+          {op.outputs.filter((port) => port.type === 'Image').length > 1 && !wantInput && (
+            <label>
+              图像输出
+              <select
+                aria-label="图像输出端口"
+                value={src.port}
+                onChange={(event) => setImagePort(event.target.value)}
+              >
+                {op.outputs
+                  .filter((port) => port.type === 'Image')
+                  .map((port) => (
+                    <option key={port.name} value={port.name}>
+                      {port.label || port.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+          <button
+            className="viewer__btn"
+            type="button"
+            data-testid="viewer-image-export"
+            disabled={!imageEpochReady(m.key, renderedKey) || m.ownerNodeId !== node.id}
+            onClick={() => void imageResults.exportPng()}
+          >
+            PNG
+          </button>
+        </div>
+      }
+      {imageResults.toolbar}
       <ImageCanvas
         runId={imageRun}
         nodeId={src.nodeId}
@@ -206,20 +277,23 @@ export function ImagePane({
         channels={m.channels}
         depth={m.depth}
         pixelScale={m.scale}
+        {...(valueEncoding ? { valueEncoding } : {})}
         testid="viewer-image"
+        onRendered={onRendered}
         overlay={(view) => (
           <>
             <ShapeOverlay view={view} shapes={shapes} colorOf={colorOf} />
+            {imageResults.overlay(view)}
             {rois.length > 0 && (
               <RoiOverlay view={view} nodeId={node.id} op={op} roiNode={roiNode} rois={rois} />
             )}
           </>
         )}
       />
-      {status !== null && (
+      {(status !== null || m.key !== metaKey) && (
         // 画面是上一次的结果：状态缩在角上，不盖住图
         <div className="viewer__empty viewer__empty--corner" data-testid="viewer3d-status">
-          {status}
+          {status ?? metaError ?? '正在更新图像信息，当前为上次结果'}
         </div>
       )}
     </div>
@@ -237,6 +311,7 @@ function ShapeOverlay({
   shapes: readonly OutputStat[];
   colorOf: (type: string) => string;
 }) {
+  if (view.isCurrent === false) return null;
   const [W, H] = [view.fullWidth, view.fullHeight];
   return (
     <svg className="viewer-image__shapes" data-testid="viewer-image-shapes">

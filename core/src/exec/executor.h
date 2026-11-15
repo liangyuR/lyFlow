@@ -140,7 +140,8 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
 /// source 四种：`default`（图里没写）/ `explicit`（图里写了）/ `bound`（子图提升参数灌进来的）/
 /// `graph`（顶层图参数灌进来的，另带 graphParam 说是哪一个）。
 std::string effectiveParamsJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                                const std::string& paramsJson = {});
+                                const std::string& paramsJson = {},
+                                const std::vector<InjectedInput>& inputs = {});
 
 /// 某次运行的图级命名输出（ADR-0017）。返回
 /// `{ name: { node, port, type, elementCount, byteSize, value? } }`。

@@ -11,10 +11,25 @@ import type { RoiItem } from '../components/RoiLayer';
 
 const frame: Frame = { id: 'editor-world', unit: 'm', axes: ['X', 'Y'], yDirection: 'up' };
 
-function layersOf(root: THREE.Object3D, prefix: string): Layer[] {
+function layersOf(root: THREE.Object3D, prefix: string, outputFrame: Frame = frame): Layer[] {
   const result: Layer[] = [];
   root.updateWorldMatrix(true, true);
   root.traverseVisible((object) => {
+    if (object instanceof THREE.Sprite && typeof object.userData.label === 'string') {
+      const position = new THREE.Vector3();
+      object.getWorldPosition(position);
+      result.push({
+        id: `${prefix}-${result.length}`,
+        instanceId: object.userData.instanceId,
+        label: object.userData.label,
+        kind: 'text',
+        frame: outputFrame,
+        position: [position.x, position.y],
+        text: object.userData.label,
+        color: object.userData.color,
+      });
+      return;
+    }
     if (!(object instanceof THREE.Points) && !(object instanceof THREE.Line)) return;
     const attr = object.geometry.getAttribute('position');
     if (!attr) return;
@@ -37,7 +52,10 @@ function layersOf(root: THREE.Object3D, prefix: string): Layer[] {
     const common = {
       id: `${prefix}-${result.length}`,
       label: prefix,
-      frame,
+      frame: outputFrame,
+      ...(typeof object.userData.instanceId === 'string'
+        ? { instanceId: object.userData.instanceId }
+        : {}),
       color: material.vertexColors ? '#2563eb' : `#${material.color.getHexString()}`,
       opacity: material.opacity,
     };
@@ -89,11 +107,20 @@ export function sceneSpecsOf(
   const bounds: [number, number, number, number] = [lower.x, lower.y, upper.x, upper.y];
   return Array.from({ length: scene.views }, (_, i) => {
     const pane = i as 0 | 1;
+    const frames = [
+      ...new Set(
+        scene.overlays[pane].children
+          .map((object) => object.userData.frame)
+          .filter((id): id is string => typeof id === 'string'),
+      ),
+    ];
+    if (frames.length > 1) throw new Error('Export requires one explicit scene frame');
+    const outputFrame: Frame = frames.length === 1 ? { ...frame, id: frames[0]! } : frame;
     const layers = [
-      ...(scene.points[pane] ? layersOf(scene.points[pane]!, 'cloud') : []),
-      ...layersOf(scene.overlays[pane], 'algorithm geometry'),
-      ...layersOf(scene.backdrop, 'backdrop'),
-      ...layersOf(scene.measure, 'interactive measurement'),
+      ...(scene.points[pane] ? layersOf(scene.points[pane]!, 'cloud', outputFrame) : []),
+      ...layersOf(scene.overlays[pane], 'algorithm geometry', outputFrame),
+      ...layersOf(scene.backdrop, 'backdrop', outputFrame),
+      ...layersOf(scene.measure, 'interactive measurement', outputFrame),
     ];
     const identity = identities[i];
     if (identity?.totalPoints !== undefined && layers[0]?.kind === 'points')
@@ -105,7 +132,7 @@ export function sceneSpecsOf(
         layers.push({
           id: `roi-${roi.param}`,
           label: roi.label,
-          frame,
+          frame: outputFrame,
           kind: 'box',
           color: roi.color,
           bounds: b as [number, number, number, number],
@@ -114,7 +141,7 @@ export function sceneSpecsOf(
     return {
       schemaVersion: 1,
       title: titles[i] ?? `View ${i + 1}`,
-      frame,
+      frame: outputFrame,
       layers,
       annotations: identity
         ? [

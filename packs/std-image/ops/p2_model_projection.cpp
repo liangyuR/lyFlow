@@ -203,7 +203,11 @@ Matrix poseMatrix(const Json& pose) {
   return matrix;
 }
 
-Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx) {
+Status render(const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
+  const auto mode = params.text("renderMode");
+  if (mode != "overlay" && mode != "mask" && mode != "edge_mask" && mode != "depth" &&
+      mode != "normal")
+    return img::badParam("模型渲染模式无效", "renderMode");
   const auto* image = in.get("image").asImage();
   auto status = image_p1::image(image, "image", false, kMaxPixels);
   if (!status.ok)
@@ -212,6 +216,19 @@ Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx
   status = cloudInput(model, "model");
   if (!status.ok)
     return status;
+  bool normalAvailable = model->pointCount() > 0 && !model->normals.empty();
+  if (normalAvailable)
+    for (std::size_t i = 0; i < model->pointCount(); ++i) {
+      if ((i & 8191) == 0 && ctx.cancelled())
+        return fail("模型法线验证已取消", "model", "cancelled");
+      if (std::hypot(model->normals[3 * i], model->normals[3 * i + 1], model->normals[3 * i + 2]) ==
+          0) {
+        normalAvailable = false;
+        break;
+      }
+    }
+  if (mode == "normal" && !normalAvailable)
+    return fail("法线渲染需要每个模型点都具有有限非零法线", "model");
   calibration::Camera camera;
   status = cameraInput(in, *image, camera);
   if (!status.ok)
@@ -229,10 +246,13 @@ Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx
     return status;
   std::vector<double> depths(image->pixelCount(), std::numeric_limits<double>::infinity());
   std::vector<std::int32_t> owners(image->pixelCount(), -1);
+  cv::Mat normals;
+  if (normalAvailable)
+    normals = cv::Mat(image->height, image->width, CV_32FC3, cv::Scalar::all(0));
   std::vector<Pixel> pixels;
   for (std::size_t instance = 0; instance < items.size(); ++instance) {
-    status =
-        project(*model, sceneToCamera * poseMatrix(items[instance]), camera, *image, pixels, ctx);
+    const auto modelToCamera = sceneToCamera * poseMatrix(items[instance]);
+    status = project(*model, modelToCamera, camera, *image, pixels, ctx);
     if (!status.ok)
       return status;
     for (std::size_t i = 0; i < pixels.size(); ++i) {
@@ -245,10 +265,25 @@ Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx
       if (pixel.depth < depths[index]) {
         depths[index] = pixel.depth;
         owners[index] = static_cast<std::int32_t>(instance);
+        if (normalAvailable) {
+          const cv::Vec3d input(model->normals[3 * i], model->normals[3 * i + 1],
+                                model->normals[3 * i + 2]);
+          cv::Vec3d transformed;
+          for (int row = 0; row < 3; ++row)
+            transformed[row] = modelToCamera(row, 0) * input[0] + modelToCamera(row, 1) * input[1] +
+                               modelToCamera(row, 2) * input[2];
+          transformed /= cv::norm(transformed);
+          normals.at<cv::Vec3f>(pixel.y, pixel.x) = cv::Vec3f(transformed);
+        }
       }
     }
   }
-  cv::Mat overlay = cvx::view(*image).clone();
+  cv::Mat overlay;
+  if (mode == "overlay")
+    overlay = cvx::view(*image).clone();
+  cv::Mat mask(image->height, image->width, CV_8UC1, cv::Scalar::all(0));
+  cv::Mat edgeMask(image->height, image->width, CV_8UC1, cv::Scalar::all(0));
+  cv::Mat depth(image->height, image->width, CV_32FC1, cv::Scalar::all(0));
   const double full = image->depth == PixelDepth::U8    ? 255
                       : image->depth == PixelDepth::U16 ? 65535
                                                         : 1;
@@ -260,7 +295,18 @@ Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx
       const auto index = static_cast<std::size_t>(y) * image->width + x;
       if (owners[index] < 0)
         continue;
+      if (depths[index] > std::numeric_limits<float>::max())
+        return fail("相机深度超过F32米制范围", "depth");
+      mask.at<std::uint8_t>(y, x) = 255;
+      depth.at<float>(y, x) = static_cast<float>(depths[index]);
+      if (x == 0 || y == 0 || x == image->width - 1 || y == image->height - 1 ||
+          owners[index - 1] != owners[index] || owners[index + 1] != owners[index] ||
+          owners[index - image->width] != owners[index] ||
+          owners[index + image->width] != owners[index])
+        edgeMask.at<std::uint8_t>(y, x) = 255;
       ++rendered;
+      if (mode != "overlay")
+        continue;
       const auto tint = owners[index] % 3;
       cv::Scalar color = image->channels == 1 ? cv::Scalar(full) : cv::Scalar(0, full, 0, full);
       if (image->channels > 1) {
@@ -270,26 +316,60 @@ Status render(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx
       cv::rectangle(overlay, cv::Rect(x, y, 1, 1), color, cv::FILLED);
     }
   }
-  if (image->channels == 4) {
+  if (mode == "overlay" && image->channels == 4) {
     const int channels[] = {3, 3};
     const cv::Mat original = cvx::view(*image);
     cv::mixChannels(&original, 1, &overlay, 1, channels, 1);
   }
   Image result;
-  if (!cvx::fromMat(std::move(overlay), result))
+  const cv::Mat selected = mode == "mask"        ? mask
+                           : mode == "edge_mask" ? edgeMask
+                           : mode == "depth"     ? depth
+                           : mode == "normal"    ? normals
+                                                 : overlay;
+  if (!cvx::fromMat(selected, result))
     return fail("输出图像格式不合法", "image");
   result.scale = image->scale;
-  Record quality{"image.ModelProjection.v1",
-                 {{"frame", camera.frame},
-                  {"unit", "px"},
-                  {"imageSize", {camera.width, camera.height}},
-                  {"imageScale", image->scale},
-                  {"instanceCount", items.size()},
-                  {"renderedPixels", rendered},
-                  {"method", "calibrated-model-point-zbuffer"}}};
+  Record quality{
+      "image.ModelProjection.v1",
+      {{"frame", camera.frame},
+       {"unit", "px"},
+       {"imageSize", {camera.width, camera.height}},
+       {"imageScale", image->scale},
+       {"instanceCount", items.size()},
+       {"renderedPixels", rendered},
+       {"renderMode", mode},
+       {"normalAvailable", normalAvailable},
+       {"outputs",
+        {{"image",
+          {{"encoding", mode == "normal"  ? "camera-unit-vector-xyz"
+                        : mode == "depth" ? "camera-z-meters"
+                                          : mode}}},
+         {"mask", {{"encoding", "binary-0-255"}}},
+         {"edge_mask", {{"encoding", "visible-instance-boundary-0-255"}}},
+         {"depth",
+          {{"encoding", "camera-z-meters"}, {"unit", "m"}, {"invalid", 0}, {"validMask", "mask"}}},
+         {"normal",
+          {{"encoding", "camera-unit-vector-xyz"},
+           {"frame", camera.frame},
+           {"invalid", 0},
+           {"available", normalAvailable},
+           {"validMask", "mask"}}}}},
+       {"method", "calibrated-model-point-zbuffer"}}};
   if (ctx.cancelled())
     return fail("模型叠图已取消", "image", "cancelled");
+  Image maskResult, edgeResult, depthResult, normalResult;
+  if (!cvx::fromMat(mask, maskResult) || !cvx::fromMat(edgeMask, edgeResult) ||
+      !cvx::fromMat(depth, depthResult) ||
+      (normalAvailable && !cvx::fromMat(normals, normalResult)))
+    return fail("模型渲染输出图像格式不合法", "image");
+  maskResult.scale = edgeResult.scale = depthResult.scale = normalResult.scale = image->scale;
   out.set("image", Data::image(std::move(result)));
+  out.set("mask", Data::image(std::move(maskResult)));
+  out.set("edge_mask", Data::image(std::move(edgeResult)));
+  out.set("depth", Data::image(std::move(depthResult)));
+  if (normalAvailable)
+    out.set("normal", Data::image(std::move(normalResult)));
   out.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
 }
@@ -328,15 +408,30 @@ void registerP2ModelProjection(Registry& registry) {
   };
   registry.addOperator(std::move(op));
 
-  op = image_p1::descriptor("image.render_model_3d", "三维模板投影叠图",
-                            "render centered 3d model poses calibrated image overlay zbuffer");
+  op = image_p1::descriptor(
+      "image.render_model_3d", "三维模板投影叠图",
+      "render centered 3d model poses calibrated image overlay mask edge depth normal zbuffer");
+  op.version = "1.1.0";
   op.doc =
-      "将居中模型按Pose3D变换到场景，经显式场景到相机变换及相机畸变投影。点云模板采用像素z-buffer叠图，保留位深/通道/alpha，不合成不可见的Mesh表面。";
+      "按Pose3D及标定投影点云模板，最近相机Z决定遮挡。默认叠图保留位深/通道/alpha；另输出U8可见mask/四邻域实例边界、F32米制相机Z（背景0，mask为有效位）。有非零模型法线时输出F32相机单位XYZ法线；缺法线normal模式报错，普通模式不产normal。所有输出保留scale。不合成点云未覆盖的Mesh表面。";
   op.inputs = {img::imageIn(), Port{"model", "PointCloud", "居中模型", "模型局部米制坐标", true},
                image_p1::recordPort("instances", poses::kPoses3DType),
                image_p1::recordPort("calib", calibration::kCameraType),
                Port{"sceneToCamera", "Transform", "场景到相机", "跨帧时必填", false}};
-  op.outputs = {img::imageOut(), image_p1::recordPort("quality", "image.ModelProjection.v1")};
+  op.outputs = {img::imageOut(),
+                img::imageOut("mask", "U8可见区域0/255"),
+                img::imageOut("edge_mask", "U8可见实例四邻域边界0/255"),
+                img::imageOut("depth", "F32相机Z，米；背景0，以mask判有效"),
+                Port{"normal", "Image", "相机法线", "F32 XYZ单位向量，需模型法线", false},
+                image_p1::recordPort("quality", "image.ModelProjection.v1")};
+  op.params = {
+      img::enumParam("renderMode", "主图模式", "overlay",
+                     {{"overlay", "实例叠图"},
+                      {"mask", "可见掩膜"},
+                      {"edge_mask", "实例边界"},
+                      {"depth", "米制深度"},
+                      {"normal", "相机法线"}},
+                     "改变主image端口的真实格式；独立mask/edge_mask/depth及可选normal仍可连线")};
   op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
     return guarded(in, p, out, ctx, true);
   };

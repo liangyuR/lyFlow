@@ -297,6 +297,8 @@ macro_rules! lyflow_handler {
         $crate::tauri::generate_handler![
             $crate::commands::get_manifest,
             $crate::commands::get_core_info,
+            $crate::commands::get_runtime_capabilities,
+            $crate::commands::get_run_bindings,
             $crate::commands::save_graph,
             $crate::commands::load_graph,
             $crate::commands::validate_graph,

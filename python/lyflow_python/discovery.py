@@ -88,5 +88,7 @@ class Discovery:
                 enabled[identifier] = entries[0]
         check_cancelled()
         self.operators = enabled
+        from .api import DATA_PROTOCOL_VERSION
         return {"operators": [enabled[key][1] for key in sorted(enabled)], "problems": problems,
+                "dataProtocolVersion": DATA_PROTOCOL_VERSION,
                 "pythonVersion": platform.python_version(), "numpyVersion": np.__version__}

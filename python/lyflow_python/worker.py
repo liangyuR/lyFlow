@@ -153,7 +153,8 @@ class Worker:
                     raise
                 raise TaskFailure("python_output_invalid", error) from error
             success = True
-            return {"outputs": outputs}
+            from lyflow_python.api import DATA_PROTOCOL_VERSION
+            return {"outputs": outputs, "dataProtocolVersion": DATA_PROTOCOL_VERSION}
         finally:
             codec.close(success=success)
 
@@ -168,7 +169,9 @@ class Worker:
                 if sys.version_info < (3, 11):
                     version = ".".join(str(part) for part in sys.version_info[:3])
                     raise TaskFailure("python_version_unsupported", RuntimeError(f"LyFlow Python nodes require Python 3.11 or newer; current interpreter is {version}"))
-                from lyflow_python.api import Context, NodeCancelled
+                from lyflow_python.api import DATA_PROTOCOL_VERSION, Context, NodeCancelled
+                if type(request.get("dataProtocolVersion")) is not int or request["dataProtocolVersion"] != DATA_PROTOCOL_VERSION:
+                    raise TaskFailure("python_protocol_error", ProtocolError(f"dataProtocolVersion must be {DATA_PROTOCOL_VERSION}; update the SDK and worker together"))
                 context = Context(base_dir=request.get("baseDir", ""), thread_budget=request.get("threadBudget", 1),
                                   cancel_event=cancellation, emit=lambda event: self.emit(identifier, event))
                 context.check_cancelled()

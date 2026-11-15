@@ -21,6 +21,8 @@ export function disposeOverlay(group: THREE.Group) {
     const line = child as THREE.Line;
     line.geometry?.dispose();
     const m = line.material as THREE.Material | THREE.Material[];
+    for (const material of Array.isArray(m) ? m : [m])
+      (material as THREE.Material & { map?: THREE.Texture })?.map?.dispose();
     if (Array.isArray(m)) m.forEach((x) => x.dispose());
     else m?.dispose();
   }
