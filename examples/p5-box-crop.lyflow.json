@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-box-crop",
+  "name": "P5 稳定盒体表面采样、有限体裁剪与紧凑移除",
+  "nodes": [
+    {
+      "id": "boxA",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "boxA",
+        "frame": "world",
+        "position": [0, 0, 0.5],
+        "size": [0.125, 0.125, 0.03125]
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "boxB",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "boxB",
+        "frame": "world",
+        "position": [0.25, 0, 0.5],
+        "size": [0.0625, 0.0625, 0.0625]
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "boxes",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "sample",
+      "op": "cloud.box_sample",
+      "params": {
+        "pointsPerFace": 100,
+        "seed": 7,
+        "wireSpacing": 0.01
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "crop",
+      "op": "cloud.crop_primitives",
+      "params": {
+        "frame": "world"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "remove",
+      "op": "cloud.remove_primitives",
+      "params": {
+        "frame": "world",
+        "mode": "shape",
+        "outputMode": "compact"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "boxA-pose-boxes-a",
+      "from": {
+        "node": "boxA",
+        "port": "pose"
+      },
+      "to": {
+        "node": "boxes",
+        "port": "a"
+      }
+    },
+    {
+      "id": "boxB-pose-boxes-b",
+      "from": {
+        "node": "boxB",
+        "port": "pose"
+      },
+      "to": {
+        "node": "boxes",
+        "port": "b"
+      }
+    },
+    {
+      "id": "boxes-poses-sample-boxes",
+      "from": {
+        "node": "boxes",
+        "port": "poses"
+      },
+      "to": {
+        "node": "sample",
+        "port": "boxes"
+      }
+    },
+    {
+      "id": "sample-cloud-crop-cloud",
+      "from": {
+        "node": "sample",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "crop",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "boxes-poses-crop-poses",
+      "from": {
+        "node": "boxes",
+        "port": "poses"
+      },
+      "to": {
+        "node": "crop",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "sample-cloud-remove-cloud",
+      "from": {
+        "node": "sample",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "remove",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "boxes-poses-remove-poses",
+      "from": {
+        "node": "boxes",
+        "port": "poses"
+      },
+      "to": {
+        "node": "remove",
+        "port": "poses"
+      }
+    }
+  ],
+  "params": {
+    "shape": {
+      "type": "string",
+      "default": "box",
+      "binds": ["crop.shape", "remove.shape"]
+    }
+  },
+  "outputs": {
+    "poses": {
+      "node": "boxes",
+      "port": "poses"
+    },
+    "sourceCloud": {
+      "node": "sample",
+      "port": "cloud"
+    },
+    "wireframe": {
+      "node": "sample",
+      "port": "wireframe"
+    },
+    "sampleIndices": {
+      "node": "sample",
+      "port": "indices"
+    },
+    "sampleGroups": {
+      "node": "sample",
+      "port": "groups"
+    },
+    "wireIndices": {
+      "node": "sample",
+      "port": "wireIndices"
+    },
+    "wireGroups": {
+      "node": "sample",
+      "port": "wireGroups"
+    },
+    "sampleQuality": {
+      "node": "sample",
+      "port": "quality"
+    },
+    "cropped": {
+      "node": "crop",
+      "port": "inner"
+    },
+    "outside": {
+      "node": "crop",
+      "port": "outer"
+    },
+    "innerIndices": {
+      "node": "crop",
+      "port": "innerIndices"
+    },
+    "outerIndices": {
+      "node": "crop",
+      "port": "outerIndices"
+    },
+    "groupIndices": {
+      "node": "crop",
+      "port": "groupIndices"
+    },
+    "groups": {
+      "node": "crop",
+      "port": "groups"
+    },
+    "cropQuality": {
+      "node": "crop",
+      "port": "quality"
+    },
+    "cloud": {
+      "node": "remove",
+      "port": "cloud"
+    },
+    "removed": {
+      "node": "remove",
+      "port": "inner"
+    },
+    "removedIndices": {
+      "node": "remove",
+      "port": "innerIndices"
+    },
+    "keptIndices": {
+      "node": "remove",
+      "port": "outerIndices"
+    },
+    "removeGroupIndices": {
+      "node": "remove",
+      "port": "groupIndices"
+    },
+    "removeGroups": {
+      "node": "remove",
+      "port": "groups"
+    },
+    "quality": {
+      "node": "remove",
+      "port": "quality"
+    }
+  }
+}

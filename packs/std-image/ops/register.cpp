@@ -41,6 +41,9 @@ void registerPackOps(Registry& r) {
   ops::registerP4Barcodes(r);
   ops::registerP4OcrImage(r);
   ops::registerP4Segmentation(r);
+  ops::registerP5Projection(r);
+  ops::registerP5Inspection(r);
+  ops::registerP5PoseProjection(r);
 }
 
 } // namespace lyflow::packs::std_image

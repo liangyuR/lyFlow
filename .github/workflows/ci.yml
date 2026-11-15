@@ -64,8 +64,10 @@ jobs:
           python tests/release/test-fetch-barcode-deps.py
           python tests/release/test_fetch_p4_assets.py
 
-      - name: P4示例JSON Schema契约（仅schema，不代替真实CLI门禁）
-        run: python tests/release/p4_contract.py --schema-only
+      - name: P4/P5示例JSON Schema契约（仅schema，不代替真实CLI门禁）
+        run: |
+          python tests/release/p4_contract.py --schema-only
+          python tests/release/p5_contract.py --schema-only
 
       - name: C++ 格式检查（clang-format 20.1.8）
         shell: bash
@@ -365,6 +367,8 @@ jobs:
             build/vision-opencv/*.log
             build/vision-deps/prepared.json
             build/barcode-deps/prepared.json
+            build/p5-sdk-contract/
+            build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: ignore
           retention-days: 7
 
@@ -492,6 +496,20 @@ jobs:
           ctest --test-dir build/p1-native --output-on-failure --no-tests=error --output-junit test-results.xml
           if ($LASTEXITCODE -ne 0) { throw 'P1 点云/检测组合回归失败' }
 
+      - name: 阶段5独立安装 C++17 SDK 与加载隔离契约
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
+          cmake --install build/p1-native --prefix "$sdk"
+          if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 安装失败' }
+          cmake -S tests/release/p5_sdk_consumer -B build/p5-sdk-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= "-Dlyflow_DIR=$sdk" "-DLYFLOW_CONSUMER_VERSION=$version"
+          if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 配置失败' }
+          cmake --build build/p5-sdk-consumer --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 编译失败' }
+          python tests/release/p5_sdk_contract.py --sdk "$sdk" --consumer build/p5-sdk-consumer/p5_sdk_consumer.exe --bait-dir build/p1-native/bin --output-dir build/p5-sdk-contract
+          if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 工作流或依赖隔离失败' }
+
       - name: 保存已验证的 OpenCV 安装
         if: github.ref == 'refs/heads/main' && steps.vision-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -513,5 +531,7 @@ jobs:
             build/release-dependency-diagnostics/
             build/vision-opencv/*.log
             build/barcode-deps/prepared.json
+            build/p5-sdk-contract/
+            build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: ignore
           retention-days: 7

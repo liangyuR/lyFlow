@@ -1,0 +1,519 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-depth-inspection",
+  "name": "P5 相机组织视图、可审计填洞、物理缺陷与真实截面",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "camera",
+        "unit": "m"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "image",
+      "op": "io.load_image",
+      "params": {
+        "mode": "unchanged"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "project",
+      "op": "cloud.project_camera",
+      "params": {
+        "cloudFrame": "camera",
+        "imageFrame": "image",
+        "colorSource": "cloud"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "plane",
+      "op": "geometry.plane",
+      "params": {
+        "normal": [0, 0, 1],
+        "offset": -1
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "fill",
+      "op": "cloud.fill_holes",
+      "params": {
+        "closeKernel": 5,
+        "fillKernel": 7
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "defects",
+      "op": "depth.defects",
+      "params": {
+        "planeFrame": "camera",
+        "distanceThreshold": 0.005,
+        "minCoverage": 0.99
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "profiles",
+      "op": "depth.profile_slices",
+      "params": {
+        "planeFrame": "camera",
+        "sliceCount": 6,
+        "aWidth": 2,
+        "bWidth": 2,
+        "min": 0,
+        "max": 1
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 260
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-cloud-project-cloud",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "project",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "image-image-project-image",
+      "from": {
+        "node": "image",
+        "port": "image"
+      },
+      "to": {
+        "node": "project",
+        "port": "image"
+      }
+    },
+    {
+      "id": "camera-calib-project-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "project",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "project-cloud-fill-cloud",
+      "from": {
+        "node": "project",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "fill",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "project-depth-fill-depth",
+      "from": {
+        "node": "project",
+        "port": "depth"
+      },
+      "to": {
+        "node": "fill",
+        "port": "depth"
+      }
+    },
+    {
+      "id": "project-status-fill-status",
+      "from": {
+        "node": "project",
+        "port": "status"
+      },
+      "to": {
+        "node": "fill",
+        "port": "status"
+      }
+    },
+    {
+      "id": "project-indexMap-fill-indexMap",
+      "from": {
+        "node": "project",
+        "port": "indexMap"
+      },
+      "to": {
+        "node": "fill",
+        "port": "indexMap"
+      }
+    },
+    {
+      "id": "project-mapping-fill-mapping",
+      "from": {
+        "node": "project",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "fill",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "fill-cloud-defects-cloud",
+      "from": {
+        "node": "fill",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "defects",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "fill-depth-defects-depth",
+      "from": {
+        "node": "fill",
+        "port": "depth"
+      },
+      "to": {
+        "node": "defects",
+        "port": "depth"
+      }
+    },
+    {
+      "id": "fill-status-defects-status",
+      "from": {
+        "node": "fill",
+        "port": "status"
+      },
+      "to": {
+        "node": "defects",
+        "port": "status"
+      }
+    },
+    {
+      "id": "fill-indexMap-defects-indexMap",
+      "from": {
+        "node": "fill",
+        "port": "indexMap"
+      },
+      "to": {
+        "node": "defects",
+        "port": "indexMap"
+      }
+    },
+    {
+      "id": "fill-mapping-defects-mapping",
+      "from": {
+        "node": "fill",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "defects",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "plane-plane-defects-plane",
+      "from": {
+        "node": "plane",
+        "port": "plane"
+      },
+      "to": {
+        "node": "defects",
+        "port": "plane"
+      }
+    },
+    {
+      "id": "fill-cloud-profiles-cloud",
+      "from": {
+        "node": "fill",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "fill-depth-profiles-depth",
+      "from": {
+        "node": "fill",
+        "port": "depth"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "depth"
+      }
+    },
+    {
+      "id": "fill-status-profiles-status",
+      "from": {
+        "node": "fill",
+        "port": "status"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "status"
+      }
+    },
+    {
+      "id": "fill-indexMap-profiles-indexMap",
+      "from": {
+        "node": "fill",
+        "port": "indexMap"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "indexMap"
+      }
+    },
+    {
+      "id": "fill-mapping-profiles-mapping",
+      "from": {
+        "node": "fill",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "plane-plane-profiles-plane",
+      "from": {
+        "node": "plane",
+        "port": "plane"
+      },
+      "to": {
+        "node": "profiles",
+        "port": "plane"
+      }
+    }
+  ],
+  "params": {
+    "cloudPath": {
+      "type": "path",
+      "default": "p5-scene.pcd",
+      "binds": ["source.path"]
+    },
+    "imagePath": {
+      "type": "path",
+      "default": "1700000001000-p5-scene.png",
+      "binds": ["image.path"]
+    },
+    "cameraPath": {
+      "type": "path",
+      "default": "p5-camera.json",
+      "binds": ["camera.path"]
+    },
+    "defectMode": {
+      "type": "string",
+      "default": "both",
+      "binds": ["defects.mode"]
+    },
+    "aType": {
+      "type": "string",
+      "default": "left-most",
+      "binds": ["profiles.aType"]
+    },
+    "bType": {
+      "type": "string",
+      "default": "right-most",
+      "binds": ["profiles.bType"]
+    },
+    "profileDirection": {
+      "type": "string",
+      "default": "x",
+      "binds": ["profiles.direction"]
+    },
+    "attributeMode": {
+      "type": "string",
+      "default": "x-x",
+      "binds": ["profiles.attributeMode"]
+    }
+  },
+  "outputs": {
+    "sourceCloud": {
+      "node": "source",
+      "port": "cloud"
+    },
+    "projectedCloud": {
+      "node": "project",
+      "port": "cloud"
+    },
+    "projectionQuality": {
+      "node": "project",
+      "port": "quality"
+    },
+    "projectionMapping": {
+      "node": "project",
+      "port": "mapping"
+    },
+    "projectedDepth": {
+      "node": "project",
+      "port": "depth"
+    },
+    "projectedStatus": {
+      "node": "project",
+      "port": "status"
+    },
+    "projectedIndexMap": {
+      "node": "project",
+      "port": "indexMap"
+    },
+    "sourceIndexMap": {
+      "node": "project",
+      "port": "sourceIndexMap"
+    },
+    "pointState": {
+      "node": "project",
+      "port": "pointState"
+    },
+    "sourceImage": {
+      "node": "project",
+      "port": "image"
+    },
+    "cloud": {
+      "node": "fill",
+      "port": "cloud"
+    },
+    "depth": {
+      "node": "fill",
+      "port": "depth"
+    },
+    "status": {
+      "node": "fill",
+      "port": "status"
+    },
+    "indexMap": {
+      "node": "fill",
+      "port": "indexMap"
+    },
+    "mapping": {
+      "node": "fill",
+      "port": "mapping"
+    },
+    "filledMask": {
+      "node": "fill",
+      "port": "filledMask"
+    },
+    "filledIndices": {
+      "node": "fill",
+      "port": "filledIndices"
+    },
+    "fillQuality": {
+      "node": "fill",
+      "port": "quality"
+    },
+    "defects": {
+      "node": "defects",
+      "port": "defects"
+    },
+    "defectInstances": {
+      "node": "defects",
+      "port": "instances"
+    },
+    "defectMask": {
+      "node": "defects",
+      "port": "mask"
+    },
+    "height": {
+      "node": "defects",
+      "port": "height"
+    },
+    "defectOverlay": {
+      "node": "defects",
+      "port": "overlay"
+    },
+    "features": {
+      "node": "profiles",
+      "port": "features"
+    },
+    "profiles": {
+      "node": "profiles",
+      "port": "profiles"
+    },
+    "attributes": {
+      "node": "profiles",
+      "port": "attributes"
+    },
+    "attributeValid": {
+      "node": "profiles",
+      "port": "attributeValid"
+    },
+    "supports": {
+      "node": "profiles",
+      "port": "supports"
+    },
+    "sliceCloud": {
+      "node": "profiles",
+      "port": "sliceCloud"
+    },
+    "sliceIndices": {
+      "node": "profiles",
+      "port": "indices"
+    },
+    "sliceGroups": {
+      "node": "profiles",
+      "port": "groups"
+    },
+    "profileOverlay": {
+      "node": "profiles",
+      "port": "overlay"
+    },
+    "profilePlot": {
+      "node": "profiles",
+      "port": "plot"
+    }
+  }
+}

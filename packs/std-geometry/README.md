@@ -1,6 +1,6 @@
 # std-geometry
 
-无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.2.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI。
+无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.3.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI。
 
 | ID | 名称 | 输入 → 输出 |
 |---|---|---|
@@ -93,3 +93,21 @@ P1 在不增加核心种类或 ABI 的前提下，提供以下节点。外部20�
 `pose.filter` 的区间包含端点；缺失可选字段不匹配。最小间距模式按原输入顺序，对已接受项贪心检查，保留首项且不重新排序；面积为sizeX×sizeY，单位是实例单位的平方，不替代抓取面积。`pose.update` 的attributes整体替换，非法补丁即使面对空列表也报错。文本序列化采用JSON可往返数值精度，完整集合超过64KiB时明确报错，调用者需先拆分，不能截断首项或丢失元数据。
 
 `pose.to_world_plane` 仅适用于已知物理平面：`image.PlaneCalib.H` 的像素→mm/m先换算为米，再乘显式plane→world刚体。朝向由单应性在中心的局部雅可比求出；size3D为已知物理输入，默认零占位必须由用户配置为正数。它不是任意深度恢复、相机6DoF估计或机器人FrameTree协议适配。一个无图像/点云依赖的完整例子见[非交换位姿链](../../examples/p1-pose-flow.lyflow.json)。
+
+## P2 阶段5：三维对称规则、比较、刚体检查与升维
+
+LyFlow 1.3.11 / std-geometry 0.3.0 增加七个无PCL/OpenCV依赖的节点。完整源模式、退化与数值契约见[姿态几何分析](../../docs/p5-analysis-pose-geometry.md)，可执行组合见[阶段5示例](../../docs/p5-examples.md)。本节描述源码已实现，最终完整运行门禁仍在执行，不代表现场精度或抓取许可已验证。
+
+| 入口                  | 契约                                                                                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pose.flip_axis_3d`   | 显式n重局部旋转对称类内，优化指定轴与父帧方向的点积；不从尺寸猜对称。                                                                          |
+| `pose.rotate_axis_3d` | 显式continuousSymmetry，保持固定局部轴，Point/Direction、reverse/useZ；零向量/重合点/平行退化拒绝。                                            |
+| `pose.compare_3d`     | ID/index批次配对、bToA、父/局部平移差、三轴夹角和geodesic角，有限/连续对称，alarm超差原子失败。轴差用稳定atan2计算，不放宽公差。               |
+| `pose.rigid_template` | 2..256个带ID参考点的位置、逐点及点对公差；小Record可由GraphDoc参数/宿主持久化，不隐式修改全局文件。                                            |
+| `pose.rigid_check`    | 全部点对距离差或proper SO(3)对应点配准残差检查；始终交付result和accepted，退化observable=false，无伪造变换。 |
+| `pose.rigid_register` | 要求定位点可观测，交付实际float32原生Transform、result和accepted；按该实际变换重评残差，可观超差保留候选，退化明确失败。 |
+| `geometry.extend_2d`  | 互斥消费Point2D/Line2D/Circle2D、Features2D集合或Poses2D，嵌入指定X/Y/Z平面、显式px→m比例和可选刚体；保留线段端点、圆法向/半径及已知工件厚度。 |
+
+三维位置/尺寸/平移统一m，角度rad、xyzw单位四元数，跨帧须显式source→target刚体。工件ID/名称/类别/置信度/属性保留，计算结果pickable=false。模板距离模式不判绝对姿态且不能区分镜像；registration要求非共线及唯一可观旋转，float32交付误差必须满足原门限。二维升维是已知平面嵌入，不是未知深度恢复。
+
+对称枚举最多1,000,000次，模板最多256点，小Record与原生Pose边界照既有协议；超限/非法输入/取消原子失败。正常空配对不生成虚构工件。有限体裁云在std-pointcloud，带K/D的三维投影/任意平面反投影在std-image，基础几何包不引入这些依赖。

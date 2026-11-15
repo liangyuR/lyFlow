@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "width": 64,
+  "height": 48,
+  "frame": "image",
+  "instances": [
+    {
+      "id": "patch-up",
+      "label": "凸起区域",
+      "classId": 1,
+      "bbox": [44, 30, 7, 6],
+      "confidence": 1.0,
+      "pickable": false,
+      "occluded": false,
+      "parts": [
+        {
+          "polygon": [
+            [44, 30],
+            [50, 30],
+            [50, 35],
+            [44, 35]
+          ],
+          "holes": []
+        }
+      ]
+    },
+    {
+      "id": "patch-down",
+      "label": "凹陷区域",
+      "classId": 2,
+      "bbox": [10, 10, 6, 6],
+      "confidence": 1.0,
+      "pickable": false,
+      "occluded": false,
+      "parts": [
+        {
+          "polygon": [
+            [10, 10],
+            [15, 10],
+            [15, 15],
+            [10, 15]
+          ],
+          "holes": []
+        }
+      ]
+    },
+    {
+      "id": "hole-region",
+      "label": "缺测区域",
+      "classId": 3,
+      "bbox": [29, 21, 5, 5],
+      "confidence": 1.0,
+      "pickable": false,
+      "occluded": false,
+      "parts": [
+        {
+          "polygon": [
+            [29, 21],
+            [33, 21],
+            [33, 25],
+            [29, 25]
+          ],
+          "holes": []
+        }
+      ]
+    }
+  ]
+}

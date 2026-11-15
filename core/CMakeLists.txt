@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.10)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.11)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -373,6 +373,7 @@ if(BUILD_TESTING)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_highlights.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p3_calibration.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p4_recognition.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p5_preview.cpp")
   endif()
   if("std-value" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_expression.cpp")
@@ -383,6 +384,7 @@ if(BUILD_TESTING)
      "std-image" IN_LIST LYFLOW_STD_PACK_NAMES)
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p2_cloud_rules.cpp")
     list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p3_shape.cpp")
+    list(APPEND LYFLOW_TEST_SOURCES "${LYFLOW_TESTS}/integration/p5_depth_geometry.cpp")
   endif()
   if(LYFLOW_P1_MODEL_TESTS)
     if(NOT "std-image" IN_LIST LYFLOW_STD_PACK_NAMES OR NOT "std-ml" IN_LIST LYFLOW_STD_PACK_NAMES)
@@ -585,6 +587,35 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-assets.md"
               "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-ocr.md"
               "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p4-analysis-segmentation.md"
         DESTINATION docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-scene.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-plane.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-orthographic.pcd"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-camera.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-circle-camera.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/1700000001000-p5-scene.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-annotations.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-annotations-index.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-circle-front.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-circle-tilted.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-fixtures.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-depth-inspection.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-depth-filters.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-orthographic-roi.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-box-crop.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-pose-rigid.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-pose-project-plane.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-circles-3d.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p5-mask-remove.lyflow.json"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate-p5-fixtures.py"
+        DESTINATION scripts)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-examples.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-analysis-projection.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-analysis-cloud-inspection.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-analysis-pose-geometry.md"
+        DESTINATION docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/adr/0031-depth-grid-association-and-derived-observations.md"
+        DESTINATION docs/adr)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-pose-flow.lyflow.json"

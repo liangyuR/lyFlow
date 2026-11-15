@@ -1,0 +1,484 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-pose-rigid",
+  "name": "P5 独立刚体模板、真实残差与几何支链",
+  "nodes": [
+    {
+      "id": "a",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "A",
+        "frame": "world",
+        "position": [0, 0, 0],
+        "size": [0.01, 0.01, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "b",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "B",
+        "frame": "world",
+        "position": [0.1, 0, 0],
+        "size": [0.01, 0.01, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "refC",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "C",
+        "frame": "world",
+        "position": [0, 0.1, 0],
+        "size": [0.01, 0.01, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "currentC",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "C",
+        "frame": "world",
+        "size": [0.01, 0.01, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "ab",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "reference",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "current",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "template",
+      "op": "pose.rigid_template",
+      "params": {
+        "tolerance": 0.001
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "check",
+      "op": "pose.rigid_check",
+      "params": {
+        "mode": "registration"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "register",
+      "op": "pose.transform_3d",
+      "params": {
+        "sourceFrame": "world",
+        "targetFrame": "world"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "compare",
+      "op": "pose.compare_3d",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "flip",
+      "op": "pose.flip_axis_3d",
+      "params": {
+        "symmetryOrder": 2,
+        "direction": [-1, 0, 0]
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "rotate",
+      "op": "pose.rotate_axis_3d",
+      "params": {
+        "continuousSymmetry": true,
+        "reference": [0, 1, 0]
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "pose2d",
+      "op": "pose.construct_2d",
+      "params": {
+        "id": "image-datum",
+        "frame": "image",
+        "unit": "px",
+        "position": [10, 20],
+        "size": [6, 4],
+        "angle": 0.2
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "extend",
+      "op": "geometry.extend_2d",
+      "params": {
+        "frame": "world",
+        "offset": 0.2,
+        "pixelToMeters": 0.001,
+        "thickness": 0.01
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "fit",
+      "op": "pose.rigid_register",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 1040
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "a-pose-ab-a",
+      "from": {
+        "node": "a",
+        "port": "pose"
+      },
+      "to": {
+        "node": "ab",
+        "port": "a"
+      }
+    },
+    {
+      "id": "b-pose-ab-b",
+      "from": {
+        "node": "b",
+        "port": "pose"
+      },
+      "to": {
+        "node": "ab",
+        "port": "b"
+      }
+    },
+    {
+      "id": "ab-poses-reference-a",
+      "from": {
+        "node": "ab",
+        "port": "poses"
+      },
+      "to": {
+        "node": "reference",
+        "port": "a"
+      }
+    },
+    {
+      "id": "refC-pose-reference-b",
+      "from": {
+        "node": "refC",
+        "port": "pose"
+      },
+      "to": {
+        "node": "reference",
+        "port": "b"
+      }
+    },
+    {
+      "id": "ab-poses-current-a",
+      "from": {
+        "node": "ab",
+        "port": "poses"
+      },
+      "to": {
+        "node": "current",
+        "port": "a"
+      }
+    },
+    {
+      "id": "currentC-pose-current-b",
+      "from": {
+        "node": "currentC",
+        "port": "pose"
+      },
+      "to": {
+        "node": "current",
+        "port": "b"
+      }
+    },
+    {
+      "id": "reference-poses-template-poses",
+      "from": {
+        "node": "reference",
+        "port": "poses"
+      },
+      "to": {
+        "node": "template",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "template-template-check-template",
+      "from": {
+        "node": "template",
+        "port": "template"
+      },
+      "to": {
+        "node": "check",
+        "port": "template"
+      }
+    },
+    {
+      "id": "current-poses-check-poses",
+      "from": {
+        "node": "current",
+        "port": "poses"
+      },
+      "to": {
+        "node": "check",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "current-poses-register-poses",
+      "from": {
+        "node": "current",
+        "port": "poses"
+      },
+      "to": {
+        "node": "register",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "reference-poses-compare-a",
+      "from": {
+        "node": "reference",
+        "port": "poses"
+      },
+      "to": {
+        "node": "compare",
+        "port": "a"
+      }
+    },
+    {
+      "id": "register-poses-compare-b",
+      "from": {
+        "node": "register",
+        "port": "poses"
+      },
+      "to": {
+        "node": "compare",
+        "port": "b"
+      }
+    },
+    {
+      "id": "a-pose-flip-poses",
+      "from": {
+        "node": "a",
+        "port": "pose"
+      },
+      "to": {
+        "node": "flip",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "a-pose-rotate-poses",
+      "from": {
+        "node": "a",
+        "port": "pose"
+      },
+      "to": {
+        "node": "rotate",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "pose2d-pose-extend-poses",
+      "from": {
+        "node": "pose2d",
+        "port": "pose"
+      },
+      "to": {
+        "node": "extend",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "current-poses-fit-poses",
+      "from": {
+        "node": "current",
+        "port": "poses"
+      },
+      "to": {
+        "node": "fit",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "template-template-fit-template",
+      "from": {
+        "node": "template",
+        "port": "template"
+      },
+      "to": {
+        "node": "fit",
+        "port": "template"
+      }
+    },
+    {
+      "id": "fit-transform-register-transform",
+      "from": {
+        "node": "fit",
+        "port": "transform"
+      },
+      "to": {
+        "node": "register",
+        "port": "transform"
+      }
+    }
+  ],
+  "params": {
+    "currentC": {
+      "type": "vec3f",
+      "default": [0, 0.1, 0],
+      "binds": ["currentC.position"]
+    }
+  },
+  "outputs": {
+    "reference": {
+      "node": "reference",
+      "port": "poses"
+    },
+    "current": {
+      "node": "current",
+      "port": "poses"
+    },
+    "template": {
+      "node": "template",
+      "port": "template"
+    },
+    "result": {
+      "node": "check",
+      "port": "result"
+    },
+    "accepted": {
+      "node": "check",
+      "port": "accepted"
+    },
+    "transform": {
+      "node": "fit",
+      "port": "transform"
+    },
+    "registered": {
+      "node": "register",
+      "port": "poses"
+    },
+    "comparison": {
+      "node": "compare",
+      "port": "result"
+    },
+    "flipped": {
+      "node": "flip",
+      "port": "poses"
+    },
+    "rotated": {
+      "node": "rotate",
+      "port": "poses"
+    },
+    "extended": {
+      "node": "extend",
+      "port": "poses"
+    },
+    "registration": {
+      "node": "fit",
+      "port": "result"
+    }
+  }
+}
