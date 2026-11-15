@@ -599,3 +599,61 @@ TEST_CASE(
     }
   }
 }
+
+TEST_CASE(
+    "P5 defect footprint dimensions and decisions are invariant to large tangent translations") {
+  auto registry = inspectionRegistry();
+  constexpr double step = .0001220703125;
+  for (double translation : {0., 1024.}) {
+    CAPTURE(translation);
+    Fixture f(1, 1, step, [](int, int) { return 1.125; });
+    f.grid.gridFrame = "grid";
+    f.grid.gridToCloud(0, 3) = translation;
+    f.grid.gridToCloud(1, 3) = translation;
+    f.cloud.xyz[0] = static_cast<float>(translation);
+    f.cloud.xyz[1] = static_cast<float>(translation);
+    test::OpCall call(registry);
+    f.assign(call);
+    REQUIRE_MESSAGE(call.run("depth.defects", {{"mode", Value::text("up")},
+                                               {"lengthThreshold", Value::number(.0001)},
+                                               {"checkWidth", Value::boolean(false)},
+                                               {"checkArea", Value::boolean(false)},
+                                               {"checkVolume", Value::boolean(false)}})
+                        .ok,
+                    call.status.message);
+    const auto& result = call.outputs.at("defects").asRecord()->data;
+    CHECK(result.at("state") == "defect");
+    CHECK(result.at("good") == false);
+    REQUIRE(result.at("items").size() == 1);
+    const auto& item = result.at("items")[0];
+    CHECK(item.at("length").get<double>() == doctest::Approx(step).epsilon(1e-7));
+    CHECK(item.at("width").get<double>() == doctest::Approx(step).epsilon(1e-7));
+    CHECK(item.at("area").get<double>() == doctest::Approx(step * step).epsilon(1e-10));
+    CHECK(item.at("volume").get<double>() == doctest::Approx(step * step * .125).epsilon(1e-10));
+    CHECK(item.at("defect") == true);
+    CHECK(item.at("exceeded") == Json::array({"lengthThreshold"}));
+    const auto& instances = call.outputs.at("instances").asRecord()->data.at("items");
+    REQUIRE(instances.size() == 1);
+    const auto& pose = instances[0];
+    CHECK(pose.at("position")[0].get<double>() == doctest::Approx(translation).epsilon(1e-12));
+    CHECK(pose.at("position")[1].get<double>() == doctest::Approx(translation).epsilon(1e-12));
+    CHECK(pose.at("position")[2].get<double>() == doctest::Approx(1.125).epsilon(1e-12));
+    CHECK(pose.at("size")[0].get<double>() == doctest::Approx(step).epsilon(1e-7));
+    CHECK(pose.at("size")[1].get<double>() == doctest::Approx(step).epsilon(1e-7));
+    const auto rotation = poses::rotationMatrix(pose.at("rotation").get<poses::Quaternion>());
+    for (double x : {-.5, .5}) {
+      for (double y : {-.5, .5}) {
+        const double xx = pose.at("position")[0].get<double>() +
+                          rotation[0] * x * pose.at("size")[0].get<double>() +
+                          rotation[1] * y * pose.at("size")[1].get<double>();
+        const double yy = pose.at("position")[1].get<double>() +
+                          rotation[3] * x * pose.at("size")[0].get<double>() +
+                          rotation[4] * y * pose.at("size")[1].get<double>();
+        CHECK(std::abs(std::abs(xx - translation) - step / 2) <= 1e-12);
+        CHECK(std::abs(std::abs(yy - translation) - step / 2) <= 1e-12);
+      }
+    }
+    CHECK(f.cloud.xyz == std::vector<float>{static_cast<float>(translation),
+                                            static_cast<float>(translation), 1.125f});
+  }
+}

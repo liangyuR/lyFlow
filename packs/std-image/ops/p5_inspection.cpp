@@ -548,7 +548,7 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
     const auto rot = rotation(base.normal);
     const auto matrix = poses::rotationMatrix(rot);
     const cv::Vec3d bx(matrix[0], matrix[3], matrix[6]), by(matrix[1], matrix[4], matrix[7]),
-        origin = -base.offset * base.normal;
+        planeOrigin = -base.offset * base.normal;
     Json reports = Json::array(), posesOut = Json::array();
     projection5::RayBudget rays;
     rays.context = &ctx;
@@ -581,6 +581,7 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
         charge(work, points.size() * 256, ctx);
         double area = 0, volume = 0, sum = 0, low = std::numeric_limits<double>::infinity(),
                high = -low;
+        const auto localOrigin = base.project(view.point(points.front().x, points.front().y));
         std::vector<cv::Point2f> footprint;
         footprint.reserve(points.size() * 4);
         for (const auto& point : points) {
@@ -598,12 +599,14 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
                                                        &rays),
                       rays, "观测深度像素角点反投影失败");
             physical[j] = base.project(observedCorner);
-            const auto relative = physical[j] - origin;
+            const auto relative = physical[j] - planeOrigin;
             const double xx = relative.dot(bx), yy = relative.dot(by);
             need(std::isfinite(xx) && std::isfinite(yy) && std::abs(xx) < 1e10 &&
                      std::abs(yy) < 1e10,
                  "缺陷平面足迹退化", "plane");
-            footprint.emplace_back(static_cast<float>(xx), static_cast<float>(yy));
+            const auto local = physical[j] - localOrigin;
+            footprint.emplace_back(static_cast<float>(local.dot(bx)),
+                                   static_cast<float>(local.dot(by)));
           }
           charge(work, rays.evaluations - evaluations, ctx);
           const double cell = std::abs(base.normal.dot(
@@ -632,7 +635,7 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
         const bool defect = !exceeded.empty();
         failed |= defect;
         const std::string id = "defect-" + std::to_string(reports.size());
-        const auto center = origin + bx * rectangle.center.x + by * rectangle.center.y +
+        const auto center = localOrigin + bx * rectangle.center.x + by * rectangle.center.y +
                             base.normal * ((low + high) / 2);
         const double a = rectangle.angle * poses::kPi / 180;
         const cv::Vec3d xAxis = bx * std::cos(a) + by * std::sin(a),
