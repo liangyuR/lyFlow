@@ -4,6 +4,7 @@
 #include <set>
 
 #include "lyflow/manifest.h"
+#include "lyflow/graph_contract_upgrade.h"
 
 namespace lyflow::exec {
 namespace {
@@ -285,6 +286,28 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
   if (!doc.is_object()) {
     diags.error("", Phase::Validate, "io", "GraphDoc 顶层不是对象");
     return false;
+  }
+
+  if (doc.contains("contractUpgrade")) {
+    nlohmann::json upgraded, report;
+    GraphContractUpgradeError error;
+    if (!upgradeGraphContracts(doc, doc["contractUpgrade"], upgraded, report, error)) {
+      diags.error(error.nodeId, Phase::Validate, "bad_input", error.message);
+      return false;
+    }
+    doc = std::move(upgraded);
+    for (const auto& change : report) {
+      MigrationPlan plan;
+      plan.op = change.at("op").get<std::string>();
+      plan.opVersion = change.at("opVersion").get<std::string>();
+      plan.paramsJson = change.at("params").dump();
+      plan.editsJson = change.at("edits").dump();
+      if (change.contains("graphUpdate"))
+        plan.graphUpdateJson = change["graphUpdate"].dump();
+      plan.notes = {"显式契约升级；源算子和原版本证据：" + change.at("source").dump()};
+      diags.migration(change.at("nodeId"), "已按明确的版本和消费连线插入契约适配节点",
+                      std::move(plan));
+    }
   }
 
   {

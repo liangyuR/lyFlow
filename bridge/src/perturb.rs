@@ -825,6 +825,7 @@ mod tests {
             id: "t".into(),
             name: None,
             meta: None,
+            contract_upgrade: None,
             params: Default::default(),
             nodes: nodes
                 .iter()

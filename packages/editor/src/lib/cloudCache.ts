@@ -12,7 +12,14 @@ const CACHE_BYTES = 256 * 1024 * 1024;
  *  记 buffer 才连法线、颜色一起算上 —— 以前只算坐标与强度，带法线的云按一半记，预算形同两倍。 */
 function payloadBytes(p: CloudPayload) {
   const buffers = new Set<ArrayBufferLike>([p.xyz.buffer]);
-  for (const channel of [p.intensity, p.normals, p.rgb]) if (channel) buffers.add(channel.buffer);
+  for (const channel of [
+    p.intensity,
+    p.normals,
+    p.rgb,
+    p.profile?.validity,
+    p.profile?.sourceIndices,
+  ])
+    if (channel) buffers.add(channel.buffer);
   let bytes = 0;
   for (const b of buffers) bytes += b.byteLength;
   return bytes;

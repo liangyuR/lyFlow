@@ -276,6 +276,23 @@ TEST_CASE(
   const auto r = poses::rotationMatrix(first(c)["rotation"].get<poses::Quaternion>());
   CHECK(r[0] == doctest::Approx(-1));
   const Data projected = c.outputs.at("poses");
+  Record canonical;
+  std::string why;
+  REQUIRE(calibration::upgradeLegacyPlane(calib, "mm", "image", "table", canonical, why));
+  c.inputs["calib"] = Data::record(canonical);
+  CHECK_FALSE(c.run("pose.to_world_plane", {{"size3D", Value::vec({0.1, 0.2, 0.03})}}).ok);
+  REQUIRE(c.run("pose.to_world_plane",
+                {{"planeFrame", Value::text("table")}, {"size3D", Value::vec({0.1, 0.2, 0.03})}})
+              .ok);
+  CHECK(first(c)["position"] == projected.asRecord()->data["items"][0]["position"]);
+  CHECK_FALSE(c.run("pose.to_world_plane", {{"planeFrame", Value::text("other")},
+                                            {"size3D", Value::vec({0.1, 0.2, 0.03})}})
+                  .ok);
+  canonical.data["imageFrame"] = "other-camera";
+  c.inputs["calib"] = Data::record(canonical);
+  CHECK_FALSE(c.run("pose.to_world_plane", {{"planeFrame", Value::text("table")},
+                                            {"size3D", Value::vec({0.1, 0.2, 0.03})}})
+                  .ok);
   c.inputs = {{"poses", projected}};
   REQUIRE(c.run("pose.to_transform").ok);
   CHECK(c.outputs.at("transform").asTransform()->m[3] == doctest::Approx(0.968));

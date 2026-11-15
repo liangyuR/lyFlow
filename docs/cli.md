@@ -34,6 +34,7 @@ lyflow manifest [--check]
 lyflow info
 lyflow samples  [<样本集>]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
+lyflow dump     graph.lyflow.json nodeId:profile out.lypr [--format profile] [--input nodeId.port=file.pcd]
                                   # 图像输出写 out.lyim（LYIM 载荷原样落盘）
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount|byteSize|durationMs
@@ -134,13 +135,13 @@ lyflow cache clear --cache-dir .cache/lyflow --stale
 
 `run` 默认逐行输出执行事件；`--summary` 额外输出 `run_summary`，`status` 为 `ok`、`degraded` 或 `failed`。`eval` 每行默认不带 summary，按需用 `--summary` 打开。做业务判定时读取 summary，字段说明见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 
-| 退出码 | 含义 |
-|---|---|
-| `0` | 成功 |
-| `1` | 图或参数校验失败 |
-| `2` | 执行失败 |
-| `3` | 被 Ctrl+C 取消 |
-| `4` | 命令参数错误 |
+| 退出码 | 含义             |
+| ------ | ---------------- |
+| `0`    | 成功             |
+| `1`    | 图或参数校验失败 |
+| `2`    | 执行失败         |
+| `3`    | 被 Ctrl+C 取消   |
+| `4`    | 命令参数错误     |
 
 CLI 当前的完整选项以 `lyflow --help` 为准。MCP 的对应工具和字段见 [MCP 服务](mcp.md)，冻结试验与预算搜索见 [glue 调参流程](mcp-glue-tuning.md)。
 

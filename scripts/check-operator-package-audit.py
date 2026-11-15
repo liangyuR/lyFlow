@@ -12,8 +12,14 @@ AUDIT = ROOT / 'docs/operator-package-audit.json'
 FIELDS = ('id', 'currentPack', 'targetPack', 'action', 'wave', 'source', 'dependencies',
           'currentContract', 'targetContract', 'migrationPrerequisites', 'acceptance', 'notes')
 CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/manifest.cpp',
+                    'core/src/profile*.cpp', 'core/src/profile*.h', 'core/src/graph_contract_upgrade.cpp',
+                    'core/src/data.cpp', 'core/src/contract.cpp', 'core/src/python_runtime.cpp',
+                    'core/src/runtime*.cpp', 'core/src/exec/disk_cache.cpp',
+                    'core/src/exec/graph.cpp', 'core/src/status.cpp',
                     'core/include/lyflow/*.h', 'core/include/lyflow/*.hpp', 'core/CMakeLists.txt',
-                    'packs/*/ops/*.cpp', 'packs/*/lyflow_op_pack.cmake',
+                    'packs/*/ops/*.cpp', 'packs/*/ops/*.h', 'packs/*/include/**/*.h',
+                    'packs/*/include/**/*.hpp', 'packs/*/lyflow_op_pack.cmake',
+                    'python/lyflow_python/*.py',
                     'python/examples/**/*.py', 'packaging/release.json')
 
 
@@ -21,14 +27,31 @@ def source_hash(path):
     return hashlib.sha256(path.read_text(encoding='utf-8').encode('utf-8')).hexdigest()
 
 
-def validate(data, manifests):
+def validate(data, manifests, generated_docs=None):
     problems = []
+    generated_docs = generated_docs or {}
 
     def require(condition, message):
         if not condition:
             problems.append(message)
 
-    require(data.get('schemaVersion') == 1 and data.get('status') == 'planned', '清单schema或规划状态不符')
+    require(data.get('schemaVersion') == 1 and data.get('status') in {'planned', 'in_progress', 'complete'}, '清单schema或规划状态不符')
+    if data.get('status') != 'planned':
+        baseline = data.get('baselineReference', {})
+        require(bool(re.fullmatch(r'[0-9a-f]{40}', baseline.get('revision', ''))) and
+                baseline.get('path') == 'docs/operator-package-audit.json', '缺少可追溯规划基线')
+        require(baseline.get('nativeCount') == 251 and baseline.get('pythonExampleCount') == 7 and
+                len(set(baseline.get('registeredNativeIds', []))) == 251 and
+                len(set(baseline.get('pythonExampleIds', []))) == 7, '原251/7基线ID快照不完整')
+        stages = data.get('stageLedger', [])
+        require(bool(stages) and len({s.get('stage') for s in stages}) == len(stages), '缺少有效阶段ledger')
+        for stage in stages:
+            require(stage.get('status') in {'planned', 'pending_manifest', 'validated_manifest', 'complete'}, '阶段状态非法')
+            if stage.get('status') in {'validated_manifest', 'complete'} and stage.get('evidenceKind') != 'planning_baseline':
+                proof = stage.get('manifestEvidence', {})
+                require(bool(re.fullmatch(r'[0-9a-f]{64}', proof.get('sha256', ''))) and
+                        proof.get('operatorCount') == stage.get('expectedNativeCount') and
+                        bool(stage.get('reviewedSourceChanges')), '阶段缺少真实manifest或源码复核证据')
     native = data.get('operators', [])
     examples = data.get('pythonExamples', [])
     rows = native + examples
@@ -39,6 +62,14 @@ def validate(data, manifests):
     require(bool(registered) and len(registered) == len(set(registered)), '缺少有效的独立注册ID快照')
     require({r['id'] for r in native} == set(registered), '原生清单与注册ID快照不一致')
     require(len(examples) == data.get('pythonExampleCount'), 'Python示例统计不符')
+    if data.get('baselineReference'):
+        baseline = data['baselineReference']
+        require(set(baseline.get('registeredNativeIds', [])) <= {r['id'] for r in native}, '原生规划基线ID丢失')
+        require(set(baseline.get('pythonExampleIds', [])) <= {r['id'] for r in examples}, 'Python规划基线ID丢失')
+        for stage in data.get('stageLedger', []):
+            if stage.get('status') in {'validated_manifest', 'complete'}:
+                require(set(stage.get('introducedNativeIds', [])) <= {r['id'] for r in native} and
+                        set(stage.get('introducedPythonIds', [])) <= {r['id'] for r in examples}, '阶段已验证但新增ID缺失')
     require(dict(collections.Counter(r['currentPack'] for r in native)) == data.get('currentPackCounts'), '当前包统计不符')
     require(dict(collections.Counter(r['targetPack'] for r in native)) == data.get('targetPackCounts'), '目标包统计不符')
     orders = [r.get('migrationOrder') for r in rows]
@@ -101,6 +132,9 @@ def validate(data, manifests):
         exported = {}
         for path in manifests:
             document = json.loads(path.read_text(encoding='utf-8-sig'))
+            if data.get('status') != 'planned' and isinstance(document, dict) and document.get('generatedBy'):
+                require(document['generatedBy'] == data.get('evidence', {}).get('nativeManifestGeneratedBy'),
+                        'manifest generatedBy与清单生成器证据不一致')
             values = document if isinstance(document, list) else document['operators']
             for op in values:
                 prior = exported.get(op['id'])
@@ -115,21 +149,28 @@ def validate(data, manifests):
             require(op.get('version') == row.get('currentVersion'), f"{row['id']}: manifest版本不符")
             require({k: op.get(k, []) for k in ['inputs', 'outputs']} == row.get('currentPorts'), f"{row['id']}: 端口描述不符")
             require(op.get('params', []) == row.get('currentParams'), f"{row['id']}: 参数描述不符")
+    details = set((ROOT / 'docs/operator-package-audit').glob('*.md'))
+    details.update(ROOT / 'docs/operator-package-audit' / (row['currentPack'] + '.md') for row in rows)
     docs = [ROOT / 'docs/operator-package-boundaries.md', ROOT / 'docs/operator-package-migration-plan.md',
-            ROOT / 'docs/operator-package-audit.md', *sorted((ROOT / 'docs/operator-package-audit').glob('*.md'))]
+            ROOT / 'docs/operator-package-audit.md', *sorted(details)]
     for path in docs:
-        require(path.is_file(), f'缺少文档：{path.relative_to(ROOT)}')
-        if not path.is_file():
+        available = path in generated_docs or path.is_file()
+        require(available, f'缺少文档：{path.relative_to(ROOT)}')
+        if not available:
             continue
-        for link in re.findall(r'(?<!!)\[[^\]]*\]\(([^)]+)\)', path.read_text(encoding='utf-8')):
+        content = generated_docs[path] if path in generated_docs else path.read_text(encoding='utf-8')
+        for link in re.findall(r'(?<!!)\[[^\]]*\]\(([^)]+)\)', content):
             link = link.strip('<>')
             if re.match(r'^[a-zA-Z][\w+.-]*:', link) or link.startswith('#'):
                 continue
             destination = path.parent / link.split('#', 1)[0]
-            require(destination.exists(), f'{path.name}: 本地链接不存在 {link}')
+            require(destination in generated_docs or destination.exists(), f'{path.name}: 本地链接不存在 {link}')
     for row in rows:
         detail = ROOT / 'docs/operator-package-audit' / (row['currentPack'] + '.md')
-        require(detail.is_file() and f" · {row['id']}\n" in detail.read_text(encoding='utf-8'), f"{row['id']}: 缺少逐项文档")
+        content = generated_docs.get(detail)
+        if content is None and detail.is_file():
+            content = detail.read_text(encoding='utf-8')
+        require(content is not None and f" · {row['id']}\n" in content, f"{row['id']}: 缺少逐项文档")
     return problems
 
 

@@ -4,7 +4,7 @@
 // 缓存判定仍只归 core（ADR-0007）：调用方只给目录，不决定哪个节点命中。
 //
 // 布局：<dir>/<fingerprint>/<cacheKey 前两位>/<cacheKey>.lfc，一个节点一个文件、全部端口在里面。
-// 只落盘「每个端口都是点云、张量或图像」的节点 —— 贵的上游（读盘、滤波、ONNX 推理）都在这两种上。
+// 落盘类型包含点云、Profile、张量、图像；Indices需能绑定同一节点归档的点云。
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
@@ -18,7 +18,7 @@ namespace lyflow::exec {
 
 using PortData = std::vector<std::pair<std::string, Data>>;
 
-/// .lfc 的编解码。编码失败（有端口不是点云 / 张量）返回 false、out 不动。
+/// .lfc 的编解码。载荷不支持或引用不完整时返回 false，out 不动。
 bool encodeNode(const PortData& ports, std::string& out);
 /// 解码失败（魔数、版本、长度对不上）返回 false。点云读回时重新分配 id（PointCloud 构造时自增）。
 bool decodeNode(const std::string& bytes, PortData& out);

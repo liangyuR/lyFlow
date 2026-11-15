@@ -52,7 +52,7 @@ class Context:
         self._emit({"event": "progress", "ratio": float(ratio), "message": str(message)})
 
 
-PORT_TYPES = {"PointCloud", "Image", "Measurement", "Record", "Tensor", "Transform", "Plane", "Point2D", "Line2D", "Circle2D", "Box2D"}
+PORT_TYPES = {"PointCloud", "Profile", "Image", "Measurement", "Record", "Tensor", "Transform", "Plane", "Point2D", "Line2D", "Circle2D", "Box2D"}
 PARAM_TYPES = {"bool", "int", "float", "vec2f", "vec3f", "vec4f", "enum", "flags", "string", "text", "path", "color", "transform", "curve"}
 PORT_FIELDS = {"type", "label", "doc", "required", "contract", "example"}
 PARAM_FIELDS = {"type", "label", "doc", "default", "group", "advanced", "min", "max", "softMin", "softMax", "step", "unit", "componentLabels", "options", "placeholder", "pattern", "rows", "filters", "mode", "alpha", "visibleWhen", "enabledWhen", "semantic", "roiBackdrop", "tuningRole", "unitSource"}

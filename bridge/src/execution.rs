@@ -66,6 +66,7 @@ pub struct StartOptions<'a> {
     pub params_json: Option<&'a str>,
     /// 宿主注入的源数据（ADR-0017，`run_graph` 的 `sceneId`）。空 = 不注入。
     pub inputs: &'a [core_ffi::RunInput],
+    pub profile_inputs: &'a [core_ffi::RunProfileInput],
 }
 
 /// 排队的请求自己持有的那份启动参数：它要活到被抢占的那个退出（ADR-0027）。
@@ -78,6 +79,7 @@ struct OwnedStart {
     preview: Option<PreviewOptions>,
     params_json: Option<String>,
     inputs: Vec<core_ffi::RunInput>,
+    profile_inputs: Vec<core_ffi::RunProfileInput>,
 }
 
 impl OwnedStart {
@@ -91,6 +93,7 @@ impl OwnedStart {
             preview: o.preview,
             params_json: o.params_json.map(str::to_string),
             inputs: o.inputs.to_vec(),
+            profile_inputs: o.profile_inputs.to_vec(),
         }
     }
 
@@ -102,6 +105,7 @@ impl OwnedStart {
             preview: self.preview,
             params_json: self.params_json.as_deref(),
             inputs: &self.inputs,
+            profile_inputs: &self.profile_inputs,
         }
     }
 }
@@ -247,6 +251,7 @@ fn launch<R: Runtime>(
     spec.force = options.force;
     spec.params_json = options.params_json;
     spec.inputs = options.inputs;
+    spec.profile_inputs = options.profile_inputs;
     if let Some(p) = options.preview {
         spec.mode = 1;
         spec.preview_max_points = p.max_points;

@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.12)
+project(lyflow_core LANGUAGES CXX VERSION 1.4.0)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -320,7 +320,7 @@ set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
 if(LYFLOW_RELEASE_BUILD AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
    CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND
    NOT LYFLOW_EXT_PACK_NAMES AND
-   _release_identity_packs STREQUAL "gap;glue;std-geometry;std-image;std-ml;std-pointcloud;std-value")
+   _release_identity_packs STREQUAL "gap;glue;std-geometry;std-image;std-ml;std-pointcloud;std-profile;std-value")
   set(LYFLOW_RELEASE_IDENTITY_ALLOWED TRUE)
 endif()
 add_custom_target(lyflow-source-revision
@@ -509,6 +509,10 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
 install(DIRECTORY "${LYFLOW_INCLUDE}/lyflow"
         DESTINATION include
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/json.hpp"
+        DESTINATION include/nlohmann)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
+        DESTINATION licenses/core/nlohmann)
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lyflow-utf8.manifest"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
@@ -630,6 +634,12 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-examples.md"
         DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/adr/0032-native-frames-and-result-delivery.md"
         DESTINATION docs/adr)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/profile-data-contract.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/profile-host-protocol.md"
+        DESTINATION docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m1-profile-adapters.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_profile.cpp"
+        DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-pose-flow.lyflow.json"

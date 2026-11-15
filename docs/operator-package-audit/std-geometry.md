@@ -1,10 +1,10 @@
 # std-geometry 逐算子迁移清单
 
-基线 `9940c8c`；共 35 项。状态：规划，未实施。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 35 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
-下列顺序是本计划内的迁移/验收顺序，不是执行图调度顺序。`?` 表示可选输入；没有`?`的输入按当前manifest默认为必需。精确参数、默认值、端口Record契约及来源指纹见[机器清单](../operator-package-audit.json)。
+下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 020 · geometry.circle_2d
+## 025 · geometry.circle_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维圆构造。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:706](../../packs/std-geometry/ops/geometry.cpp#L706)。
@@ -18,7 +18,7 @@
 - 验收：非正半径和混单位拒绝；后续几何运算不丢单位
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 021 · geometry.distance_2d
+## 026 · geometry.distance_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何距离。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:771](../../packs/std-geometry/ops/geometry.cpp#L771)。
@@ -32,7 +32,7 @@
 - 验收：点线圆/有限线段退化和非对称anchor回归；不改成业务gap定义
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 022 · geometry.extend_2d
+## 027 · geometry.extend_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何与工件嵌入三维平面。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:718](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L718)。
@@ -46,7 +46,7 @@
 - 验收：无深度信息不恢复3D；新轴/单位/变换保留几何含义
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 023 · geometry.intersect_2d
+## 028 · geometry.intersect_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何求交。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:820](../../packs/std-geometry/ops/geometry.cpp#L820)。
@@ -60,7 +60,7 @@
 - 验收：相切、平行、连续重合与数值极端回归；不伪造交点
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 024 · geometry.line_2d
+## 029 · geometry.line_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维直线与线段构造。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:637](../../packs/std-geometry/ops/geometry.cpp#L637)。
@@ -74,7 +74,7 @@
 - 验收：零方向、重合端点拒绝；端点与角度两种模式不混用
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 025 · geometry.midpoint_2d
+## 030 · geometry.midpoint_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点中点。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:857](../../packs/std-geometry/ops/geometry.cpp#L857)。
@@ -88,7 +88,7 @@
 - 验收：混单位拒绝；大数坐标有限且对称
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 026 · geometry.plane
+## 031 · geometry.plane
 
 - 当前：`std-geometry` / `1.0.0` / 三维平面构造。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:735](../../packs/std-geometry/ops/geometry.cpp#L735)。
@@ -102,7 +102,7 @@
 - 验收：缩放输入系数得到相同平面；零法向拒绝
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 027 · geometry.point_2d
+## 032 · geometry.point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点构造。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:618](../../packs/std-geometry/ops/geometry.cpp#L618)。
@@ -116,7 +116,7 @@
 - 验收：非有限和单位不符拒绝；构造/分解一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 028 · geometry.point_at
+## 033 · geometry.point_at
 
 - 当前：`std-geometry` / `1.0.0` / 交点索引提取。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:914](../../packs/std-geometry/ops/geometry.cpp#L914)。
@@ -130,7 +130,7 @@
 - 验收：空、coincident及越界诊断；有限点单位不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 029 · geometry.project_point_2d
+## 034 · geometry.project_point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点正交投影。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry.cpp:877](../../packs/std-geometry/ops/geometry.cpp#L877)。
@@ -144,7 +144,7 @@
 - 验收：端外投影在两种clamp模式符合契约；保留px/m
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 030 · geometry.transform_2d
+## 035 · geometry.transform_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何相似变换。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry_transform.cpp:126](../../packs/std-geometry/ops/geometry_transform.cpp#L126)。
@@ -158,7 +158,7 @@
 - 验收：圆拒绝非相似仿射；方向无平移，原类型与单位保留
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 031 · geometry.transform_plane
+## 036 · geometry.transform_plane
 
 - 当前：`std-geometry` / `1.0.0` / 三维平面仿射变换。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/geometry_transform.cpp:140](../../packs/std-geometry/ops/geometry_transform.cpp#L140)。
@@ -172,10 +172,10 @@
 - 验收：非均匀缩放、平移与近奇异矩阵回归；不附带外部帧树协议
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 032 · pose.compare_2d
+## 037 · pose.compare_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维工件位姿比较。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:701](../../packs/std-geometry/ops/pose_ops.cpp#L701)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:704](../../packs/std-geometry/ops/pose_ops.cpp#L704)。
 - 端口：`a:Record`, `b:Record` → `distance:Record`, `angle:Record`, `matched:Record`, `difference:Record`。
 - 参数单位标注：symmetryPeriod=rad, angleTolerance=rad。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -186,7 +186,7 @@
 - 验收：临界容差及跨周期角差；纯几何matched不充当生产OK/NG
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 033 · pose.compare_3d
+## 038 · pose.compare_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维跨帧位姿对称比较。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:683](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L683)。
@@ -200,10 +200,10 @@
 - 验收：跨帧非交换链、对称等价及临界容差；不推断工件可抓或生产许可
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 034 · pose.concat
+## 039 · pose.concat
 
 - 当前：`std-geometry` / `1.0.0` / 工件实例集合拼接。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:599](../../packs/std-geometry/ops/pose_ops.cpp#L599)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:602](../../packs/std-geometry/ops/pose_ops.cpp#L602)。
 - 端口：`a:Record`, `b:Record` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -214,10 +214,10 @@
 - 验收：混帧、重复ID拒绝；合法空集合和顺序保持
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 035 · pose.construct_2d
+## 040 · pose.construct_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维工件位姿构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:567](../../packs/std-geometry/ops/pose_ops.cpp#L567)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:570](../../packs/std-geometry/ops/pose_ops.cpp#L570)。
 - 端口：`x:Record?`, `y:Record?`, `angle:Record?` → `pose:Record`。
 - 参数单位标注：angle=rad。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -228,10 +228,10 @@
 - 验收：拒绝混单位、非正尺寸和非有限输入；身份与显式frame保留
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 036 · pose.construct_3d
+## 041 · pose.construct_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维工件位姿构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:580](../../packs/std-geometry/ops/pose_ops.cpp#L580)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:583](../../packs/std-geometry/ops/pose_ops.cpp#L583)。
 - 端口：`x:Record?`, `y:Record?`, `z:Record?`, `rx:Record?`, `ry:Record?`, `rz:Record?` → `pose:Record`。
 - 参数单位标注：rx=rad, ry=rad, rz=rad。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -242,10 +242,10 @@
 - 验收：q与-q规范化、零四元数拒绝；动态m/rad与常量一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 037 · pose.decompose_2d
+## 042 · pose.decompose_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维工件信息分解。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:693](../../packs/std-geometry/ops/pose_ops.cpp#L693)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:696](../../packs/std-geometry/ops/pose_ops.cpp#L696)。
 - 端口：`poses:Record` → `x:Record`, `y:Record`, `angle:Record`, `width:Record`, `height:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -256,10 +256,10 @@
 - 验收：输出单位继承px/m；索引越界失败；与construct往返
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 038 · pose.filter
+## 043 · pose.filter
 
 - 当前：`std-geometry` / `1.0.0` / 工件实例条件筛选。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:613](../../packs/std-geometry/ops/pose_ops.cpp#L613)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:616](../../packs/std-geometry/ops/pose_ops.cpp#L616)。
 - 端口：`poses:Record` → `matched:Record`, `rejected:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -270,10 +270,10 @@
 - 验收：相同项重排时贪心结果符合旧契约；matched/rejected互补；不赋予抓取许可
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 039 · pose.flip_axis_2d
+## 044 · pose.flip_axis_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维工件对称轴规范化。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:670](../../packs/std-geometry/ops/pose_ops.cpp#L670)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:673](../../packs/std-geometry/ops/pose_ops.cpp#L673)。
 - 端口：`poses:Record` → `poses:Record`。
 - 参数单位标注：targetAngle=rad。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -284,7 +284,7 @@
 - 验收：不自动推断矩形/物体对称；目标角和边界相位一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 040 · pose.flip_axis_3d
+## 045 · pose.flip_axis_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维有限旋转对称轴优化。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:661](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L661)。
@@ -298,10 +298,10 @@
 - 验收：q/-q、有限枚举上限与非法轴回归；身份和位置不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 041 · pose.frame_from_points
+## 046 · pose.frame_from_points
 
 - 当前：`std-geometry` / `1.0.0` / 定位点右手坐标系构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:681](../../packs/std-geometry/ops/pose_ops.cpp#L681)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:684](../../packs/std-geometry/ops/pose_ops.cpp#L684)。
 - 端口：`a:Record`, `b:Record`, `c:Record?` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -312,10 +312,10 @@
 - 验收：重合/共线/不等长失败；X/Y/Z正交且det为+1
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 042 · pose.from_text
+## 047 · pose.from_text
 
 - 当前：`std-geometry` / `1.0.0` / 工件位姿JSON解析。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:720](../../packs/std-geometry/ops/pose_ops.cpp#L720)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:723](../../packs/std-geometry/ops/pose_ops.cpp#L723)。
 - 端口：`text:Record` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -326,10 +326,10 @@
 - 验收：拒绝未知type、重复ID和混单位；与to_text往返
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 043 · pose.get
+## 048 · pose.get
 
 - 当前：`std-geometry` / `1.0.0` / 工件实例索引提取。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:606](../../packs/std-geometry/ops/pose_ops.cpp#L606)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:609](../../packs/std-geometry/ops/pose_ops.cpp#L609)。
 - 端口：`poses:Record` → `pose:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -340,10 +340,10 @@
 - 验收：空集合和越界明确失败；不生成新身份
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 044 · pose.offset_3d
+## 049 · pose.offset_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维工件位置偏移。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:660](../../packs/std-geometry/ops/pose_ops.cpp#L660)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:663](../../packs/std-geometry/ops/pose_ops.cpp#L663)。
 - 端口：`poses:Record`, `x:Record?`, `y:Record?`, `z:Record?` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -354,7 +354,7 @@
 - 验收：local/world在旋转工件上产生预期不同结果；不改姿态与frame
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 045 · pose.rigid_check
+## 050 · pose.rigid_check
 
 - 当前：`std-geometry` / `1.0.0` / 刚体多点距离与配准残差检查。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:703](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L703)。
@@ -368,7 +368,7 @@
 - 验收：镜像与共线案例不能误报可观姿态；正常空配对不造工件
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 046 · pose.rigid_register
+## 051 · pose.rigid_register
 
 - 当前：`std-geometry` / `1.0.0` / 刚体定位点可观测配准。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:711](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L711)。
@@ -382,7 +382,7 @@
 - 验收：共线和非唯一旋转拒绝；误差阈值在float32交付后仍成立
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 047 · pose.rigid_template
+## 052 · pose.rigid_template
 
 - 当前：`std-geometry` / `1.0.0` / 刚体定位点模板记录。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:697](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L697)。
@@ -396,7 +396,7 @@
 - 验收：重复点/退化/超限拒绝；模板序列化及ID一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 048 · pose.rotate_axis_3d
+## 053 · pose.rotate_axis_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维连续旋转对称轴优化。目标：`std-geometry`；保留并验边界；**M2**。
 - 源码：[packs/std-geometry/ops/p5_pose_geometry.cpp:671](../../packs/std-geometry/ops/p5_pose_geometry.cpp#L671)。
@@ -410,10 +410,10 @@
 - 验收：未声明对称拒绝；固定轴约束和退化方向回归
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 049 · pose.to_text
+## 054 · pose.to_text
 
 - 当前：`std-geometry` / `1.0.0` / 工件位姿JSON序列化。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:712](../../packs/std-geometry/ops/pose_ops.cpp#L712)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:715](../../packs/std-geometry/ops/pose_ops.cpp#L715)。
 - 端口：`poses:Record` → `text:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -424,10 +424,10 @@
 - 验收：Unicode/浮点往返；超过文本上限明确失败而非截断
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 050 · pose.to_transform
+## 055 · pose.to_transform
 
 - 当前：`std-geometry` / `1.0.0` / 工件位姿米制矩阵提取。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:727](../../packs/std-geometry/ops/pose_ops.cpp#L727)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:730](../../packs/std-geometry/ops/pose_ops.cpp#L730)。
 - 端口：`poses:Record` → `transform:Transform`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -438,10 +438,10 @@
 - 验收：拒绝px直接转米制矩阵、非法索引；与pose位置/方向一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 051 · pose.to_world_plane
+## 056 · pose.to_world_plane
 
-- 当前：`std-geometry` / `1.0.0` / 二维工件已知平面位姿映射。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:736](../../packs/std-geometry/ops/pose_ops.cpp#L736)。
+- 当前：`std-geometry` / `1.1.0` / 二维工件已知平面位姿映射。目标：`std-geometry`；保留并验边界；**M2**。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:739](../../packs/std-geometry/ops/pose_ops.cpp#L739)。
 - 端口：`poses:Record`, `calib:Record`, `planeToWorld:Transform` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -451,11 +451,12 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：标定mm/m一致；不把像素框猜成物理尺寸，不恢复未知深度
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID；只消费公开PlaneCalib Record并计算H，无OpenCV/YAML依赖；标定记录schema共享，不依赖std-image私有头
+- M1契约更新（1.1.0）：新增显式frame参数，版本化PlaneCalib使用共享schemaVersion=1/frame/unit解析；旧非版本化分支保持兼容。；验收：v1帧缺失/不匹配拒绝；米/毫米一致；旧参数与旧标定路径不漂移。
 
-## 052 · pose.transform_2d
+## 057 · pose.transform_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维工件位姿变换。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:642](../../packs/std-geometry/ops/pose_ops.cpp#L642)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:645](../../packs/std-geometry/ops/pose_ops.cpp#L645)。
 - 端口：`poses:Record`, `transform:Transform` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -466,10 +467,10 @@
 - 验收：平移/旋转非交换链、混单位与镜像拒绝；不改变属性
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 053 · pose.transform_3d
+## 058 · pose.transform_3d
 
 - 当前：`std-geometry` / `1.0.0` / 三维工件位姿变换。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:642](../../packs/std-geometry/ops/pose_ops.cpp#L642)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:645](../../packs/std-geometry/ops/pose_ops.cpp#L645)。
 - 端口：`poses:Record`, `transform:Transform` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -480,10 +481,10 @@
 - 验收：非交换链、反射/缩放拒绝；保持身份与尺寸
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 054 · pose.update
+## 059 · pose.update
 
 - 当前：`std-geometry` / `1.0.0` / 工件实例属性更新。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/pose_ops.cpp:632](../../packs/std-geometry/ops/pose_ops.cpp#L632)。
+- 源码：[packs/std-geometry/ops/pose_ops.cpp:635](../../packs/std-geometry/ops/pose_ops.cpp#L635)。
 - 端口：`poses:Record` → `poses:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT

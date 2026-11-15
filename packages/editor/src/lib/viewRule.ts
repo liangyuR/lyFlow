@@ -24,6 +24,8 @@ export function defaultViewFor(type: string | null): PeekView {
   switch (type) {
     case 'PointCloud':
       return 'cloud3d';
+    case 'Profile':
+      return 'cloud3d';
     case 'Box2D':
     case 'Line2D':
     case 'Circle2D':
@@ -41,6 +43,7 @@ export function defaultViewFor(type: string | null): PeekView {
 }
 
 const VIEWS_POINT_CLOUD: PeekView[] = ['cloud3d', 'cloud2d', 'value'];
+const VIEWS_PROFILE: PeekView[] = ['cloud3d', 'value'];
 const VIEWS_SHAPE_2D: PeekView[] = ['cloud2d', 'value'];
 const VIEWS_TENSOR: PeekView[] = ['tensor', 'value'];
 const VIEWS_IMAGE: PeekView[] = ['image', 'value'];
@@ -53,6 +56,8 @@ export function viewsFor(type: string | null): PeekView[] {
   switch (type) {
     case 'PointCloud':
       return VIEWS_POINT_CLOUD;
+    case 'Profile':
+      return VIEWS_PROFILE;
     case 'Box2D':
     case 'Line2D':
     case 'Circle2D':
@@ -89,7 +94,7 @@ function drawable(type: string | null, bundles: readonly BundleDesc[] | undefine
 
 /** 输出里有点云本身（或指向点云的 Indices）—— 不算 2D 几何，那要看它属于哪个域。 */
 function hasCloud(types: readonly (string | null)[]): boolean {
-  return types.some((t) => t === 'PointCloud' || t === 'Indices');
+  return types.some((t) => t === 'PointCloud' || t === 'Profile' || t === 'Indices');
 }
 
 /** 节点的全部输出类型 → 主预览的内容。

@@ -10,6 +10,7 @@ pub mod library_settings;
 mod patch;
 pub mod pcd;
 mod perturb;
+pub mod profile_wire;
 pub mod python_settings;
 pub mod recipe;
 pub mod ulid;

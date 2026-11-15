@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "legacy-plane-calibration",
+  "nodes": [
+    {"id": "load", "op": "image.load_calib", "opVersion": "1.0.0", "params": {}},
+    {"id": "consumer", "op": "util.reroute", "opVersion": "1.0.0", "params": {}}
+  ],
+  "edges": [
+    {"id": "calib-edge", "from": {"node": "load", "port": "calib"}, "to": {"node": "consumer", "port": "in"}}
+  ],
+  "contractUpgrade": {
+    "schemaVersion": 1,
+    "rules": [{"kind": "planeCalib.v1", "source": {"node": "load", "op": "image.load_calib", "opVersion": "1.0.0", "port": "calib"}, "target": {"node": "consumer", "port": "in"}, "adapterId": "explicit_calib", "missingUnit": "mm", "imageFrame": "camera", "planeFrame": "table"}]
+  }
+}

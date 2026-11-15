@@ -213,7 +213,7 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
       LYFLOW_STD_PACKS: '0'
-      LYFLOW_PACKS: dts;std-value;std-geometry
+      LYFLOW_PACKS: dts;std-value;std-geometry;std-profile
       LYFLOW_PREBUILT_CORE_DIR: ${{ github.workspace }}/build/core/bin
     steps:
       - uses: actions/checkout@v4
@@ -253,7 +253,7 @@ jobs:
         run: pnpm --filter lyflow-app build
 
       - name: C++ 配置（平台 / dts / 值与几何）
-        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=dts;std-value;std-geometry" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=dts;std-value;std-geometry;std-profile" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - uses: actions/setup-python@v5
         with:
@@ -287,6 +287,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Rust 单元测试失败 (exit $LASTEXITCODE)" }
           cargo test --locked --manifest-path bridge/Cargo.toml --test python_nodes 2>&1 | Tee-Object -FilePath build/ci/python-client-test.log
           if ($LASTEXITCODE -ne 0) { throw "Python CLI/嵌入客户端集成失败 (exit $LASTEXITCODE)" }
+          cargo test --locked --manifest-path bridge/Cargo.toml --test profiles 2>&1 | Tee-Object -FilePath build/ci/profile-client-test.log
+          if ($LASTEXITCODE -ne 0) { throw "Profile CLI/嵌入客户端集成失败 (exit $LASTEXITCODE)" }
 
       - name: 保存失败构建与测试诊断
         if: failure()
@@ -422,7 +424,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-glue-gap-v3
+          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-profile-glue-gap-v4
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-
 
@@ -517,6 +519,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 配置失败' }
           cmake --build build/p5-sdk-consumer --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 编译失败' }
+          & ./build/p5-sdk-consumer/profile_sdk_consumer.exe "$sdk/bin/lyflow_core.dll"
+          if ($LASTEXITCODE -ne 0) { throw 'Profile 独立 C++17 SDK 注入与换算失败' }
           python tests/release/p5_sdk_contract.py --sdk "$sdk" --consumer build/p5-sdk-consumer/p5_sdk_consumer.exe --bait-dir build/p1-native/bin --output-dir build/p5-sdk-contract
           if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 工作流或依赖隔离失败' }
 

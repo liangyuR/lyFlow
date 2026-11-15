@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "legacy-dts-metric-consumer",
+  "nodes": [
+    {"id": "root", "op": "dts.seal_root", "opVersion": "1.0.0", "params": {}},
+    {"id": "metric", "op": "util.reroute", "opVersion": "1.0.0", "params": {}},
+    {"id": "legacy", "op": "util.reroute", "opVersion": "1.0.0", "params": {}}
+  ],
+  "edges": [
+    {"id": "metric-edge", "from": {"node": "root", "port": "point"}, "to": {"node": "metric", "port": "in"}},
+    {"id": "legacy-edge", "from": {"node": "root", "port": "point"}, "to": {"node": "legacy", "port": "in"}}
+  ],
+  "contractUpgrade": {
+    "schemaVersion": 1,
+    "rules": [{"kind": "dtsGeometry.v1", "source": {"node": "root", "op": "dts.seal_root", "opVersion": "1.0.0", "port": "point"}, "target": {"node": "metric", "port": "in"}, "adapterId": "root_metric"}]
+  }
+}

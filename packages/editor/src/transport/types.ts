@@ -219,6 +219,7 @@ export interface Transport {
     port: string,
     maxPoints: number,
   ): Promise<ArrayBuffer>;
+  getOutputProfile?(runId: string, nodeId: string, port: string): Promise<ArrayBuffer>;
   getOutputTensor(
     runId: string,
     nodeId: string,

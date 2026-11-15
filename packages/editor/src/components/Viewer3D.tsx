@@ -905,6 +905,17 @@ export function Viewer3D({
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()} 点
           </span>
         )}
+        {cloud?.profile && (
+          <span
+            className="viewer__count"
+            data-testid="viewer-profile-metadata"
+            title={`来源 ${cloud.profile.descriptor.sourceId}；显示坐标为米，保留全部采样槽`}
+          >
+            {cloud.profile.validCount} 有效 · 源 {cloud.profile.descriptor.unit} ·{' '}
+            {cloud.profile.descriptor.plane} · {cloud.profile.descriptor.handedness} ·{' '}
+            {cloud.profile.descriptor.sampleOrder} · {cloud.profile.descriptor.frame}
+          </span>
+        )}
         <span className="viewer__spacer" />
         <select
           className="viewer__select"

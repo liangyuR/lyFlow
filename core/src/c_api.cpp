@@ -8,6 +8,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 #include "exec/disk_cache.h"
@@ -18,6 +19,8 @@
 #include "lyflow/cloud_io.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
+#include "lyflow/profile.h"
+#include "profile_input.h"
 #include "python_runtime.h"
 #include "lyflow/version.h"
 #include "source_revision.h"
@@ -125,10 +128,10 @@ std::string fromC(const char* s) { return s ? std::string(s) : std::string(); }
 
 /// 宿主给的注入（点云 + 图像）拷成 core 自己的 InjectedInput。运行、带注入的计划与清缓存共用它：
 /// 三处拷出来的数据一致，摘要（cacheKey）才一致。调用方的缓冲只保证活到 C 函数返回。
-std::vector<lyflow::exec::InjectedInput> injectedInputsOf(const lyflow_run_input* inputs,
-                                                          std::size_t inputCount,
-                                                          const lyflow_run_image_input* images,
-                                                          std::size_t imageCount) {
+std::vector<lyflow::exec::InjectedInput>
+injectedInputsOf(const lyflow_run_input* inputs, std::size_t inputCount,
+                 const lyflow_run_image_input* images, std::size_t imageCount,
+                 const lyflow_run_profile_input* profiles = nullptr, std::size_t profileCount = 0) {
   std::vector<lyflow::exec::InjectedInput> out;
   for (std::size_t i = 0; inputs && i < inputCount; ++i) {
     const lyflow_run_input& in = inputs[i];
@@ -153,6 +156,20 @@ std::vector<lyflow::exec::InjectedInput> injectedInputsOf(const lyflow_run_input
   for (std::size_t i = 0; images && i < imageCount; ++i) {
     out.push_back(lyflow::exec::InjectedInput{fromC(images[i].node_id), fromC(images[i].port),
                                               lyflow::Data::image(copyImageInput(images[i]))});
+  }
+  if (profileCount && !profiles)
+    throw std::invalid_argument("Profile input array is null");
+  for (std::size_t i = 0; i < profileCount; ++i) {
+    const auto& in = profiles[i];
+    if (!in.node_id || !*in.node_id || !in.port || !*in.port) {
+      out.push_back(
+          {fromC(in.node_id), fromC(in.port),
+           lyflow::Data::error(lyflow::Status::Error(
+               lyflow::Phase::Validate, "bad_input",
+               "Profile injection requires nonempty node_id and port", {}, fromC(in.port)))});
+    } else {
+      out.push_back({fromC(in.node_id), fromC(in.port), lyflow::runtime::copyProfileInput(in)});
+    }
   }
   return out;
 }
@@ -293,6 +310,16 @@ char* lyflow_plan_inputs(const char* graph_json, const char* base_dir, const cha
                          size_t n, const char* params_json, const lyflow_run_input* inputs,
                          size_t input_count, const lyflow_run_image_input* image_inputs,
                          size_t image_input_count) {
+  return lyflow_plan_inputs_ex(graph_json, base_dir, targets, n, params_json, inputs, input_count,
+                               image_inputs, image_input_count, nullptr, 0);
+}
+
+char* lyflow_plan_inputs_ex(const char* graph_json, const char* base_dir,
+                            const char* const* targets, size_t n, const char* params_json,
+                            const lyflow_run_input* inputs, size_t input_count,
+                            const lyflow_run_image_input* image_inputs, size_t image_input_count,
+                            const lyflow_run_profile_input* profile_inputs,
+                            size_t profile_input_count) {
   try {
     std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
@@ -303,7 +330,8 @@ char* lyflow_plan_inputs(const char* graph_json, const char* base_dir, const cha
     return dup(lyflow::exec::planGraphJson(
         fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
         ts, fromC(params_json),
-        injectedInputsOf(inputs, input_count, image_inputs, image_input_count)));
+        injectedInputsOf(inputs, input_count, image_inputs, image_input_count, profile_inputs,
+                         profile_input_count)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal", std::string("编译时内部异常: ") + e.what());
@@ -321,6 +349,17 @@ char* lyflow_effective_params_inputs(const char* graph_json, const char* base_di
                                      const char* params_json, const lyflow_run_input* inputs,
                                      size_t input_count, const lyflow_run_image_input* image_inputs,
                                      size_t image_input_count) {
+  return lyflow_effective_params_inputs_ex(graph_json, base_dir, params_json, inputs, input_count,
+                                           image_inputs, image_input_count, nullptr, 0);
+}
+
+char* lyflow_effective_params_inputs_ex(const char* graph_json, const char* base_dir,
+                                        const char* params_json, const lyflow_run_input* inputs,
+                                        size_t input_count,
+                                        const lyflow_run_image_input* image_inputs,
+                                        size_t image_input_count,
+                                        const lyflow_run_profile_input* profile_inputs,
+                                        size_t profile_input_count) {
   try {
     std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
@@ -328,7 +367,8 @@ char* lyflow_effective_params_inputs(const char* graph_json, const char* base_di
     return dup(lyflow::exec::effectiveParamsJson(
         fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
         fromC(params_json),
-        injectedInputsOf(inputs, input_count, image_inputs, image_input_count)));
+        injectedInputsOf(inputs, input_count, image_inputs, image_input_count, profile_inputs,
+                         profile_input_count)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal",
@@ -367,6 +407,18 @@ char* lyflow_cache_evict_inputs(const char* graph_json, const char* base_dir,
                                 const char* params_json, const lyflow_run_input* inputs,
                                 size_t input_count, const lyflow_run_image_input* image_inputs,
                                 size_t image_input_count) {
+  return lyflow_cache_evict_inputs_ex(graph_json, base_dir, node_ids, n, include_downstream,
+                                      params_json, inputs, input_count, image_inputs,
+                                      image_input_count, nullptr, 0);
+}
+
+char* lyflow_cache_evict_inputs_ex(const char* graph_json, const char* base_dir,
+                                   const char* const* node_ids, size_t n, int include_downstream,
+                                   const char* params_json, const lyflow_run_input* inputs,
+                                   size_t input_count, const lyflow_run_image_input* image_inputs,
+                                   size_t image_input_count,
+                                   const lyflow_run_profile_input* profile_inputs,
+                                   size_t profile_input_count) {
   try {
     std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
@@ -377,7 +429,8 @@ char* lyflow_cache_evict_inputs(const char* graph_json, const char* base_dir,
     return dup(lyflow::exec::evictNodesJson(
         fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
         ids, include_downstream != 0, fromC(params_json),
-        injectedInputsOf(inputs, input_count, image_inputs, image_input_count)));
+        injectedInputsOf(inputs, input_count, image_inputs, image_input_count, profile_inputs,
+                         profile_input_count)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal", std::string("清缓存时内部异常: ") + e.what());
@@ -436,7 +489,8 @@ static lyflow_run* startRun(const char* graph_json, const lyflow_run_options* op
       options.paramsJson = fromC(opts->params_json);
       // 调用方的缓冲只保证活到本函数返回，所以在这里就拷成 core 自己的。
       options.inputs = injectedInputsOf(opts->inputs, opts->input_count, opts->image_inputs,
-                                        opts->image_input_count);
+                                        opts->image_input_count, opts->profile_inputs,
+                                        opts->profile_input_count);
     }
     if (frame) {
       auto values = lyflow::runtime::frameInputs(frame, fromC(bindings));

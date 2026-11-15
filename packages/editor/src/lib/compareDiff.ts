@@ -191,6 +191,7 @@ function fieldsFor(
   const k = (name: string) => `${port}.${name}`;
 
   switch (type) {
+    case 'Profile':
     case 'PointCloud': {
       const ca = cloudFor(sa, ea.port);
       const cb = cloudFor(sb, eb.port);

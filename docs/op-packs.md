@@ -5,16 +5,16 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
-本页描述当前机制。正在规划的能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)；`std-profile`、`std-metrology`及`solution-*`目前尚未实现，不能直接作为包名启用。
+本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1新增的`std-profile`目前提供显式数据适配；轮廓算法将在M3迁入，`std-metrology`及`solution-*`仍为待实施目标。
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
-| | 仓库内的包 | 外部包 |
-|---|---|---|
-| 在哪 | 本仓库的 `packs/*` | 任意目录 |
-| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名 | `LYFLOW_OP_PACKS` 按**目录**显式列出 |
-| 注册顺序 | 紧跟 `gen.synthetic` | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
-| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`packs/dts` | 任何自己写的包 |
+|          | 仓库内的包                                                                          | 外部包                                                 |
+| -------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 在哪     | 本仓库的 `packs/*`                                                                  | 任意目录                                               |
+| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                  | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
+| 注册顺序 | 紧跟 `gen.synthetic`                                                                | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`packs/dts` | 任何自己写的包                                         |
 
 core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
@@ -22,16 +22,17 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 
 仓库内的包不一定默认编：每个包在 `lyflow_op_pack()` 里声明 `DEFAULT ON|OFF`。
 
-| 包 | 版本 | DEFAULT | 算子 | 依赖 |
-|---|---|---|---|---|
-| `std-value` | 0.2.0 | ON | 16项数值、逻辑、列表与受限表达式 | core与标准库 |
-| `std-geometry` | 0.3.0 | ON | 35项几何、位姿、坐标变换与刚体关系 | core与标准库 |
-| `std-pointcloud` | 0.4.0 | ON | 52项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子 | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计 |
-| `std-ml` | 0.3.0 | ON | `ml.onnx_run` | ONNX Runtime |
-| `std-image` | 0.9.0 | ON | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
-| `glue` | 0.3.3 | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)） | std-image的`lyflow_opencv_support` |
-| `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
-| `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
+| 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
+| ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
+| `std-geometry`   | 0.4.0  | ON      | 35项几何、位姿、坐标变换与刚体关系                                                               | core与标准库                                                                        |
+| `std-profile`    | 0.1.0  | ON      | 3项点云/轮廓、单位及轴映射显式适配；[数据契约](profile-data-contract.md)                         | core与标准库，无PCL/OpenCV/ORT                                                      |
+| `std-pointcloud` | 0.4.0  | ON      | 52项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子                                                     | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
+| `std-ml`         | 0.3.0  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
+| `std-image`      | 0.10.0 | ON      | 77项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | std-image的`lyflow_opencv_support`                                                  |
+| `gap`            | 0.2.0  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
+| `dts`            | 0.2.0  | **OFF** | 9项`dts.*`，含旧版毫米几何显式米制适配                                                           | 无（零第三方，不链 PCL）                                                            |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
@@ -60,11 +61,11 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 **空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
 不该悄悄变成「关掉标准包」；要关就显式写 `0`。
 
-| 变量 | 值 | 默认 | 语义 |
-|---|---|---|---|
-| `LYFLOW_STD_PACKS` | `0` / `1` | `1` | `1`：自动扫 `packs/*`，`DEFAULT ON` 的全编。`0`：**纯平台构建**，`packs/*` 里只编被 `LYFLOW_PACKS` 点名的 |
-| `LYFLOW_PACKS` | 分号分隔的**包名** | 空 | 点名编 `packs/*` 里的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
-| `LYFLOW_OP_PACKS` | 分号分隔的**目录** | 空 | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编 |
+| 变量               | 值                 | 默认 | 语义                                                                                                                                                |
+| ------------------ | ------------------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LYFLOW_STD_PACKS` | `0` / `1`          | `1`  | `1`：自动扫 `packs/*`，`DEFAULT ON` 的全编。`0`：**纯平台构建**，`packs/*` 里只编被 `LYFLOW_PACKS` 点名的                                           |
+| `LYFLOW_PACKS`     | 分号分隔的**包名** | 空   | 点名编 `packs/*` 里的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
+| `LYFLOW_OP_PACKS`  | 分号分隔的**目录** | 空   | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编                                                                                              |
 
 `LYFLOW_STD_PACKS=0` 之下的取舍：被点名的包才会被 `include()`，没点名的**连 cmake 文件都不读**。
 `std-pointcloud` 的 `find_package(PCL REQUIRED)`、`std-ml` 的 onnxruntime 检查写在
@@ -182,17 +183,17 @@ lyflow_op_pack(
 )
 ```
 
-| 关键字 | 作用 |
-|---|---|
-| `NAME` | 必填。注册入口是 `lyflow::packs::<NAME>::registerPackOps(Registry&)`。带连字符的名字先过一遍 `MAKE_C_IDENTIFIER`：`std-pointcloud` → `lyflow::packs::std_pointcloud` |
-| `VERSION` | 可选。manifest 里每个算子的 `pack` 字段是 `名字@版本`，不给版本就只有名字 |
-| `DEFAULT` | 可选，只对 `packs/*` 里的包生效。`OFF` 时要 `LYFLOW_PACKS=<名字>` 才编。宏会把结果写回 `LYFLOW_PACK_ENABLED`，包在调用之后读它决定要不要检查依赖、拷 DLL |
-| `SOURCES` | 编进 `lyflow_core`（以及 dump-manifest 与测试 exe） |
-| `TEST_SOURCES` | 追加到 `lyflow-core-tests` 这一个 doctest 目标，不另起 exe |
-| `PCH` | 包的预编译头。领域包往往每个 TU 都拖一遍 PCL + Eigen + 领域头，不预编译一次增量重建要十秒，热重载就跟不上手 |
-| `INCLUDES` | 追加到包的 include 路径（core 自己的 include 已经在里面） |
-| `LINK` | 追加到 `lyflow_core` 与两个 exe 的链接库。要 PCL 就写 `lyflow_pcl_support`（见下） |
-| `DEFINES` / `OPTIONS` | 只作用于包自己的 TU |
+| 关键字                | 作用                                                                                                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NAME`                | 必填。注册入口是 `lyflow::packs::<NAME>::registerPackOps(Registry&)`。带连字符的名字先过一遍 `MAKE_C_IDENTIFIER`：`std-pointcloud` → `lyflow::packs::std_pointcloud` |
+| `VERSION`             | 可选。manifest 里每个算子的 `pack` 字段是 `名字@版本`，不给版本就只有名字                                                                                            |
+| `DEFAULT`             | 可选，只对 `packs/*` 里的包生效。`OFF` 时要 `LYFLOW_PACKS=<名字>` 才编。宏会把结果写回 `LYFLOW_PACK_ENABLED`，包在调用之后读它决定要不要检查依赖、拷 DLL             |
+| `SOURCES`             | 编进 `lyflow_core`（以及 dump-manifest 与测试 exe）                                                                                                                  |
+| `TEST_SOURCES`        | 追加到 `lyflow-core-tests` 这一个 doctest 目标，不另起 exe                                                                                                           |
+| `PCH`                 | 包的预编译头。领域包往往每个 TU 都拖一遍 PCL + Eigen + 领域头，不预编译一次增量重建要十秒，热重载就跟不上手                                                          |
+| `INCLUDES`            | 追加到包的 include 路径（core 自己的 include 已经在里面）                                                                                                            |
+| `LINK`                | 追加到 `lyflow_core` 与两个 exe 的链接库。要 PCL 就写 `lyflow_pcl_support`（见下）                                                                                   |
+| `DEFINES` / `OPTIONS` | 只作用于包自己的 TU                                                                                                                                                  |
 
 **每个包一个对象库**，所以每个包可以有自己的 PCH，互不干扰
 （ADR-0014 之前是全局只能有一份，两个包给了不同的 PCH 会 `FATAL_ERROR`）。
@@ -307,11 +308,11 @@ op.outputs = {
 
 算子的约束只有三个去处，**不写成给人读的散文**：
 
-| 约束依赖什么 | 写在哪 | 什么时候报 |
-|---|---|---|
-| 只依赖参数与连接关系（「`dirMode` 不是 `free` 就必须接 `refLine`」「半径上限不能小于下限」） | `OperatorDesc::validate` | 加载期，`buildPlan` 里，图根本跑不起来 |
-| 数据到达端口时就能核对的数值不变量（点数、有限性、张量形状、Record 类型） | 端口 `contract`（下一节） | 输入绑定时，第一帧 |
-| 依赖数据内容的（弧太短、内点太少、截取没生效） | 运行期信号：quality 字段、warn 日志、错误值 | 运行期，每帧 |
+| 约束依赖什么                                                                                 | 写在哪                                      | 什么时候报                             |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------- |
+| 只依赖参数与连接关系（「`dirMode` 不是 `free` 就必须接 `refLine`」「半径上限不能小于下限」） | `OperatorDesc::validate`                    | 加载期，`buildPlan` 里，图根本跑不起来 |
+| 数据到达端口时就能核对的数值不变量（点数、有限性、张量形状、Record 类型）                    | 端口 `contract`（下一节）                   | 输入绑定时，第一帧                     |
+| 依赖数据内容的（弧太短、内点太少、截取没生效）                                               | 运行期信号：quality 字段、warn 日志、错误值 | 运行期，每帧                           |
 
 用法说明（「这个旋钮什么时候该开」「有哪个更合适的替代算子」）写进 `op.doc` 或对应参数的 `doc`。
 
@@ -424,16 +425,16 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 包**不能**往类型表里加类型 —— 前端要在不知道任何包的前提下给端口着色、
 在 3D 视图里叠画几何。core 已经有六种 2D 量测域的通用载荷，外加一个给推理用的 `Tensor` 与第二个数据域 `Image`：
 
-| 类型 | 载荷 | 3D 视图 |
-|---|---|---|
-| `Box2D` | min/max 两角，米 | 画成矩形框 |
-| `Line2D` | 过一点 + 单位方向，可选带两端点 | 画成线段（无端点时按视图尺度画一条长线） |
-| `Circle2D` | 圆心 + 半径 | 画成圆 |
-| `Point2D` | 一个点 | 画成十字 |
-| `Measurement` | 值 + 单位 + ok + 消息 + 判定 + 上下限 | Inspector 的「输出」一栏 |
-| `Record` | 带类型标签的 JSON | Inspector 里显示 JSON |
-| `Tensor` | 形状 + float32 数据，行主序 | 连线查看器画成图像；Inspector 与预览里显示形状与 min/max/mean |
-| `Image` | 宽 × 高 × 通道（1/3/4，RGB(A) 顺序）、位深 u8/u16/f32，行主序、通道交错（[图像包](../packs/std-image/README.md)） | 连线查看器按级别取、可缩放、悬停读像素；Inspector 显示尺寸与逐通道均值 |
+| 类型          | 载荷                                                                                                              | 3D 视图                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `Box2D`       | min/max 两角，米                                                                                                  | 画成矩形框                                                             |
+| `Line2D`      | 过一点 + 单位方向，可选带两端点                                                                                   | 画成线段（无端点时按视图尺度画一条长线）                               |
+| `Circle2D`    | 圆心 + 半径                                                                                                       | 画成圆                                                                 |
+| `Point2D`     | 一个点                                                                                                            | 画成十字                                                               |
+| `Measurement` | 值 + 单位 + ok + 消息 + 判定 + 上下限                                                                             | Inspector 的「输出」一栏                                               |
+| `Record`      | 带类型标签的 JSON                                                                                                 | Inspector 里显示 JSON                                                  |
+| `Tensor`      | 形状 + float32 数据，行主序                                                                                       | 连线查看器画成图像；Inspector 与预览里显示形状与 min/max/mean          |
+| `Image`       | 宽 × 高 × 通道（1/3/4，RGB(A) 顺序）、位深 u8/u16/f32，行主序、通道交错（[图像包](../packs/std-image/README.md)） | 连线查看器按级别取、可缩放、悬停读像素；Inspector 显示尺寸与逐通道均值 |
 
 领域专有的结构走 `Record`：`Record{ type: "GapAlignment", data: {...} }`。
 加一个领域结构因此不用改 core，代价是它在图上只是一团 JSON，没有专门的可视化。

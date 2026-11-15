@@ -61,7 +61,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
         --cache-dir <dir>（run / eval / sweep / perturb 都认；或环境变量 LYFLOW_CACHE_DIR）：结果缓存落盘，
                  另一个进程跑同一张图时贵的上游直接命中。默认关；按构建指纹分目录，重编 core 之后旧结果不再复用。
-                 只落盘确定性、耗时 ≥ 20 ms、输出全是点云、张量或图像的节点。docs/disk-cache-plan.md
+                 只落盘确定性、耗时 ≥ 20 ms、输出均支持原生二进制缓存的节点。见 docs/operator-optimization.md。
   lyflow cache    info|clear --cache-dir <dir> [--stale]
         info：各个指纹目录的文件数与字节数，current 标出当前 core 的那一个；clear 删掉（--stale 只删旧指纹的）
   lyflow import   <file> --kind <kind> [--fine] [-o <out.lyflow.json>] [--base-dir <dir>]
@@ -105,7 +105,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         当前 core 的版本、构建指纹、实际 DLL 路径与算子包，JSON Lines。
   lyflow samples [--samples <jsonl> | --samples-glob <pat> --bind <n>.<p> | --samples-dir <root> ...]
         使用 eval 的样本选择选项，输出规范化样本 JSONL，不执行图。
-  lyflow dump     <graph> <nodeId>:<port> <out.pcd> [--format <binary|ascii|binary_compressed>]
+  lyflow dump     <graph> <nodeId>:<port> <out.pcd|out.lypr> [--format <binary|ascii|binary_compressed|profile>] [--input ...]
                           图像输出写 <out.lyim>（LYIM 载荷原样落盘，docs/http-transport.md）
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
                           --metric <nodeId>:<port>.<elementCount|byteSize|durationMs>
@@ -1509,18 +1509,15 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(i) => i,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
-    // 先单独校验一遍：校验失败与执行失败是两个不同的退出码，混在一次 run 里分不开。
-    // lyflow_validate 看不见注入：被 --input 喂了的必填输入不算 missing_input（执行期
-    // 的校验知道注入，会把它当成已接）。
-    match diagnostics_of(&core, &loaded) {
-        Ok(diags) => {
-            let fed = |d: &Value| {
-                d["code"] == "missing_input"
-                    && inputs.iter().any(|i| {
-                        d["nodeId"] == i.node_id.as_str() && d["portName"] == i.port.as_str()
-                    })
-            };
-            let remaining: Vec<Value> = diags.into_iter().filter(|d| !fed(d)).collect();
+    let diagnostics = if inputs.is_empty() {
+        diagnostics_of(&core, &loaded)
+    } else {
+        core.plan_with_inputs(&loaded.json, &loaded.base_dir, &[], None, &inputs, &[])
+            .map_err(|e| e.to_string())
+            .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).map_err(|e| e.to_string()))
+    };
+    match diagnostics {
+        Ok(remaining) => {
             if has_errors(&remaining) {
                 for d in &remaining {
                     json_line(out, d);
@@ -1737,7 +1734,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if parsed.positional.len() < 3 {
         line(
             err,
-            "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd|out.lyim>",
+            "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd|out.lyim|out.lypr>",
         );
         return EXIT_USAGE;
     }
@@ -1748,7 +1745,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let target_file = parsed.positional[2].clone();
     // 写错的格式（--format asci）以前一路传到写盘那里，落进「其余一律 binary」悄悄写成二进制
-    const FORMATS: &[&str] = &["binary", "ascii", "binary_compressed"];
+    const FORMATS: &[&str] = &["binary", "ascii", "binary_compressed", "profile"];
     let format = parsed.one("format").unwrap_or("binary").to_string();
     if !FORMATS.contains(&format.as_str()) {
         return fail(
@@ -1766,6 +1763,10 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let targets = vec![node_id.to_string()];
+    let inputs = match load_inputs(&core, parsed) {
+        Ok(inputs) => inputs,
+        Err(e) => return fail(err, &e, EXIT_FAILED),
+    };
     let result = match execute(
         &core,
         RunRequest {
@@ -1778,7 +1779,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
             params_json: None,
-            inputs: &[],
+            inputs: &inputs,
             group: None,
             on_event: None,
         },
@@ -1816,7 +1817,16 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             );
         }
     }
-    if let Err(e) = core.output_save(&run_id, node_id, port, &target_file, &format) {
+    let saved = if format == "profile" {
+        core.output_profile(&run_id, node_id, port, 0, 0)
+            .map_err(|e| e.to_string())
+            .and_then(|view| crate::profile_wire::encode_profile(&view))
+            .and_then(|bytes| std::fs::write(&target_file, bytes).map_err(|e| e.to_string()))
+    } else {
+        core.output_save(&run_id, node_id, port, &target_file, &format)
+            .map_err(|e| e.to_string())
+    };
+    if let Err(e) = saved {
         return fail(err, &e, EXIT_FAILED);
     }
     let count = result.metric(node_id, port, "elementCount").unwrap_or(0.0);

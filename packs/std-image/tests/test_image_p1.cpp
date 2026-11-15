@@ -271,6 +271,15 @@ TEST_CASE("P1 homography warp and calibrated distance respect physical units and
   REQUIRE(c.run("image.calibrated_distance").ok);
   CHECK(c.outputs.at("distance").asMeasurement()->value == doctest::Approx(0.01));
   CHECK(c.outputs.at("distance").asMeasurement()->unit == "m");
+  Record canonical;
+  std::string why;
+  REQUIRE(calibration::upgradeLegacyPlane(plane, "mm", "camera-A", "table", canonical, why));
+  c.inputs["calib"] = Data::record(canonical);
+  CHECK_FALSE(c.run("image.calibrated_distance").ok);
+  CHECK_FALSE(c.run("image.calibrated_distance", {{"imageFrame", Value::text("camera-B")}}).ok);
+  REQUIRE(c.run("image.calibrated_distance", {{"imageFrame", Value::text("camera-A")}}).ok);
+  CHECK(c.outputs.at("distance").asMeasurement()->value == doctest::Approx(0.01));
+  CHECK(canonical.data["imageFrame"] == "camera-A");
   a.unit = Unit2D::Meter;
   c.inputs["a"] = Data::point2d(a);
   CHECK_FALSE(c.run("image.calibrated_distance").ok);

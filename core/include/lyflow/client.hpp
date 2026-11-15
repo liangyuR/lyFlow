@@ -3,6 +3,7 @@
 // 嵌入 SDK：header-only 的 C++ 封装，只依赖 lyflow/c_api.h。
 // 用法、安装布局与线程约定见 docs/embedding.md。
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -87,6 +88,24 @@ struct InputImage {
   const std::uint8_t* pixels = nullptr;
 };
 
+class ProfileInputHandle {
+public:
+  bool valid() const { return static_cast<bool>(handle_); }
+  const lyflow_profile_input* raw() const { return handle_.get(); }
+
+private:
+  friend class Client;
+  friend class Frame;
+  std::shared_ptr<lyflow_profile_input> handle_;
+};
+
+struct InputProfile : InputCloud {
+  std::string descriptorJson;
+  std::vector<std::uint8_t> validity;
+  std::vector<std::uint32_t> sourceIndices;
+  ProfileInputHandle retained;
+};
+
 struct RunOptions {
   std::string runId;
   std::string baseDir;
@@ -99,6 +118,7 @@ struct RunOptions {
   bool noReuse = false;
   std::vector<InputCloud> inputs;
   std::vector<InputImage> imageInputs;
+  std::vector<InputProfile> profileInputs;
   /// 顶层图参数的取值（ABI v10），JSON 对象 { 名字: 值 }。空串 = 全用图里的 default。
   std::string paramsJson;
 
@@ -136,6 +156,56 @@ class FrameSession;
 namespace detail {
 struct FrameApi;
 }
+
+class ProfileView {
+public:
+  ProfileView() = default;
+  ~ProfileView() { reset(); }
+  ProfileView(const ProfileView&) = delete;
+  ProfileView& operator=(const ProfileView&) = delete;
+  ProfileView(ProfileView&& other) noexcept { steal(other); }
+  ProfileView& operator=(ProfileView&& other) noexcept {
+    if (this != &other) {
+      reset();
+      steal(other);
+    }
+    return *this;
+  }
+  bool valid() const { return view_.handle != nullptr; }
+  std::uint32_t pointCount() const { return view_.point_count; }
+  std::uint32_t totalPoints() const { return view_.total_points; }
+  std::uint32_t offset() const { return view_.offset; }
+  std::uint32_t flags() const { return view_.flags; }
+  std::uint64_t cloudId() const { return view_.cloud_id; }
+  const char* descriptorJson() const { return view_.descriptor_json ? view_.descriptor_json : ""; }
+  const float* xyz() const { return view_.xyz; }
+  const float* intensity() const { return view_.intensity; }
+  const float* normals() const { return view_.normals; }
+  const std::uint8_t* rgb() const { return view_.rgb; }
+  const std::uint8_t* validity() const { return view_.validity; }
+  const std::uint32_t* sourceIndices() const { return view_.source_indices; }
+
+private:
+  friend class Client;
+  friend class Frame;
+  void reset() {
+    if (free_ && view_.handle)
+      free_(&view_);
+    std::memset(&view_, 0, sizeof(view_));
+    free_ = nullptr;
+    retain_.reset();
+  }
+  void steal(ProfileView& other) {
+    view_ = other.view_;
+    free_ = other.free_;
+    retain_ = std::move(other.retain_);
+    std::memset(&other.view_, 0, sizeof(other.view_));
+    other.free_ = nullptr;
+  }
+  lyflow_profile_view view_{};
+  void (*free_)(lyflow_profile_view*) = nullptr;
+  std::shared_ptr<void> retain_;
+};
 
 /// 借来的点云缓冲，析构时还给 core。
 class CloudView {
@@ -357,7 +427,8 @@ struct RunState {
 /// 那两个向量久；core 在调用里就拷走，调用返回后即可丢。运行、带注入的计划与清缓存共用它。
 class RawInputs {
 public:
-  RawInputs(const std::vector<InputCloud>& inputs, const std::vector<InputImage>& images) {
+  RawInputs(const std::vector<InputCloud>& inputs, const std::vector<InputImage>& images,
+            const std::vector<InputProfile>& profiles = {}) {
     clouds_.reserve(inputs.size());
     for (const InputCloud& in : inputs) {
       lyflow_run_input raw{};
@@ -384,7 +455,34 @@ public:
       raw.pixels = in.pixels;
       images_.push_back(raw);
     }
+    profiles_.reserve(profiles.size());
+    for (const auto& in : profiles) {
+      const auto n = in.xyz.size() / 3;
+      if (!in.retained.valid() &&
+          (in.xyz.size() % 3 || n > UINT32_MAX || in.validity.size() != n ||
+           in.sourceIndices.size() != n || (!in.intensity.empty() && in.intensity.size() != n) ||
+           (!in.normals.empty() && in.normals.size() != 3 * n) ||
+           (!in.rgb.empty() && in.rgb.size() != 3 * n)))
+        throw ClientError("Profile input buffer lengths do not agree");
+      lyflow_run_profile_input raw{};
+      raw.node_id = in.nodeId.c_str();
+      raw.port = in.port.c_str();
+      raw.count = static_cast<std::uint32_t>(n);
+      raw.xyz = in.xyz.data();
+      raw.intensity = in.intensity.empty() ? nullptr : in.intensity.data();
+      raw.normals = in.normals.empty() ? nullptr : in.normals.data();
+      raw.rgb = in.rgb.empty() ? nullptr : in.rgb.data();
+      raw.descriptor_json = in.descriptorJson.c_str();
+      raw.validity = in.validity.data();
+      raw.source_indices = in.sourceIndices.data();
+      raw.handle = in.retained.raw();
+      profiles_.push_back(raw);
+    }
   }
+  const lyflow_run_profile_input* profiles() const {
+    return profiles_.empty() ? nullptr : profiles_.data();
+  }
+  std::size_t profileCount() const { return profiles_.size(); }
   const lyflow_run_input* clouds() const { return clouds_.empty() ? nullptr : clouds_.data(); }
   std::size_t cloudCount() const { return clouds_.size(); }
   const lyflow_run_image_input* images() const {
@@ -395,6 +493,7 @@ public:
 private:
   std::vector<lyflow_run_input> clouds_;
   std::vector<lyflow_run_image_input> images_;
+  std::vector<lyflow_run_profile_input> profiles_;
 };
 
 } // namespace detail
@@ -434,6 +533,8 @@ public:
   CloudView cloud(const std::string& nodeId, const std::string& port,
                   std::uint32_t maxPoints = 0) const;
 
+  ProfileView profile(const std::string& nodeId, const std::string& port, std::uint32_t offset = 0,
+                      std::uint32_t count = 0) const;
   TensorView tensor(const std::string& nodeId, const std::string& port, std::uint64_t offset = 0,
                     std::uint32_t count = 0) const;
 
@@ -511,7 +612,8 @@ public:
   std::string effectiveParams(const std::string& graphJson, const std::string& baseDir = {},
                               const std::string& paramsJson = {},
                               const std::vector<InputCloud>& inputs = {},
-                              const std::vector<InputImage>& imageInputs = {}) const;
+                              const std::vector<InputImage>& imageInputs = {},
+                              const std::vector<InputProfile>& profileInputs = {}) const;
   Frame captureFrame(const std::string& runId, const std::string& metadataJson,
                      const std::string& optionsJson = "{}") const;
   Frame loadFrame(const std::string& path, std::uint64_t maxBytes = 1024ull * 1024 * 1024,
@@ -552,14 +654,22 @@ public:
   std::string plan(const std::string& graphJson, const std::string& baseDir,
                    const std::vector<std::string>& targets, const std::string& paramsJson,
                    const std::vector<InputCloud>& inputs,
-                   const std::vector<InputImage>& imageInputs = {}) const {
-    if (inputs.empty() && imageInputs.empty())
+                   const std::vector<InputImage>& imageInputs = {},
+                   const std::vector<InputProfile>& profileInputs = {}) const {
+    if (inputs.empty() && imageInputs.empty() && profileInputs.empty())
       return plan(graphJson, baseDir, targets, paramsJson);
     requireInjected(fn_.plan_inputs, "lyflow_plan_inputs");
     std::vector<const char*> ptrs;
     for (const std::string& t : targets)
       ptrs.push_back(t.c_str());
-    const detail::RawInputs raw(inputs, imageInputs);
+    const detail::RawInputs raw(inputs, imageInputs, profileInputs);
+    if (!profileInputs.empty()) {
+      requireInjected(fn_.plan_inputs_ex, "lyflow_plan_inputs_ex");
+      return owned(fn_.plan_inputs_ex(
+          graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+          paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(), raw.cloudCount(),
+          raw.images(), raw.imageCount(), raw.profiles(), raw.profileCount()));
+    }
     return owned(fn_.plan_inputs(graphJson.c_str(), baseDir.c_str(),
                                  ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
                                  paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
@@ -594,6 +704,50 @@ public:
 
   RunHandle startRun(const std::string& graphJson, const RunOptions& options,
                      const std::function<void(const char*)>& onEvent = {}) const;
+
+  ProfileInputHandle retainProfileInput(const InputProfile& input) const {
+    requireInjected(fn_.profile_input_create, "lyflow_profile_input_create");
+    requireInjected(fn_.profile_input_free, "lyflow_profile_input_free");
+    const std::vector<InputProfile> inputs{input};
+    detail::RawInputs raw({}, {}, inputs);
+    lyflow_profile_input* handle = nullptr;
+    const auto error = owned(fn_.profile_input_create(raw.profiles(), &handle));
+    if (!handle)
+      throw ClientError(error.empty() ? "Profile input creation failed" : error);
+    ProfileInputHandle result;
+    const auto free = fn_.profile_input_free;
+    result.handle_ = std::shared_ptr<lyflow_profile_input>(
+        handle, [free, lease = lease_](lyflow_profile_input* value) { free(value); });
+    return result;
+  }
+  ProfileInputHandle captureProfileInput(const std::string& runId, const std::string& nodeId,
+                                         const std::string& port) const {
+    requireInjected(fn_.profile_input_capture, "lyflow_profile_input_capture");
+    requireInjected(fn_.profile_input_free, "lyflow_profile_input_free");
+    lyflow_profile_input* handle = nullptr;
+    const auto error =
+        owned(fn_.profile_input_capture(runId.c_str(), nodeId.c_str(), port.c_str(), &handle));
+    if (!handle)
+      throw ClientError(error.empty() ? "Profile capture failed" : error);
+    ProfileInputHandle result;
+    const auto free = fn_.profile_input_free;
+    result.handle_ = std::shared_ptr<lyflow_profile_input>(
+        handle, [free, lease = lease_](lyflow_profile_input* value) { free(value); });
+    return result;
+  }
+  bool supportsProfiles() const { return fn_.output_profile && fn_.profile_view_free; }
+  ProfileView profile(const std::string& runId, const std::string& nodeId, const std::string& port,
+                      std::uint32_t offset = 0, std::uint32_t count = 0) const {
+    requireInjected(fn_.output_profile, "lyflow_output_profile");
+    requireInjected(fn_.profile_view_free, "lyflow_profile_view_free");
+    ProfileView out;
+    if (fn_.output_profile(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count,
+                           &out.view_) != 0)
+      return out;
+    out.free_ = fn_.profile_view_free;
+    out.retain_ = lease_;
+    return out;
+  }
 
   /// 某个节点某个输出端口的点云，等步长抽样到 maxPoints 以内。
   CloudView cloud(const std::string& runId, const std::string& nodeId, const std::string& port,
@@ -686,14 +840,23 @@ public:
   std::string evictCache(const std::string& graphJson, const std::vector<std::string>& nodeIds,
                          bool includeDownstream, const std::string& baseDir,
                          const std::string& paramsJson, const std::vector<InputCloud>& inputs,
-                         const std::vector<InputImage>& imageInputs = {}) const {
-    if (inputs.empty() && imageInputs.empty())
+                         const std::vector<InputImage>& imageInputs = {},
+                         const std::vector<InputProfile>& profileInputs = {}) const {
+    if (inputs.empty() && imageInputs.empty() && profileInputs.empty())
       return evictCache(graphJson, nodeIds, includeDownstream, baseDir, paramsJson);
     requireInjected(fn_.cache_evict_inputs, "lyflow_cache_evict_inputs");
     std::vector<const char*> ptrs;
     for (const std::string& id : nodeIds)
       ptrs.push_back(id.c_str());
-    const detail::RawInputs raw(inputs, imageInputs);
+    const detail::RawInputs raw(inputs, imageInputs, profileInputs);
+    if (!profileInputs.empty()) {
+      requireInjected(fn_.cache_evict_inputs_ex, "lyflow_cache_evict_inputs_ex");
+      return owned(fn_.cache_evict_inputs_ex(
+          graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+          includeDownstream ? 1 : 0, paramsJson.empty() ? nullptr : paramsJson.c_str(),
+          raw.clouds(), raw.cloudCount(), raw.images(), raw.imageCount(), raw.profiles(),
+          raw.profileCount()));
+    }
     return owned(fn_.cache_evict_inputs(
         graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
         includeDownstream ? 1 : 0, paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
@@ -751,6 +914,13 @@ private:
     char* (*run_outputs)(const char*) = nullptr;
     char* (*run_summary)(const char*) = nullptr;
     char* (*import)(const char*, const char*, const char*) = nullptr;
+    decltype(&lyflow_profile_input_create) profile_input_create = nullptr;
+    decltype(&lyflow_profile_input_capture) profile_input_capture = nullptr;
+    decltype(&lyflow_profile_input_free) profile_input_free = nullptr;
+    decltype(&lyflow_output_profile) output_profile = nullptr;
+    decltype(&lyflow_profile_view_free) profile_view_free = nullptr;
+    decltype(&lyflow_plan_inputs_ex) plan_inputs_ex = nullptr;
+    decltype(&lyflow_cache_evict_inputs_ex) cache_evict_inputs_ex = nullptr;
     int (*output_cloud)(const char*, const char*, const char*, uint32_t,
                         lyflow_cloud_view*) = nullptr;
     void (*cloud_view_free)(lyflow_cloud_view*) = nullptr;
@@ -924,6 +1094,13 @@ inline void Client::bind(const std::string& where) {
   need(fn_.plan_params, "lyflow_plan_params", where);
   need(fn_.cache_clear, "lyflow_cache_clear", where);
   need(fn_.cache_evict, "lyflow_cache_evict", where);
+  maybe(fn_.profile_input_create, "lyflow_profile_input_create");
+  maybe(fn_.profile_input_capture, "lyflow_profile_input_capture");
+  maybe(fn_.profile_input_free, "lyflow_profile_input_free");
+  maybe(fn_.output_profile, "lyflow_output_profile");
+  maybe(fn_.profile_view_free, "lyflow_profile_view_free");
+  maybe(fn_.plan_inputs_ex, "lyflow_plan_inputs_ex");
+  maybe(fn_.cache_evict_inputs_ex, "lyflow_cache_evict_inputs_ex");
   maybe(fn_.plan_inputs, "lyflow_plan_inputs");
   maybe(fn_.cache_evict_inputs, "lyflow_cache_evict_inputs");
   need(fn_.cache_stats, "lyflow_cache_stats", where);
@@ -992,6 +1169,13 @@ inline CloudView RunHandle::cloud(const std::string& nodeId, const std::string& 
   return client_->cloud(runId_, nodeId, port, maxPoints);
 }
 
+inline ProfileView RunHandle::profile(const std::string& nodeId, const std::string& port,
+                                      std::uint32_t offset, std::uint32_t count) const {
+  if (!client_)
+    return ProfileView();
+  return client_->profile(runId_, nodeId, port, offset, count);
+}
+
 inline TensorView RunHandle::tensor(const std::string& nodeId, const std::string& port,
                                     std::uint64_t offset, std::uint32_t count) const {
   if (!client_)
@@ -1051,7 +1235,7 @@ inline RunHandle Client::startRunImpl(const std::string& graphJson, const RunOpt
   for (const std::string& t : options.targets)
     targets.push_back(t.c_str());
 
-  const detail::RawInputs raw(options.inputs, options.imageInputs);
+  const detail::RawInputs raw(options.inputs, options.imageInputs, options.profileInputs);
 
   lyflow_run_options opts{};
   opts.run_id = handle.runId_.c_str();
@@ -1068,6 +1252,8 @@ inline RunHandle Client::startRunImpl(const std::string& graphJson, const RunOpt
   opts.input_count = raw.cloudCount();
   opts.image_inputs = raw.images();
   opts.image_input_count = raw.imageCount();
+  opts.profile_inputs = raw.profiles();
+  opts.profile_input_count = raw.profileCount();
   opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
   std::shared_ptr<void> frameRetain;

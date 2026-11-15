@@ -22,6 +22,13 @@ export type * from './types/graph';
 export type * from './types/manifest';
 export type * from './types/execution';
 export { isMigration, decodeCloud, CLOUD_MAGIC } from './types/execution';
+export {
+  decodeProfile,
+  parseProfileDescriptor,
+  profileToCloudPayload,
+  PROFILE_MAGIC,
+  PROFILE_HEADER_BYTES,
+} from './types/execution';
 export { decodeTensor, decodeIndices, TENSOR_MAGIC, INDICES_MAGIC } from './types/execution';
 export {
   GRAPH_SCHEMA_VERSION,

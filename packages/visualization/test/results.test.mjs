@@ -6,6 +6,7 @@ import {
   maskPreview,
   poseCollection,
   poseGeometry,
+  profileDescriptor,
   poseScene2D,
   projectedPoseScene,
   renderImageOverlaySvg,
@@ -14,6 +15,44 @@ import {
   resultSummary,
   structuredScene,
 } from '../index.js';
+
+test('native Profile summaries preserve explicit units, planes, ordering and lineage', () => {
+  const descriptor = {
+    schemaVersion: 1,
+    frame: 'scanner',
+    unit: 'mm',
+    plane: 'XZ',
+    handedness: 'reflected',
+    sampleOrder: 'acquisition',
+    sourceId: 'raw-scan',
+    sourceCount: 1280,
+  };
+  const summary = resultSummary({ kind: 'Profile', descriptor, count: 1280, validCount: 1279 });
+  assert.equal(summary.unit, 'mm');
+  assert.equal(summary.plane, 'XZ');
+  assert.equal(summary.sampleOrder, 'acquisition');
+  assert.equal(summary.validCount, 1279);
+  assert.equal(summary.sourceId, 'raw-scan');
+  assert.equal(Object.isFrozen(profileDescriptor(descriptor)), true);
+  for (const patch of [
+    { unit: 'px' },
+    { sourceCount: true },
+    { plane: 'auto' },
+    { frame: '' },
+    { frame: 'sensor\u0000other' },
+    { sourceId: 'scan\u0000other' },
+    { frame: '\ud800' },
+    { extra: 1 },
+  ])
+    assert.throws(() => profileDescriptor({ ...descriptor, ...patch }));
+  assert.throws(() =>
+    resultSummary({ kind: 'Profile', descriptor, count: 1280, validCount: 1281 }),
+  );
+  const boundary = { ...descriptor, frame: '\u0001'.repeat(670), sourceId: '\u0001'.repeat(670) };
+  assert.ok(new TextEncoder().encode(JSON.stringify(boundary)).length <= 8192);
+  assert.equal(profileDescriptor(boundary).sourceId, boundary.sourceId);
+  assert.throws(() => profileDescriptor({ ...boundary, sourceId: '\u0001'.repeat(674) }), /8KiB/);
+});
 
 const pose = (dimension, overrides = {}) => ({
   kind: 'Record',

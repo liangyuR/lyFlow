@@ -8,11 +8,106 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lyflow_python import Box2D, Circle2D, Image, Line2D, NodeError, Plane, Point2D, Record, Tensor, Transform, geometry3d, pose2d, pose3d, poses, scalar, value_list
+from lyflow_python import Box2D, Circle2D, Image, Line2D, NodeCancelled, NodeError, Plane, Point2D, Profile, Record, Tensor, Transform, geometry3d, node, pose2d, pose3d, poses, scalar, value_list
 from lyflow_python.codec import DataCodec
 
 
 class NativeTypeContracts(unittest.TestCase):
+    def test_profile_preserves_slots_metadata_channels_and_readonly_copy(self):
+        @node(id="py.test.profile", version="1.0.0", label="轮廓", inputs={"profile": "Profile"}, outputs={"profile": "Profile"})
+        def echo(inputs, params, ctx):
+            return {"profile": inputs["profile"]}
+
+        self.assertEqual(echo.__lyflow_node__["inputs"][0]["type"], "Profile")
+        descriptor = dict(schemaVersion=1, frame="激光头", unit="mm", plane="XZ", handedness="reflected",
+                          sampleOrder="acquisition", sourceId="scan-1280", sourceCount=1280)
+        xyz = np.arange(3840, dtype=np.float32).reshape(1280, 3)
+        xyz[100] = np.nan
+        validity = np.ones(1280, dtype=np.uint8)
+        validity[100] = 0
+        profile = Profile(xyz, descriptor, validity, np.arange(1280, dtype=np.uint32),
+                          np.arange(1280, dtype=np.float32), np.ones((1280, 3), dtype=np.float32),
+                          np.zeros((1280, 3), dtype=np.uint8))
+        with tempfile.TemporaryDirectory() as temporary:
+            writer, reader = DataCodec(temporary), DataCodec(temporary)
+            try:
+                dto = writer.encode(profile, "Profile")
+                with self.assertRaises(NodeError):
+                    writer.encode(profile, "PointCloud")
+                self.assertEqual(dto["sourceIndices"]["dtype"], "u32")
+                self.assertNotIn("data", dto)
+                decoded = reader.decode(dto, "Profile")
+                self.assertEqual(dict(decoded.descriptor), descriptor)
+                np.testing.assert_array_equal(decoded.xyz, xyz)
+                np.testing.assert_array_equal(decoded.source_indices, np.arange(1280, dtype=np.uint32))
+                self.assertFalse(decoded.xyz.flags.writeable)
+                self.assertFalse(decoded.source_indices.flags.writeable)
+                with self.assertRaises(TypeError):
+                    decoded.descriptor["unit"] = "m"
+                with self.assertRaises(NodeError):
+                    decoded.validity = validity
+                copied = decoded.copy()
+                copied.xyz[0] += 1
+                self.assertFalse(np.array_equal(copied.xyz[0], decoded.xyz[0]))
+                self.assertEqual(copied.descriptor["unit"], "mm")
+            finally:
+                reader.close()
+                writer.close()
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        empty = Profile(np.empty((0, 3), np.float32), {**descriptor, "sourceCount": 0},
+                        np.empty(0, np.uint8), np.empty(0, np.uint32))
+        self.assertEqual(len(empty.xyz), 0)
+
+    def test_profile_rejects_implicit_units_bad_order_masks_and_invalid_coordinates(self):
+        descriptor = dict(schemaVersion=1, frame="sensor", unit="m", plane="XY", handedness="right",
+                          sampleOrder="acquisition", sourceId="scan", sourceCount=4)
+        xyz = np.zeros((2, 3), np.float32)
+        for patch in [{"sourceCount": True}, {"sourceCount": 4294967296}, {"sourceCount": "4"},
+                      {"schemaVersion": 1.0}, {"frame": ""}, {"sourceId": "文" * 342},
+                      {"unit": "px"}, {"plane": "ZX"}, {"handedness": "auto"}, {"extra": 1}]:
+            with self.subTest(patch=patch), self.assertRaises(NodeError):
+                Profile(xyz, {**descriptor, **patch}, np.ones(2, np.uint8), np.arange(2, dtype=np.uint32))
+        for indices in [np.array([1, 0], np.uint32), np.array([1, 1], np.uint32), np.array([0, 4], np.uint32)]:
+            with self.subTest(indices=indices), self.assertRaises(NodeError):
+                Profile(xyz, descriptor, np.ones(2, np.uint8), indices)
+        unknown = {**descriptor, "sampleOrder": "unknown"}
+        Profile(xyz, unknown, np.ones(2, np.uint8), np.array([1, 0], np.uint32))
+        with self.assertRaises(NodeError):
+            Profile(xyz, unknown, np.ones(2, np.uint8), np.array([1, 1], np.uint32))
+        for mask in [np.array([1, 2], np.uint8), np.ones(1, np.uint8), np.ones(2, np.float32)]:
+            with self.subTest(mask=mask), self.assertRaises(NodeError):
+                Profile(xyz, descriptor, mask, np.arange(2, dtype=np.uint32))
+        for value in [float("inf"), float("nan")]:
+            bad = xyz.copy()
+            bad[0, 0] = value
+            with self.subTest(value=value), self.assertRaises(NodeError):
+                Profile(bad, descriptor, np.ones(2, np.uint8), np.arange(2, dtype=np.uint32))
+        bad = xyz.copy()
+        bad[0, 0] = float("inf")
+        with self.assertRaises(NodeError):
+            Profile(bad, descriptor, np.zeros(2, np.uint8), np.arange(2, dtype=np.uint32))
+
+    def test_profile_cancelled_write_cleans_all_array_files(self):
+        descriptor = dict(schemaVersion=1, frame="sensor", unit="m", plane="XY", handedness="right",
+                          sampleOrder="acquisition", sourceId="scan", sourceCount=2)
+        profile = Profile(np.zeros((2, 3), np.float32), descriptor, np.ones(2, np.uint8), np.arange(2, dtype=np.uint32))
+        calls = 0
+
+        def cancel():
+            nonlocal calls
+            calls += 1
+            if calls == 5:
+                raise NodeCancelled("cancelled")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            codec = DataCodec(temporary, cancel)
+            try:
+                with self.assertRaises(NodeCancelled):
+                    codec.encode(profile, "Profile")
+            finally:
+                codec.close()
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
     def test_native_geometry_tensor_and_preview_metadata_roundtrip_readonly(self):
         matrix = np.eye(4, dtype=np.float32)
         matrix[:3, 3] = [.125, -.25, 2]

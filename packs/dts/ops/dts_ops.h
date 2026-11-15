@@ -24,5 +24,6 @@ void registerPickMetal(Registry& r);
 void registerSealRoot(Registry& r);
 void registerFlush(Registry& r);
 void registerProfileBundle(Registry& r);
+void registerGeometryAdapter(Registry& r);
 
 } // namespace lyflow::dts

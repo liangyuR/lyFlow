@@ -13,6 +13,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "lyflow/calibration.h"
+
 namespace lyflow::std_image {
 
 inline constexpr const char* kPlaneCalibType = "image.PlaneCalib";
@@ -20,11 +22,14 @@ inline constexpr const char* kPlaneCalibType = "image.PlaneCalib";
 struct PlaneCalib {
   std::array<double, 9> H{1, 0, 0, 0, 1, 0, 0, 0, 1};
   std::string unit = "mm";
+  bool canonical = false;
+  std::string imageFrame;
+  std::string planeFrame;
 
   /// 像素 (x, y) → 工作平面 (X, Y)。齐次分量接近 0（点在地平线上）或结果非有限时返回 false。
   bool map(double x, double y, double* X, double* Y) const {
     const double w = H[6] * x + H[7] * y + H[8];
-    if (!std::isfinite(w) || std::fabs(w) < 1e-12)
+    if (!std::isfinite(w) || (canonical ? w == 0 : std::fabs(w) < 1e-12))
       return false;
     *X = (H[0] * x + H[1] * y + H[2]) / w;
     *Y = (H[3] * x + H[4] * y + H[5]) / w;
@@ -51,6 +56,23 @@ inline bool parsePlaneCalib(const nlohmann::json& data, PlaneCalib* out, std::st
   };
   if (!data.is_object())
     return fail("image.PlaneCalib 的 data 不是对象");
+  if (data.contains("schemaVersion")) {
+    Record record;
+    record.type = calibration::kPlaneType;
+    record.data = data;
+    calibration::Plane plane;
+    std::string message;
+    if (!calibration::parsePlane(record, plane, message))
+      return fail(message);
+    PlaneCalib result;
+    result.H = plane.H;
+    result.unit = plane.unit;
+    result.canonical = true;
+    result.imageFrame = plane.imageFrame;
+    result.planeFrame = plane.planeFrame;
+    *out = std::move(result);
+    return true;
+  }
   const auto h = data.find("H");
   if (h == data.end() || !h->is_array() || h->size() != 9)
     return fail("H 要是 9 个数（行主序的 3×3）");
@@ -76,6 +98,12 @@ inline bool parsePlaneCalib(const nlohmann::json& data, PlaneCalib* out, std::st
 }
 
 inline nlohmann::json planeCalibJson(const PlaneCalib& c) {
+  if (c.canonical)
+    return nlohmann::json{{"schemaVersion", 1},
+                          {"H", c.H},
+                          {"unit", c.unit},
+                          {"imageFrame", c.imageFrame},
+                          {"planeFrame", c.planeFrame}};
   return nlohmann::json{{"H", c.H}, {"unit", c.unit}};
 }
 

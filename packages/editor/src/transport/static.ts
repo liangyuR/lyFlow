@@ -101,6 +101,9 @@ export class StaticTransport implements Transport {
   async getOutputCloud(): Promise<ArrayBuffer> {
     return browserOnly('取运行结果');
   }
+  async getOutputProfile(): Promise<ArrayBuffer> {
+    return browserOnly('取轮廓结果');
+  }
   async getOutputTensor(): Promise<ArrayBuffer> {
     return browserOnly('取运行结果');
   }

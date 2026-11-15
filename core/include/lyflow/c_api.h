@@ -181,6 +181,31 @@ typedef struct {
   const uint8_t* pixels; /* row_bytes * height 字节 */
 } lyflow_run_image_input;
 
+/* 1.4.0: Profile 数组保持原始槽位；mask/index 均为 count 项。raw 数组在调用内复制。
+   为跨 run/plan/effective/cache 复用同一来源身份，应先 create/capture 并复用 handle。 */
+typedef struct lyflow_profile_input lyflow_profile_input;
+
+typedef struct {
+  const char* node_id;
+  const char* port;
+  uint32_t count;
+  const float* xyz;
+  const float* intensity;
+  const float* normals;
+  const uint8_t* rgb;
+  const char* descriptor_json;
+  const uint8_t* validity;
+  const uint32_t* source_indices;
+  const lyflow_profile_input* handle; /* 非 NULL 时忽略数组/descriptor 字段；调用返回后可释放 */
+} lyflow_run_profile_input;
+
+/* 成功返回已分配的空字符串，失败返回错误文本；统一由 lyflow_string_free 释放。 */
+LYFLOW_API char* lyflow_profile_input_create(const lyflow_run_profile_input* input,
+                                             lyflow_profile_input** out);
+LYFLOW_API char* lyflow_profile_input_capture(const char* run_id, const char* node_id,
+                                              const char* port, lyflow_profile_input** out);
+LYFLOW_API void lyflow_profile_input_free(lyflow_profile_input* input);
+
 typedef struct {
   const char* run_id;         /* 由调用方分配（Rust 用 ULID），事件里原样回传 */
   const char* base_dir;       /* 相对路径参数的基准目录，可为 NULL */
@@ -214,6 +239,8 @@ typedef struct {
   /* v15：运行时注入的图像，NULL/0 表示没有。与 inputs 可以同时给（同一个节点的不同端口也行）。 */
   const lyflow_run_image_input* image_inputs;
   size_t image_input_count;
+  const lyflow_run_profile_input* profile_inputs;
+  size_t profile_input_count;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0
@@ -236,6 +263,18 @@ LYFLOW_API char* lyflow_cache_evict_inputs(const char* graph_json, const char* b
                                            const lyflow_run_input* inputs, size_t input_count,
                                            const lyflow_run_image_input* image_inputs,
                                            size_t image_input_count);
+
+LYFLOW_API char*
+lyflow_plan_inputs_ex(const char* graph_json, const char* base_dir, const char* const* targets,
+                      size_t n, const char* params_json, const lyflow_run_input* inputs,
+                      size_t input_count, const lyflow_run_image_input* image_inputs,
+                      size_t image_input_count, const lyflow_run_profile_input* profile_inputs,
+                      size_t profile_input_count);
+LYFLOW_API char* lyflow_cache_evict_inputs_ex(
+    const char* graph_json, const char* base_dir, const char* const* node_ids, size_t n,
+    int include_downstream, const char* params_json, const lyflow_run_input* inputs,
+    size_t input_count, const lyflow_run_image_input* image_inputs, size_t image_input_count,
+    const lyflow_run_profile_input* profile_inputs, size_t profile_input_count);
 
 // 立即返回句柄，执行在后台线程。opts/cb 允许为 NULL（cb 为 NULL 时事件丢弃）。
 // 返回 NULL 表示连线程都没起来（内存不足），调用方应当当作运行失败。
@@ -286,6 +325,26 @@ LYFLOW_API int lyflow_output_cloud(const char* run_id, const char* node_id, cons
                                    uint32_t max_points, lyflow_cloud_view* out);
 
 LYFLOW_API void lyflow_cloud_view_free(lyflow_cloud_view* view);
+
+typedef struct {
+  uint32_t point_count;
+  uint32_t total_points;
+  uint32_t offset;
+  uint32_t flags;
+  uint64_t cloud_id;
+  const char* descriptor_json;
+  const float* xyz;
+  const float* intensity;
+  const float* normals;
+  const uint8_t* rgb;
+  const uint8_t* validity;
+  const uint32_t* source_indices;
+  void* handle;
+} lyflow_profile_view;
+
+LYFLOW_API int lyflow_output_profile(const char* run_id, const char* node_id, const char* port,
+                                     uint32_t offset, uint32_t count, lyflow_profile_view* out);
+LYFLOW_API void lyflow_profile_view_free(lyflow_profile_view* view);
 
 // v8：张量按切片取（ADR-0019）。与点云不同，这里**零拷贝** ——
 // shape/data 直接指进结果仓里那一份，handle 一释放就失效。
@@ -378,6 +437,11 @@ LYFLOW_API char* lyflow_effective_params_inputs(const char* graph_json, const ch
                                                 const lyflow_run_input* inputs, size_t input_count,
                                                 const lyflow_run_image_input* image_inputs,
                                                 size_t image_input_count);
+LYFLOW_API char* lyflow_effective_params_inputs_ex(
+    const char* graph_json, const char* base_dir, const char* params_json,
+    const lyflow_run_input* inputs, size_t input_count, const lyflow_run_image_input* image_inputs,
+    size_t image_input_count, const lyflow_run_profile_input* profile_inputs,
+    size_t profile_input_count);
 
 // v7：走注册好的导入器把一段文本变成图（比如 gap 包的 "StandardGap.yml"）。
 // 成功返回 GraphDoc 对象（'{' 开头），失败返回诊断数组（'[' 开头），

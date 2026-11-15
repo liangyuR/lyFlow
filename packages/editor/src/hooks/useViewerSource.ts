@@ -4,7 +4,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { cloudPortsOf, findBaseCloud, firstCloudPort, type BaseCloud } from '../lib/basecloud';
+import {
+  cloudPortsOf,
+  cloudPortType,
+  findBaseCloud,
+  firstCloudPort,
+  type BaseCloud,
+} from '../lib/basecloud';
+import { fetchCloudPayload } from '../lib/profileFetch';
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from '../lib/cloudCache';
 import { augmentOperators, levelOf, resolveOutput } from '../lib/subgraph';
 import { hasPoseScene, viewerContentFor, type ViewerContent } from '../lib/viewRule';
@@ -14,12 +21,7 @@ import { aggregatedNodes, useExecutionStore } from '../store/execution';
 import { useGraphStore } from '../store/graph';
 import { useManifestStore } from '../store/manifest';
 import { useUiStore } from '../store/ui';
-import {
-  decodeCloud,
-  type CloudPayload,
-  type NodeState,
-  type OutputStat,
-} from '../types/execution';
+import { type CloudPayload, type NodeState, type OutputStat } from '../types/execution';
 import type { GraphNode } from '../types/graph';
 import type { OperatorDesc } from '../types/manifest';
 
@@ -211,7 +213,15 @@ export function useViewerSource({
         });
       };
       dropOtherRuns(runId);
-      const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
+      const type =
+        base?.type ??
+        (port && liveOutputs?.find((o) => o.port === port)?.type === 'Profile'
+          ? 'Profile'
+          : port
+            ? cloudPortType(ops, node.op, port, bundles)
+            : 'PointCloud');
+      const cap =
+        type === 'Profile' ? 0 : isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
       const key = cacheKey(runId, resolved.nodeId, resolved.port, cap);
       const hit = cloudCache.get(key);
       if (hit) {
@@ -226,16 +236,19 @@ export function useViewerSource({
         try {
           // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
           const payload = await fetchCloud(key, async () => {
-            const [buffer, infos] = await Promise.all([
-              transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap),
+            const [cloud, infos] = await Promise.all([
+              fetchCloudPayload(transport, type, runId, resolved.nodeId, resolved.port, cap),
               transport.getOutputInfo(runId, resolved.nodeId).catch(() => []),
             ]);
-            const cloud = decodeCloud(buffer);
             const sourceCloudId = infos.find((info) => info.port === resolved.port)?.sourceCloudId;
             return {
               ...cloud,
               ...(sourceCloudId ? { sourceCloudId } : {}),
-              sampleStride: cap > 0 ? Math.max(1, Math.ceil(cloud.totalPoints / cap)) : 1,
+              sampleStride: cloud.profile
+                ? 1
+                : cap > 0
+                  ? Math.max(1, Math.ceil(cloud.totalPoints / cap))
+                  : 1,
             };
           });
           if (cancelled) return;

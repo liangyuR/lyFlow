@@ -11,6 +11,7 @@ void registerPackOps(Registry& r) {
   lyflow::dts::registerSealRoot(r);
   lyflow::dts::registerFlush(r);
   lyflow::dts::registerProfileBundle(r);
+  lyflow::dts::registerGeometryAdapter(r);
 }
 
 } // namespace lyflow::packs::dts

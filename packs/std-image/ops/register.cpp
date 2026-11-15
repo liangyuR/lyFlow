@@ -3,6 +3,7 @@
 #include "ops.h"
 
 namespace lyflow::packs::std_image {
+void registerPlaneCalibUpgrade(Registry& r);
 
 void registerPackOps(Registry& r) {
   ops::registerIoLoadImage(r);
@@ -44,6 +45,7 @@ void registerPackOps(Registry& r) {
   ops::registerP5Projection(r);
   ops::registerP5Inspection(r);
   ops::registerP5PoseProjection(r);
+  registerPlaneCalibUpgrade(r);
 }
 
 } // namespace lyflow::packs::std_image

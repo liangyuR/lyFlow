@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 
 from .api import NodeError
-from .data import Box2D, Circle2D, Image, Line2D, Measurement, Plane, Point2D, PointCloud, Record, Tensor, Transform, _plain
+from .data import Box2D, Circle2D, Image, Line2D, Measurement, Plane, Point2D, PointCloud, Profile, Record, Tensor, Transform, _plain
 
 
-DTYPES = {"f32": np.dtype("<f4"), "u8": np.dtype("u1"), "u16": np.dtype("<u2")}
-TYPES = {"PointCloud": PointCloud, "Image": Image, "Measurement": Measurement, "Record": Record,
+DTYPES = {"f32": np.dtype("<f4"), "u8": np.dtype("u1"), "u16": np.dtype("<u2"), "u32": np.dtype("<u4")}
+TYPES = {"PointCloud": PointCloud, "Profile": Profile, "Image": Image, "Measurement": Measurement, "Record": Record,
          "Tensor": Tensor, "Transform": Transform, "Plane": Plane, "Point2D": Point2D,
          "Line2D": Line2D, "Circle2D": Circle2D, "Box2D": Box2D}
 
@@ -70,6 +70,13 @@ class DataCodec:
             if "xyz" not in dto or set(dto) - {"type", "xyz", "intensity", "normals", "rgb"}:
                 raise NodeError("PointCloud DTO requires xyz and only declared channels")
             result = PointCloud(**{name: self.read_array(value) for name, value in dto.items() if name != "type"})
+        elif expected_type == "Profile":
+            required = {"type", "xyz", "descriptor", "validity", "sourceIndices"}
+            if not required <= dto.keys() or set(dto) - required - {"intensity", "normals", "rgb"}:
+                raise NodeError("Profile DTO has missing or unknown fields")
+            result = Profile(self.read_array(dto["xyz"]), dto["descriptor"], self.read_array(dto["validity"]),
+                             self.read_array(dto["sourceIndices"]),
+                             **{name: self.read_array(dto[name]) for name in ("intensity", "normals", "rgb") if name in dto})
         elif expected_type == "Image":
             if set(dto) != {"type", "pixels", "scale"}:
                 raise NodeError("Image DTO requires pixels and scale")
@@ -137,6 +144,12 @@ class DataCodec:
         if expected_type == "PointCloud":
             PointCloud(value.xyz, value.intensity, value.normals, value.rgb)
             return {"type": expected_type, **{name: self.write_array(getattr(value, name)) for name in ("xyz", "intensity", "normals", "rgb") if getattr(value, name) is not None}}
+        if expected_type == "Profile":
+            Profile(value.xyz, value.descriptor, value.validity, value.source_indices,
+                    value.intensity, value.normals, value.rgb)
+            return {"type": expected_type, "descriptor": _plain(value.descriptor),
+                    "validity": self.write_array(value.validity), "sourceIndices": self.write_array(value.source_indices),
+                    **{name: self.write_array(getattr(value, name)) for name in ("xyz", "intensity", "normals", "rgb") if getattr(value, name) is not None}}
         if expected_type == "Image":
             Image(value.pixels, value.scale)
             return {"type": expected_type, "pixels": self.write_array(value.pixels), "scale": value.scale}

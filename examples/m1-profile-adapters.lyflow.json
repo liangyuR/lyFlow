@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "01M1PROFILEADAPTERS000000001",
+  "name": "M1 轮廓契约与显式轴映射",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "gen.synthetic",
+      "opVersion": "1.0.0",
+      "params": {
+        "pointCount": 1280,
+        "seed": 1
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "profile",
+      "op": "profile.from_cloud",
+      "opVersion": "1.0.0",
+      "params": {
+        "frame": "synthetic",
+        "unit": "m",
+        "plane": "XZ",
+        "handedness": "right",
+        "sampleOrder": "unknown",
+        "sourceId": "m1-synthetic-fixture"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "axes",
+      "op": "profile.remap_axes",
+      "opVersion": "1.0.0",
+      "params": {
+        "targetFrame": "inspection",
+        "axes": "XZY",
+        "signs": [1, 1, 1]
+      },
+      "ui": {
+        "position": {
+          "x": 600,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "export",
+      "op": "profile.to_cloud",
+      "opVersion": "1.0.0",
+      "params": {
+        "unit": "mm"
+      },
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "profile",
+        "port": "cloud"
+      },
+      "id": "m1-edge-1"
+    },
+    {
+      "from": {
+        "node": "profile",
+        "port": "profile"
+      },
+      "to": {
+        "node": "axes",
+        "port": "profile"
+      },
+      "id": "m1-edge-2"
+    },
+    {
+      "from": {
+        "node": "axes",
+        "port": "profile"
+      },
+      "to": {
+        "node": "export",
+        "port": "profile"
+      },
+      "id": "m1-edge-3"
+    }
+  ],
+  "outputs": {
+    "profile": {
+      "node": "export",
+      "port": "profile"
+    },
+    "descriptor": {
+      "node": "export",
+      "port": "descriptor"
+    },
+    "cloud": {
+      "node": "export",
+      "port": "cloud"
+    }
+  }
+}

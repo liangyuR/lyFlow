@@ -1,7 +1,8 @@
 // ExecutionEvent 的 TypeScript 镜像，契约在 schema/execution-event.schema.json。
 // 与 manifest 一样，这里只是给编辑器用的视图；改动顺序永远是 schema → C++ → 这里。
 
-import type { PortRef } from './graph';
+import type { GraphDoc, PortRef } from './graph';
+import { profileDescriptor as sharedProfileDescriptor } from '@lyflow/visualization';
 
 export type NodeState = 'idle' | 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'skipped';
 
@@ -38,6 +39,22 @@ export interface MigrationAction extends GraphDiagnostic {
   notes?: string[];
   /** 端口增删时的连线改写（ADR-0025）。节点 id 已由 core 分配好，照做即可。 */
   edits?: MigrationEdits;
+  graphUpdate?: { contractUpgradeRetirement: ContractUpgradeRetirement };
+}
+
+export interface ContractUpgradeRetirement {
+  request: NonNullable<GraphDoc['contractUpgrade']>;
+  historyEntry: {
+    schemaVersion: 1;
+    request: NonNullable<GraphDoc['contractUpgrade']>;
+    appliedSources: unknown[];
+  };
+  requirements: {
+    source: { node: string; op: string; opVersion: string; port: string };
+    target: PortRef;
+    adapter: { id: string; op: string; opVersion: string; params: Record<string, unknown> };
+    port: string;
+  }[];
 }
 
 export interface MigrationEdits {
@@ -139,6 +156,8 @@ export interface OutputValue {
   depth?: 'u8' | 'u16' | 'f32';
   /** 预览时源头缩小过的图（ADR-0028）：一个像素对应原图 scale × scale 个像素。只在 > 1 时有。 */
   scale?: number;
+  descriptor?: ProfileDescriptor;
+  validCount?: number;
 }
 
 export interface OutputStat {
@@ -369,6 +388,13 @@ export interface CloudPayload {
   normals: Float32Array | null;
   /** 3n 个 0..255，或 null（C ABI v12）。RGB 着色靠它。 */
   rgb: Uint8Array | null;
+  profile?: {
+    descriptor: ProfileDescriptor;
+    validity: Uint8Array;
+    sourceIndices: Uint32Array;
+    offset: number;
+    validCount: number;
+  };
 }
 
 /** 解析二进制点云。用视图而不是拷贝：一百万点是 12MB，多拷一次就是多 12MB
@@ -409,6 +435,154 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
   }
 
   return { pointCount, totalPoints, bounds, xyz, intensity, normals, rgb };
+}
+
+export type ProfileDescriptor = import('@lyflow/visualization').ProfileDescriptor;
+
+export interface ProfilePayload {
+  descriptor: ProfileDescriptor;
+  cloudId: string;
+  pointCount: number;
+  totalPoints: number;
+  offset: number;
+  xyz: Float32Array;
+  intensity: Float32Array | null;
+  normals: Float32Array | null;
+  rgb: Uint8Array | null;
+  validity: Uint8Array;
+  sourceIndices: Uint32Array;
+}
+
+export const PROFILE_MAGIC = 0x5250594c;
+export const PROFILE_HEADER_BYTES = 32;
+
+export function parseProfileDescriptor(value: unknown): ProfileDescriptor {
+  return sharedProfileDescriptor(value);
+}
+
+export function decodeProfile(buffer: ArrayBuffer): ProfilePayload {
+  if (buffer.byteLength < PROFILE_HEADER_BYTES) throw new Error('轮廓载荷太短');
+  const head = new DataView(buffer);
+  const [magic, version, pointCount, totalPoints, offset, flags, metadataBytes, reserved] =
+    Array.from({ length: 8 }, (_, i) => head.getUint32(i * 4, true)) as [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
+  if (magic !== PROFILE_MAGIC || version !== 1 || reserved !== 0 || (flags & ~7) !== 0)
+    throw new Error('轮廓载荷头无效');
+  if (
+    offset > totalPoints ||
+    pointCount > totalPoints - offset ||
+    metadataBytes > 16384 ||
+    metadataBytes > buffer.byteLength - PROFILE_HEADER_BYTES
+  )
+    throw new Error('轮廓载荷范围无效');
+  const align = (value: number) => Math.ceil(value / 4) * 4;
+  const xyzOffset = align(PROFILE_HEADER_BYTES + metadataBytes);
+  const intensityOffset = xyzOffset + pointCount * 12;
+  const normalsOffset = intensityOffset + (flags & 1 ? pointCount * 4 : 0);
+  const rgbOffset = normalsOffset + (flags & 2 ? pointCount * 12 : 0);
+  const validityOffset = rgbOffset + (flags & 4 ? align(pointCount * 3) : 0);
+  const indicesOffset = align(validityOffset + pointCount);
+  if (indicesOffset + pointCount * 4 !== buffer.byteLength) throw new Error('轮廓数组字节数不匹配');
+  const envelope: unknown = JSON.parse(
+    new TextDecoder('utf-8', { fatal: true }).decode(
+      new Uint8Array(buffer, PROFILE_HEADER_BYTES, metadataBytes),
+    ),
+  );
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope))
+    throw new Error('轮廓元数据无效');
+  const metadata = envelope as Record<string, unknown>;
+  if (
+    Object.keys(metadata).length !== 2 ||
+    !('descriptor' in metadata) ||
+    !('cloudId' in metadata) ||
+    typeof metadata.cloudId !== 'string' ||
+    !/^(0|[1-9]\d{0,19})$/.test(metadata.cloudId) ||
+    BigInt(metadata.cloudId) > 0xffffffffffffffffn
+  )
+    throw new Error('轮廓载荷来源标识无效');
+  const descriptor = parseProfileDescriptor(metadata.descriptor);
+  if (totalPoints > descriptor.sourceCount) throw new Error('轮廓总槽数超出来源范围');
+  const xyz = new Float32Array(buffer, xyzOffset, pointCount * 3);
+  const validity = new Uint8Array(buffer, validityOffset, pointCount);
+  const sourceIndices = new Uint32Array(buffer, indicesOffset, pointCount);
+  const seen = descriptor.sampleOrder === 'unknown' ? new Set<number>() : null;
+  for (let i = 0; i < pointCount; i++) {
+    const index = sourceIndices[i]!;
+    if (
+      validity[i]! > 1 ||
+      index >= descriptor.sourceCount ||
+      (seen ? seen.has(index) : i > 0 && index <= sourceIndices[i - 1]!)
+    )
+      throw new Error('轮廓有效性或来源索引无效');
+    seen?.add(index);
+    for (let axis = 0; axis < 3; axis++) {
+      const value = xyz[i * 3 + axis]!;
+      if (
+        value === Infinity ||
+        value === -Infinity ||
+        (validity[i] === 1 && !Number.isFinite(value))
+      )
+        throw new Error('轮廓有效采样坐标无效');
+    }
+  }
+  return {
+    descriptor,
+    cloudId: metadata.cloudId,
+    pointCount,
+    totalPoints,
+    offset,
+    xyz,
+    intensity: flags & 1 ? new Float32Array(buffer, intensityOffset, pointCount) : null,
+    normals: flags & 2 ? new Float32Array(buffer, normalsOffset, pointCount * 3) : null,
+    rgb: flags & 4 ? new Uint8Array(buffer, rgbOffset, pointCount * 3) : null,
+    validity,
+    sourceIndices,
+  };
+}
+
+export function profileToCloudPayload(profile: ProfilePayload): CloudPayload {
+  const scale = profile.descriptor.unit === 'mm' ? 0.001 : 1;
+  const xyz = new Float32Array(profile.xyz.length);
+  const minimum = [Infinity, Infinity, Infinity];
+  const maximum = [-Infinity, -Infinity, -Infinity];
+  let validCount = 0;
+  for (let i = 0; i < profile.pointCount; i++) {
+    const valid = profile.validity[i] === 1;
+    if (valid) validCount++;
+    for (let axis = 0; axis < 3; axis++) {
+      const value = valid ? profile.xyz[i * 3 + axis]! * scale : NaN;
+      xyz[i * 3 + axis] = value;
+      if (valid) {
+        minimum[axis] = Math.min(minimum[axis]!, value);
+        maximum[axis] = Math.max(maximum[axis]!, value);
+      }
+    }
+  }
+  return {
+    pointCount: profile.pointCount,
+    totalPoints: profile.totalPoints,
+    sourceCloudId: profile.cloudId,
+    bounds: new Float32Array(validCount ? [...minimum, ...maximum] : [0, 0, 0, 0, 0, 0]),
+    xyz,
+    intensity: profile.intensity,
+    normals: profile.normals,
+    rgb: profile.rgb,
+    profile: {
+      descriptor: profile.descriptor,
+      validity: profile.validity,
+      sourceIndices: profile.sourceIndices,
+      offset: profile.offset,
+      validCount,
+    },
+  };
 }
 
 export const TENSOR_MAGIC = 0x4e54594c;

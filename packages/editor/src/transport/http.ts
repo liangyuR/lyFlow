@@ -231,6 +231,13 @@ export class HttpTransport implements Transport {
     return this.#get<SnippetScan>('/lyflow/snippets');
   }
 
+  async getOutputProfile(runId: string, nodeId: string, port: string): Promise<ArrayBuffer> {
+    const response = await this.#request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/profiles/${encodeURIComponent(nodeId)}/${encodeURIComponent(port)}`,
+    );
+    return response.arrayBuffer();
+  }
+
   async getOutputTensor(
     runId: string,
     nodeId: string,

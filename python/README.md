@@ -45,12 +45,13 @@ def offset(inputs, params, ctx):
 
 ## 数据与生命周期
 
-| SDK 类型 | 内容 |
-| --- | --- |
-| `PointCloud(xyz, intensity=None, normals=None, rgb=None)` | `xyz` 为 `N×3 float32`；强度 `N float32`、法线 `N×3 float32`、RGB `N×3 uint8` 可选。允许零点云。 |
-| `Image(pixels)` | `H×W` 或 `H×W×C`，`C` 为 1、3、4；位深 `uint8`、`uint16`、`float32`，通道按 RGB/RGBA 排列。 |
-| `Measurement(value, unit="", ok=None, ...)` | `value` 为有限实数或 `None`；没测出时 `ok=False`。可带 `message`、`verdict`，以及同时提供的 `nominal/lower/upper`。 |
-| `Record(data, record_type="")` | JSON 数据和记录类型；`record_type` 在协议中写成 `recordType`。 |
+| SDK 类型                                                                                     | 内容                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Profile(xyz, descriptor, validity, source_indices, intensity=None, normals=None, rgb=None)` | 只读采样轮廓，保留NaN和无效槽；坐标单位、参考帧、轴平面、手性、采样顺序和来源映射均显式声明。见[Profile契约](../docs/profile-data-contract.md)和[示例](examples/profile_copy.py)。 |
+| `PointCloud(xyz, intensity=None, normals=None, rgb=None)`                                    | `xyz` 为 `N×3 float32`；强度 `N float32`、法线 `N×3 float32`、RGB `N×3 uint8` 可选。允许零点云。                                                                                   |
+| `Image(pixels)`                                                                              | `H×W` 或 `H×W×C`，`C` 为 1、3、4；位深 `uint8`、`uint16`、`float32`，通道按 RGB/RGBA 排列。                                                                                        |
+| `Measurement(value, unit="", ok=None, ...)`                                                  | `value` 为有限实数或 `None`；没测出时 `ok=False`。可带 `message`、`verdict`，以及同时提供的 `nominal/lower/upper`。                                                                |
+| `Record(data, record_type="")`                                                               | JSON 数据和记录类型；`record_type` 在协议中写成 `recordType`。                                                                                                                     |
 
 输入数组通过只读 `np.memmap` 打开，输入对象及 Record 的嵌套数据也不可修改。需要编辑时调用 `.copy()`；输出可以是副本或新建的 SDK 数据对象。数组位深和形状必须显式匹配，SDK 不悄悄把 float64 点云转成 float32。输出非连续数组会按连续小端布局写出。
 

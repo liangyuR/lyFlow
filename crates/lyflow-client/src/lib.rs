@@ -16,7 +16,9 @@ use std::sync::Arc;
 use libloading::{Library, Symbol};
 
 mod frames;
+mod profiles;
 pub use frames::{Frame, Session};
+pub use profiles::{ProfileInputHandle, ProfileView, RunProfileInput, RunProfileInputRaw};
 
 // ------------- C ABI 的类型镜像，与 core/include/lyflow/c_api.h 一一对应
 
@@ -89,6 +91,8 @@ pub struct RunOptionsRaw {
     /// v15：运行时注入的图像；NULL/0 = 没有。
     pub image_inputs: *const RunImageInputRaw,
     pub image_input_count: usize,
+    pub profile_inputs: *const RunProfileInputRaw,
+    pub profile_input_count: usize,
 }
 
 #[repr(C)]
@@ -199,6 +203,7 @@ struct RawInputs<'a> {
     // 顺序有意义：clouds / images 里的指针指向 names 的 CString，先丢指针。
     clouds: Vec<RunInputRaw>,
     images: Vec<RunImageInputRaw>,
+    profiles: Vec<RunProfileInputRaw>,
     #[allow(dead_code)]
     names: Vec<CString>,
     _borrow: std::marker::PhantomData<&'a [RunInput]>,
@@ -209,7 +214,26 @@ impl<'a> RawInputs<'a> {
         inputs: &'a [RunInput],
         images: &'a [RunImageInput],
     ) -> Result<Self, std::ffi::NulError> {
-        let mut names = Vec::with_capacity(2 * (inputs.len() + images.len()));
+        Self::new_impl(inputs, images, &[])
+    }
+
+    fn with_profiles(
+        inputs: &'a [RunInput],
+        images: &'a [RunImageInput],
+        profiles: &'a [RunProfileInput],
+    ) -> Result<Self, CoreError> {
+        for profile in profiles {
+            profile.validate_buffers()?;
+        }
+        Ok(Self::new_impl(inputs, images, profiles)?)
+    }
+
+    fn new_impl(
+        inputs: &'a [RunInput],
+        images: &'a [RunImageInput],
+        profiles: &'a [RunProfileInput],
+    ) -> Result<Self, std::ffi::NulError> {
+        let mut names = Vec::with_capacity(2 * (inputs.len() + images.len()) + 3 * profiles.len());
         // CString 的缓冲在堆上，Vec 扩容只搬句柄，指针不失效。
         let mut name = |text: &str| -> Result<*const c_char, std::ffi::NulError> {
             let owned = CString::new(text)?;
@@ -249,16 +273,48 @@ impl<'a> RawInputs<'a> {
                 pixels: i.pixels_ptr(),
             });
         }
+        let mut raw_profiles = Vec::with_capacity(profiles.len());
+        for i in profiles {
+            raw_profiles.push(RunProfileInputRaw {
+                node_id: name(&i.node_id)?,
+                port: name(&i.port)?,
+                count: (i.xyz.len() / 3) as u32,
+                xyz: i.xyz.as_ptr(),
+                intensity: or_null(i.intensity.is_empty(), i.intensity.as_ptr()),
+                normals: or_null(i.normals.is_empty(), i.normals.as_ptr()),
+                rgb: if i.rgb.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.rgb.as_ptr()
+                },
+                descriptor_json: name(&i.descriptor_json)?,
+                validity: i.validity.as_ptr(),
+                source_indices: i.source_indices.as_ptr(),
+                handle: i.retained.as_ref().map_or(std::ptr::null(), |h| h.raw()),
+            });
+        }
         Ok(RawInputs {
             clouds,
             images: raw_images,
+            profiles: raw_profiles,
             names,
             _borrow: std::marker::PhantomData,
         })
     }
 
+    fn profiles_ptr(&self) -> *const RunProfileInputRaw {
+        if self.profiles.is_empty() {
+            std::ptr::null()
+        } else {
+            self.profiles.as_ptr()
+        }
+    }
+    fn profile_count(&self) -> usize {
+        self.profiles.len()
+    }
+
     fn is_empty(&self) -> bool {
-        self.clouds.is_empty() && self.images.is_empty()
+        self.clouds.is_empty() && self.images.is_empty() && self.profiles.is_empty()
     }
 
     fn clouds_ptr(&self) -> *const RunInputRaw {
@@ -305,6 +361,7 @@ pub struct RunSpec<'a> {
     pub inputs: &'a [RunInput],
     /// 运行时注入的图像（v15）。
     pub image_inputs: &'a [RunImageInput],
+    pub profile_inputs: &'a [RunProfileInput],
     /// 顶层图参数的取值（v10），JSON 对象 `{ 名字: 值 }`。None = 全用图里的 default。
     pub params_json: Option<&'a str>,
     /// 只运行这些节点（v11，docs/node-run-plan.md R1–R2）。空 = 普通运行。给了它 core 就忽略
@@ -334,6 +391,7 @@ impl<'a> RunSpec<'a> {
             no_reuse: false,
             inputs: &[],
             image_inputs: &[],
+            profile_inputs: &[],
             params_json: None,
             isolate: &[],
             force: &[],
@@ -535,6 +593,7 @@ pub struct Core {
     python_status: Option<FnJson>,
     refresh_python: Option<FnJson>,
     frames: frames::Functions,
+    profiles: profiles::Functions,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -653,6 +712,7 @@ impl Core {
             python_status: sym_opt!(lib, "lyflow_python_status", FnJson),
             refresh_python: sym_opt!(lib, "lyflow_refresh_python", FnJson),
             frames: frames::Functions::load(&lib),
+            profiles: profiles::Functions::load(&lib),
             lib,
         })
     }
@@ -1590,7 +1650,8 @@ impl RunHandle {
         let force_ptrs: Vec<*const c_char> = force_cstrings.iter().map(|c| c.as_ptr()).collect();
 
         // node_id / port 的 CString 与点云缓冲都必须活到 run_start 返回：core 在里面拷贝。
-        let raw_inputs = RawInputs::new(spec.inputs, spec.image_inputs)?;
+        let raw_inputs =
+            RawInputs::with_profiles(spec.inputs, spec.image_inputs, spec.profile_inputs)?;
 
         let params_c = spec.params_json.map(CString::new).transpose()?;
         let options = RunOptionsRaw {
@@ -1625,6 +1686,8 @@ impl RunHandle {
             force_count: force_ptrs.len(),
             image_inputs: raw_inputs.images_ptr(),
             image_input_count: raw_inputs.image_count(),
+            profile_inputs: raw_inputs.profiles_ptr(),
+            profile_input_count: raw_inputs.profile_count(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

@@ -44,7 +44,7 @@ export function FieldsView({ src, onPick }: { src: PeekSource; onPick: (field: s
                   {stat
                     ? stat.value
                       ? formatOutputValue(stat)
-                      : `${stat.elementCount.toLocaleString()} ${f.type === 'PointCloud' ? '点' : '个'}`
+                      : `${stat.elementCount.toLocaleString()} ${f.type === 'PointCloud' || f.type === 'Profile' ? '点' : '个'}`
                     : '—'}
                 </span>
                 <span className="peek-fields__go" aria-hidden>

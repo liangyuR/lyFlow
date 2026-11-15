@@ -234,7 +234,7 @@ impl Capture {
                 let port = item["port"].as_str().unwrap_or_default().to_string();
                 let ty = item["type"].as_str().unwrap_or_default().to_string();
                 item["nodeId"] = json!(node_id);
-                let binary = ty == "PointCloud" || ty == "Image";
+                let binary = ty == "PointCloud" || ty == "Image" || ty == "Profile";
                 let include = match self.policy.as_str() {
                     "selected" => self.selected.contains(&(node_id.clone(), port.clone())),
                     "failures" => {
@@ -254,20 +254,37 @@ impl Capture {
                     let name = format!(
                         "output-{}.{}",
                         outputs.len(),
-                        if ty == "Image" { "lyim" } else { "pcd" }
+                        if ty == "Image" {
+                            "lyim"
+                        } else if ty == "Profile" {
+                            "lypr"
+                        } else {
+                            "pcd"
+                        }
                     );
                     let file = self.dir.join(&name);
                     if item["byteSize"].as_u64().unwrap_or(0) > self.max_bytes.saturating_sub(used)
                     {
                         Some("quota_exceeded".to_string())
                     } else {
-                        match core.output_save(
-                            result.run_id(),
-                            node_id,
-                            &port,
-                            &file.to_string_lossy(),
-                            "ascii",
-                        ) {
+                        let saved = if ty == "Profile" {
+                            core.output_profile(result.run_id(), node_id, &port, 0, 0)
+                                .map_err(|e| e.to_string())
+                                .and_then(|view| crate::profile_wire::encode_profile(&view))
+                                .and_then(|bytes| {
+                                    std::fs::write(&file, bytes).map_err(|e| e.to_string())
+                                })
+                        } else {
+                            core.output_save(
+                                result.run_id(),
+                                node_id,
+                                &port,
+                                &file.to_string_lossy(),
+                                "ascii",
+                            )
+                            .map_err(|e| e.to_string())
+                        };
+                        match saved {
                             Err(e) => {
                                 let _ = std::fs::remove_file(&file);
                                 Some(format!("capture_failed: {e}"))

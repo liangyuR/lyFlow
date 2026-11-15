@@ -1073,3 +1073,56 @@ TEST_CASE(
   CHECK_FALSE(disk.enabled());
   std::filesystem::remove_all(dir);
 }
+
+TEST_CASE(
+    "Fully provided outputs skip unused parameter validation while partial injection retains it") {
+  Registry registry;
+  OperatorDesc op;
+  op.id = "test.provided_validation";
+  op.version = "1.0.0";
+  op.label = "Provided validation";
+  op.category = "Test";
+  op.inputs = {{"input", "PointCloud", "Input", "", true}};
+  op.outputs = {{"first", "PointCloud", "First", "", true},
+                {"second", "PointCloud", "Second", "", true}};
+  Param gain;
+  gain.name = "gain";
+  gain.type = ParamType::Float;
+  gain.def = Value::number(1);
+  gain.min = 0;
+  Param path;
+  path.name = "path";
+  path.type = ParamType::Path;
+  path.def = Value::text("");
+  op.params = {gain, path};
+  static int validationCalls;
+  validationCalls = 0;
+  op.validate = [](const ParamView&, const std::set<std::string>&) {
+    ++validationCalls;
+    return std::vector<Issue>{Issue::error("adapter_required", "Unused adapter configuration")};
+  };
+  op.compute = [](const Inputs&, const ParamView&, Outputs&, ExecContext&) { return Status::Ok(); };
+  registry.addOperator(std::move(op));
+  const auto check = [&](const std::set<std::string>& ports, const Json& params) {
+    const auto graph = makeGraph({{"n", "test.provided_validation", params}}, {});
+    exec::RawGraph raw;
+    Diagnostics diagnostics;
+    REQUIRE(exec::parseGraph(graph.dump(), raw, diagnostics));
+    exec::BuildOptions options;
+    options.runId = "provided-validation";
+    options.injectedPorts["n"] = ports;
+    exec::Plan plan;
+    exec::buildPlan(registry, raw, options, plan, diagnostics);
+    return Json::parse(diagnostics.toJson());
+  };
+  CHECK(check({"first", "second"}, {{"gain", -1}, {"path", 42}, {"unused", 7}}).empty());
+  CHECK(validationCalls == 0);
+  const auto partial = check({"first"}, {{"path", "unused.pcd"}});
+  REQUIRE_FALSE(partial.empty());
+  CHECK(partial[0]["code"] == "adapter_required");
+  CHECK(validationCalls == 1);
+  const auto badRange = check({"first"}, {{"gain", -1}, {"path", "unused.pcd"}});
+  REQUIRE_FALSE(badRange.empty());
+  CHECK(badRange[0]["code"] == "bad_param");
+  CHECK(validationCalls == 1);
+}

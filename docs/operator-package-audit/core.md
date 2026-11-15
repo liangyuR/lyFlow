@@ -1,8 +1,8 @@
 # core 逐算子迁移清单
 
-基线 `9940c8c`；共 4 项。状态：规划，未实施。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 4 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
-下列顺序是本计划内的迁移/验收顺序，不是执行图调度顺序。`?` 表示可选输入；没有`?`的输入按当前manifest默认为必需。精确参数、默认值、端口Record契约及来源指纹见[机器清单](../operator-package-audit.json)。
+下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
 ## 001 · flow.fallback
 
@@ -46,7 +46,7 @@
 - 验收：各原生数据类型/Bundle透明透传，缓存和连线语义不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 127 · gen.synthetic
+## 132 · gen.synthetic
 
 - 当前：`core` / `1.0.0` / 点云合成。目标：`std-pointcloud`；迁移归属；**M6**。
 - 源码：[core/src/ops/gen_synthetic.cpp:106](../../core/src/ops/gen_synthetic.cpp#L106)。

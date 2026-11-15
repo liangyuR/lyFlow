@@ -1,10 +1,10 @@
 # std-ml 逐算子迁移清单
 
-基线 `9940c8c`；共 1 项。状态：规划，未实施。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 1 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
-下列顺序是本计划内的迁移/验收顺序，不是执行图调度顺序。`?` 表示可选输入；没有`?`的输入按当前manifest默认为必需。精确参数、默认值、端口Record契约及来源指纹见[机器清单](../operator-package-audit.json)。
+下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 203 · ml.onnx_run
+## 208 · ml.onnx_run
 
 - 当前：`std-ml` / `1.0.0` / ONNX 推理。目标：`std-ml`；保留并验边界；**M6**。
 - 源码：[packs/std-ml/ops/ml_onnx_run.cpp:376](../../packs/std-ml/ops/ml_onnx_run.cpp#L376)。

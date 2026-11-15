@@ -1,4 +1,5 @@
 #include "lyflow/data.h"
+#include "lyflow/profile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -413,6 +414,14 @@ Data Data::image(std::shared_ptr<const lyflow::Image> i) {
   return d;
 }
 
+Data Data::profile(std::shared_ptr<const lyflow::Profile> p) {
+  Data d;
+  d.kind_ = Kind::Profile;
+  d.profile_ = std::move(p);
+  d.valueCache_ = std::make_shared<ValueCache>();
+  return d;
+}
+
 Bundle& Bundle::set(const std::string& name, Data value) {
   for (auto& f : fields) {
     if (f.first == name) {
@@ -454,6 +463,7 @@ const Tensor* Data::asTensor() const { return kind_ == Kind::Tensor ? tensor_.ge
 const Status* Data::asError() const { return kind_ == Kind::Error ? error_.get() : nullptr; }
 const Bundle* Data::asBundle() const { return kind_ == Kind::Bundle ? bundle_.get() : nullptr; }
 const Image* Data::asImage() const { return kind_ == Kind::Image ? image_.get() : nullptr; }
+const Profile* Data::asProfile() const { return kind_ == Kind::Profile ? profile_.get() : nullptr; }
 
 const char* Data::typeName() const {
   if (kind_ == Kind::Bundle && bundle_)
@@ -507,6 +517,12 @@ std::size_t Data::byteSize() const {
   }
   case Kind::Image:
     return image_ ? image_->byteSize() : 0;
+  case Kind::Profile:
+    if (!profile_)
+      return 0;
+    return sizeof(Profile) + Data::cloud(profile_->cloud).byteSize() + profile_->validity.size() +
+           profile_->sourceIndices.size() * sizeof(std::uint32_t) +
+           profileDescriptorJson(profile_->descriptor).dump().size();
   }
   return 0;
 }
@@ -535,6 +551,8 @@ std::size_t Data::elementCount() const {
     return bundle_ ? bundle_->fields.size() : 0;
   case Kind::Image:
     return image_ ? image_->pixelCount() : 0;
+  case Kind::Profile:
+    return profile_ ? profile_->pointCount() : 0;
   }
   return 0;
 }
@@ -554,6 +572,17 @@ Data Data::withTensorScale(std::int32_t s) const {
 }
 
 std::string Data::valueJsonUncached() const {
+  if (kind_ == Kind::Profile) {
+    if (!profile_)
+      return {};
+    return nlohmann::json{
+        {"kind", "Profile"},
+        {"descriptor", profileDescriptorJson(profile_->descriptor)},
+        {"count", profile_->pointCount()},
+        {"validCount", std::count(profile_->validity.begin(), profile_->validity.end(), 1)},
+        {"cloudId", profile_->cloud ? std::to_string(profile_->cloud->id) : ""}}
+        .dump();
+  }
   // 点云与 Indices 走二进制通道（ADR-0006），这里给空串。
   if (kind_ == Kind::None || kind_ == Kind::PointCloud || kind_ == Kind::Indices)
     return {};
@@ -808,6 +837,8 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
     return Data::Kind::Error;
   if (typeName == "Image")
     return Data::Kind::Image;
+  if (typeName == "Profile")
+    return Data::Kind::Profile;
   if (parseBundleType(typeName, nullptr))
     return Data::Kind::Bundle;
   return Data::Kind::None; // 含 "Any"：不约束具体载荷
@@ -861,6 +892,8 @@ const char* typeNameFromKind(Data::Kind kind) {
     return "Bundle";
   case Data::Kind::Image:
     return "Image";
+  case Data::Kind::Profile:
+    return "Profile";
   }
   return "None";
 }
