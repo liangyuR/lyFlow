@@ -60,6 +60,27 @@ struct PointCloud {
   bool channelsConsistent() const;
 };
 
+struct ProfileDescriptor {
+  std::uint32_t schemaVersion = 1;
+  std::string frame;
+  std::string unit;
+  std::string plane;
+  std::string handedness;
+  std::string sampleOrder;
+  std::string sourceId;
+  std::uint64_t sourceCount = 0;
+};
+
+struct Profile {
+  std::shared_ptr<const PointCloud> cloud;
+  ProfileDescriptor descriptor;
+  std::vector<std::uint8_t> validity;
+  std::vector<std::uint32_t> sourceIndices;
+
+  std::size_t pointCount() const { return cloud ? cloud->pointCount() : 0; }
+  bool consistent(std::string* why = nullptr) const;
+};
+
 /// 点下标集合。指向某个点云，本身不含坐标。
 struct Indices {
   /// 来源点云的 id。消费方必须校验，不符是 bad_input 而不是越界崩溃。
@@ -225,6 +246,7 @@ public:
     Bundle,
     /// 2D 图像（docs/image-plan.md），同样追加在末尾。
     Image,
+    Profile,
   };
 
   Data() = default;
@@ -255,6 +277,10 @@ public:
   static Data image(lyflow::Image i) {
     return image(std::make_shared<const lyflow::Image>(std::move(i)));
   }
+  static Data profile(std::shared_ptr<const lyflow::Profile> p);
+  static Data profile(lyflow::Profile p) {
+    return profile(std::make_shared<const lyflow::Profile>(std::move(p)));
+  }
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -275,6 +301,7 @@ public:
   const lyflow::Status* asError() const;
   const lyflow::Bundle* asBundle() const;
   const lyflow::Image* asImage() const;
+  const lyflow::Profile* asProfile() const;
   bool isError() const { return kind_ == Kind::Error; }
 
   /// 预览缩小过的图像转出来的张量记着比例（ADR-0028）：图像 → 张量 → 推理 → 张量 → 图像这条链上，转回来的图
@@ -286,6 +313,7 @@ public:
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
   std::shared_ptr<const lyflow::Image> imagePtr() const { return image_; }
+  std::shared_ptr<const lyflow::Profile> profilePtr() const { return profile_; }
 
   /// 对应 manifest 里的端口类型名，用于错误信息与事件里的 stats。
   /// Bundle 是 `Bundle<kind>`，指针活到这份 Data 析构为止 —— 调用方要留着就拷成 string。
@@ -321,6 +349,7 @@ private:
   std::shared_ptr<const lyflow::Status> error_;
   std::shared_ptr<const lyflow::Bundle> bundle_;
   std::shared_ptr<const lyflow::Image> image_;
+  std::shared_ptr<const lyflow::Profile> profile_;
   std::shared_ptr<ValueCache> valueCache_;
   std::int32_t tensorScale_ = 1;
 };

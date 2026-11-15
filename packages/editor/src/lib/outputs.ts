@@ -18,6 +18,12 @@ export function formatOutputValue(o: ValueLike): string {
   // 图像算子的几何是像素坐标（docs/image-plan.md Q2）：值上写明，免得当成米读
   const px = v.unit === 'px' && v.kind !== 'Measurement' ? ' px' : '';
   switch (v.kind) {
+    case 'Profile': {
+      const d = v.descriptor;
+      return d
+        ? `${o.elementCount ?? v.count ?? 0} 槽 · ${v.validCount ?? '?'} 有效 · ${d.unit} · ${d.plane} · ${d.handedness} · ${d.sampleOrder} · ${d.frame}`
+        : '轮廓元数据不可用';
+    }
     case 'Measurement':
       if (v.value === null || v.value === undefined) return v.message || '未测出';
       return `${num(v.value)} ${v.unit ?? ''}`.trim();

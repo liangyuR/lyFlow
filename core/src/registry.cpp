@@ -650,11 +650,13 @@ std::vector<std::string> Registry::validate() const {
             fail(portWhere + " contract: recordType 只对 Record 端口有意义，这个端口是 " + p.type);
           }
           if (p.contract.contains("finite") && p.type != "PointCloud" && p.type != "Tensor" &&
-              p.type != "Image" && p.type != "Measurement" && p.type != kAnyTypeName) {
-            fail(portWhere +
-                 " contract: finite 只对 PointCloud / Tensor / Image / Measurement 端口有意义，"
-                 "这个端口是 " +
-                 p.type);
+              p.type != "Image" && p.type != "Profile" && p.type != "Measurement" &&
+              p.type != kAnyTypeName) {
+            fail(
+                portWhere +
+                " contract: finite 只对 PointCloud / Profile / Tensor / Image / Measurement 端口有意义，"
+                "这个端口是 " +
+                p.type);
           }
         }
       }

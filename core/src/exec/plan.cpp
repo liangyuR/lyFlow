@@ -601,6 +601,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     /// 参数这一段全部通过。validate 钩子只在它为真时调：拿默认值占位的参数去跑
     /// 钩子，只会多报几条由第一条错误派生出来的假问题。
     bool paramsOk = false;
+    bool fullyProvided = false;
     std::vector<Diagnostic> errors;
   };
   std::vector<Prepared> prepared(n);
@@ -622,6 +623,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       continue;
     }
     prepared[i].op = op;
+    const auto injected = options.injectedPorts.find(rn.id);
+    prepared[i].fullyProvided =
+        !op->outputs.empty() && injected != options.injectedPorts.end() &&
+        std::all_of(op->outputs.begin(), op->outputs.end(),
+                    [&](const Port& port) { return injected->second.count(port.name) != 0; });
 
     // -- 别名重定向与迁移（E3）。迁移链在开头跑过了，这里只取结果、报版本问题。
     nlohmann::json params = rn.params;
@@ -674,6 +680,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 参数：先查未知键，再逐个规整 + 查范围。
     for (auto it = params.begin(); it != params.end(); ++it) {
       if (!findParam(*op, it.key())) {
+        if (prepared[i].fullyProvided)
+          continue;
         auto viaGraph = rn.graphParams.find(it.key());
         if (viaGraph != rn.graphParams.end()) {
           fail(i, "unknown_bind",
@@ -693,12 +701,13 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       if (it != params.end()) {
         std::string message;
         if (!coerceParam(p, *it, v, message)) {
-          fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + message, p.name);
+          if (!prepared[i].fullyProvided)
+            fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + message, p.name);
           v = p.def; // 用默认值占位，后面的检查还能继续跑
         }
       }
       std::string rangeMessage;
-      if (!checkRange(p, v, rangeMessage)) {
+      if (!prepared[i].fullyProvided && !checkRange(p, v, rangeMessage)) {
         fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + rangeMessage, p.name);
       }
       prepared[i].params[p.name] = std::move(v);
@@ -706,7 +715,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 必填只对**可见**的参数成立（1.6）：被 visibleWhen 藏起来的 path 参数
     // 用户根本没机会选文件，为它标红只会让人找不到那个红框在哪。
     for (const Param& p : op->params) {
-      if (p.type != ParamType::Path)
+      if (prepared[i].fullyProvided || p.type != ParamType::Path)
         continue;
       if (!conditionHolds(p.visibleWhen, prepared[i].params))
         continue;
@@ -841,7 +850,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   }
 
   for (std::size_t i = 0; i < n; ++i) {
-    if (!prepared[i].op)
+    if (!prepared[i].op || providedNode[i])
       continue;
     for (const Port& p : prepared[i].op->inputs) {
       if (p.required && !connectedInputs[i].count(p.name)) {
@@ -854,7 +863,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   // -- 算子的加载期校验（J5）：参数已解析、连线已知，数据一概不给。----------
   for (std::size_t i = 0; i < n; ++i) {
     const OperatorDesc* op = prepared[i].op;
-    if (!op || !op->validate || !prepared[i].paramsOk)
+    if (!op || !op->validate || !prepared[i].paramsOk || prepared[i].fullyProvided)
       continue;
     std::vector<Issue> issues;
     try {

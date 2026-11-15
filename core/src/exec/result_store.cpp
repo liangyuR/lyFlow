@@ -51,7 +51,10 @@ OutputInfo describeOutput(const std::string& port, const Data& data) {
           data.elementCount(),
           data.byteSize(),
           data.valueJson(),
-          data.asCloud() ? std::to_string(data.asCloud()->id) : std::string{}};
+          data.asCloud() ? std::to_string(data.asCloud()->id)
+          : data.asProfile() && data.asProfile()->cloud
+              ? std::to_string(data.asProfile()->cloud->id)
+              : std::string{}};
 }
 
 bool splitFieldAddress(const std::string& address, std::string* port, std::string* field) {
@@ -578,6 +581,8 @@ std::string ResultStore::bindingsJson(const std::string& runId) const {
       item["virtual"] = true;
     if (const auto* cloud = data.asCloud())
       item["sourceCloudId"] = std::to_string(cloud->id);
+    if (const auto* profile = data.asProfile(); profile && profile->cloud)
+      item["sourceCloudId"] = std::to_string(profile->cloud->id);
     if (const auto* record = data.asRecord())
       item["recordType"] = record->type;
     entries.push_back(std::move(item));
@@ -622,6 +627,8 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
   if (!get(runId, nodeId, port, data))
     return false;
   const PointCloud* cloud = data.asCloud();
+  if (!cloud && data.asProfile())
+    cloud = data.asProfile()->cloud.get();
   if (!cloud)
     return false;
 

@@ -90,11 +90,26 @@ export function subgraphIdOf(opId: string): string | null {
   return opId.startsWith(SUBGRAPH_OP_PREFIX) ? opId.slice(SUBGRAPH_OP_PREFIX.length) : null;
 }
 
+export type GraphContractUpgradeRule = {
+  source: { node: string; op: string; opVersion: '1.0.0'; port: string };
+  target: { node: string; port: string };
+  adapterId: string;
+} & (
+  | {
+      kind: 'planeCalib.v1';
+      missingUnit: 'm' | 'mm';
+      imageFrame: string;
+      planeFrame: string;
+    }
+  | { kind: 'dtsGeometry.v1' }
+);
+
 export interface GraphDoc {
   schemaVersion: number;
   id: string;
   name?: string;
   meta?: Record<string, unknown>;
+  contractUpgrade?: { schemaVersion: 1; rules: GraphContractUpgradeRule[] };
   nodes: GraphNode[];
   edges: GraphEdge[];
   groups?: unknown[];

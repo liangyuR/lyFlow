@@ -312,6 +312,7 @@ macro_rules! lyflow_handler {
             $crate::commands::get_run_outputs,
             $crate::commands::import_graph,
             $crate::commands::get_output_cloud,
+            $crate::commands::get_output_profile,
             $crate::commands::get_output_tensor,
             $crate::commands::get_output_indices,
             $crate::commands::get_output_image,

@@ -124,6 +124,17 @@ export const RESULT_LIMITS: Readonly<{
   layers: number;
 }>;
 export function resultColor(identity: unknown): string;
+export interface ProfileDescriptor {
+  schemaVersion: 1;
+  frame: string;
+  unit: 'm' | 'mm';
+  plane: 'XY' | 'XZ' | 'YZ';
+  handedness: 'right' | 'reflected';
+  sampleOrder: 'unknown' | 'acquisition';
+  sourceId: string;
+  sourceCount: number;
+}
+export function profileDescriptor(value: unknown): ProfileDescriptor;
 export function poseCollection(value: unknown): PoseCollection | null;
 export function poseGeometry(value: unknown, options?: ResultOptions): PoseShape[];
 export function poseScene2D(value: unknown, options?: ResultOptions): SceneSpec;
@@ -135,6 +146,12 @@ export function resultSummary(value: unknown): {
   count?: number;
   items?: unknown[];
   value?: unknown;
+  plane?: string;
+  handedness?: string;
+  sampleOrder?: string;
+  sourceId?: string;
+  sourceCount?: number;
+  validCount?: number;
 } | null;
 export function cameraProjector(
   value: unknown,

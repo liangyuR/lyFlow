@@ -1,4 +1,5 @@
 #include "python_runtime.h"
+#include "lyflow/profile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -213,11 +214,25 @@ Json coordinates(const float* values, std::size_t count) {
 bool supportedPort(const std::string& type) {
   static const std::set<std::string> types{"PointCloud", "Image",     "Measurement", "Record",
                                            "Tensor",     "Transform", "Plane",       "Point2D",
-                                           "Line2D",     "Circle2D",  "Box2D"};
+                                           "Line2D",     "Circle2D",  "Box2D",       "Profile"};
   return types.count(type) != 0;
 }
 
 Json encode(const Data& data, const fs::path& dir) {
+  if (const auto* profile = data.asProfile()) {
+    std::string why;
+    if (!validateProfile(*profile, why))
+      throw Failure("python_input_invalid", why);
+    auto result = encode(Data::cloud(profile->cloud), dir);
+    result["type"] = "Profile";
+    result["descriptor"] = profileDescriptorJson(profile->descriptor);
+    result["validity"] = writeArray(dir, profile->validity.data(), profile->validity.size(),
+                                    {profile->pointCount()}, "u8");
+    result["sourceIndices"] = writeArray(dir, profile->sourceIndices.data(),
+                                         profile->sourceIndices.size() * sizeof(std::uint32_t),
+                                         {profile->pointCount()}, "u32");
+    return result;
+  }
   if (const auto* c = data.asCloud()) {
     if (!c->channelsConsistent())
       throw Failure("python_input_invalid", "点云通道长度不一致");
@@ -330,7 +345,10 @@ Array arrayInfo(const Json& j, const fs::path& dir) {
       !j.contains("dtype"))
     throw Failure("python_output_invalid", "数组描述必须只有 file、shape、dtype");
   a.dtype = j.at("dtype").get<std::string>();
-  std::size_t size = a.dtype == "f32" ? 4 : a.dtype == "u16" ? 2 : a.dtype == "u8" ? 1 : 0;
+  std::size_t size = (a.dtype == "f32" || a.dtype == "u32") ? 4
+                     : a.dtype == "u16"                     ? 2
+                     : a.dtype == "u8"                      ? 1
+                                                            : 0;
   if (!size || !j.at("shape").is_array() || j.at("shape").size() > 8)
     throw Failure("python_output_invalid", "数组 dtype 或 shape 无效");
   if (j.at("shape").empty())
@@ -409,6 +427,34 @@ Unit2D readUnit(const Json& j) {
 Data decode(const Json& j, const std::string& type, const fs::path& dir) {
   if (!j.is_object() || j.at("type") != type)
     throw Failure("python_output_invalid", "输出 DTO 类型与端口声明不符");
+  if (type == "Profile") {
+    dtoFields(j, {"type", "xyz", "descriptor", "validity", "sourceIndices"},
+              {"intensity", "normals", "rgb"});
+    Profile profile;
+    std::string why;
+    if (!parseProfileDescriptor(j.at("descriptor"), profile.descriptor, why))
+      throw Failure("python_output_invalid", why);
+    auto cloudDto = j;
+    cloudDto["type"] = "PointCloud";
+    cloudDto.erase("descriptor");
+    cloudDto.erase("validity");
+    cloudDto.erase("sourceIndices");
+    auto cloud = decode(cloudDto, "PointCloud", dir);
+    profile.cloud = cloud.cloudPtr();
+    const auto n = profile.pointCount();
+    const auto validity = arrayInfo(j.at("validity"), dir);
+    const auto indices = arrayInfo(j.at("sourceIndices"), dir);
+    if (validity.dtype != "u8" || validity.shape != std::vector<std::size_t>{n} ||
+        indices.dtype != "u32" || indices.shape != std::vector<std::size_t>{n})
+      throw Failure("python_output_invalid", "Profile validity/sourceIndices必须为u8[N]/u32[N]");
+    profile.validity.resize(n);
+    profile.sourceIndices.resize(n);
+    readArray(validity, profile.validity.data());
+    readArray(indices, profile.sourceIndices.data());
+    if (!validateProfile(profile, why))
+      throw Failure("python_output_invalid", why);
+    return Data::profile(std::move(profile));
+  }
   if (type == "PointCloud") {
     dtoFields(j, {"type", "xyz"}, {"intensity", "normals", "rgb"});
     PointCloud c;

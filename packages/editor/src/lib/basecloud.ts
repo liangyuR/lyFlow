@@ -16,6 +16,23 @@ export interface BaseCloud {
   resolved: { nodeId: string; port: string };
   /** 就是接在它输入口上的那片云（直接接着的点云口，或直接接着的 Bundle 里的点云字段）；隔了几跳找到的是 false。 */
   direct?: boolean;
+  type?: 'PointCloud' | 'Profile';
+}
+
+export function cloudPortType(
+  ops: ReadonlyMap<string, OperatorDesc>,
+  opId: string,
+  port: string,
+  bundles?: readonly BundleDesc[],
+): 'PointCloud' | 'Profile' {
+  const [name, field] = port.split('.');
+  const output = ops.get(opId)?.outputs.find((p) => p.name === name);
+  if (!field) return output?.type === 'Profile' ? 'Profile' : 'PointCloud';
+  const kind = output ? bundleKindOf(output.type) : null;
+  return bundles?.find((b) => b.kind === kind)?.fields.find((f) => f.name === field)?.type ===
+    'Profile'
+    ? 'Profile'
+    : 'PointCloud';
 }
 
 /** 该算子的第一个 PointCloud 输出端口。没有时再看 Bundle 输出里的点云字段，返回
@@ -29,12 +46,15 @@ export function firstCloudPort(
 ): string | null {
   const declared = ops.get(opId)?.outputs ?? [];
   for (const p of declared) {
-    if (p.type === 'PointCloud') return p.name;
+    const actual = outputs?.find((o) => o.port === p.name)?.type ?? p.type;
+    if (actual === 'PointCloud' || actual === 'Profile') return p.name;
   }
   for (const p of declared) {
     const kind = bundleKindOf(p.type);
     const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
-    const fields = (desc?.fields ?? []).filter((f) => f.type === 'PointCloud');
+    const fields = (desc?.fields ?? []).filter(
+      (f) => f.type === 'PointCloud' || f.type === 'Profile',
+    );
     if (fields.length === 0) continue;
     let best = `${p.name}.${fields[fields.length - 1]!.name}`;
     let most = -1;
@@ -58,12 +78,14 @@ export function cloudPortsOf(
   bundles?: readonly BundleDesc[],
 ): string[] {
   const declared = ops.get(opId)?.outputs ?? [];
-  const out = declared.filter((p) => p.type === 'PointCloud').map((p) => p.name);
+  const out = declared
+    .filter((p) => p.type === 'PointCloud' || p.type === 'Profile')
+    .map((p) => p.name);
   for (const p of declared) {
     const kind = bundleKindOf(p.type);
     const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
     for (const f of desc?.fields ?? []) {
-      if (f.type === 'PointCloud') out.push(`${p.name}.${f.name}`);
+      if (f.type === 'PointCloud' || f.type === 'Profile') out.push(`${p.name}.${f.name}`);
     }
   }
   return out;
@@ -174,7 +196,15 @@ export function findBaseCloud(
         !!frame.port &&
         !!port &&
         (port === frame.port || port.startsWith(`${frame.port}.`));
-      return { localId: node.id, label: titleOf(node, ops), resolved, direct };
+      return {
+        localId: node.id,
+        label: titleOf(node, ops),
+        resolved,
+        direct,
+        ...(cloudPortType(ops, node.op, port, bundles) === 'Profile'
+          ? { type: 'Profile' as const }
+          : {}),
+      };
     }
     push(upstreamOf(doc, frame.path, node, ops));
   }

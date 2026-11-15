@@ -700,7 +700,7 @@ async function route(req, res, url) {
   }
 
   let snapshotMatch =
-    /^\/lyflow\/(runs|snapshots)\/([^/]+)(?:\/(snapshot|clouds|images)(?:\/([^/]+)\/([^/]+))?)?$/.exec(
+    /^\/lyflow\/(runs|snapshots)\/([^/]+)(?:\/(snapshot|clouds|images|profiles)(?:\/([^/]+)\/([^/]+))?)?$/.exec(
       p,
     );
   if (
@@ -721,9 +721,11 @@ async function route(req, res, url) {
     const node = decodeURIComponent(rawNode ?? '');
     const port = decodeURIComponent(rawPort ?? '');
     const buf =
-      resource === 'clouds'
-        ? await cloudOf(state, node, port, Number(q.get('maxPoints') ?? 0))
-        : await imageOf(state, node, port, Number(q.get('row') ?? 0), Number(q.get('rows') ?? 0));
+      resource === 'profiles'
+        ? fs.readFileSync(snapshots.output(state.snapshotId ?? state.id, node, port, 'Profile'))
+        : resource === 'clouds'
+          ? await cloudOf(state, node, port, Number(q.get('maxPoints') ?? 0))
+          : await imageOf(state, node, port, Number(q.get('row') ?? 0), Number(q.get('rows') ?? 0));
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': buf.length,
@@ -758,6 +760,25 @@ async function route(req, res, url) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     return send(res, 200, outputInfoOf(state, decodeURIComponent(m[2])));
+  }
+
+  m = /^\/lyflow\/runs\/([^/]+)\/profiles\/([^/]+)\/([^/]+)$/.exec(p);
+  if (req.method === 'GET' && m) {
+    const state = runOf(decodeURIComponent(m[1]));
+    await state.done;
+    const file = snapshots.output(
+      state.snapshotId ?? state.id,
+      decodeURIComponent(m[2]),
+      decodeURIComponent(m[3]),
+      'Profile',
+    );
+    const bytes = fs.readFileSync(file);
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': bytes.length,
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(bytes);
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/clouds\/([^/]+)\/([^/]+)$/.exec(p);

@@ -56,7 +56,7 @@ export { formatOutputValue } from '../lib/outputs';
  *  提取下标的 rest 这类以前在预览里怎么都看不到）。 */
 function OutputValues({ outputs, nodeKey }: { outputs: OutputStat[]; nodeKey: string }) {
   const shown = outputs.filter((o) => o.value !== undefined);
-  const clouds = outputs.filter((o) => o.type === 'PointCloud');
+  const clouds = outputs.filter((o) => o.type === 'PointCloud' || o.type === 'Profile');
   const pick = useUiStore((s) => s.viewerPortPick.get(nodeKey) ?? null);
   if (shown.length === 0 && clouds.length < 2) return null;
   return (

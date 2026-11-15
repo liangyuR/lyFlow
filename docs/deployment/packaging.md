@@ -6,15 +6,15 @@
 
 `pnpm run package` 通过 [package-windows.ps1](../../scripts/package-windows.ps1) 从当前源码构建两个 ZIP、编辑器 tarball 与正式运行库 NuGet 包，并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 [Windows release](../../.github/workflows/release-windows.yml) 工作流使用同一入口。交付运行库、headless CLI/SDK 与编辑器源码包，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。桌面构建与安装包验证见 [测试地图](../testing.md)。
 
-| 资产 | 布局与消费方式 |
-|---|---|
-| `lyflow-runtime-win-x64-vX.Y.Z.zip` | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。 |
-| `lyflow-sdk-win-x64-vX.Y.Z.zip` | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。 |
-| `lyflow-editor-vX.Y.Z.tgz` | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
-| `lyflow-runtime.json` | 输出目录中的随包清单副本，便于在解压前检查版本、ABI、算子和依赖。 |
-| `LyFlow.Runtime.win-x64.X.Y.Z.nupkg` | 与运行库 ZIP 使用同一份正式暂存内容，统一置于 `runtimes/win-x64/native/`；包含全部 DLL、`lyflow-runtime.json` 和许可证树。根 nuspec 的 repository commit 记录源码修订。诊断构建不生成正式 NuGet 包。 |
+| 资产                                 | 布局与消费方式                                                                                                                                                                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lyflow-runtime-win-x64-vX.Y.Z.zip`  | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。                                                                         |
+| `lyflow-sdk-win-x64-vX.Y.Z.zip`      | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。                                                                                                                                             |
+| `lyflow-editor-vX.Y.Z.tgz`           | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
+| `lyflow-runtime.json`                | 输出目录中的随包清单副本，便于在解压前检查版本、ABI、算子和依赖。                                                                                                                                                                       |
+| `LyFlow.Runtime.win-x64.X.Y.Z.nupkg` | 与运行库 ZIP 使用同一份正式暂存内容，统一置于 `runtimes/win-x64/native/`；包含全部 DLL、`lyflow-runtime.json` 和许可证树。根 nuspec 的 repository commit 记录源码修订。诊断构建不生成正式 NuGet 包。                                    |
 
-算子组合以 [release.json](../../packaging/release.json) 的 `packs` 为唯一来源，当前固定为 `std-value`、`std-geometry`、`std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.32.0`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
+算子组合以 [release.json](../../packaging/release.json) 的 `packs` 为唯一来源，当前固定为 `std-value`、`std-geometry`、`std-profile`、`std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.32.0`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
 
 本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 必须升级到采用相同产品版本 ABI 的客户端；旧数字 ABI 客户端不再列为兼容对象。
 
@@ -46,7 +46,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 源码必须干净且有有效 Git 修订；不要在正在编辑的工作树里制作正式产物。正式 tag 构建可加 `-ExpectedTag vX.Y.Z`；脚本校验版本，不自动修改源码版本。输出目录应位于仓外或仓内已忽略的构建目录；默认是 `build/release`。已有同名产物时拒绝覆盖，复验构建须选新输出目录。输出目录不能位于内部release工作区、matching-deps、vision-deps、vision-downloads、vision-opencv或opencv5-install目录内，防止产物与受管源码/依赖安装混用。打包完成或失败时恢复此前的OpenCV_DIR、LYFLOW_OPENCV_ROOT/BIN及其他被入口调整的进程环境。`-AllowDirty`、`-SkipDependencySetup` 只用于本地诊断，tag 发布禁止使用。
 
-入口恢复固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.32.0`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、`release.json` 中固定的 MSVC toolset 和 Windows SDK、vcpkg baseline、工具策略 `locked-tools-v1` 与发布组合修订 `std-glue-gap-v3` 构成稳定键；同一身份不再按运行编号重复保存。精确键未命中时按 `restore-keys` 退回同 toolset、同 SDK、同 baseline、同工具策略的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，哈希不符的包不会误用；普通发布缺包即失败，只有显式预热任务才编译缺失包。调整依赖 features、triplet 或发布组合时仍须同步更新缓存身份（当前 `std-glue-gap-v3`），让新组合另存一份。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；依赖准备与缓存保存在独立的 `deps` job 里完成，`build` job 恢复同一缓存后再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。普通发布的vcpkg端口始终使用 `--only-binarycaching`，缺缓存时停止，不允许临时回退源码编译。OpenCV是单独明确配置的固定源码构建，不属于该vcpkg回退路径：Windows按OS/架构、固定toolset/SDK、vision清单和构建/准备脚本缓存 `build/vision-deps` 与 `build/opencv5-install`，不使用跨版本restore前缀；只有精确cache-hit才传 `-SkipVisionBuild`。跳过编译仍验证固定源树、稳定版本、所有必需模块和许可证，失败即停止。显式rebuild_deps不恢复OpenCV安装缓存，重新执行源码构建。没有独立warm-vcpkg工作流，依赖预热继续使用Windows release的dispatch入口。
+入口恢复固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.32.0`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、`release.json` 中固定的 MSVC toolset 和 Windows SDK、vcpkg baseline、工具策略 `locked-tools-v1` 与发布组合修订 `std-profile-glue-gap-v4` 构成稳定键；同一身份不再按运行编号重复保存。精确键未命中时按 `restore-keys` 退回同 toolset、同 SDK、同 baseline、同工具策略的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，哈希不符的包不会误用；普通发布缺包即失败，只有显式预热任务才编译缺失包。调整依赖 features、triplet 或发布组合时仍须同步更新缓存身份（当前 `std-profile-glue-gap-v4`），让新组合另存一份。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；依赖准备与缓存保存在独立的 `deps` job 里完成，`build` job 恢复同一缓存后再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。普通发布的vcpkg端口始终使用 `--only-binarycaching`，缺缓存时停止，不允许临时回退源码编译。OpenCV是单独明确配置的固定源码构建，不属于该vcpkg回退路径：Windows按OS/架构、固定toolset/SDK、vision清单和构建/准备脚本缓存 `build/vision-deps` 与 `build/opencv5-install`，不使用跨版本restore前缀；只有精确cache-hit才传 `-SkipVisionBuild`。跳过编译仍验证固定源树、稳定版本、所有必需模块和许可证，失败即停止。显式rebuild_deps不恢复OpenCV安装缓存，重新执行源码构建。没有独立warm-vcpkg工作流，依赖预热继续使用Windows release的dispatch入口。
 
 Linux vision CI同样使用PowerShell7的正式OpenCV构建脚本，显式传入返回的OpenCV_DIR，不依赖发行版libopencv-dev。只从发行版获取Ninja和yaml-cpp开发包；Linux按固定vision源/脚本精确缓存安装，命中仍执行源树、模块和许可证验证。共享库目录写入下一步的LD_LIBRARY_PATH，配置、manifest自检和CTest仍每轮执行，超时上限45分钟。Windows原生视觉job也显式传入同一已验证OpenCV_DIR，不让CMake从系统里误选另一套OpenCV。
 
@@ -74,11 +74,11 @@ Linux vision CI同样使用PowerShell7的正式OpenCV构建脚本，显式传入
 
 Actions 缓存之外，vcpkg 还挂一个常驻的二进制源：`https://nuget.pkg.github.com/liangyuR/index.json`（NuGet）。它独立于可能被淘汰的 Actions 缓存。`scripts/use-vcpkg-feed.ps1` 把它接到当前进程的 `VCPKG_BINARY_SOURCES`：本地 `files` 缓存在前，源在后；两处都没有时，发布立即失败。`prepare-release-deps.ps1` 在设置了 `LYFLOW_VCPKG_FEED_TOKEN` 时自动调用它；没有令牌时行为与以前相同。
 
-| 使用方 | 令牌 | 模式 |
-|---|---|---|
-| 发布工作流 `deps` job | 工作流自带 `GITHUB_TOKEN`，job 权限 `packages: write` | 默认 `read`，显式预热时 `readwrite` |
-| 发布工作流 `build` job | `GITHUB_TOKEN`，`packages: read` | `read` |
-| 开发机 | classic PAT，`read:packages`（要上传则 `write:packages`）；GitHub Packages 的 NuGet 不认 fine-grained 令牌 | `read`（默认） |
+| 使用方                 | 令牌                                                                                                       | 模式                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| 发布工作流 `deps` job  | 工作流自带 `GITHUB_TOKEN`，job 权限 `packages: write`                                                      | 默认 `read`，显式预热时 `readwrite` |
+| 发布工作流 `build` job | `GITHUB_TOKEN`，`packages: read`                                                                           | `read`                              |
+| 开发机                 | classic PAT，`read:packages`（要上传则 `write:packages`）；GitHub Packages 的 NuGet 不认 fine-grained 令牌 | `read`（默认）                      |
 
 开发机配置：`gh auth refresh -h github.com -s read:packages` 后把 `gh auth token` 存进用户环境变量 `LYFLOW_VCPKG_FEED_TOKEN`；或在 GitHub 设置里新建 classic PAT。任何 vcpkg（包括下游项目自己的 `C:cpkg`）都可以用：`pwsh -File scripts/use-vcpkg-feed.ps1 -VcpkgRoot C:cpkg` 之后在同一进程里 `vcpkg install`。令牌只写进 `build/vcpkg-feed/nuget.config`（已忽略），不进仓库、URL 或日志。
 
@@ -92,11 +92,11 @@ vcpkg 只把本次现编的包推到源里，从 Actions 缓存恢复的包不�
 
 ## GitHub 门禁与正式发布
 
-| 触发 | 行为 |
-|---|---|
-| PR / main push / 手动 `CI` | 仅编译、单元测试、类型与格式检查，不运行完整发包。 |
-| 手动 `Windows release` | 默认运行完整门禁；`dependencies_only` 仅检查依赖，`rebuild_deps` 显式允许预热。不创建 Release。 |
-| `vX.Y.Z` tag push | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。 |
+| 触发                       | 行为                                                                                            |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| PR / main push / 手动 `CI` | 仅编译、单元测试、类型与格式检查，不运行完整发包。                                              |
+| 手动 `Windows release`     | 默认运行完整门禁；`dependencies_only` 仅检查依赖，`rebuild_deps` 显式允许预热。不创建 Release。 |
+| `vX.Y.Z` tag push          | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。    |
 
 完整构建使用 GitHub 托管 `windows-2022`。`deps` job 只安装固定 baseline 的 vcpkg 端口，持有 `packages: write` 以写入依赖二进制源；编译 job 仅有 `contents: read` 与 `packages: read`。发布 job 依赖构建成功，下载两个 ZIP、编辑器 tarball 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
 

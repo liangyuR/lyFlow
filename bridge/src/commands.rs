@@ -420,6 +420,7 @@ pub fn run_graph<R: Runtime>(
             preview,
             params_json: params_json.as_deref(),
             inputs: &inputs,
+            profile_inputs: &[],
         },
     )
 }
@@ -568,6 +569,21 @@ pub fn get_output_cloud(
         .output_cloud(&runId, &nodeId, &port, maxPoints.unwrap_or(2_000_000))
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_cloud(&view)))
+}
+
+#[tauri::command]
+pub fn get_output_profile(
+    #[allow(non_snake_case)] runId: String,
+    #[allow(non_snake_case)] nodeId: String,
+    port: String,
+) -> Result<tauri::ipc::Response, String> {
+    let core = core_ffi::core()?;
+    let view = core
+        .output_profile(&runId, &nodeId, &port, 0, 0)
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(
+        crate::profile_wire::encode_profile(&view)?,
+    ))
 }
 
 /// 读一个磁盘上的点云文件（不属于任何一次运行）。编辑器的 2D 拖框要把模板云画在框底下

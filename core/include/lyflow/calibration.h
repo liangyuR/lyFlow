@@ -85,6 +85,8 @@ struct Plane {
   std::array<double, 9> H{};
   std::string unit;
   double metersPerUnit = 1;
+  std::string imageFrame;
+  std::string planeFrame;
 
   bool map(double x, double y, double& X, double& Y) const {
     const double w = H[6] * x + H[7] * y + H[8];
@@ -103,6 +105,17 @@ inline bool parsePlane(const Record& record, Plane& out, std::string& why) {
       (d["unit"] != "m" && d["unit"] != "mm")) {
     why = "需要 image.PlaneCalib，H 为九个有限数且 unit 为 m/mm";
     return false;
+  }
+  if (d.contains("schemaVersion")) {
+    if (!d["schemaVersion"].is_number_integer() || d["schemaVersion"] != 1 ||
+        !d.contains("imageFrame") || !d["imageFrame"].is_string() || !d.contains("planeFrame") ||
+        !d["planeFrame"].is_string() || d["imageFrame"].get_ref<const std::string&>().empty() ||
+        d["planeFrame"].get_ref<const std::string&>().empty() ||
+        d["imageFrame"].get_ref<const std::string&>().size() > 1024 ||
+        d["planeFrame"].get_ref<const std::string&>().size() > 1024) {
+      why = "版本化PlaneCalib需要schemaVersion=1及明确的imageFrame/planeFrame";
+      return false;
+    }
   }
   Plane plane;
   double scale = 0;
@@ -129,7 +142,49 @@ inline bool parsePlane(const Record& record, Plane& out, std::string& why) {
   }
   plane.unit = d["unit"].get<std::string>();
   plane.metersPerUnit = plane.unit == "mm" ? 0.001 : 1;
+  if (d.contains("schemaVersion")) {
+    plane.imageFrame = d["imageFrame"].get<std::string>();
+    plane.planeFrame = d["planeFrame"].get<std::string>();
+  }
   out = std::move(plane);
+  why.clear();
+  return true;
+}
+
+inline bool upgradeLegacyPlane(const Record& input, const std::string& missingUnit,
+                               const std::string& imageFrame, const std::string& planeFrame,
+                               Record& out, std::string& why) {
+  if (input.type != kPlaneType || !input.data.is_object()) {
+    why = "只能显式升级image.PlaneCalib记录";
+    return false;
+  }
+  if (input.data.contains("schemaVersion")) {
+    Plane parsed;
+    if (!parsePlane(input, parsed, why))
+      return false;
+    if (parsed.imageFrame != imageFrame || parsed.planeFrame != planeFrame) {
+      why = "已有标定帧与声明不一致，不能用升级操作重新标记坐标系";
+      return false;
+    }
+    out = input;
+    return true;
+  }
+  Record candidate = input;
+  if (!candidate.data.contains("unit")) {
+    if (missingUnit != "m" && missingUnit != "mm") {
+      why = "旧标定缺少单位，必须显式选择m或mm，不能猜测";
+      return false;
+    }
+    candidate.data["unit"] = missingUnit;
+  }
+  candidate.data["schemaVersion"] = 1;
+  candidate.data["imageFrame"] = imageFrame;
+  candidate.data["planeFrame"] = planeFrame;
+  Plane parsed;
+  if (!parsePlane(candidate, parsed, why))
+    return false;
+  candidate.data["H"] = parsed.H;
+  out = std::move(candidate);
   return true;
 }
 

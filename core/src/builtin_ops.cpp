@@ -17,6 +17,8 @@ void registerBuiltinTypes(Registry& r) {
 
   r.addType(
       PortType{"PointCloud", "#4a9eff", {}, "无序点云，至少含 XYZ；强度、法线、颜色是可选通道。"});
+  r.addType(PortType{
+      "Profile", "#5ab8da", {}, "显式单位/平面/采样顺序的原生轮廓，保留有效槽与原始索引。"});
 
   r.addType(PortType{"Indices", "#c586c0", {}, "点下标集合。指向某个点云，本身不含坐标。"});
 

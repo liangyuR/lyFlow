@@ -193,6 +193,19 @@ impl Frame {
     pub fn run_id(&self) -> &str {
         &self.inner.run_id
     }
+    pub fn profile_input(&self, node: &str, port: &str) -> Result<ProfileInputHandle, CoreError> {
+        self.core().capture_profile_input(self.run_id(), node, port)
+    }
+    pub fn profile(
+        &self,
+        node: &str,
+        port: &str,
+        offset: u32,
+        count: u32,
+    ) -> Result<ProfileView, CoreError> {
+        self.core()
+            .output_profile(self.run_id(), node, port, offset, count)
+    }
     pub fn metadata(&self) -> Result<String, CoreError> {
         let call = self
             .core()

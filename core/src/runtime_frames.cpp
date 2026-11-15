@@ -1,4 +1,5 @@
 #include "runtime_frames.h"
+#include "lyflow/profile.h"
 
 #include "exec/result_store.h"
 #include <algorithm>
@@ -119,6 +120,11 @@ struct Payload {
     for (const auto& entry : entries) {
       require(!entry.nodeId.empty() && !entry.port.empty() && !entry.data.empty(),
               "帧端口必须有名称和数据");
+      if (const auto* profile = entry.data.asProfile()) {
+        std::string why;
+        const bool valid = validateProfile(*profile, why);
+        require(valid, why);
+      }
       const auto n = entry.data.byteSize();
       require(n <= maximum && required <= maximum - n, "帧载荷超过预算", "resource_limit");
       required += n;
@@ -329,6 +335,15 @@ struct Encoder {
         out["normals"] = blob(c->normals.data(), c->normals.size() * sizeof(float));
         out["rgb"] = blob(c->rgb.data(), c->rgb.size());
       }
+    } else if (const auto* profile = data.asProfile()) {
+      std::string why;
+      const bool valid = validateProfile(*profile, why);
+      require(valid, why);
+      out["descriptor"] = profileDescriptorJson(profile->descriptor);
+      out["cloud"] = encode(Data::cloud(profile->cloud), depth + 1);
+      out["validity"] = blob(profile->validity.data(), profile->validity.size());
+      out["sourceIndices"] = blob(profile->sourceIndices.data(),
+                                  profile->sourceIndices.size() * sizeof(std::uint32_t));
     } else if (const auto* image = data.asImage()) {
       require(image->consistent() && image->scale > 0, "图像不完整或scale无效");
       out["width"] = image->width;
@@ -476,6 +491,8 @@ struct Decoder {
               "点云通道/点数不一致");
       pointCounts[key] = cloud.pointCount();
       clouds.emplace(key, Data::cloud(std::move(cloud)));
+    } else if (kind == "Profile") {
+      scanClouds(value.at("cloud"), depth + 1);
     } else if (kind.rfind("Bundle<", 0) == 0) {
       require(value.at("fields").is_array() && value.at("fields").size() <= 4096,
               "Bundle字段数无效");
@@ -490,6 +507,21 @@ struct Decoder {
       const auto key = text(value, "cloudKey");
       require(clouds.count(key), "点云别名未绑定");
       return clouds.at(key);
+    }
+    if (kind == "Profile") {
+      Profile profile;
+      std::string why;
+      const bool descriptorValid =
+          parseProfileDescriptor(value.at("descriptor"), profile.descriptor, why);
+      require(descriptorValid, why);
+      auto cloud = decode(value.at("cloud"), depth + 1);
+      require(cloud.asCloud() != nullptr, "Profile归档必须包含PointCloud缓冲");
+      profile.cloud = cloud.cloudPtr();
+      profile.validity = read<std::uint8_t>(value.at("validity"));
+      profile.sourceIndices = read<std::uint32_t>(value.at("sourceIndices"));
+      const bool valid = validateProfile(profile, why);
+      require(valid, why);
+      return Data::profile(std::move(profile));
     }
     if (kind == "Image") {
       for (const char* field : {"width", "height", "channels", "depth", "scale"})
@@ -1008,7 +1040,7 @@ extern "C" {
 char* lyflow_runtime_capabilities() {
   return lyflow::runtime::status([] {
     return std::string(
-        "{\"schemaVersion\":1,\"frames\":true,\"sessions\":true,\"resultBindings\":true,\"cloudSampling\":\"ordered-stride-v1\"}");
+        "{\"schemaVersion\":1,\"frames\":true,\"sessions\":true,\"resultBindings\":true,\"cloudSampling\":\"ordered-stride-v1\",\"profiles\":true,\"profileTransfer\":\"ordered-slots-v1\"}");
   });
 }
 char* lyflow_run_bindings(const char* run) {

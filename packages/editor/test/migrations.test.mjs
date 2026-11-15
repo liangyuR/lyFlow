@@ -1,6 +1,7 @@
 // ADR-0025：迁移诊断带 edits 时，applyMigrations 在同一条撤销记录里删边、插节点、加边，
 // 语义与 bridge 的 GraphDoc::apply_migration（lyflow migrate --write）一致。
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { useGraphStore } from '../src/store/graph.ts';
@@ -63,6 +64,211 @@ const action = {
     ],
   },
 };
+
+test('版本化契约升级夹具在编辑器迁移、保存及撤销后保留来源证据', () => {
+  const before = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../core/tests/fixtures/contract-upgrade/plane-calib.lyflow.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  );
+  const rule = before.contractUpgrade.rules[0];
+  const old = before.edges[0];
+  const adapter = { node: rule.adapterId, port: 'calib' };
+  const change = {
+    ...action,
+    nodeId: 'consumer',
+    op: 'util.reroute',
+    opVersion: '1.0.0',
+    params: {},
+    edits: {
+      removeEdges: [old],
+      addNodes: [
+        {
+          id: rule.adapterId,
+          op: 'image.upgrade_plane_calib',
+          opVersion: '1.0.0',
+          params: { missingUnit: 'mm', imageFrame: 'camera', planeFrame: 'table' },
+        },
+      ],
+      addEdges: [
+        { id: 'contract_explicit_calib_in', from: old.from, to: adapter },
+        { ...old, from: adapter },
+      ],
+    },
+  };
+  const historyEntry = {
+    schemaVersion: 1,
+    request: structuredClone(before.contractUpgrade),
+    appliedSources: [structuredClone(rule.source)],
+  };
+  change.graphUpdate = {
+    contractUpgradeRetirement: {
+      request: structuredClone(before.contractUpgrade),
+      historyEntry,
+      requirements: [
+        {
+          source: rule.source,
+          target: rule.target,
+          adapter: change.edits.addNodes[0],
+          port: 'calib',
+        },
+      ],
+    },
+  };
+  const g = useGraphStore.getState();
+  g.setTopologyLocked(false);
+  g.loadDoc(structuredClone(before), 'upgrade.lyflow.json');
+  assert.equal(g.applyMigrations([change]), 1);
+  const saved = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  assert.equal(saved.contractUpgrade, undefined);
+  assert.deepEqual(saved.meta.contractUpgradeHistory, [historyEntry]);
+  assert.equal(saved.nodes.find((n) => n.id === 'load').opVersion, '1.0.0');
+  assert.equal(saved.nodes.find((n) => n.id === rule.adapterId).params.missingUnit, 'mm');
+  assert.equal(saved.edges.length, 2);
+  useGraphStore.getState().undo();
+  assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), before);
+
+  const multi = structuredClone(before);
+  multi.meta = { owner: 'keep', contractUpgradeHistory: [{ schemaVersion: 2, future: true }] };
+  multi.nodes.push({ id: 'other', op: 'util.reroute', opVersion: '1.0.0', params: {} });
+  multi.edges.push({ id: 'other-edge', from: old.from, to: { node: 'other', port: 'in' } });
+  const secondRule = {
+    ...structuredClone(rule),
+    target: { node: 'other', port: 'in' },
+    adapterId: 'other_calib',
+  };
+  multi.contractUpgrade.rules.push(secondRule);
+  const second = structuredClone(change);
+  second.nodeId = 'other';
+  second.edits.removeEdges = [multi.edges[1]];
+  second.edits.addNodes[0].id = 'other_calib';
+  second.edits.addEdges = [
+    { id: 'contract_other_calib_in', from: old.from, to: { node: 'other_calib', port: 'calib' } },
+    { ...multi.edges[1], from: { node: 'other_calib', port: 'calib' } },
+  ];
+  const multiHistory = {
+    schemaVersion: 1,
+    request: structuredClone(multi.contractUpgrade),
+    appliedSources: multi.contractUpgrade.rules.map((r) => structuredClone(r.source)),
+  };
+  const retirement = {
+    request: structuredClone(multi.contractUpgrade),
+    historyEntry: multiHistory,
+    requirements: [
+      {
+        source: rule.source,
+        target: rule.target,
+        adapter: change.edits.addNodes[0],
+        port: 'calib',
+      },
+      {
+        source: secondRule.source,
+        target: secondRule.target,
+        adapter: second.edits.addNodes[0],
+        port: 'calib',
+      },
+    ],
+  };
+  const first = structuredClone(change);
+  delete first.graphUpdate;
+  second.graphUpdate = { contractUpgradeRetirement: retirement };
+  g.loadDoc(structuredClone(multi), 'partial.lyflow.json');
+  g.setTopologyLocked(true);
+  assert.equal(g.applyMigrations([first, second]), 0);
+  assert.deepEqual(useGraphStore.getState().doc.contractUpgrade, multi.contractUpgrade);
+  g.setTopologyLocked(false);
+  assert.equal(g.applyMigrations([second]), 1);
+  const partial = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  assert.deepEqual(partial.contractUpgrade, multi.contractUpgrade);
+  assert.deepEqual(partial.meta, multi.meta);
+  g.loadDoc(partial, 'partial.lyflow.json');
+  first.graphUpdate = { contractUpgradeRetirement: retirement };
+  assert.equal(g.applyMigrations([first]), 1);
+  const completed = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  assert.equal(completed.contractUpgrade, undefined);
+  assert.equal(completed.meta.owner, 'keep');
+  assert.deepEqual(completed.meta.contractUpgradeHistory, [
+    ...multi.meta.contractUpgradeHistory,
+    multiHistory,
+  ]);
+  assert.deepEqual(completed.edges.map((e) => e.id).sort(), [
+    'calib-edge',
+    'contract_explicit_calib_in',
+    'contract_other_calib_in',
+    'other-edge',
+  ]);
+  const historicalActive = structuredClone(completed);
+  historicalActive.contractUpgrade = structuredClone(multi.contractUpgrade);
+  const graphOnly = { ...first, nodeId: '', op: '', opVersion: '', params: {}, edits: undefined };
+  for (const bypass of [true, null, 'false', 0]) {
+    const disabled = structuredClone(historicalActive);
+    disabled.meta = { owner: 'keep', contractUpgradeHistory: [] };
+    disabled.nodes.find((node) => node.id === rule.adapterId).bypass = bypass;
+    g.loadDoc(disabled, 'disabled-adapter.lyflow.json');
+    assert.equal(g.applyMigrations([graphOnly]), 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), disabled);
+    const enabled = structuredClone(disabled);
+    enabled.nodes.find((node) => node.id === rule.adapterId).bypass = false;
+    g.loadDoc(enabled, 'enabled-adapter.lyflow.json');
+    assert.equal(g.applyMigrations([graphOnly]), 1);
+    assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
+    assert.deepEqual(useGraphStore.getState().doc.meta.contractUpgradeHistory, [multiHistory]);
+  }
+  g.loadDoc(historicalActive, 'historical-active.lyflow.json');
+  assert.equal(g.applyMigrations([graphOnly]), 1);
+  assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
+  assert.equal(useGraphStore.getState().doc.meta.contractUpgradeHistory.length, 2);
+  useUiStore.getState().setPath([]);
+  g.deleteNodes(['consumer']);
+  assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
+  const remaining = useGraphStore.getState().doc.nodes.map((n) => n.id);
+  assert.ok(g.composeSubgraph(remaining));
+  assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
+  assert.deepEqual(
+    useGraphStore.getState().doc.meta.contractUpgradeHistory,
+    completed.meta.contractUpgradeHistory,
+  );
+  for (const sourceOp of ['image.load_calib', 'image.renamed_calib']) {
+    g.loadDoc(structuredClone(before), 'mixed-hooks.lyflow.json');
+    const sourceMigration = {
+      ...action,
+      nodeId: 'load',
+      op: sourceOp,
+      opVersion: '1.1.0',
+      params: {},
+      edits: undefined,
+    };
+    const targetMigration = {
+      ...action,
+      nodeId: 'consumer',
+      op: 'test.consumer_v2',
+      opVersion: '2.0.0',
+      params: {},
+      edits: {
+        removeEdges: [change.edits.addEdges[1]],
+        addNodes: [],
+        addEdges: [{ ...change.edits.addEdges[1], to: { node: 'consumer', port: 'newIn' } }],
+      },
+    };
+    assert.equal(g.applyMigrations([sourceMigration]), 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), before);
+    g.setTopologyLocked(true);
+    assert.equal(g.applyMigrations([change, sourceMigration]), 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), before);
+    g.setTopologyLocked(false);
+    assert.equal(g.applyMigrations([change, sourceMigration, targetMigration]), 2);
+    const mixed = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+    assert.equal(mixed.contractUpgrade, undefined);
+    assert.deepEqual(mixed.meta.contractUpgradeHistory, [historyEntry]);
+    assert.equal(mixed.nodes.find((n) => n.id === 'load').op, sourceOp);
+    assert.equal(mixed.nodes.find((n) => n.id === 'load').opVersion, '1.1.0');
+    assert.equal(mixed.edges.find((e) => e.id === old.id).to.port, 'newIn');
+  }
+});
 
 test('edits：删两条旧边、插一个节点、加三条边，一次撤销全部回去；不带 edits 的只改版本与参数', () => {
   const g = useGraphStore.getState();

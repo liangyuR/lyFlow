@@ -151,6 +151,16 @@ export class TauriTransport implements Transport {
     const view = raw as Uint8Array;
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
+  async getOutputProfile(runId: string, nodeId: string, port: string): Promise<ArrayBuffer> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const raw = await invoke<ArrayBuffer | Uint8Array>('get_output_profile', {
+      runId,
+      nodeId,
+      port,
+    });
+    if (raw instanceof ArrayBuffer) return raw;
+    return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+  }
   async getOutputTensor(
     runId: string,
     nodeId: string,

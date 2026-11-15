@@ -213,6 +213,11 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value, nlohma
                       "端口契约：坐标必须全是有限值，实际有 " + std::to_string(bad) +
                           " 个非有限分量（共 " + std::to_string(c->xyz.size()) + " 个）");
       }
+    } else if (const Profile* profile = value.asProfile()) {
+      if (!profile->cloud || !cloudFinite(*profile->cloud)) {
+        return reject({{"finite", true}}, {{"type", "Profile"}},
+                      "端口契约：Profile全部槽的坐标必须有限；无效槽中的NaN也不符合finite约束");
+      }
     } else if (const Tensor* t = value.asTensor()) {
       const std::size_t bad = countNonFinite(t->data);
       if (bad != 0) {

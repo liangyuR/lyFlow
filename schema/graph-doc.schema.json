@@ -4,12 +4,7 @@
   "title": "GraphDoc",
   "description": "LyFlow 图文档。唯一真实数据源：前端状态、磁盘文件、传给 C++ 的载荷都是它。",
   "type": "object",
-  "required": [
-    "schemaVersion",
-    "id",
-    "nodes",
-    "edges"
-  ],
+  "required": ["schemaVersion", "id", "nodes", "edges"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
@@ -27,6 +22,11 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "contractUpgradeHistory": {
+          "type": "array",
+          "description": "已应用契约升级的被动历史证据，不参与执行或拓扑重放；保留未来版本记录。",
+          "items": { "type": "object", "additionalProperties": true }
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -65,10 +65,7 @@
       "description": "图级命名输出（ADR-0017）。宿主用 lyflow_run_outputs 按名字取值，不认节点 id。子图内部的端口写展开后的路径 id（`outer/inner`）。",
       "additionalProperties": {
         "type": "object",
-        "required": [
-          "node",
-          "port"
-        ],
+        "required": ["node", "port"],
         "additionalProperties": false,
         "properties": {
           "node": {
@@ -106,15 +103,16 @@
       "type": "object",
       "additionalProperties": true,
       "description": "扩展位。读取时保留未知字段，保证向前兼容。"
+    },
+    "contractUpgrade": {
+      "$ref": "#/$defs/contractUpgrade",
+      "description": "待应用的显式契约升级请求；所有适配及连线写回后退休至meta.contractUpgradeHistory。"
     }
   },
   "$defs": {
     "node": {
       "type": "object",
-      "required": [
-        "id",
-        "op"
-      ],
+      "required": ["id", "op"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -150,10 +148,7 @@
       "properties": {
         "position": {
           "type": "object",
-          "required": [
-            "x",
-            "y"
-          ],
+          "required": ["x", "y"],
           "additionalProperties": false,
           "properties": {
             "x": {
@@ -169,34 +164,21 @@
           "default": false
         },
         "title": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "null 表示用 manifest 的 label。"
         },
         "color": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "width": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "description": "null 表示自适应。"
         }
       }
     },
     "edge": {
       "type": "object",
-      "required": [
-        "id",
-        "from",
-        "to"
-      ],
+      "required": ["id", "from", "to"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -214,10 +196,7 @@
     },
     "portRef": {
       "type": "object",
-      "required": [
-        "node",
-        "port"
-      ],
+      "required": ["node", "port"],
       "additionalProperties": false,
       "properties": {
         "node": {
@@ -231,10 +210,7 @@
     },
     "group": {
       "type": "object",
-      "required": [
-        "id",
-        "nodes"
-      ],
+      "required": ["id", "nodes"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -265,10 +241,7 @@
     },
     "subgraph": {
       "type": "object",
-      "required": [
-        "nodes",
-        "edges"
-      ],
+      "required": ["nodes", "edges"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -331,10 +304,7 @@
     },
     "subInput": {
       "type": "object",
-      "required": [
-        "name",
-        "type"
-      ],
+      "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -361,11 +331,7 @@
     },
     "subOutput": {
       "type": "object",
-      "required": [
-        "name",
-        "type",
-        "from"
-      ],
+      "required": ["name", "type", "from"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -389,10 +355,7 @@
     "graphParam": {
       "type": "object",
       "description": "一个顶层图参数 = 一份参数规格（与 manifest 的 param 同一套字段，复用 operator-manifest.schema.json 的 paramSpec，param-recipe P1.1）+ binds。老格式 { type?, default, binds, doc? } 是它的子集。给了 type 时 core 先按这份规格校验取值（类型、硬限位 min/max、options），不合法报 bad_param，paramPath 为图参数名；再照旧走被绑定节点的参数规整。",
-      "required": [
-        "default",
-        "binds"
-      ],
+      "required": ["default", "binds"],
       "allOf": [
         {
           "$ref": "operator-manifest.schema.json#/$defs/paramSpec"
@@ -422,12 +385,7 @@
     },
     "subParam": {
       "type": "object",
-      "required": [
-        "name",
-        "type",
-        "default",
-        "binds"
-      ],
+      "required": ["name", "type", "default", "binds"],
       "additionalProperties": true,
       "description": "一份 manifest 的 param 声明（type/default/min/max/options… 原样）加一组绑定。",
       "properties": {
@@ -442,10 +400,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": [
-              "node",
-              "param"
-            ],
+            "required": ["node", "param"],
             "additionalProperties": false,
             "properties": {
               "node": {
@@ -455,6 +410,165 @@
                 "type": "string"
               }
             }
+          }
+        }
+      }
+    },
+    "contractUpgradeSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "op", "opVersion", "port"],
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/localId"
+        },
+        "op": {
+          "type": "string"
+        },
+        "opVersion": {
+          "const": "1.0.0"
+        },
+        "port": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "contractUpgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "rules"],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "source",
+                  "target",
+                  "adapterId",
+                  "missingUnit",
+                  "imageFrame",
+                  "planeFrame"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "planeCalib.v1"
+                  },
+                  "source": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/contractUpgradeSource"
+                      },
+                      {
+                        "properties": {
+                          "op": {
+                            "enum": ["image.load_calib", "image.board_calib"]
+                          },
+                          "port": {
+                            "const": "calib"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "target": {
+                    "$ref": "#/$defs/portRef"
+                  },
+                  "adapterId": {
+                    "$ref": "#/$defs/localId"
+                  },
+                  "missingUnit": {
+                    "enum": ["m", "mm"]
+                  },
+                  "imageFrame": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "planeFrame": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "source", "target", "adapterId"],
+                "properties": {
+                  "kind": {
+                    "const": "dtsGeometry.v1"
+                  },
+                  "source": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/contractUpgradeSource"
+                      },
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "op": {
+                                "const": "dts.seal_dome"
+                              },
+                              "port": {
+                                "const": "apex"
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "op": {
+                                "const": "dts.pick_metal"
+                              },
+                              "port": {
+                                "const": "metal"
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "op": {
+                                "const": "dts.seal_root"
+                              },
+                              "port": {
+                                "const": "point"
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "op": {
+                                "const": "dts.flush"
+                              },
+                              "port": {
+                                "const": "foot"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "target": {
+                    "$ref": "#/$defs/portRef"
+                  },
+                  "adapterId": {
+                    "$ref": "#/$defs/localId"
+                  }
+                }
+              }
+            ]
           }
         }
       }

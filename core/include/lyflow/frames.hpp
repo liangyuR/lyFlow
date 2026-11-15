@@ -39,6 +39,11 @@ struct FrameApi {
   decltype(&lyflow_runtime_capabilities) capabilities = nullptr;
   decltype(&lyflow_run_bindings) bindings = nullptr;
   decltype(&lyflow_effective_params_inputs) effectiveInputs = nullptr;
+  decltype(&lyflow_effective_params_inputs_ex) effectiveProfileInputs = nullptr;
+  decltype(&lyflow_profile_input_capture) profileInput = nullptr;
+  decltype(&lyflow_profile_input_free) profileInputFree = nullptr;
+  decltype(&lyflow_output_profile) profile = nullptr;
+  decltype(&lyflow_profile_view_free) profileFree = nullptr;
   decltype(&lyflow_string_free) stringFree = nullptr;
   decltype(&lyflow_output_cloud) cloud = nullptr;
   decltype(&lyflow_cloud_view_free) cloudFree = nullptr;
@@ -101,6 +106,31 @@ public:
   std::string outputInfo(const std::string& nodeId) const {
     check();
     return api_->owned(api_->outputInfo(runId_.c_str(), nodeId.c_str()));
+  }
+  ProfileInputHandle profileInput(const std::string& nodeId, const std::string& port) const {
+    check();
+    const auto capture = detail::frameRequired(api_->profileInput, "lyflow_profile_input_capture");
+    const auto free = detail::frameRequired(api_->profileInputFree, "lyflow_profile_input_free");
+    lyflow_profile_input* handle = nullptr;
+    const auto error = api_->owned(capture(runId_.c_str(), nodeId.c_str(), port.c_str(), &handle));
+    if (!handle)
+      throw ClientError(error.empty() ? "Profile capture failed" : error);
+    ProfileInputHandle result;
+    result.handle_ = std::shared_ptr<lyflow_profile_input>(
+        handle, [free, api = api_](lyflow_profile_input* value) { free(value); });
+    return result;
+  }
+  ProfileView profile(const std::string& nodeId, const std::string& port, std::uint32_t offset = 0,
+                      std::uint32_t count = 0) const {
+    check();
+    const auto call = detail::frameRequired(api_->profile, "lyflow_output_profile");
+    detail::frameRequired(api_->profileFree, "lyflow_profile_view_free");
+    ProfileView view;
+    if (call(runId_.c_str(), nodeId.c_str(), port.c_str(), offset, count, &view.view_) == 0) {
+      view.free_ = api_->profileFree;
+      view.retain_ = handle_;
+    }
+    return view;
   }
   CloudView cloud(const std::string& nodeId, const std::string& port,
                   std::uint32_t maximum = 0) const {
@@ -242,6 +272,11 @@ inline std::shared_ptr<detail::FrameApi> Client::frameApi() const {
   LYFLOW_FRAME_BIND(capabilities, "lyflow_runtime_capabilities");
   LYFLOW_FRAME_BIND(bindings, "lyflow_run_bindings");
   LYFLOW_FRAME_BIND(effectiveInputs, "lyflow_effective_params_inputs");
+  LYFLOW_FRAME_BIND(effectiveProfileInputs, "lyflow_effective_params_inputs_ex");
+  LYFLOW_FRAME_BIND(profileInput, "lyflow_profile_input_capture");
+  LYFLOW_FRAME_BIND(profileInputFree, "lyflow_profile_input_free");
+  LYFLOW_FRAME_BIND(profile, "lyflow_output_profile");
+  LYFLOW_FRAME_BIND(profileFree, "lyflow_profile_view_free");
 #undef LYFLOW_FRAME_BIND
   api->stringFree = fn_.string_free;
   api->cloud = fn_.output_cloud;
@@ -268,10 +303,19 @@ inline std::string Client::runBindings(const std::string& runId) const {
 inline std::string Client::effectiveParams(const std::string& graphJson, const std::string& baseDir,
                                            const std::string& paramsJson,
                                            const std::vector<InputCloud>& inputs,
-                                           const std::vector<InputImage>& imageInputs) const {
+                                           const std::vector<InputImage>& imageInputs,
+                                           const std::vector<InputProfile>& profileInputs) const {
   const auto api = frameApi();
   const auto call = detail::frameRequired(api->effectiveInputs, "lyflow_effective_params_inputs");
-  const detail::RawInputs raw(inputs, imageInputs);
+  const detail::RawInputs raw(inputs, imageInputs, profileInputs);
+  if (!profileInputs.empty()) {
+    const auto extended =
+        detail::frameRequired(api->effectiveProfileInputs, "lyflow_effective_params_inputs_ex");
+    return api->owned(extended(graphJson.c_str(), baseDir.c_str(),
+                               paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
+                               raw.cloudCount(), raw.images(), raw.imageCount(), raw.profiles(),
+                               raw.profileCount()));
+  }
   return api->owned(call(graphJson.c_str(), baseDir.c_str(),
                          paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
                          raw.cloudCount(), raw.images(), raw.imageCount()));

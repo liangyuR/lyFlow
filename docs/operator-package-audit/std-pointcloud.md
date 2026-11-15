@@ -1,10 +1,10 @@
 # std-pointcloud 逐算子迁移清单
 
-基线 `9940c8c`；共 52 项。状态：规划，未实施。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 52 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
-下列顺序是本计划内的迁移/验收顺序，不是执行图调度顺序。`?` 表示可选输入；没有`?`的输入按当前manifest默认为必需。精确参数、默认值、端口Record契约及来源指纹见[机器清单](../operator-package-audit.json)。
+下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 056 · register.constraints_3d
+## 061 · register.constraints_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维几何约束构造。目标：`std-geometry`；迁移归属；**M2**。
 - 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:684](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L684)。
@@ -18,7 +18,7 @@
 - 验收：字段/单位/权重/3-2-1合法性、大小上限、非有限值和拟合器schema一致；几何包单独构建不加载PCL。
 - 说明：构造Record不等于实现配准；不得把拟合可观性检查提前伪造成构造成功即定位成功。
 
-## 057 · transform.make
+## 062 · transform.make
 
 - 当前：`std-pointcloud` / `1.0.0` / 刚体变换构造。目标：`std-geometry`；迁移归属；**M2**。
 - 源码：[packs/std-pointcloud/ops/transform_make.cpp:56](../../packs/std-pointcloud/ops/transform_make.cpp#L56)。
@@ -32,7 +32,7 @@
 - 验收：非交换XYZ旋转、deg/rad、行主序、平移m、正交/末行验证及旧工作流矩阵逐项一致。
 - 说明：不能直接替换为现有pose构造节点；重复接口合并须显式图迁移。
 
-## 066 · profile.analyze
+## 071 · profile.analyze
 
 - 当前：`std-pointcloud` / `1.0.0` / 单剖面直线分析。目标：`std-profile`；迁移归属；**M3**。
 - 源码：[packs/std-pointcloud/ops/profile_analysis.cpp:84](../../packs/std-pointcloud/ops/profile_analysis.cpp#L84)。
@@ -46,7 +46,7 @@
 - 验收：旧PointCloud输入和显式Profile适配读数一致；点序置换、三平面、退化、RMS门限与米/毫米显式转换。
 - 说明：分析不要求列序，不可因std-profile处理有序轮廓就给旧算法新增隐含前提。
 
-## 067 · profile.gap_flush
+## 072 · profile.gap_flush
 
 - 当前：`std-pointcloud` / `1.0.0` / 单剖面间隙与面差。目标：`std-metrology`；拆公共能力/适配；**M3**。
 - 源码：[packs/std-pointcloud/ops/profile_analysis.cpp:126](../../packs/std-pointcloud/ops/profile_analysis.cpp#L126)。
@@ -56,11 +56,11 @@
 - 当前契约：cloud:PointCloud → gap:Measurement, flush:Measurement, left:Line2D, right:Line2D, quality:Record。单扫描XY/XZ/YZ米制；左右显式不相交横坐标区间拟合，gap=右采样最小x−左采样最大x，flush=referenceX处右线−左线；限制RMS/外推并拒绝竖直线。
 - 目标契约：主归std-metrology，拆出轮廓区域拟合和采样边界定义；显式基准轴/符号/单位/外推范围，保持采样边缘间距与同横坐标面差两个定义。
 - 迁移前置：M1；M2；profile.analyze
-- 关联算子：`profile.analyze`
+- 关联算子：profile.analyze
 - 验收：左右区间/符号/换轴、采样稀疏边缘、竖直线、超外推、残差拒绝；拆分图与原节点读数/诊断一致。
 - 说明：不能用最近点距离、法向垂距或gap领域圆角量测直接替换；不增加业务OK/NG规则。
 
-## 068 · profile.project_pair
+## 073 · profile.project_pair
 
 - 当前：`std-pointcloud` / `1.0.0` / 双剖面已知外参变换。目标：`std-profile`；迁移归属；**M3**。
 - 源码：[packs/std-pointcloud/ops/profile_analysis.cpp:201](../../packs/std-pointcloud/ops/profile_analysis.cpp#L201)。
@@ -70,11 +70,11 @@
 - 当前契约：master:PointCloud, slave:PointCloud, masterToCommon:Transform, slaveToCommon:Transform, commonToOutput:Transform → master:PointCloud, slave:PointCloud, metadata:Record。主/副米制点云及显式masterToCommon/slaveToCommon/commonToOutput；应用output←common←sensor，保留属性、旋转法线与点序，不猜传感器外参。
 - 目标契约：迁std-profile的多扫描帧适配；每条轮廓独立保持sample-order，明确两个源帧及公共/输出帧，不自动换配方中心或单位。
 - 迁移前置：M1；M2；transform.make
-- 关联算子：`transform.make`
+- 关联算子：transform.make
 - 验收：非交换三段外参、两个扫描顺序与属性、法线、未知帧/单位拒绝和输入只读。
 - 说明：属于传感器轮廓数据适配，不能简单以两个独立transform.apply丢失双源元数据。
 
-## 204 · cloud.bounds_obb
+## 209 · cloud.bounds_obb
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云有向包围盒。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:162](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L162)。
@@ -88,7 +88,7 @@
 - 验收：空云、重合/共线/等特征值、右手轴、米制尺寸、来源身份及large-offset数值稳定性。
 - 说明：三者当前共享统计实现但公开意图不同；本轮不盲目合并节点或强行认定PCA姿态稳定。
 
-## 205 · cloud.box_sample
+## 210 · cloud.box_sample
 
 - 当前：`std-pointcloud` / `1.0.0` / 长方体点云采样。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p5_cloud_inspection.cpp:226](../../packs/std-pointcloud/ops/p5_cloud_inspection.cpp#L226)。
@@ -102,7 +102,7 @@
 - 验收：表面/体积点数、稳定组ID、法线与可见面、local源位姿解释、线框索引与单位。
 - 说明：几何参数是纯几何，采样产物仍属于点云；不把合成点当传感器有效观测。
 
-## 206 · cloud.crop_primitives
+## 211 · cloud.crop_primitives
 
 - 当前：`std-pointcloud` / `1.0.0` / 按工件有限体裁云与碰撞检查。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:330](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L330)。
@@ -116,7 +116,7 @@
 - 验收：旋转/顶面锚定/表面开闭、未知高度、帧转换、model_radius、preserve_order NaN槽位、分组来源和三态结果。
 - 说明：M2必须先移除../../std-geometry/ops/p5_pose_geometry_common.h私有头耦合；不能把unknown直接归到free。
 
-## 207 · cloud.edges_3d
+## 212 · cloud.edges_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维点云边缘提取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_global_matching.cpp:1181](../../packs/std-pointcloud/ops/p2_global_matching.cpp#L1181)。
@@ -130,7 +130,7 @@
 - 验收：organized尺寸/孔洞/Z、无组织点云、像素遮挡模式拒绝、退化邻域和索引身份。
 - 说明：当前不隐式从点云数量推断图像布局；与图像边缘、轮廓分段分属不同契约。
 
-## 208 · cloud.empty_tote
+## 213 · cloud.empty_tote
 
 - 当前：`std-pointcloud` / `1.0.0` / 料箱观测状态判定。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_height_rules.cpp:509](../../packs/std-pointcloud/ops/p2_height_rules.cpp#L509)。
@@ -144,7 +144,7 @@
 - 验收：有效空观测、缺失观测、ROI无覆盖、实例存在/不在ROI、三类分支互斥且无虚构就绪状态。
 - 说明：该节点含场景化命名，后续可拆occupied-region证据+实例分支；不把空箱结果升级为产线抓取许可。
 
-## 209 · cloud.group_concat
+## 214 · cloud.group_concat
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云集合拼接。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:310](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L310)。
@@ -158,7 +158,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 210 · cloud.group_get
+## 215 · cloud.group_get
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云分组提取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:222](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L222)。
@@ -172,7 +172,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 211 · cloud.group_merge
+## 216 · cloud.group_merge
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云分组合并。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:293](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L293)。
@@ -186,7 +186,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 212 · cloud.group_pack
+## 217 · cloud.group_pack
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云分组构造。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:205](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L205)。
@@ -200,7 +200,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 213 · cloud.group_statistics
+## 218 · cloud.group_statistics
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云逐组统计。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:388](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L388)。
@@ -214,7 +214,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 214 · cloud.group_subset
+## 219 · cloud.group_subset
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云分组子集。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:249](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L249)。
@@ -228,7 +228,7 @@
 - 验收：错云身份、越界/重叠/重复ID、组顺序、空组、可选通道与拼接后来源重绑。
 - 说明：组成员是原生索引，不移到通用小Record集合包；统计仅依赖Eigen，包装/选择本身不需PCL。
 
-## 215 · cloud.neighbor_height
+## 220 · cloud.neighbor_height
 
 - 当前：`std-pointcloud` / `1.0.0` / 邻域支撑面高度估计。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_height_rules.cpp:314](../../packs/std-pointcloud/ops/p2_height_rules.cpp#L314)。
@@ -242,7 +242,7 @@
 - 验收：旋转工件ROI、层/平面退化、providedHeight、帧冲突及ID/属性不丢失。
 - 说明：可共享高度计量的标量定义，但点云邻域与实例关联仍属std-pointcloud。
 
-## 216 · cloud.pca
+## 221 · cloud.pca
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云主成分分析。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:162](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L162)。
@@ -256,7 +256,7 @@
 - 验收：空云、重合/共线/等特征值、右手轴、米制尺寸、来源身份及large-offset数值稳定性。
 - 说明：三者当前共享统计实现但公开意图不同；本轮不盲目合并节点或强行认定PCA姿态稳定。
 
-## 217 · cloud.plane_patches
+## 222 · cloud.plane_patches
 
 - 当前：`std-pointcloud` / `1.0.0` / 有限平面片几何分解。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_height_rules.cpp:651](../../packs/std-pointcloud/ops/p2_height_rules.cpp#L651)。
@@ -270,7 +270,7 @@
 - 验收：平面/多面/断裂面片、面积m²、法线朝向、边缘覆盖/碰撞、组索引和属性对应。
 - 说明：实际算法为Eigen与原生邻接/栅格；当前整包PCL链接不等于每步都调用PCL。
 
-## 218 · cloud.remove_primitives
+## 223 · cloud.remove_primitives
 
 - 当前：`std-pointcloud` / `1.0.0` / 按工件有限体或模型移除点云。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-pointcloud/ops/p5_primitive_crop.cpp:330](../../packs/std-pointcloud/ops/p5_primitive_crop.cpp#L330)。
@@ -284,7 +284,7 @@
 - 验收：旋转/顶面锚定/表面开闭、未知高度、帧转换、model_radius、preserve_order NaN槽位、分组来源和三态结果。
 - 说明：M2必须先移除../../std-geometry/ops/p5_pose_geometry_common.h私有头耦合；不能把unknown直接归到free。
 
-## 219 · cloud.statistics
+## 224 · cloud.statistics
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云三维统计。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:162](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L162)。
@@ -298,7 +298,7 @@
 - 验收：空云、重合/共线/等特征值、右手轴、米制尺寸、来源身份及large-offset数值稳定性。
 - 说明：三者当前共享统计实现但公开意图不同；本轮不盲目合并节点或强行认定PCA姿态稳定。
 
-## 220 · cloud.template_3d
+## 225 · cloud.template_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维表面模板构建。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_global_matching.cpp:1114](../../packs/std-pointcloud/ops/p2_global_matching.cpp#L1114)。
@@ -312,7 +312,7 @@
 - 验收：点数预算、平面退化、居中变换、确定性、错云模板身份及重载重新绑定。
 - 说明：仅模板构造不需要调用KISS/small_gicp；后端依赖由global_3d能力声明。
 
-## 221 · cloud.top_layer
+## 226 · cloud.top_layer
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云顶层高度。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_height_rules.cpp:199](../../packs/std-pointcloud/ops/p2_height_rules.cpp#L199)。
@@ -326,7 +326,7 @@
 - 验收：轴向/层厚、噪点、空层、多组、上下层索引互补与输出组重新绑定。
 - 说明：空间层提取是点云能力；最终工件是否可抓取属于场景规则。
 
-## 222 · cloud.view_sample
+## 227 · cloud.view_sample
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云可见面采样。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_global_matching.cpp:1214](../../packs/std-pointcloud/ops/p2_global_matching.cpp#L1214)。
@@ -340,7 +340,7 @@
 - 验收：前后遮挡、nearPlane、角栅格/深度容差、法线并不决定全部可见性、双套索引身份。
 - 说明：不是连续网格精确可见性或图像渲染器；与CAD拓扑采样边界分开。
 
-## 223 · edit.translate_region
+## 228 · edit.translate_region
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云选区平移。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/edit_translate_region.cpp:73](../../packs/std-pointcloud/ops/edit_translate_region.cpp#L73)。
@@ -354,7 +354,7 @@
 - 验收：严格半空间/闭盒边界、未选点不变、选择跨锚点的示例和全部属性不变。
 - 说明：用于扰动验收不等于业务测量算子，不能迁到gap或metrology。
 
-## 224 · features.normals
+## 229 · features.normals
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云法线估计。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/features_normals.cpp:111](../../packs/std-pointcloud/ops/features_normals.cpp#L111)。
@@ -368,7 +368,7 @@
 - 验收：平面/退化邻域、朝向视点、线程数变化、通道长度及非法法线。
 - 说明：法线是空间点云特征，不因有2D应用迁入std-profile。
 
-## 225 · filter.crop_box
+## 230 · filter.crop_box
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维包围盒裁剪。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_crop_box.cpp:97](../../packs/std-pointcloud/ops/filter_crop_box.cpp#L97)。
@@ -382,7 +382,7 @@
 - 验收：旋转盒、边界/反选、变换方向、属性对应关系和非法变换。
 - 说明：纯几何盒判断可共享，PointCloud筛选节点仍归std-pointcloud。
 
-## 226 · filter.crop_box2d
+## 231 · filter.crop_box2d
 
 - 当前：`std-pointcloud` / `1.0.0` / 二维矩形裁剪。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_crop_box2d.cpp:36](../../packs/std-pointcloud/ops/filter_crop_box2d.cpp#L36)。
@@ -396,7 +396,7 @@
 - 验收：开闭四边、裁空诊断、非有限点、错单位/帧和属性选择一致。
 - 说明：头文件依赖与算法依赖不同；清除Cloud2D/PCL泄漏后才可给轻量轮廓共用。
 
-## 227 · filter.passthrough
+## 232 · filter.passthrough
 
 - 当前：`std-pointcloud` / `1.0.0` / 直通滤波。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_passthrough.cpp:89](../../packs/std-pointcloud/ops/filter_passthrough.cpp#L89)。
@@ -410,7 +410,7 @@
 - 验收：闭区间边界、反选、NaN、不同字段与organized槽位/原索引一致。
 - 说明：无需PCL滤波器，当前重依赖来自包整体构建。
 
-## 228 · filter.radius_outlier
+## 233 · filter.radius_outlier
 
 - 当前：`std-pointcloud` / `1.0.0` / 半径离群点剔除。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_radius_outlier.cpp:87](../../packs/std-pointcloud/ops/filter_radius_outlier.cpp#L87)。
@@ -424,7 +424,7 @@
 - 验收：半径边界、自点计数、空云和小云、NaN、removed身份与通道对应。
 - 说明：与std-profile滑动中值按采样邻接处理的含义不同。
 
-## 229 · filter.random_sample
+## 234 · filter.random_sample
 
 - 当前：`std-pointcloud` / `2.0.0` / 随机采样。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_random_sample.cpp:77](../../packs/std-pointcloud/ops/filter_random_sample.cpp#L77)。
@@ -438,7 +438,7 @@
 - 验收：同seed同结果、边界数量、空云及通道对应；原索引追踪策略显式。
 - 说明：随机抽样不属于业务专用算法。
 
-## 230 · filter.statistical_outlier
+## 235 · filter.statistical_outlier
 
 - 当前：`std-pointcloud` / `1.0.0` / 统计离群点剔除。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_statistical_outlier.cpp:111](../../packs/std-pointcloud/ops/filter_statistical_outlier.cpp#L111)。
@@ -452,7 +452,7 @@
 - 验收：小点数、相同点、NaN、保留/删除索引互补、并行结果与附加通道。
 - 说明：算法是显式搜索依赖，不能仅改目录就宣称零PCL。
 
-## 231 · filter.voxel_grid
+## 236 · filter.voxel_grid
 
 - 当前：`std-pointcloud` / `1.0.0` / 体素降采样。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/filter_voxel_grid.cpp:379](../../packs/std-pointcloud/ops/filter_voxel_grid.cpp#L379)。
@@ -466,7 +466,7 @@
 - 验收：固定输入确定性、负坐标/体素边界、通道聚合、资源上限；禁止将输出继续当原采样槽位。
 - 说明：不能把空间体素滤波作为std-profile保列序清洗的替代。
 
-## 232 · fit.circle_2d
+## 237 · fit.circle_2d
 
 - 当前：`std-pointcloud` / `1.0.0` / 二维圆拟合。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/fit_circle_2d.cpp:72](../../packs/std-pointcloud/ops/fit_circle_2d.cpp#L72)。
@@ -480,7 +480,7 @@
 - 验收：圆弧短段、固定半径、上下限、内点重筛、非法/退化云与原云索引。
 - 说明：不得因抽公共内核把PCL估计替换为DTS的最小二乘。
 
-## 233 · fit.line_2d
+## 238 · fit.line_2d
 
 - 当前：`std-pointcloud` / `1.0.0` / 二维直线拟合。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/fit_line_2d.cpp:94](../../packs/std-pointcloud/ops/fit_line_2d.cpp#L94)。
@@ -494,7 +494,7 @@
 - 验收：同输入确定性、双迹线/候选选择、ROI截线、退化输入及inliers身份。
 - 说明：名字中的2D不表示需要有序采样；与DTS最小二乘拟合是不同算法契约。
 
-## 234 · io.load_cloud
+## 239 · io.load_cloud
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云与三角网格采样读取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/io_load_cloud.cpp:431](../../packs/std-pointcloud/ops/io_load_cloud.cpp#L431)。
@@ -508,7 +508,7 @@
 - 验收：m/mm与初姿非交换顺序、STL采样确定性/法线、拒绝mesh PLY/非法字段、路径和预算。
 - 说明：不把STL采样输出宣传成仍有CAD拓扑的模型；与io.load_pcd差异保留。
 
-## 235 · io.load_pcd
+## 240 · io.load_pcd
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云读取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/io_load_pcd.cpp:110](../../packs/std-pointcloud/ops/io_load_pcd.cpp#L110)。
@@ -522,7 +522,7 @@
 - 验收：ASCII/二进制PCD/PLY及中文路径往返；缺字段、非法文件和可选通道长度检查。
 - 说明：保留公开节点，抽出I/O能力依赖；不能因通用io前缀搬入core。
 
-## 236 · io.save_pcd
+## 241 · io.save_pcd
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云保存。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/io_save_pcd.cpp:94](../../packs/std-pointcloud/ops/io_save_pcd.cpp#L94)。
@@ -536,7 +536,7 @@
 - 验收：全部可选通道往返、目标格式与写盘错误诊断；不得把文件输出误设为缓存纯函数。
 - 说明：保留公开节点，抽出I/O能力依赖；不能因通用io前缀搬入core。
 
-## 237 · register.constrained_fit_3d
+## 242 · register.constrained_fit_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维加权几何约束拟合。目标：`std-pointcloud`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:701](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L701)。
@@ -546,11 +546,11 @@
 - 当前契约：constraints:Record, initial:Transform, cloud:PointCloud → transform:Transform, aligned:PointCloud, quality:Record。cloud.Constraints3D.v1+可选initial/cloud→Transform/aligned/quality；米制混合点点/点线/点面/轴向偏移，3-2-1结构、可观性和float32交付质量均校验。
 - 目标契约：公开点云对齐节点保留std-pointcloud；公共约束求解可下沉std-geometry内部库，保持局部优化/质量门语义及可选cloud输出。
 - 迁移前置：M1；M2；register.constraints_3d
-- 关联算子：`register.constraints_3d`
+- 关联算子：register.constraints_3d
 - 验收：混合与3-2-1、权重/退化、Huber、未收敛、float32交付门限、无cloud模式及输入只读。
 - 说明：主目标仍为点云配准；与register.constraints_3d通过公共schema接口连接，避免几何包依赖整个点云包。
 
-## 238 · register.global_3d
+## 243 · register.global_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维表面模板全局匹配。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_global_matching.cpp:1131](../../packs/std-pointcloud/ops/p2_global_matching.cpp#L1131)。
@@ -560,11 +560,11 @@
 - 当前契约：model:PointCloud, template:Record, scene:PointCloud, sceneIndices:Indices, sceneGroups:Record → instances:Record, indices:Indices, groups:Record, quality:Record。居中米制model+身份template+scene/可选场景组→多实例、场景支持索引和quality；任意SE3候选后按真实float32位姿重算覆盖/RMSE/非共面支持；空匹配为空集合。
 - 目标契约：保留CPU全局匹配后端及显式对称规则；pickable=false，非确定性不缓存，阶段边界取消与调用/点数预算不能被包重构削弱。
 - 迁移前置：M1；M2；cloud.template_3d
-- 关联算子：`cloud.template_3d`
+- 关联算子：cloud.template_3d
 - 验收：小件/遮挡/对称、错template身份、空ROI/无匹配、多实例独立支持、质量拒绝/预算/取消；Windows CPU与安装SDK运行。
 - 说明：全局匹配不并入通用几何构造；GPU后端未来单列能力，主线不因包整理引入CUDA。
 
-## 239 · register.icp_2d
+## 244 · register.icp_2d
 
 - 当前：`std-pointcloud` / `1.1.0` / 二维 ICP 配准。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/register_icp_2d.cpp:271](../../packs/std-pointcloud/ops/register_icp_2d.cpp#L271)。
@@ -578,7 +578,7 @@
 - 验收：已知非交换SE2、质量重算/拒绝、鲁棒损失、粗细层数与退化情况。
 - 说明：虽然gap使用该内核，其本身不属于gap领域或轻量std-profile。
 
-## 240 · register.icp_3d
+## 245 · register.icp_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维迭代最近点配准。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/register_3d.cpp:284](../../packs/std-pointcloud/ops/register_3d.cpp#L284)。
@@ -592,7 +592,7 @@
 - 验收：已知刚体、法线缺失/退化、差初值/未收敛、覆盖率和RMSE拒绝、批次原子失败。
 - 说明：不因同为三维配准就改为KISS或small_gicp；算法切换属于独立行为变更。
 
-## 241 · register.local_search_3d
+## 246 · register.local_search_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维局部多初值配准。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/register_3d.cpp:284](../../packs/std-pointcloud/ops/register_3d.cpp#L284)。
@@ -606,7 +606,7 @@
 - 验收：已知刚体、法线缺失/退化、差初值/未收敛、覆盖率和RMSE拒绝、批次原子失败。
 - 说明：不因同为三维配准就改为KISS或small_gicp；算法切换属于独立行为变更。
 
-## 242 · register.pose_search_3d
+## 247 · register.pose_search_3d
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维工件六轴局部搜索。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/p2_advanced_fit.cpp:724](../../packs/std-pointcloud/ops/p2_advanced_fit.cpp#L724)。
@@ -620,7 +620,7 @@
 - 验收：候选总数预算、边界/非交换旋转、ICP开关、稳定择优、任一对象失败不输出部分伪成功。
 - 说明：纯位姿枚举可共享几何层，但与点云对齐/质量有关的节点归属点云包。
 
-## 243 · register.rigid_fit
+## 248 · register.rigid_fit
 
 - 当前：`std-pointcloud` / `1.0.0` / 对应点三维刚体拟合。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/register_3d.cpp:251](../../packs/std-pointcloud/ops/register_3d.cpp#L251)。
@@ -634,7 +634,7 @@
 - 验收：大坐标小偏移、反射、共线/重合、点数不等、变换后float32误差与通道旋转。
 - 说明：不与ICP或混合约束拟合合并为含糊的register节点。
 
-## 244 · segment.euclidean_clusters
+## 249 · segment.euclidean_clusters
 
 - 当前：`std-pointcloud` / `1.0.0` / 三维欧式聚类。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:420](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L420)。
@@ -648,7 +648,7 @@
 - 验收：点序置换、同质心簇、数量上限、NaN与原生组身份；不静默丢簇。
 - 说明：欧式聚类保留PCL后端，不能把确定性ID误表述为对象追踪。
 
-## 245 · segment.extract_indices
+## 250 · segment.extract_indices
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云索引提取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/segment_extract_indices.cpp:27](../../packs/std-pointcloud/ops/segment_extract_indices.cpp#L27)。
@@ -662,7 +662,7 @@
 - 验收：错云索引、越界、重复、空选择、selected/rest通道对应与顺序。
 - 说明：原生索引选择本身不使用PCL；通用Record集合算子不能代替大数组索引。
 
-## 246 · segment.multi_planes
+## 251 · segment.multi_planes
 
 - 当前：`std-pointcloud` / `1.0.0` / 多平面顺序提取。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/cloud_analysis.cpp:503](../../packs/std-pointcloud/ops/cloud_analysis.cpp#L503)。
@@ -676,7 +676,7 @@
 - 验收：多个平面/不足点/残余噪声、平面系数与组ID对齐、原云身份和排序。
 - 说明：与已有Plane类型的构造和纯距离计算边界分开。
 
-## 247 · segment.ransac_plane
+## 252 · segment.ransac_plane
 
 - 当前：`std-pointcloud` / `1.0.0` / RANSAC 平面拟合。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/segment_ransac_plane.cpp:92](../../packs/std-pointcloud/ops/segment_ransac_plane.cpp#L92)。
@@ -690,7 +690,7 @@
 - 验收：平面系数、退化输入、约束角度、原云索引身份和随机性声明。
 - 说明：检测空间平面留在点云包，Plane的构造/纯代数关系属于几何包。
 
-## 248 · segment.region_growing_2d
+## 253 · segment.region_growing_2d
 
 - 当前：`std-pointcloud` / `1.0.0` / 区域生长 2D。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/segment_region_growing_2d.cpp:85](../../packs/std-pointcloud/ops/segment_region_growing_2d.cpp#L85)。
@@ -704,7 +704,7 @@
 - 验收：双弧/单簇/噪声、多簇排名、角阈值、最少点数及左右定义。
 - 说明：与DTS按列的gap/jump分片不同，不能迁入std-profile后偷换实现。
 
-## 249 · transform.apply
+## 254 · transform.apply
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云变换。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/transform_apply.cpp:56](../../packs/std-pointcloud/ops/transform_apply.cpp#L56)。
@@ -714,11 +714,11 @@
 - 当前契约：cloud:PointCloud, transform:Transform → cloud:PointCloud。4×4变换作用到XYZ，法线旋转后归一化；保留intensity/RGB，不改变点数/顺序。
 - 目标契约：点云应用adapter保留；矩阵/刚体/帧校验来自公共几何层，明确source→target和法线异常策略。
 - 迁移前置：M1；M2；transform.make
-- 关联算子：`transform.make`
+- 关联算子：transform.make
 - 验收：非交换变换、法线旋转、点序/通道不变、输入只读与非法矩阵拒绝。
 - 说明：Transform构造下沉几何包；作用于大点数组的节点仍属于点云包。
 
-## 250 · util.merge
+## 255 · util.merge
 
 - 当前：`std-pointcloud` / `1.0.0` / 点云合并。目标：`std-pointcloud`；保留并验边界；**M6**。
 - 源码：[packs/std-pointcloud/ops/util_merge.cpp:62](../../packs/std-pointcloud/ops/util_merge.cpp#L62)。

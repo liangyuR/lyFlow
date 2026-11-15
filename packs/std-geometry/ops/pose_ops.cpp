@@ -515,6 +515,9 @@ Status toWorldPlane(const Inputs& in, const ParamView& p, Outputs& out, ExecCont
   calibration::Plane plane;
   if (!record || !calibration::parsePlane(*record, plane, why))
     return bad(why.empty() ? "需要平面标定" : why, "calib");
+  if ((!plane.imageFrame.empty() && plane.imageFrame != p.text("sourceFrame")) ||
+      (!plane.planeFrame.empty() && plane.planeFrame != p.text("planeFrame")))
+    return badParam("版本化标定的图像帧/平面帧必须匹配明确声明", "planeFrame");
   if (list.data["unit"] != "px" || list.data["frame"] != p.text("sourceFrame") ||
       p.text("targetFrame").empty())
     return badParam("像素位姿帧必须匹配 sourceFrame，targetFrame 不能为空", "sourceFrame");
@@ -735,12 +738,13 @@ void registerPoseOps(Registry& r) {
 
   op = descriptor("pose.to_world_plane", "二维工件已知平面位姿映射",
                   "2D object homography known plane world 3D pose projection");
+  op.version = "1.1.0";
   op.inputs = {record("poses"), record("calib"),
                Port{"planeToWorld", "Transform", "PlaneToWorld",
                     "已知平面坐标系→目标世界帧的米制刚体。", true}};
   op.outputs = {record("poses")};
   op.params = {text("sourceFrame", "图像参考帧", "image"),
-               text("targetFrame", "目标参考帧", "world"),
+               text("targetFrame", "目标参考帧", "world"), text("planeFrame", "标定平面参考帧", ""),
                vec("size3D", "已知物理尺寸（米）", {0, 0, 0})};
   op.doc =
       "H将像素中心映到已知平面；方向由局部雅可比映射，再乘planeToWorld。3D尺寸必须显式给定，不由透视像素框猜物理尺寸；不估计任意深度或相机6DoF。";

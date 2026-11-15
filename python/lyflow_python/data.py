@@ -67,6 +67,57 @@ class PointCloud(_Value):
         return PointCloud(**{name: None if value is None else value.copy() for name, value in vars(self).items() if name != "_readonly"})
 
 
+def _profile_descriptor(value):
+    fields = {"schemaVersion", "frame", "unit", "plane", "handedness", "sampleOrder", "sourceId", "sourceCount"}
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise NodeError("Profile descriptor has missing or unknown fields")
+    result = _plain(value)
+    if type(result["schemaVersion"]) is not int or result["schemaVersion"] != 1:
+        raise NodeError("Profile descriptor schemaVersion must be 1")
+    for name in ("frame", "sourceId"):
+        text = result[name]
+        try:
+            valid = isinstance(text, str) and 0 < len(text.encode("utf-8")) <= 1024
+        except UnicodeEncodeError:
+            valid = False
+        if not valid:
+            raise NodeError(f"Profile {name} must contain 1..1024 UTF-8 bytes")
+    for name, allowed in (("unit", ("m", "mm")), ("plane", ("XY", "XZ", "YZ")),
+                          ("handedness", ("right", "reflected")), ("sampleOrder", ("unknown", "acquisition"))):
+        if not isinstance(result[name], str) or result[name] not in allowed:
+            raise NodeError(f"invalid Profile {name}")
+    if type(result["sourceCount"]) is not int or not 0 <= result["sourceCount"] <= 4294967295:
+        raise NodeError("Profile sourceCount must be a uint32 integer")
+    return _frozen(result)
+
+
+class Profile(_Value):
+    def __init__(self, xyz, descriptor, validity, source_indices, intensity=None, normals=None, rgb=None):
+        cloud = PointCloud(xyz, intensity, normals, rgb)
+        count = len(xyz)
+        self.descriptor = _profile_descriptor(descriptor)
+        self.xyz, self.intensity, self.normals, self.rgb = cloud.xyz, cloud.intensity, cloud.normals, cloud.rgb
+        self.validity = _array("validity", validity, np.uint8, (count,))
+        self.source_indices = _array("source_indices", source_indices, np.uint32, (count,))
+        if (self.validity > 1).any():
+            raise NodeError("Profile validity must contain only 0 or 1")
+        if np.isinf(xyz).any() or not np.isfinite(xyz[self.validity == 1]).all():
+            raise NodeError("Profile coordinates cannot contain infinity; valid samples must be finite")
+        if count and int(self.source_indices.max()) >= self.descriptor["sourceCount"]:
+            raise NodeError("Profile source index exceeds sourceCount")
+        if self.descriptor["sampleOrder"] == "acquisition":
+            if (self.source_indices[1:] <= self.source_indices[:-1]).any():
+                raise NodeError("acquisition Profile source indices must strictly increase")
+        elif np.unique(self.source_indices).size != count:
+            raise NodeError("Profile source indices must be unique")
+
+    def copy(self):
+        return Profile(self.xyz.copy(), self.descriptor, self.validity.copy(), self.source_indices.copy(),
+                       None if self.intensity is None else self.intensity.copy(),
+                       None if self.normals is None else self.normals.copy(),
+                       None if self.rgb is None else self.rgb.copy())
+
+
 class Image(_Value):
     def __init__(self, pixels, scale=1):
         if not isinstance(pixels, np.ndarray) or pixels.dtype not in (np.dtype("uint8"), np.dtype("uint16"), np.dtype("float32")):

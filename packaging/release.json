@@ -8,8 +8,26 @@
   },
   "vcpkgBaseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd",
   "onnxruntimeVersion": "1.32.0",
-  "packs": ["std-value", "std-geometry", "std-pointcloud", "std-image", "std-ml", "glue", "gap"],
+  "packs": [
+    "std-value",
+    "std-geometry",
+    "std-profile",
+    "std-pointcloud",
+    "std-image",
+    "std-ml",
+    "glue",
+    "gap"
+  ],
   "requiredSdkFiles": [
+    "include/lyflow/profile.h",
+    "include/nlohmann/json.hpp",
+    "include/lyflow/graph_contract_upgrade.h",
+    "examples/m1-profile-adapters.lyflow.json",
+    "examples/embed_profile.cpp",
+    "docs/profile-data-contract.md",
+    "docs/profile-host-protocol.md",
+    "examples/python/profile_copy.py",
+    "bin/python/examples/profile_copy.py",
     "include/lyflow/frames.hpp",
     "bin/python/lyflow_python/records.py",
     "bin/python/examples/p6_adapters/__init__.py",
@@ -31,11 +49,16 @@
     "docs/adr/0032-native-frames-and-result-delivery.md"
   ],
   "requiredRuntimeFiles": [
+    "python/examples/profile_copy.py",
     "python/lyflow_python/records.py",
     "python/examples/p6_adapters/__init__.py",
     "python/examples/p6_adapters/README.md"
   ],
   "requiredOperators": [
+    "profile.from_cloud",
+    "profile.to_cloud",
+    "profile.remap_axes",
+    "image.upgrade_plane_calib",
     "value.number",
     "value.boolean",
     "value.string",

@@ -1,12 +1,15 @@
 #include "helpers.h"
 
 #include <cstdlib>
+#include <cmath>
 #include <fstream>
 #include <future>
+#include <limits>
 #include <mutex>
 
 #include "lyflow/c_api.h"
 #include "lyflow/pose.h"
+#include "lyflow/profile.h"
 #include "python_runtime.h"
 
 using namespace lyflow;
@@ -424,6 +427,85 @@ TEST_CASE(
   CHECK(mismatched.at("problems").dump().find("dataProtocolVersion=2") != std::string::npos);
   std::ofstream(path) << original;
   CHECK(python_runtime::refresh(registry).at("ready") == true);
+}
+
+TEST_CASE(
+    "Python Profile preserves ordered slots and rejects corrupted outputs through a real worker") {
+  PythonFixture fixture;
+  {
+    std::ofstream file(fixture.dir / "nodes.py", std::ios::app);
+    file << R"PY(
+
+@node(id='py.integration.profile', version='1.0.0', label='轮廓往返',
+      inputs={'profile':'Profile'}, outputs={'profile':'Profile'},
+      params={'mode':{'type':'string','default':'ok'}})
+def profile_roundtrip(ctx, profile, mode):
+    assert profile.xyz.shape == (1280, 3)
+    assert not profile.xyz.flags.writeable and not profile.validity.flags.writeable
+    assert not profile.source_indices.flags.writeable
+    assert np.isnan(profile.xyz[777, 0]) and profile.validity[777] == 0
+    result = profile.copy()
+    result.xyz[0, 2] += 5
+    if mode == 'corrupt':
+        from lyflow_python.codec import DataCodec
+        original = DataCodec.encode
+        def encode(codec, value, kind):
+            DataCodec.encode = original
+            dto = original(codec, value, kind)
+            dto['sourceIndices']['dtype'] = 'f32'
+            return dto
+        DataCodec.encode = encode
+    return {'profile':result}
+)PY";
+  }
+  auto& registry = ensureRegistry();
+  const auto configured = python_runtime::configure(registry, fixture.config().dump());
+  INFO(configured.dump());
+  REQUIRE(configured.at("ready") == true);
+  const auto* op = registry.find("py.integration.profile");
+  REQUIRE(op);
+  Profile profile;
+  PointCloud cloud;
+  for (std::uint32_t i = 0; i < 1280; ++i) {
+    cloud.push(static_cast<float>(i), 0, 1);
+    cloud.intensity.push_back(0.5f);
+    cloud.normals.insert(cloud.normals.end(), {0, 1, 0});
+    cloud.rgb.insert(cloud.rgb.end(), {1, 2, 3});
+    profile.validity.push_back(i == 777 ? 0 : 1);
+    profile.sourceIndices.push_back(i);
+  }
+  cloud.xyz[777 * 3] = std::numeric_limits<float>::quiet_NaN();
+  profile.cloud = std::make_shared<const PointCloud>(std::move(cloud));
+  profile.descriptor = {1, "sensor", "mm", "XZ", "right", "acquisition", "source", 1280};
+  std::unordered_map<std::string, Data> input{{"profile", Data::profile(profile)}};
+  PythonContext context;
+  auto run = [&](const char* mode, std::unordered_map<std::string, Data>& result) {
+    Outputs output(result);
+    const ParamMap params{{"mode", Value::text(mode)}};
+    return op->compute(Inputs(input), ParamView(params, context.base), output, context);
+  };
+  std::unordered_map<std::string, Data> result;
+  const auto first = run("ok", result);
+  INFO(first.message);
+  REQUIRE(first.ok);
+  const auto* returned = result.at("profile").asProfile();
+  REQUIRE(returned);
+  CHECK(returned->consistent());
+  CHECK(returned->pointCount() == 1280);
+  CHECK(returned->cloud->xyz[2] == 6);
+  CHECK(profile.cloud->xyz[2] == 1);
+  CHECK(std::isnan(returned->cloud->xyz[777 * 3]));
+  CHECK(returned->validity == profile.validity);
+  CHECK(returned->sourceIndices == profile.sourceIndices);
+  CHECK(returned->cloud->intensity == profile.cloud->intensity);
+  CHECK(returned->cloud->normals == profile.cloud->normals);
+  CHECK(returned->cloud->rgb == profile.cloud->rgb);
+  CHECK(profileDescriptorJson(returned->descriptor) == profileDescriptorJson(profile.descriptor));
+  result.clear();
+  CHECK(run("corrupt", result).code == "python_output_invalid");
+  CHECK(result.empty());
+  CHECK(profile.cloud->xyz[2] == 1);
+  CHECK(run("ok", result).ok);
 }
 
 TEST_CASE("Python failures, queued cancellation and forced termination recover on the next task") {

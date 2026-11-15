@@ -2,6 +2,8 @@
 
 Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Rust 接口和宿主只读覆盖见 [Python 自定义节点](python-nodes.md)。
 
+1.4系列新增原生Profile，包含明确的单位、坐标、采样顺序及来源映射；输入与结果无需JSON承载数组。跨宿主、稳定输入句柄及二进制协议见[Profile宿主协议](profile-host-protocol.md)，随SDK安装的[embed_profile.cpp](../examples/embed_profile.cpp)演示只读输入、NaN槽及单位换算。
+
 几条路：
 
 - **C++ 宿主**（本文大半篇幅）：`lyflow/client.hpp` + 运行时加载的 core DLL。
@@ -80,13 +82,13 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 `lyflow::client` 是 INTERFACE 目标，只带 include 路径与 `cxx_std_17`。
 配置文件另外给出：
 
-| 变量 | 内容 |
-|---|---|
-| `LYFLOW_BIN_DIR` | 运行时目录。宿主 exe 边上要有这一份 |
-| `LYFLOW_CORE_DLL` | `Client` 构造函数要的路径 |
-| `LYFLOW_CLI` | `lyflow.exe`，离线跑图/导入用 |
-| `LYFLOW_LIBRARY_DIR` | 库算子目录 |
-| `LYFLOW_ABI_VERSION` | 产品版本字符串；运行时按主.次系列兼容，包元数据按本次发布逐字一致 |
+| 变量                   | 内容                                                                      |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `LYFLOW_BIN_DIR`       | 运行时目录。宿主 exe 边上要有这一份                                       |
+| `LYFLOW_CORE_DLL`      | `Client` 构造函数要的路径                                                 |
+| `LYFLOW_CLI`           | `lyflow.exe`，离线跑图/导入用                                             |
+| `LYFLOW_LIBRARY_DIR`   | 库算子目录                                                                |
+| `LYFLOW_ABI_VERSION`   | 产品版本字符串；运行时按主.次系列兼容，包元数据按本次发布逐字一致         |
 | `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
 
 完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
@@ -137,7 +139,7 @@ lyflow::RunResult result = client.run(graphJson, options);
   类型、硬限位 `min`/`max`、`options`。不合法报 `bad_param`，`paramPath` 是图参数名、`nodeId` 为空，
   整次运行不执行任何节点；之后照旧走被绑定节点自己的参数规整。没有 `type` 的老图参数跳过第一步。
 - 切换一组取值之前想先问一句「这组值合不合法、哪些节点会重算」：`lyflow_validate_params(graph, baseDir,
-  params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`
+params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`
   与 `lyflow_validate` / `lyflow_plan` 同义，只多一个 `params_json`。`client.hpp` 的 `validate` / `plan`
   与 `lyflow-client` 的 `validate_with_params` / `plan_with_params` 各多一个可选参数。
 
@@ -315,16 +317,16 @@ handle.diagnostics();                  // warn/error 级别的日志事件
 lyflow::CloudView view = handle.cloud("n_merge", "cloud", 20000);
 ```
 
-| 成员 | 说明 |
-|---|---|
-| `runId()` | 这次运行的 id（`options.runId` 为空时是 `"embed-run"`） |
-| `valid()` | `run_start` 成功给出了句柄 |
-| `cancel()` | 置取消位，立即返回。core 保证这次运行最终仍发出一条 `run_finished` |
-| `join()` | 等运行结束。幂等，多线程调用安全 |
-| `status()` / `diagnostics()` | join 之前也能读，读到的是「到目前为止」；join 之后才是最终值 |
-| `outputs()` | 图级命名输出的 JSON，要 join 之后才完整 |
-| `cloud()` | 等价于 `client.cloud(runId(), …)`，句柄活着就取得到 |
-| `result()` | join 之后装成一个 `RunResult`（不含 `events`），点云索引转交给它 |
+| 成员                         | 说明                                                               |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `runId()`                    | 这次运行的 id（`options.runId` 为空时是 `"embed-run"`）            |
+| `valid()`                    | `run_start` 成功给出了句柄                                         |
+| `cancel()`                   | 置取消位，立即返回。core 保证这次运行最终仍发出一条 `run_finished` |
+| `join()`                     | 等运行结束。幂等，多线程调用安全                                   |
+| `status()` / `diagnostics()` | join 之前也能读，读到的是「到目前为止」；join 之后才是最终值       |
+| `outputs()`                  | 图级命名输出的 JSON，要 join 之后才完整                            |
+| `cloud()`                    | 等价于 `client.cloud(runId(), …)`，句柄活着就取得到                |
+| `result()`                   | join 之后装成一个 `RunResult`（不含 `events`），点云索引转交给它   |
 
 三条约定：
 
@@ -470,12 +472,12 @@ impl SceneProvider for MyScenes {
 给了 `Some(root)` 之后，所有收路径的命令（`save_graph`、`load_graph`、备份四件、
 `write_file_bytes`，以及 `graphPath` 推出来的 base dir）都走一遍解析：
 
-| 前端给的 | 结果 |
-|---|---|
-| `graphs/a.lyflow.json` | `<root>/graphs/a.lyflow.json` |
-| `./graphs/../a.json` | `<root>/a.json`（先消 `.` 与 `..`，没逃出去就放行） |
-| `../外面/a.json` | 报错「路径逃出了工作区」 |
-| `D:/别处/a.json` | 原样放行 —— 绝对路径是宿主自己的 webview 给的，可信 |
+| 前端给的               | 结果                                                |
+| ---------------------- | --------------------------------------------------- |
+| `graphs/a.lyflow.json` | `<root>/graphs/a.lyflow.json`                       |
+| `./graphs/../a.json`   | `<root>/a.json`（先消 `.` 与 `..`，没逃出去就放行） |
+| `../外面/a.json`       | 报错「路径逃出了工作区」                            |
+| `D:/别处/a.json`       | 原样放行 —— 绝对路径是宿主自己的 webview 给的，可信 |
 
 消 `.` 与 `..` 是纯文本的，不碰文件系统：`canonicalize()` 要求路径已存在
 （`save_graph` 写的是还不存在的文件），而且在 Windows 上会带出 `\\?\` 前缀。

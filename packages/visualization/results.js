@@ -20,6 +20,51 @@ export const RESULT_LIMITS = Object.freeze({
 function requireThat(value, message) {
   if (!value) throw new Error(message);
 }
+export function profileDescriptor(value) {
+  const fields = [
+    'schemaVersion',
+    'frame',
+    'unit',
+    'plane',
+    'handedness',
+    'sampleOrder',
+    'sourceId',
+    'sourceCount',
+  ];
+  requireThat(
+    value && typeof value === 'object' && !Array.isArray(value),
+    'Profile descriptor must be an object',
+  );
+  requireThat(
+    Object.keys(value).length === fields.length && fields.every((key) => Object.hasOwn(value, key)),
+    'Profile descriptor has missing or unknown fields',
+  );
+  const text = (item) =>
+    typeof item === 'string' &&
+    item.length > 0 &&
+    !item.includes('\u0000') &&
+    !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(item) &&
+    new TextEncoder().encode(item).length <= 1024;
+  requireThat(
+    value.schemaVersion === 1 &&
+      text(value.frame) &&
+      text(value.sourceId) &&
+      ['m', 'mm'].includes(value.unit) &&
+      ['XY', 'XZ', 'YZ'].includes(value.plane) &&
+      ['right', 'reflected'].includes(value.handedness) &&
+      ['unknown', 'acquisition'].includes(value.sampleOrder) &&
+      Number.isInteger(value.sourceCount) &&
+      value.sourceCount >= 0 &&
+      value.sourceCount <= 0xffffffff,
+    'Invalid Profile unit, plane, ordering or source metadata',
+  );
+  const descriptor = { ...value };
+  requireThat(
+    new TextEncoder().encode(JSON.stringify(descriptor)).length <= 8192,
+    'Profile descriptor exceeds 8KiB',
+  );
+  return Object.freeze(descriptor);
+}
 function vector(value, count) {
   return Array.isArray(value) && value.length === count && value.every(Number.isFinite);
 }
@@ -302,6 +347,19 @@ export function cloudGroupPreview(value, indices, cloud, options = {}) {
   };
 }
 export function resultSummary(value) {
+  if (value?.kind === 'Profile') {
+    const descriptor = profileDescriptor(value.descriptor);
+    requireThat(
+      Number.isInteger(value.count) &&
+        Number.isInteger(value.validCount) &&
+        value.count >= 0 &&
+        value.count <= descriptor.sourceCount &&
+        value.validCount >= 0 &&
+        value.validCount <= value.count,
+      'Invalid Profile sample counts',
+    );
+    return { title: '轮廓', ...descriptor, count: value.count, validCount: value.validCount };
+  }
   const poses = poseCollection(value);
   if (poses)
     return {

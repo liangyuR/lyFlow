@@ -1,4 +1,5 @@
 #include "exec/disk_cache.h"
+#include "lyflow/profile.h"
 #include "exec/executor.h"
 
 #include <algorithm>
@@ -1218,6 +1219,11 @@ private:
                                    "' 的图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）",
                                {}, port);
         }
+        if (const Profile* profile = d.asProfile()) {
+          std::string why;
+          if (!validateProfile(*profile, why))
+            return Status::Error(Phase::Execute, "bad_input", why, {}, port);
+        }
         if (!node.bypass) {
           nlohmann::json contractWant;
           nlohmann::json contractGot;
@@ -1297,6 +1303,13 @@ private:
                                    "必须为空或与点数对齐）",
                                {}, p.name);
         }
+      }
+      if (it->second.kind() == Data::Kind::Profile) {
+        std::string why;
+        const auto* profile = it->second.asProfile();
+        if (!profile || !validateProfile(*profile, why))
+          return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
+                               profile ? why : "Profile缓冲为空", {}, p.name);
       }
       if (const Image* img = it->second.asImage()) {
         if (!img->consistent()) {
@@ -1692,6 +1705,93 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
 
 // ------------------------------------------------------------------ 注入与 cacheKey
 
+static bool validateInjectedData(const Data& data, std::string& why, bool inBundle = false) {
+  if (data.kind() == Data::Kind::Profile) {
+    const auto* profile = data.asProfile();
+    if (!profile) {
+      why = "Profile缓冲为空";
+      return false;
+    }
+    return validateProfile(*profile, why);
+  }
+  if (data.kind() == Data::Kind::Bundle) {
+    if (inBundle) {
+      why = "Bundle字段不能嵌套Bundle";
+      return false;
+    }
+    why = ensureRegistry().checkBundle(data.typeName(), data);
+    if (!why.empty())
+      return false;
+    for (const auto& field : data.asBundle()->fields) {
+      if (!validateInjectedData(field.second, why, true)) {
+        why = "Bundle字段 '" + field.first + "'：" + why;
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static void hashInjectedData(const Data& data, Hasher& h, bool inBundle = false) {
+  h.add(std::string(data.typeName()));
+  if (const PointCloud* c = data.asCloud()) {
+    h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
+    h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
+    h.addBytes(c->normals.data(), c->normals.size() * sizeof(float));
+    h.addBytes(c->rgb.data(), c->rgb.size());
+  } else if (const Profile* p = data.asProfile()) {
+    h.add(profileDescriptorJson(p->descriptor).dump());
+    if (p->cloud) {
+      h.add(std::to_string(p->cloud->id));
+      hashInjectedData(Data::cloud(p->cloud), h);
+    }
+    h.addBytes(p->validity.data(), p->validity.size());
+    h.addBytes(p->sourceIndices.data(), p->sourceIndices.size() * sizeof(std::uint32_t));
+  } else if (const Image* img = data.asImage()) {
+    h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
+          std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
+    h.add(std::to_string(img->scale));
+    if (img->pixels)
+      h.addBytes(img->pixels.get(), img->byteSize());
+  } else if (const Tensor* tensor = data.asTensor()) {
+    h.addBytes(tensor->shape.data(), tensor->shape.size() * sizeof(std::int64_t));
+    h.addBytes(tensor->data.data(), tensor->data.size() * sizeof(float));
+    h.add(std::to_string(data.tensorScale()));
+  } else if (const Indices* indices = data.asIndices()) {
+    h.add(std::to_string(indices->sourceCloudId));
+    h.addBytes(indices->values.data(), indices->values.size() * sizeof(std::int32_t));
+  } else if (const Bundle* bundle = data.asBundle()) {
+    h.add(bundle->kind);
+    if (inBundle) {
+      h.add("invalid-nested-bundle");
+      return;
+    }
+    for (const auto& field : bundle->fields) {
+      h.add(field.first);
+      Hasher fieldHash;
+      hashInjectedData(field.second, fieldHash, true);
+      h.add(fieldHash.hex());
+    }
+  } else {
+    h.add(data.valueJson());
+  }
+}
+
+void validateInjectedInputs(const std::vector<InjectedInput>& inputs, Diagnostics& diags) {
+  for (const auto& input : inputs) {
+    if (const auto* error = input.data.asError();
+        error && error->phase == Phase::Validate && error->code == "bad_input") {
+      auto status = *error;
+      status.portName = input.port;
+      diags.add(input.nodeId, std::move(status));
+    } else {
+      std::string why;
+      if (!validateInjectedData(input.data, why))
+        diags.error(input.nodeId, Phase::Validate, "bad_input", why, {}, input.port);
+    }
+  }
+}
+
 InjectionKeys injectionKeysOf(const std::vector<InjectedInput>& inputs) {
   InjectionKeys out;
   std::map<std::string, Hasher> digests;
@@ -1701,19 +1801,7 @@ InjectionKeys injectionKeysOf(const std::vector<InjectedInput>& inputs) {
     out.injectedPorts[in.nodeId].insert(in.port);
     Hasher& h = digests[in.nodeId];
     h.add(in.port);
-    h.add(std::string(in.data.typeName()));
-    if (const PointCloud* c = in.data.asCloud()) {
-      // 每个通道各是一段（addBytes 自带分隔）：同样的 xyz 换一份法向或颜色，键就不同
-      h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
-      h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
-      h.addBytes(c->normals.data(), c->normals.size() * sizeof(float));
-      h.addBytes(c->rgb.data(), c->rgb.size());
-    } else if (const Image* img = in.data.asImage()) {
-      h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
-            std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
-      if (img->pixels)
-        h.addBytes(img->pixels.get(), img->byteSize());
-    }
+    hashInjectedData(in.data, h);
   }
   for (auto& kv : digests)
     out.providedDigest[kv.first] = kv.second.hex();
@@ -1789,6 +1877,7 @@ void Run::workImpl() {
   const auto t0 = Clock::now();
 
   Diagnostics diags;
+  validateInjectedInputs(options_.inputs, diags);
   RawGraph raw;
   Plan plan;
   plan.runId = options_.runId;
@@ -1802,7 +1891,8 @@ void Run::workImpl() {
       continue;
     injected[in.nodeId][in.port] = in.data;
   }
-  const InjectionKeys injection = injectionKeysOf(options_.inputs);
+  const InjectionKeys injection =
+      diags.hasErrors() ? InjectionKeys{} : injectionKeysOf(options_.inputs);
   std::vector<CapturedOutput> recordedInputs;
   for (const auto& item : options_.inputs)
     recordedInputs.push_back({item.nodeId, item.port, item.data});
@@ -1815,7 +1905,8 @@ void Run::workImpl() {
     diags.error("", Phase::Validate, "bad_input",
                 "预览模式不能与「只运行此节点」（isolate）同时使用");
   }
-  const bool parsed = !conflicting && prepareGraph(graphJson_, raw, diags, options_.paramsJson);
+  const bool parsed = !conflicting && !diags.hasErrors() &&
+                      prepareGraph(graphJson_, raw, diags, options_.paramsJson);
   if (parsed) {
     BuildOptions build;
     build.runId = options_.runId;
@@ -2053,6 +2144,9 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   Plan plan;
   if (!prepareGraph(graphJson, raw, diags, paramsJson))
     return diags.toJson();
+  validateInjectedInputs(inputs, diags);
+  if (diags.hasErrors())
+    return diags.toJson();
 
   BuildOptions build;
   build.runId = "plan";
@@ -2146,6 +2240,9 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
   Plan plan;
   if (!prepareGraph(graphJson, raw, diags, paramsJson))
     return diags.toJson();
+  validateInjectedInputs(inputs, diags);
+  if (diags.hasErrors())
+    return diags.toJson();
 
   BuildOptions build;
   build.runId = "evict";
@@ -2219,6 +2316,9 @@ std::string effectiveParamsJson(const std::string& graphJson, const std::filesys
   RawGraph raw;
   Plan plan;
   if (!prepareGraph(graphJson, raw, diags, paramsJson))
+    return diags.toJson();
+  validateInjectedInputs(inputs, diags);
+  if (diags.hasErrors())
     return diags.toJson();
 
   BuildOptions build;

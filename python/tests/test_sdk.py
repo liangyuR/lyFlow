@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lyflow_python import Box2D, Circle2D, Context, Image, Line2D, Measurement, NodeCancelled, NodeError, Plane, Point2D, PointCloud, Record, Tensor, Transform, node, pose2d, pose3d, poses, scalar, value_list
+from lyflow_python import Box2D, Circle2D, Context, Image, Line2D, Measurement, NodeCancelled, NodeError, Plane, Point2D, PointCloud, Profile, Record, Tensor, Transform, node, pose2d, pose3d, poses, scalar, value_list
 from lyflow_python.api import resolve_params
 from lyflow_python.codec import DataCodec
 from lyflow_python.discovery import Discovery
@@ -306,6 +306,49 @@ class WorkerTests(unittest.TestCase):
     def execution(self, identifier, **extra):
         return {"id": identifier, "command": "execute", "operatorId": "py.test.run", "requestDir": str(self.root),
                 "inputs": {}, "params": {}, "baseDir": str(self.root), "threadBudget": 2, **extra}
+
+    def test_profile_worker_preserves_slots_metadata_and_readonly_input(self):
+        file = self.root / "profile.py"
+        example = Path(__file__).resolve().parents[1] / "examples" / "profile_copy.py"
+        discovered = self.discover(example)
+        self.assertEqual(discovered["problems"], [])
+        self.assertEqual(discovered["operators"][0]["inputs"][0]["type"], "Profile")
+        count = 1280
+        xyz = np.arange(count * 3, dtype=np.float32).reshape(count, 3)
+        xyz[2] = np.nan
+        validity = np.ones(count, np.uint8)
+        validity[2] = 0
+        validity[3] = 0
+        descriptor = dict(schemaVersion=1, frame="scanner", unit="mm", plane="XZ", handedness="reflected",
+                          sampleOrder="acquisition", sourceId="scan-中文", sourceCount=count * 2)
+        profile = Profile(xyz, descriptor, validity, np.arange(0, count * 2, 2, dtype=np.uint32),
+                          np.arange(count, dtype=np.float32), np.ones((count, 3), np.float32),
+                          np.full((count, 3), 128, np.uint8))
+        codec = DataCodec(str(self.root))
+        try:
+            encoded = codec.encode(profile, "Profile")
+            event = self.request(self.execution("profile", operatorId="py.profile_copy.offset_z",
+                                                params={"offset_m": 0.01}, inputs={"profile": encoded}))[-1]
+            self.assertEqual(event["event"], "result", event)
+            result = codec.decode(event["outputs"]["profile"], "Profile")
+            self.assertEqual(dict(result.descriptor), descriptor)
+            for field in ("validity", "source_indices", "intensity", "normals", "rgb"):
+                np.testing.assert_array_equal(getattr(result, field), getattr(profile, field))
+            np.testing.assert_array_equal(result.xyz[:, :2], xyz[:, :2])
+            expected_z = xyz[:, 2].copy()
+            expected_z[validity == 1] += 10
+            np.testing.assert_array_equal(result.xyz[:, 2], expected_z)
+            self.assertEqual(result.xyz.shape, (count, 3))
+            self.assertFalse(result.xyz.flags.writeable)
+            self.assertEqual(xyz[0, 2], 2)
+            file.write_text(source("py.test.run", "kwargs['profile'].xyz[0, 0] = 99\nreturn {'profile': kwargs['profile']}",
+                                   inputs="{'profile':'Profile'}", outputs="{'profile':'Profile'}"), encoding="utf-8")
+            self.discover(file)
+            failed = self.request(self.execution("profile-readonly", inputs={"profile": encoded}))[-1]
+            self.assertEqual(failed["code"], "python_exception")
+            self.assertIn("read-only", failed["traceback"])
+        finally:
+            codec.close()
 
     def test_p6_protocol_and_portable_package_execute_with_standard_contracts(self):
         package = Path(__file__).resolve().parents[1] / "examples" / "p6_adapters"

@@ -1,9 +1,13 @@
 #include "exec/disk_cache.h"
+#include "lyflow/profile.h"
 
 #include <atomic>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <map>
+#include <set>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -20,11 +24,13 @@ namespace {
 // 文件头：魔数 + 格式版本 + 端口数；每个端口：名字（u16 长度 + 字节）、种类（u8）、负载长度（u64）、负载。
 // 本机字节序 —— 目录按构建指纹分，同一指纹只会在同一种机器上读写。
 constexpr char kMagic[4] = {'L', 'F', 'C', '1'};
-constexpr std::uint32_t kFormatVersion = 1;
+constexpr std::uint32_t kFormatVersion = 2;
 constexpr std::uint8_t kKindCloud = 1;
 constexpr std::uint8_t kKindTensor = 2;
 // 老文件里不会出现 3，所以加 Image 不用升 kFormatVersion（docs/image-plan.md §2）
 constexpr std::uint8_t kKindImage = 3;
+constexpr std::uint8_t kKindProfile = 4;
+constexpr std::uint8_t kKindIndices = 5;
 constexpr std::uint8_t kHasIntensity = 1;
 constexpr std::uint8_t kHasNormals = 2;
 constexpr std::uint8_t kHasRgb = 4;
@@ -87,7 +93,8 @@ void encodeCloud(const PointCloud& c, std::string& out) {
 bool decodeCloud(Reader& r, PointCloud& c) {
   std::uint64_t n = 0;
   std::uint8_t flags = 0;
-  if (!r.get(n) || !r.get(flags))
+  if (!r.get(n) || n > std::numeric_limits<std::uint32_t>::max() || !r.get(flags) ||
+      (flags & ~(kHasIntensity | kHasNormals | kHasRgb)))
     return false;
   if (!r.getVec(c.xyz, n * 3))
     return false;
@@ -99,6 +106,68 @@ bool decodeCloud(Reader& r, PointCloud& c) {
     return false;
   return c.channelsConsistent();
 }
+
+template <class T> bool sameBuffer(const std::vector<T>& a, const std::vector<T>& b) {
+  return a.size() == b.size() &&
+         (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0);
+}
+
+struct CloudEncoder {
+  std::map<std::uint64_t, const PointCloud*> clouds;
+  std::set<std::uint64_t> written;
+
+  bool add(const PointCloud& cloud) {
+    const auto inserted = clouds.emplace(cloud.id, &cloud);
+    if (inserted.second || inserted.first->second == &cloud)
+      return true;
+    const auto& previous = *inserted.first->second;
+    return sameBuffer(previous.xyz, cloud.xyz) && sameBuffer(previous.intensity, cloud.intensity) &&
+           sameBuffer(previous.normals, cloud.normals) && sameBuffer(previous.rgb, cloud.rgb);
+  }
+  void encode(const PointCloud& cloud, std::string& out) {
+    put(out, cloud.id);
+    const auto alias = static_cast<std::uint8_t>(!written.insert(cloud.id).second);
+    put(out, alias);
+    if (!alias)
+      encodeCloud(cloud, out);
+  }
+  bool valid(const Indices& indices) const {
+    const auto source = clouds.find(indices.sourceCloudId);
+    if (source == clouds.end())
+      return false;
+    const auto n = source->second->pointCount();
+    for (const auto value : indices.values)
+      if (value < 0 || static_cast<std::size_t>(value) >= n)
+        return false;
+    return true;
+  }
+};
+
+struct CloudDecoder {
+  std::map<std::uint64_t, std::shared_ptr<const PointCloud>> clouds;
+
+  bool decode(Reader& reader, std::shared_ptr<const PointCloud>& out) {
+    std::uint64_t key = 0;
+    std::uint8_t alias = 0;
+    if (!reader.get(key) || !reader.get(alias) || alias > 1)
+      return false;
+    const auto found = clouds.find(key);
+    if (alias) {
+      if (found == clouds.end())
+        return false;
+      out = found->second;
+      return true;
+    }
+    if (found != clouds.end())
+      return false;
+    PointCloud cloud;
+    if (!decodeCloud(reader, cloud))
+      return false;
+    out = std::make_shared<const PointCloud>(std::move(cloud));
+    clouds.emplace(key, out);
+    return true;
+  }
+};
 
 void encodeTensor(const Tensor& t, std::string& out) {
   const std::uint32_t ndim = static_cast<std::uint32_t>(t.shape.size());
@@ -230,16 +299,29 @@ bool persistable(const Data& d) {
     return img->consistent() && img->scale == 1;
   if (d.asTensor())
     return d.tensorScale() == 1;
+  if (const auto* profile = d.asProfile())
+    return profile->consistent();
+  if (const auto* indices = d.asIndices())
+    return indices->sourceCloudId != 0;
   return d.asCloud() != nullptr;
 }
 
 bool encodeNode(const PortData& ports, std::string& out) {
-  if (ports.empty())
+  if (ports.empty() || ports.size() > 256)
     return false;
+  CloudEncoder clouds;
   for (const auto& [name, d] : ports) {
     if (!persistable(d) || name.size() > 0xFFFF)
       return false;
+    const auto* cloud = d.asCloud();
+    if (const auto* profile = d.asProfile())
+      cloud = profile->cloud.get();
+    if (cloud && (!cloud->channelsConsistent() || !clouds.add(*cloud)))
+      return false;
   }
+  for (const auto& [name, d] : ports)
+    if (const auto* indices = d.asIndices(); indices && !clouds.valid(*indices))
+      return false;
   std::string buf(kMagic, 4);
   put(buf, kFormatVersion);
   put(buf, static_cast<std::uint32_t>(ports.size()));
@@ -248,7 +330,20 @@ bool encodeNode(const PortData& ports, std::string& out) {
     std::uint8_t kind = 0;
     if (const PointCloud* c = d.asCloud()) {
       kind = kKindCloud;
-      encodeCloud(*c, payload);
+      clouds.encode(*c, payload);
+    } else if (const Profile* profile = d.asProfile()) {
+      kind = kKindProfile;
+      const auto descriptor = profileDescriptorJson(profile->descriptor).dump();
+      put(payload, static_cast<std::uint32_t>(descriptor.size()));
+      payload += descriptor;
+      clouds.encode(*profile->cloud, payload);
+      putVec(payload, profile->validity);
+      putVec(payload, profile->sourceIndices);
+    } else if (const auto* indices = d.asIndices()) {
+      kind = kKindIndices;
+      put(payload, indices->sourceCloudId);
+      put(payload, static_cast<std::uint64_t>(indices->values.size()));
+      putVec(payload, indices->values);
     } else if (const Image* img = d.asImage()) {
       kind = kKindImage;
       encodeImage(*img, payload);
@@ -272,14 +367,44 @@ bool decodeNode(const std::string& bytes, PortData& out) {
   if (!readTable(table, entries))
     return false;
   PortData ports;
+  CloudDecoder clouds;
+  std::vector<std::pair<std::size_t, Indices>> indices;
   for (const PortEntry& e : entries) {
     const std::string payload = bytes.substr(e.offset, static_cast<std::size_t>(e.length));
     Reader r{payload};
     if (e.kind == kKindCloud) {
-      PointCloud c; // 构造时拿一个新的进程内 id —— Indices 对账靠它，不能沿用写盘那个进程的
-      if (!decodeCloud(r, c) || r.at != payload.size())
+      std::shared_ptr<const PointCloud> cloud;
+      if (!clouds.decode(r, cloud) || r.at != payload.size())
         return false;
-      ports.emplace_back(e.name, Data::cloud(std::move(c)));
+      ports.emplace_back(e.name, Data::cloud(std::move(cloud)));
+    } else if (e.kind == kKindProfile) {
+      std::uint32_t descriptorSize = 0;
+      std::string descriptorText;
+      if (!r.get(descriptorSize) || descriptorSize > 8192 ||
+          !r.bytes(descriptorText, descriptorSize))
+        return false;
+      Profile profile;
+      std::string why;
+      try {
+        if (!parseProfileDescriptor(nlohmann::json::parse(descriptorText), profile.descriptor, why))
+          return false;
+      } catch (const nlohmann::json::exception&) {
+        return false;
+      }
+      if (!clouds.decode(r, profile.cloud) || !r.getVec(profile.validity, profile.pointCount()) ||
+          !r.getVec(profile.sourceIndices, profile.pointCount()) || r.at != payload.size())
+        return false;
+      if (!validateProfile(profile, why))
+        return false;
+      ports.emplace_back(e.name, Data::profile(std::move(profile)));
+    } else if (e.kind == kKindIndices) {
+      Indices value;
+      std::uint64_t n = 0;
+      if (!r.get(value.sourceCloudId) || !r.get(n) || !r.getVec(value.values, n) ||
+          r.at != payload.size())
+        return false;
+      indices.emplace_back(ports.size(), std::move(value));
+      ports.emplace_back(e.name, Data{});
     } else if (e.kind == kKindTensor) {
       Tensor t;
       if (!decodeTensor(r, t) || r.at != payload.size())
@@ -293,6 +418,16 @@ bool decodeNode(const std::string& bytes, PortData& out) {
     } else {
       return false;
     }
+  }
+  for (auto& [index, value] : indices) {
+    const auto source = clouds.clouds.find(value.sourceCloudId);
+    if (source == clouds.clouds.end())
+      return false;
+    for (const auto item : value.values)
+      if (item < 0 || static_cast<std::size_t>(item) >= source->second->pointCount())
+        return false;
+    value.sourceCloudId = source->second->id;
+    ports[index].second = Data::indices(std::move(value));
   }
   out = std::move(ports);
   return true;

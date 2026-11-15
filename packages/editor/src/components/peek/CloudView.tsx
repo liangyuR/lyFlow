@@ -2,7 +2,8 @@ import { profileCanvas } from '../../lib/sceneExport';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
-import { findBaseCloud, firstCloudPort, type BaseCloud } from '../../lib/basecloud';
+import { cloudPortType, findBaseCloud, firstCloudPort, type BaseCloud } from '../../lib/basecloud';
+import { fetchCloudPayload } from '../../lib/profileFetch';
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from '../../lib/cloudCache';
 import {
   applyViewPreset,
@@ -31,7 +32,7 @@ import { useGraphStore } from '../../store/graph';
 import { useManifestStore } from '../../store/manifest';
 import { PEEK_FROZEN, usePeekStore } from '../../store/peek';
 import { transport } from '../../transport';
-import { decodeCloud, type CloudPayload } from '../../types/execution';
+import { type CloudPayload } from '../../types/execution';
 import { useFocusOnDoubleClick } from '../../hooks/useFocusOnDoubleClick';
 import { measureAttrs, useMeasure } from '../../hooks/useMeasure';
 import { MeasureReadout } from '../MeasureReadout';
@@ -52,6 +53,7 @@ interface Display {
 interface CloudTarget {
   resolved: { nodeId: string; port: string } | null;
   base: BaseCloud | null;
+  type: 'PointCloud' | 'Profile';
 }
 
 /** 每个窗口最后的视角与那时取景量的范围。运行期间窗里换成「正在计算…」会卸掉画布，算完回来接着用 ——
@@ -97,20 +99,28 @@ export function CloudView({ win, src }: PeekViewProps) {
   // 自己有云就画自己的；没有就先看本节点还有没有别的点云口，再沿输入边往上游借最近的一片，
   // 几何叠在它上面 —— 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
   const target: CloudTarget = useMemo(() => {
-    if (src.type === 'PointCloud' && src.resolved) return { resolved: src.resolved, base: null };
+    if ((src.type === 'PointCloud' || src.type === 'Profile') && src.resolved)
+      return { resolved: src.resolved, base: null, type: src.type };
     const node = levelOf(doc, path).nodes.find((n) => n.id === fromNode);
-    if (!node) return { resolved: null, base: null };
-    const own = firstCloudPort(ops, node.op);
+    if (!node) return { resolved: null, base: null, type: 'PointCloud' };
+    const own = firstCloudPort(ops, node.op, undefined, src.outputs);
     if (own) {
       const resolved = resolveOutput(doc, path, node.id, own);
       if (resolved) {
         const label = node.ui?.title ?? ops.get(node.op)?.label ?? node.id;
-        return { resolved, base: { localId: node.id, label, resolved } };
+        return {
+          resolved,
+          base: { localId: node.id, label, resolved },
+          type:
+            src.outputs?.find((o) => o.port === own)?.type === 'Profile'
+              ? 'Profile'
+              : cloudPortType(ops, node.op, own),
+        };
       }
     }
     const base = findBaseCloud(doc, path, node.id, ops);
-    return { resolved: base?.resolved ?? null, base };
-  }, [doc, path, fromNode, ops, src.type, src.resolved]);
+    return { resolved: base?.resolved ?? null, base, type: base?.type ?? 'PointCloud' };
+  }, [doc, path, fromNode, ops, src.type, src.resolved, src.outputs]);
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
@@ -191,7 +201,12 @@ export function CloudView({ win, src }: PeekViewProps) {
     }
 
     if (!lockedRun) dropOtherRuns(runId);
-    const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
+    const key = cacheKey(
+      runId,
+      resolved.nodeId,
+      resolved.port,
+      target.type === 'Profile' ? 0 : maxPoints,
+    );
     const hit = cloudCache.get(key);
     if (hit) {
       // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
@@ -204,9 +219,14 @@ export function CloudView({ win, src }: PeekViewProps) {
     setLoading(true);
     void (async () => {
       try {
-        const payload = await fetchCloud(key, async () =>
-          decodeCloud(
-            await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, maxPoints),
+        const payload = await fetchCloud(key, () =>
+          fetchCloudPayload(
+            transport,
+            target.type,
+            runId,
+            resolved.nodeId,
+            resolved.port,
+            maxPoints,
           ),
         );
         if (cancelled) return;
@@ -265,7 +285,10 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
   const shapeStat = useMemo(
-    () => (src.type !== 'PointCloud' && src.stat?.value !== undefined ? src.stat : null),
+    () =>
+      src.type !== 'PointCloud' && src.type !== 'Profile' && src.stat?.value !== undefined
+        ? src.stat
+        : null,
     [src.type, src.stat],
   );
 
@@ -386,6 +409,17 @@ export function CloudView({ win, src }: PeekViewProps) {
         {cloud && (
           <span className="peek-cloud__count" title="显示点数 / 总点数">
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()}
+          </span>
+        )}
+        {cloud?.profile && (
+          <span
+            className="peek-cloud__count"
+            data-testid="peek-profile-metadata"
+            title={`来源 ${cloud.profile.descriptor.sourceId}；显示坐标为米，保留全部采样槽`}
+          >
+            {cloud.profile.validCount} 有效 · 源 {cloud.profile.descriptor.unit} ·{' '}
+            {cloud.profile.descriptor.plane} · {cloud.profile.descriptor.handedness} ·{' '}
+            {cloud.profile.descriptor.sampleOrder} · {cloud.profile.descriptor.frame}
           </span>
         )}
         {gridText && (

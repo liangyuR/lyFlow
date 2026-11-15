@@ -18,6 +18,38 @@
 using namespace lyflow;
 using namespace lyflow::test;
 
+TEST_CASE("PlaneCalib versioned contract: image and portable consumers share normalized mapping") {
+  Record old;
+  old.type = calibration::kPlaneType;
+  old.data = {{"H", {2e-40, 0, 0, 0, 2e-40, 0, 0, 0, 4e-40}}};
+  Record upgraded;
+  std::string why;
+  REQUIRE(calibration::upgradeLegacyPlane(old, "mm", "camera", "table", upgraded, why));
+  calibration::Plane portable;
+  std_image::PlaneCalib image;
+  REQUIRE(calibration::parsePlane(upgraded, portable, why));
+  REQUIRE(std_image::parsePlaneCalib(upgraded.data, &image, &why));
+  CHECK(image.canonical);
+  CHECK(image.imageFrame == "camera");
+  CHECK(image.planeFrame == "table");
+  double x = 0, y = 0, xx = 0, yy = 0;
+  REQUIRE(portable.map(10, 20, x, y));
+  REQUIRE(image.map(10, 20, &xx, &yy));
+  CHECK(x == xx);
+  CHECK(y == yy);
+  CHECK(std_image::planeCalibJson(image) == upgraded.data);
+  auto malformed = upgraded.data;
+  malformed["unit"] = "cm";
+  CHECK_FALSE(std_image::parsePlaneCalib(malformed, &image, &why));
+  test::OpCall node;
+  node.inputs["calib"] = Data::record(old);
+  REQUIRE(node.run("image.upgrade_plane_calib", {{"missingUnit", Value::text("mm")},
+                                                 {"imageFrame", Value::text("camera")},
+                                                 {"planeFrame", Value::text("table")}})
+              .ok);
+  CHECK(node.out("calib").asRecord()->data == upgraded.data);
+}
+
 namespace {
 
 /// 板面 mm → 图像 px：8 px/mm、转 5°、加一点透视。

@@ -6,6 +6,13 @@ use std::collections::HashSet;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
+fn deserialize_present_json<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphDoc {
     #[serde(rename = "schemaVersion")]
@@ -15,6 +22,13 @@ pub struct GraphDoc {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+    #[serde(
+        rename = "contractUpgrade",
+        default,
+        deserialize_with = "deserialize_present_json",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub contract_upgrade: Option<serde_json::Value>,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     #[serde(default)]
@@ -172,6 +186,29 @@ impl GraphDoc {
         let Some(node_id) = m["nodeId"].as_str() else {
             return false;
         };
+        if node_id.is_empty() {
+            return self.retire_contract_upgrade(&m["graphUpdate"]);
+        }
+        let pending_source = self
+            .contract_upgrade
+            .as_ref()
+            .and_then(|request| request["rules"].as_array())
+            .is_some_and(|rules| {
+                rules
+                    .iter()
+                    .any(|rule| rule["source"]["node"].as_str() == Some(node_id))
+            });
+        if pending_source
+            && self.nodes.iter().any(|node| {
+                node.id == node_id
+                    && (m["op"].as_str().is_some_and(|op| op != node.op)
+                        || m["opVersion"]
+                            .as_str()
+                            .is_some_and(|version| Some(version) != node.op_version.as_deref()))
+            })
+        {
+            return false;
+        }
         let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) else {
             return false;
         };
@@ -193,6 +230,7 @@ impl GraphDoc {
 
         let edits = &m["edits"];
         if !edits.is_object() {
+            self.retire_contract_upgrade(&m["graphUpdate"]);
             return true;
         }
         let same = |a: &PortRef, b: &serde_json::Value| {
@@ -252,6 +290,96 @@ impl GraphDoc {
                 self.edges.push(Edge { id, from, to });
             }
         }
+        self.retire_contract_upgrade(&m["graphUpdate"]);
+        true
+    }
+
+    fn retire_contract_upgrade(&mut self, update: &serde_json::Value) -> bool {
+        let retirement = &update["contractUpgradeRetirement"];
+        let Some(request) = self.contract_upgrade.as_ref() else {
+            return false;
+        };
+        let Some(requirements) = retirement["requirements"].as_array() else {
+            return false;
+        };
+        if request != &retirement["request"] || !retirement["historyEntry"].is_object() {
+            return false;
+        }
+        let same = |a: &PortRef, b: &serde_json::Value| {
+            b["node"].as_str() == Some(a.node.as_str())
+                && b["port"].as_str() == Some(a.port.as_str())
+        };
+        for required in requirements {
+            let source = &required["source"];
+            let adapter = &required["adapter"];
+            let Some(source_node) = self
+                .nodes
+                .iter()
+                .find(|n| Some(n.id.as_str()) == source["node"].as_str())
+            else {
+                return false;
+            };
+            let Some(adapter_node) = self
+                .nodes
+                .iter()
+                .find(|n| Some(n.id.as_str()) == adapter["id"].as_str())
+            else {
+                return false;
+            };
+            let from = serde_json::json!({"node":source["node"],"port":source["port"]});
+            let middle = serde_json::json!({"node":adapter["id"],"port":required["port"]});
+            let target = &required["target"];
+            if Some(source_node.op.as_str()) != source["op"].as_str()
+                || source_node.op_version.as_deref() != source["opVersion"].as_str()
+                || Some(adapter_node.op.as_str()) != adapter["op"].as_str()
+                || adapter_node.op_version.as_deref() != adapter["opVersion"].as_str()
+                || adapter_node.bypass
+                || serde_json::Value::Object(adapter_node.params.clone()) != adapter["params"]
+                || !self
+                    .nodes
+                    .iter()
+                    .any(|n| Some(n.id.as_str()) == target["node"].as_str())
+                || self
+                    .edges
+                    .iter()
+                    .any(|e| same(&e.from, &from) && same(&e.to, target))
+                || self
+                    .edges
+                    .iter()
+                    .filter(|e| same(&e.from, &from) && same(&e.to, &middle))
+                    .count()
+                    != 1
+                || self
+                    .edges
+                    .iter()
+                    .filter(|e| same(&e.from, &middle) && same(&e.to, target))
+                    .count()
+                    != 1
+            {
+                return false;
+            }
+        }
+        if self.meta.as_ref().is_some_and(|meta| !meta.is_object()) {
+            return false;
+        }
+        let meta = self.meta.get_or_insert_with(|| serde_json::json!({}));
+        if meta
+            .get("contractUpgradeHistory")
+            .is_some_and(|history| !history.is_array())
+        {
+            return false;
+        }
+        let history = meta
+            .as_object_mut()
+            .unwrap()
+            .entry("contractUpgradeHistory")
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .unwrap();
+        if !history.contains(&retirement["historyEntry"]) {
+            history.push(retirement["historyEntry"].clone());
+        }
+        self.contract_upgrade = None;
         true
     }
 }
@@ -266,6 +394,7 @@ mod tests {
             id: "test".into(),
             name: None,
             meta: None,
+            contract_upgrade: None,
             params: Default::default(),
             nodes: nodes
                 .iter()
@@ -388,7 +517,8 @@ mod tests {
                 "ui": {"position": {"x": 12, "y": 34}, "title": "自定义标题"}
             }],
             "edges": [],
-            "x": {"futureField": [1, 2, 3]}
+            "x": {"futureField": [1, 2, 3]},
+            "contractUpgrade": {"schemaVersion":1,"rules":[]}
         }"#;
         let doc: GraphDoc = serde_json::from_str(raw).unwrap();
         doc.validate_structure().unwrap();
@@ -397,6 +527,32 @@ mod tests {
         assert_eq!(out["nodes"][0]["ui"]["position"]["x"], 12);
         assert_eq!(out["nodes"][0]["ui"]["title"], "自定义标题");
         assert_eq!(out["x"]["futureField"][2], 3);
+        assert_eq!(
+            out["contractUpgrade"],
+            serde_json::json!({"schemaVersion":1,"rules":[]})
+        );
+        let roundtrip: GraphDoc = serde_json::from_value(out.clone()).unwrap();
+        assert_eq!(roundtrip.contract_upgrade, doc.contract_upgrade);
+        for payload in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!({"schemaVersion":999,"rules":[]}),
+        ] {
+            let mut present = out.clone();
+            present["contractUpgrade"] = payload.clone();
+            let parsed: GraphDoc = serde_json::from_value(present).unwrap();
+            assert_eq!(parsed.contract_upgrade, Some(payload.clone()));
+            assert_eq!(
+                serde_json::to_value(parsed).unwrap()["contractUpgrade"],
+                payload
+            );
+        }
+        let mut absent = roundtrip;
+        absent.contract_upgrade = None;
+        assert!(serde_json::to_value(absent)
+            .unwrap()
+            .get("contractUpgrade")
+            .is_none());
         // bypass 默认 false 时不写进文件：稀疏存储，老图的 diff 不该被它污染
         assert!(out["nodes"][0].get("bypass").is_none());
         // 没有声明图输出时 outputs 也不写进文件
@@ -495,5 +651,143 @@ mod tests {
         // 子图里的路径 id 不写回
         let nested = serde_json::json!({ "nodeId": "sg/s", "op": "t.sink", "params": {} });
         assert!(!d.apply_migration(&nested));
+    }
+
+    #[test]
+    fn contract_upgrade_partial_write_retires_to_passive_history_after_completion() {
+        let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../core/tests/fixtures/contract-upgrade/plane-calib.lyflow.json"
+        ))
+        .unwrap();
+        raw["meta"] = serde_json::json!({"owner":"keep", "contractUpgradeHistory":[{"schemaVersion":2,"future":true}]});
+        raw["nodes"].as_array_mut().unwrap().push(
+            serde_json::json!({"id":"other","op":"util.reroute","opVersion":"1.0.0","params":{}}),
+        );
+        raw["edges"].as_array_mut().unwrap().push(serde_json::json!({"id":"other-edge","from":{"node":"load","port":"calib"},"to":{"node":"other","port":"in"}}));
+        let mut second_rule = raw["contractUpgrade"]["rules"][0].clone();
+        second_rule["adapterId"] = "other_calib".into();
+        second_rule["target"]["node"] = "other".into();
+        raw["contractUpgrade"]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(second_rule);
+        let request = raw["contractUpgrade"].clone();
+        let params =
+            serde_json::json!({"missingUnit":"mm","imageFrame":"camera","planeFrame":"table"});
+        let mut requirements = Vec::new();
+        let mut actions = Vec::new();
+        for (index, rule) in request["rules"].as_array().unwrap().iter().enumerate() {
+            let adapter = serde_json::json!({"id":rule["adapterId"],"op":"image.upgrade_plane_calib","opVersion":"1.0.0","params":params});
+            let from = raw["edges"][index]["from"].clone();
+            let middle = serde_json::json!({"node":rule["adapterId"],"port":"calib"});
+            requirements.push(serde_json::json!({"source":rule["source"],"target":rule["target"],"adapter":adapter,"port":"calib"}));
+            actions.push(serde_json::json!({"nodeId":rule["target"]["node"],"op":"util.reroute","opVersion":"1.0.0","params":{},
+                "edits":{"removeEdges":[raw["edges"][index]],"addNodes":[adapter],"addEdges":[
+                    {"id":format!("contract_{}_in",rule["adapterId"].as_str().unwrap()),"from":from,"to":middle},
+                    {"id":raw["edges"][index]["id"],"from":middle,"to":rule["target"]}]}}));
+        }
+        let entry = serde_json::json!({"schemaVersion":1,"request":request,"appliedSources":request["rules"].as_array().unwrap().iter().map(|r|r["source"].clone()).collect::<Vec<_>>()});
+        let update = serde_json::json!({"contractUpgradeRetirement":{"request":request,"historyEntry":entry,"requirements":requirements}});
+        actions[1]["graphUpdate"] = update.clone();
+        let mut d: GraphDoc = serde_json::from_value(raw).unwrap();
+        let source_migration = serde_json::json!({"nodeId":"load","op":"image.renamed_calib","opVersion":"2.0.0","params":{}});
+        assert!(!d.apply_migration(&source_migration));
+        assert_eq!(d.nodes[0].op_version.as_deref(), Some("1.0.0"));
+        assert!(d.apply_migration(&actions[1]));
+        assert_eq!(d.contract_upgrade.as_ref(), Some(&request));
+        assert_eq!(
+            d.meta.as_ref().unwrap()["contractUpgradeHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut resumed: GraphDoc =
+            serde_json::from_value(serde_json::to_value(d).unwrap()).unwrap();
+        actions[0]["graphUpdate"] = update.clone();
+        assert!(resumed.apply_migration(&actions[0]));
+        assert!(resumed.contract_upgrade.is_none());
+        assert!(resumed.apply_migration(&source_migration));
+        assert_eq!(resumed.nodes[0].op, "image.renamed_calib");
+        assert_eq!(resumed.nodes[0].op_version.as_deref(), Some("2.0.0"));
+        assert_eq!(resumed.meta.as_ref().unwrap()["owner"], "keep");
+        assert_eq!(
+            resumed.meta.as_ref().unwrap()["contractUpgradeHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        resumed.nodes[0].op = "image.load_calib".into();
+        resumed.nodes[0].op_version = Some("1.0.0".into());
+        resumed.contract_upgrade = Some(request);
+        let graph_only = serde_json::json!({"nodeId":"","graphUpdate":update});
+        let mut disabled = resumed.clone();
+        disabled.meta = Some(serde_json::json!({"owner":"keep","contractUpgradeHistory":[]}));
+        disabled
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "explicit_calib")
+            .unwrap()
+            .bypass = true;
+        let untouched = serde_json::to_value(&disabled).unwrap();
+        assert!(!disabled.apply_migration(&graph_only));
+        assert_eq!(serde_json::to_value(&disabled).unwrap(), untouched);
+        for bypass in [
+            serde_json::Value::Null,
+            serde_json::json!("false"),
+            serde_json::json!(0),
+        ] {
+            let mut malformed = untouched.clone();
+            malformed["nodes"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|node| node["id"] == "explicit_calib")
+                .unwrap()["bypass"] = bypass;
+            assert!(serde_json::from_value::<GraphDoc>(malformed).is_err());
+        }
+        disabled
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "explicit_calib")
+            .unwrap()
+            .bypass = false;
+        assert!(disabled.apply_migration(&graph_only));
+        assert!(disabled.contract_upgrade.is_none());
+        assert_eq!(
+            disabled.meta.as_ref().unwrap()["contractUpgradeHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(resumed.apply_migration(&graph_only));
+        assert!(resumed.contract_upgrade.is_none());
+        assert_eq!(
+            resumed.meta.as_ref().unwrap()["contractUpgradeHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        resumed.nodes.retain(|n| n.id != "consumer");
+        resumed
+            .edges
+            .retain(|e| e.from.node != "consumer" && e.to.node != "consumer");
+        resumed.validate_structure().unwrap();
+        let nested = serde_json::to_value(&resumed).unwrap();
+        resumed.subgraphs.insert("inside".into(), serde_json::json!({"nodes":nested["nodes"],"edges":nested["edges"],"inputs":[],"outputs":[],"params":[]}));
+        resumed.nodes = vec![Node {
+            id: "group".into(),
+            op: "sub:inside".into(),
+            op_version: None,
+            bypass: false,
+            params: Default::default(),
+            ui: None,
+        }];
+        resumed.edges.clear();
+        resumed.validate_structure().unwrap();
+        assert!(resumed.contract_upgrade.is_none());
     }
 }
