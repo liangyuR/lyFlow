@@ -28,6 +28,8 @@ import type {
   Transport,
   TransportKind,
   Unlisten,
+  RuntimeCapabilities,
+  RunBindings,
 } from './types';
 
 /** Tauri 壳里的传输：每个方法对应一条 `#[tauri::command]`。 */
@@ -41,6 +43,14 @@ export class TauriTransport implements Transport {
   async getCoreInfo(): Promise<CoreInfo> {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<CoreInfo>('get_core_info');
+  }
+  async getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RuntimeCapabilities>('get_runtime_capabilities');
+  }
+  async getRunBindings(runId: string): Promise<RunBindings> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RunBindings>('get_run_bindings', { runId });
   }
   async saveGraph(path: string, doc: GraphDoc): Promise<void> {
     const { invoke } = await import('@tauri-apps/api/core');

@@ -145,6 +145,7 @@ export interface OutputStat {
   port: string;
   type: string;
   elementCount: number;
+  sourceCloudId?: string;
   /** 非点云输出才有。点云与 Indices 走二进制通道（ADR-0006）。 */
   value?: OutputValue;
 }
@@ -326,6 +327,7 @@ export interface RunOutput {
   type: string;
   elementCount: number;
   byteSize: number;
+  sourceCloudId?: string;
   /** 非点云输出才有。点云走二进制通道。 */
   value?: OutputValue;
   /** 该端口没有结果（节点没跑到，或惰性闭包没被 demand）。 */
@@ -340,6 +342,7 @@ export interface OutputInfo {
   type: string;
   elementCount: number;
   byteSize: number;
+  sourceCloudId?: string;
   value?: OutputValue;
 }
 
@@ -355,6 +358,8 @@ export const CLOUD_HAS_RGB = 4;
 export interface CloudPayload {
   pointCount: number;
   totalPoints: number;
+  sourceCloudId?: string;
+  sampleStride?: number;
   /** [minX, minY, minZ, maxX, maxY, maxZ]，用**全量**点云算的。 */
   bounds: Float32Array;
   /** 3n 个 float，可以直接喂给 BufferAttribute。 */
@@ -514,6 +519,7 @@ export interface IndicesPayload {
   count: number;
   total: number;
   sourceCloudId: number;
+  sourceCloudIdString?: string;
   values: Int32Array;
 }
 
@@ -533,5 +539,11 @@ export function decodeIndices(buffer: ArrayBuffer): IndicesPayload {
     throw new Error(`下标载荷太短（${buffer.byteLength} 字节），装不下 count=${count}`);
   }
   const values = new Int32Array(buffer, 24, count);
-  return { count, total, sourceCloudId, values };
+  return {
+    count,
+    total,
+    sourceCloudId,
+    sourceCloudIdString: header.getBigUint64(16, true).toString(),
+    values,
+  };
 }

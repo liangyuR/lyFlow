@@ -4,6 +4,20 @@
 
 import type { PeekView } from '../store/peek';
 import { bundleKindOf, type BundleDesc } from '../types/manifest';
+import type { OutputStat } from '../types/execution';
+
+export function hasPoseScene(outputs: readonly OutputStat[] | undefined): boolean {
+  return Boolean(
+    outputs?.some(
+      (output) =>
+        output.value?.kind === 'Record' &&
+        ['vision.Pose2D.v1', 'vision.Poses2D.v1', 'vision.Pose3D.v1', 'vision.Poses3D.v1'].includes(
+          output.value.type ?? '',
+        ) &&
+        output.value.data?.unit === 'm',
+    ),
+  );
+}
 
 export function defaultViewFor(type: string | null): PeekView {
   if (type && bundleKindOf(type)) return 'fields';
@@ -89,10 +103,12 @@ export function viewerContentFor(
   types: readonly (string | null)[],
   bundles?: readonly BundleDesc[],
   inputTypes: readonly (string | null)[] = [],
+  outputs?: readonly OutputStat[],
 ): ViewerContent {
   if (types.length === 0 && inputTypes.length === 0) return 'cloud';
   if (hasCloud(types)) return 'cloud';
   if (types.includes('Image') || inputTypes.includes('Image')) return 'image';
+  if (hasPoseScene(outputs)) return 'cloud';
   if (types.length === 0) return 'cloud';
   return types.some((t) => drawable(t, bundles)) ? 'cloud' : 'value';
 }

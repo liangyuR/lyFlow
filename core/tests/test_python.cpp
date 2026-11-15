@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "lyflow/c_api.h"
+#include "lyflow/pose.h"
 #include "python_runtime.h"
 
 using namespace lyflow;
@@ -99,6 +100,35 @@ def invalid(ctx, mode):
         return dto
     DataCodec.encode = encode
     return {'image':Image(np.zeros((1, 2), dtype=np.uint8))}
+
+@node(id='py.integration.native_types', version='1.0.0', label='原生几何与张量往返',
+      inputs={'tensor':'Tensor', 'transform':'Transform', 'plane':'Plane',
+              'point':'Point2D', 'line':'Line2D', 'circle':'Circle2D', 'box':'Box2D', 'poses':'Record'},
+      outputs={'tensor':'Tensor', 'transform':'Transform', 'plane':'Plane',
+               'point':'Point2D', 'line':'Line2D', 'circle':'Circle2D', 'box':'Box2D', 'poses':'Record'},
+      params={'mode':{'type':'string','default':'ok'}})
+def native_types(inputs, params, ctx):
+    from lyflow_python import Transform
+    assert not inputs['tensor'].values.flags.writeable
+    assert not inputs['transform'].matrix.flags.writeable
+    assert inputs['point'].unit == 'px' and inputs['line'].unit == 'm'
+    outputs = {name:value.copy() for name,value in inputs.items()}
+    outputs['tensor'].values[:] += np.float32(1.25)
+    outputs['poses'].data['items'][0]['attributes']['processed'] = True
+    if params['mode'] == 'protocol':
+        import lyflow_python.api as api
+        api.DATA_PROTOCOL_VERSION = 99
+    elif params['mode'] == 'wrong_output':
+        from lyflow_python.codec import DataCodec
+        original = DataCodec.encode
+        def encode(codec, value, kind):
+            dto = original(codec, value, kind)
+            if kind == 'Tensor':
+                DataCodec.encode = original
+                dto['values']['dtype'] = 'u8'
+            return dto
+        DataCodec.encode = encode
+    return outputs
 )PY";
     std::ofstream bad(dir / "broken.py");
     bad << "raise ImportError('isolated broken package')\n";
@@ -190,13 +220,14 @@ TEST_CASE("Python configuration is opt-in and dynamic registry families remain i
   CHECK(isolated.operators().size() == 1);
 }
 
-TEST_CASE("Python worker exchanges all supported data through a real named pipe") {
+TEST_CASE(
+    "Python worker exchanges clouds images measurements and records through a real named pipe") {
   PythonFixture fixture;
   auto& registry = ensureRegistry();
   const auto configured = python_runtime::configure(registry, fixture.config().dump());
   INFO(configured.dump());
   REQUIRE(configured.at("ready") == true);
-  REQUIRE(configured.at("operatorCount") == 3);
+  REQUIRE(configured.at("operatorCount") == 4);
   CHECK(configured.at("problems").size() == 1);
   CHECK_FALSE(configured.at("pythonVersion").get<std::string>().empty());
   CHECK_FALSE(configured.at("numpyVersion").get<std::string>().empty());
@@ -222,6 +253,7 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
       CAPTURE(pixelDepthName(depth));
       CAPTURE(channels);
       auto image = Image::allocate(2, 3, channels, depth);
+      image.scale = 3;
       std::unordered_map<std::string, Data> input{
           {"cloud", Data::cloud(cloud)},
           {"image", Data::image(image)},
@@ -245,6 +277,7 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
       CHECK(result.at("cloud").asCloud()->intensity == cloud.intensity);
       CHECK(result.at("image").asImage()->at(1, 2, channels - 1) == 1);
       CHECK(result.at("image").asImage()->depth == depth);
+      CHECK(result.at("image").asImage()->scale == 3);
       CHECK(result.at("measurement").asMeasurement()->value == 7);
       CHECK(result.at("measurement").asMeasurement()->hasLimits);
       CHECK(result.at("measurement").asMeasurement()->upper == 12);
@@ -261,7 +294,7 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
   }
   const auto refreshed = python_runtime::refresh(registry);
   CHECK(refreshed.at("ready") == true);
-  CHECK(refreshed.at("operatorCount") == 3);
+  CHECK(refreshed.at("operatorCount") == 4);
   const ComputeFn invalid = registry.find("py.integration.invalid")->compute;
   for (const char* mode : {"dtype", "shape", "file", "channels"}) {
     CAPTURE(mode);
@@ -292,6 +325,105 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
   for (char* text : {status, manifest, validation, plan})
     lyflow_string_free(text);
   CHECK(refresh.get().at("ready") == true);
+}
+
+TEST_CASE(
+    "Python native geometry Tensor and standard Records preserve identity units and recovery") {
+  PythonFixture fixture;
+  auto& registry = ensureRegistry();
+  REQUIRE(python_runtime::configure(registry, fixture.config().dump()).at("ready") == true);
+  const auto* op = registry.find("py.integration.native_types");
+  REQUIRE(op != nullptr);
+  const ComputeFn compute = op->compute;
+  Tensor tensor{{2, 2}, {1, 2, 3, 4}};
+  Transform transform;
+  transform.m[3] = .125f;
+  Plane plane{{0, 0, 1}, -.125f};
+  Point2D point{{8, 9}, Unit2D::Pixel};
+  Line2D line;
+  line.hasSegment = true;
+  line.end[0] = 2;
+  Circle2D circle{{3, 4}, .25f, Unit2D::Meter};
+  Box2D box{{1, 2}, {4, 6}, Unit2D::Pixel};
+  Json pose{{"id", "part-A"},
+            {"frame", "camera"},
+            {"unit", "m"},
+            {"position", {1, 2, 3}},
+            {"size", {.1, .2, .3}},
+            {"rotation", {0, 0, 0, 1}},
+            {"attributes", {{"source", "native"}}}};
+  Record poses{poses::kPoses3DType, {{"frame", "camera"}, {"unit", "m"}, {"items", {pose}}}};
+  std::unordered_map<std::string, Data> input{{"tensor", Data::tensor(tensor).withTensorScale(4)},
+                                              {"transform", Data::transform(transform)},
+                                              {"plane", Data::plane(plane)},
+                                              {"point", Data::point2d(point)},
+                                              {"line", Data::line2d(line)},
+                                              {"circle", Data::circle2d(circle)},
+                                              {"box", Data::box2d(box)},
+                                              {"poses", Data::record(poses)}};
+  auto run = [&](const char* mode, std::unordered_map<std::string, Data>& result) {
+    PythonContext context;
+    Outputs output(result);
+    const ParamMap params{{"mode", Value::text(mode)}};
+    return compute(Inputs(input), ParamView(params, context.base), output, context);
+  };
+  std::unordered_map<std::string, Data> result;
+  const auto first = run("ok", result);
+  INFO(first.message);
+  REQUIRE(first.ok);
+  REQUIRE(result.size() == 8);
+  CHECK(result.at("tensor").asTensor()->shape == tensor.shape);
+  CHECK(result.at("tensor").asTensor()->data == std::vector<float>{2.25f, 3.25f, 4.25f, 5.25f});
+  CHECK(result.at("tensor").tensorScale() == 4);
+  CHECK(result.at("transform").asTransform()->m[3] == doctest::Approx(.125));
+  CHECK(result.at("plane").asPlane()->d == doctest::Approx(-.125));
+  CHECK(result.at("point").asPoint2D()->unit == Unit2D::Pixel);
+  CHECK(result.at("point").asPoint2D()->p[1] == 9);
+  CHECK(result.at("line").asLine2D()->hasSegment);
+  CHECK(result.at("line").asLine2D()->unit == Unit2D::Meter);
+  CHECK(result.at("line").asLine2D()->end[0] == 2);
+  CHECK(result.at("circle").asCircle2D()->radius == doctest::Approx(.25));
+  CHECK(result.at("box").asBox2D()->unit == Unit2D::Pixel);
+  CHECK(result.at("box").asBox2D()->max[1] == 6);
+  CHECK(result.at("poses").asRecord()->data["items"][0]["id"] == "part-A");
+  CHECK(result.at("poses").asRecord()->data["items"][0]["attributes"]["processed"] == true);
+  CHECK_FALSE(input.at("poses").asRecord()->data["items"][0]["attributes"].contains("processed"));
+  CHECK(input.at("tensor").asTensor()->data == tensor.data);
+  for (const char* mode : {"wrong_output", "protocol"}) {
+    CAPTURE(mode);
+    result.clear();
+    CHECK(run(mode, result).code ==
+          (std::string(mode) == "protocol" ? "python_protocol_error" : "python_output_invalid"));
+    CHECK(result.empty());
+    const auto recovered = run("ok", result);
+    INFO(recovered.message);
+    CHECK(recovered.ok);
+  }
+  for (const Tensor empty : {Tensor{{}, {}}, Tensor{{2, 0, 3}, {}}}) {
+    input["tensor"] = Data::tensor(empty).withTensorScale(2);
+    result.clear();
+    REQUIRE(run("ok", result).ok);
+    CHECK(result.at("tensor").asTensor()->shape == empty.shape);
+    CHECK(result.at("tensor").asTensor()->data.empty());
+    CHECK(result.at("tensor").tensorScale() == 2);
+  }
+  input["poses"] = Data::record({"vision.Poses3D.v2", poses.data});
+  result.clear();
+  CHECK(run("ok", result).code == "python_input_invalid");
+  CHECK(result.empty());
+  const auto path = fixture.dir / "nodes.py";
+  std::ifstream file(path);
+  const std::string original((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+  file.close();
+  std::ofstream(path) << original
+                      << "\nimport lyflow_python.api as api\napi.DATA_PROTOCOL_VERSION = 99\n";
+  const auto mismatched = python_runtime::refresh(registry);
+  CHECK(mismatched.at("ready") == false);
+  CHECK(mismatched.at("operatorCount") == 0);
+  CHECK(mismatched.at("problems").dump().find("dataProtocolVersion=2") != std::string::npos);
+  std::ofstream(path) << original;
+  CHECK(python_runtime::refresh(registry).at("ready") == true);
 }
 
 TEST_CASE("Python failures, queued cancellation and forced termination recover on the next task") {
@@ -446,7 +578,7 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
     const auto discovered = python_runtime::refresh(registry);
     INFO(discovered.dump());
     REQUIRE(discovered.at("ready") == true);
-    REQUIRE(discovered.at("operatorCount") == 3);
+    REQUIRE(discovered.at("operatorCount") == 4);
     CHECK(registry.validate().empty());
     const auto* current = registry.find("py.integration.control");
     REQUIRE(current != nullptr);

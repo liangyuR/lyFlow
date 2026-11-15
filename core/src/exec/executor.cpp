@@ -274,6 +274,7 @@ public:
       w.field("port", o.port);
       w.field("type", o.type);
       w.field("elementCount", static_cast<std::int64_t>(o.elementCount));
+      w.fieldIfSet("sourceCloudId", o.sourceCloudId);
       // 非点云输出把值一并带上：A/B 脚本与 Inspector 靠它，不必再回头查结果仓。
       if (!o.valueJson.empty()) {
         w.key("value");
@@ -1035,8 +1036,7 @@ private:
         primaryElements = d.elementCount();
         first = false;
       }
-      infos.push_back(
-          OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize(), d.valueJson()});
+      infos.push_back(describeOutput(p.name, d));
       appendBundleFieldInfos(p.name, d, infos);
       // 强制重算的结果覆盖同 cacheKey 的旧结果（修订一 V1）：键没变而内容变了的只有外部输入，
       // 那正是用户点「强制重算」想看到的新东西。
@@ -1624,6 +1624,7 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     if (s.hasInfo) {
       w.field("type", s.info.type);
       w.field("elementCount", static_cast<std::int64_t>(s.info.elementCount));
+      w.fieldIfSet("sourceCloudId", s.info.sourceCloudId);
       // 点云只给元信息，二进制仍走 lyflow_output_cloud（D4）。
       if (!s.info.valueJson.empty()) {
         w.key("value");
@@ -1738,6 +1739,8 @@ int threadBudgetFor(int concurrent) {
 
 Run::Run(std::string graphJson, RunOptions options, lyflow_event_cb cb, void* user)
     : graphJson_(std::move(graphJson)), options_(std::move(options)), cb_(cb), user_(user) {
+  if (ResultStore::instance().isView(options_.runId))
+    throw std::invalid_argument("运行标识与不可变帧视图冲突");
   // 给了 isolate 就用同一组 id 当 targets（node-run R1）：编译要它们的上游闭包来算 cacheKey，
   // 下游一概不进计划（R4）。调用方不必重复传，传了别的也以 isolate 为准。
   if (!options_.isolate.empty())
@@ -1800,6 +1803,10 @@ void Run::workImpl() {
     injected[in.nodeId][in.port] = in.data;
   }
   const InjectionKeys injection = injectionKeysOf(options_.inputs);
+  std::vector<CapturedOutput> recordedInputs;
+  for (const auto& item : options_.inputs)
+    recordedInputs.push_back({item.nodeId, item.port, item.data});
+  ResultStore::instance().setRunInputs(options_.runId, std::move(recordedInputs));
 
   // 预览与单节点运行不组合（node-run R5）：预览结果在另一个缓存命名空间里，拿它去探
   // 「上游有没有结果」只会把刚跑过正式运行的上游误判成缺。参数错误，整图级失败。
@@ -1833,6 +1840,11 @@ void Run::workImpl() {
   }
 
   const int workers = resolveMaxParallel(options_.maxParallel);
+  std::vector<NamedOutput> declaredOutputs;
+  for (const auto& node : plan.nodes)
+    for (const auto& port : node.op->outputs)
+      declaredOutputs.push_back({"", node.id, port.name});
+  ResultStore::instance().setDeclaredOutputs(options_.runId, std::move(declaredOutputs));
   const bool preview = options_.mode == RunMode::Preview;
   sink.runStarted(plan, options_.targets, options_.isolate, options_.force, workers, preview,
                   options_.previewMaxPoints ? options_.previewMaxPoints : kDefaultPreviewMaxPoints);
@@ -2200,7 +2212,8 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
 // --------------------------------------------------------------- 生效参数视图
 
 std::string effectiveParamsJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                                const std::string& paramsJson) {
+                                const std::string& paramsJson,
+                                const std::vector<InjectedInput>& inputs) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
@@ -2210,6 +2223,9 @@ std::string effectiveParamsJson(const std::string& graphJson, const std::filesys
   BuildOptions build;
   build.runId = "params";
   build.baseDir = baseDir;
+  const auto injection = injectionKeysOf(inputs);
+  build.injectedPorts = injection.injectedPorts;
+  build.providedDigest = injection.providedDigest;
   buildPlan(ensureRegistry(), raw, build, plan, diags);
   if (diags.hasErrors() || !plan.ok)
     return diags.toJson();
@@ -2281,6 +2297,7 @@ std::string runOutputsJson(const std::string& runId) {
     if (store.outputInfo(runId, o.nodeId, o.port, info)) {
       w.field("type", info.type);
       w.field("elementCount", static_cast<std::int64_t>(info.elementCount));
+      w.fieldIfSet("sourceCloudId", info.sourceCloudId);
       w.field("byteSize", static_cast<std::int64_t>(info.byteSize));
       // 点云只给元信息，二进制仍走 lyflow_output_cloud（D4）。
       if (!info.valueJson.empty()) {

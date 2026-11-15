@@ -131,6 +131,11 @@ struct RunResult {
 };
 
 class Client;
+class Frame;
+class FrameSession;
+namespace detail {
+struct FrameApi;
+}
 
 /// 借来的点云缓冲，析构时还给 core。
 class CloudView {
@@ -166,16 +171,19 @@ public:
 
 private:
   friend class Client;
+  friend class Frame;
   void reset();
   void steal(CloudView& other) {
     view_ = other.view_;
     free_ = other.free_;
+    retain_ = std::move(other.retain_);
     std::memset(&other.view_, 0, sizeof(other.view_));
     other.free_ = nullptr;
   }
 
   lyflow_cloud_view view_{};
   void (*free_)(lyflow_cloud_view*) = nullptr;
+  std::shared_ptr<void> retain_;
 };
 
 class TensorView {
@@ -203,16 +211,19 @@ public:
 
 private:
   friend class Client;
+  friend class Frame;
   void reset();
   void steal(TensorView& other) {
     view_ = other.view_;
     free_ = other.free_;
+    retain_ = std::move(other.retain_);
     std::memset(&other.view_, 0, sizeof(other.view_));
     other.free_ = nullptr;
   }
 
   lyflow_tensor_view view_{};
   void (*free_)(lyflow_tensor_view*) = nullptr;
+  std::shared_ptr<void> retain_;
 };
 
 /// 一张图像的一级、一段行（ABI v15）。level 0 零拷贝借用，释放前别让 RunResult 析构。
@@ -246,16 +257,19 @@ public:
 
 private:
   friend class Client;
+  friend class Frame;
   void reset();
   void steal(ImageView& other) {
     view_ = other.view_;
     free_ = other.free_;
+    retain_ = std::move(other.retain_);
     std::memset(&other.view_, 0, sizeof(other.view_));
     other.free_ = nullptr;
   }
 
   lyflow_image_view view_{};
   void (*free_)(lyflow_image_view*) = nullptr;
+  std::shared_ptr<void> retain_;
 };
 
 class IndicesView {
@@ -281,16 +295,19 @@ public:
 
 private:
   friend class Client;
+  friend class Frame;
   void reset();
   void steal(IndicesView& other) {
     view_ = other.view_;
     free_ = other.free_;
+    retain_ = std::move(other.retain_);
     std::memset(&other.view_, 0, sizeof(other.view_));
     other.free_ = nullptr;
   }
 
   lyflow_indices_view view_{};
   void (*free_)(lyflow_indices_view*) = nullptr;
+  std::shared_ptr<void> retain_;
 };
 
 namespace detail {
@@ -461,15 +478,7 @@ public:
   explicit Client(const std::wstring& dllPath) { loadW(dllPath); }
 #endif
 
-  ~Client() {
-    if (handle_) {
-#if defined(_WIN32)
-      ::FreeLibrary(static_cast<HMODULE>(handle_));
-#else
-      ::dlclose(handle_);
-#endif
-    }
-  }
+  ~Client() = default;
 
   Client(const Client&) = delete;
   Client& operator=(const Client&) = delete;
@@ -496,6 +505,23 @@ public:
     requireInjected(fn_.python_status, "lyflow_python_status");
     return owned(fn_.python_status());
   }
+
+  std::string runtimeCapabilities() const;
+  std::string runBindings(const std::string& runId) const;
+  std::string effectiveParams(const std::string& graphJson, const std::string& baseDir = {},
+                              const std::string& paramsJson = {},
+                              const std::vector<InputCloud>& inputs = {},
+                              const std::vector<InputImage>& imageInputs = {}) const;
+  Frame captureFrame(const std::string& runId, const std::string& metadataJson,
+                     const std::string& optionsJson = "{}") const;
+  Frame loadFrame(const std::string& path, std::uint64_t maxBytes = 1024ull * 1024 * 1024,
+                  const std::function<bool()>& cancelled = {}) const;
+  FrameSession createSession(const std::string& optionsJson = "{}") const;
+  RunHandle startRunWithFrame(const std::string& graphJson, const RunOptions& options,
+                              const Frame& frame, const std::string& bindingsJson,
+                              const std::function<void(const char*)>& onEvent = {}) const;
+  RunResult runWithFrame(const std::string& graphJson, const RunOptions& options,
+                         const Frame& frame, const std::string& bindingsJson) const;
   std::string refreshPython() const {
     requireInjected(fn_.refresh_python, "lyflow_refresh_python");
     return owned(fn_.refresh_python());
@@ -580,6 +606,7 @@ public:
       return out;
     }
     out.free_ = fn_.cloud_view_free;
+    out.retain_ = lease_;
     return out;
   }
 
@@ -593,6 +620,7 @@ public:
       return out;
     }
     out.free_ = fn_.tensor_view_free;
+    out.retain_ = lease_;
     return out;
   }
 
@@ -606,6 +634,7 @@ public:
       return out;
     }
     out.free_ = fn_.indices_view_free;
+    out.retain_ = lease_;
     return out;
   }
 
@@ -621,6 +650,7 @@ public:
       return out;
     }
     out.free_ = fn_.image_view_free;
+    out.retain_ = lease_;
     return out;
   }
 
@@ -673,6 +703,26 @@ public:
 
 private:
   friend class RunHandle;
+  friend class Frame;
+  friend class FrameSession;
+
+  std::shared_ptr<detail::FrameApi> frameApi() const;
+  RunHandle startRunImpl(const std::string& graphJson, const RunOptions& options,
+                         const std::function<void(const char*)>& onEvent, const Frame* frame,
+                         const std::string* bindingsJson) const;
+  lyflow_run* startFrame(const char* graph, const lyflow_run_options* options, const Frame* frame,
+                         const std::string* bindings, lyflow_event_cb callback, void* user,
+                         std::shared_ptr<void>& retain) const;
+
+  void retainLibrary() {
+    lease_ = std::shared_ptr<void>(handle_, [](void* library) {
+#if defined(_WIN32)
+      ::FreeLibrary(static_cast<HMODULE>(library));
+#else
+      ::dlclose(library);
+#endif
+    });
+  }
 
   struct Table {
     const char* (*version)() = nullptr;
@@ -767,6 +817,7 @@ private:
   }
 
   void* handle_ = nullptr;
+  std::shared_ptr<void> lease_;
   Table fn_;
 };
 
@@ -823,6 +874,7 @@ inline void Client::loadW(const std::wstring& dllPath) {
     handle_ = nullptr;
     throw;
   }
+  retainLibrary();
 }
 
 inline void Client::load(const std::string& dllPath) {
@@ -845,6 +897,7 @@ inline void Client::load(const std::string& dllPath) {
     handle_ = nullptr;
     throw;
   }
+  retainLibrary();
 }
 #endif
 
@@ -978,6 +1031,12 @@ inline RunResult RunHandle::result() {
 
 inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions& options,
                                   const std::function<void(const char*)>& onEvent) const {
+  return startRunImpl(graphJson, options, onEvent, nullptr, nullptr);
+}
+
+inline RunHandle Client::startRunImpl(const std::string& graphJson, const RunOptions& options,
+                                      const std::function<void(const char*)>& onEvent,
+                                      const Frame* frame, const std::string* bindingsJson) const {
   RunHandle handle;
   handle.client_ = this;
   handle.runId_ = options.runId.empty() ? std::string("embed-run") : options.runId;
@@ -1011,12 +1070,16 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   opts.image_input_count = raw.imageCount();
   opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
-  lyflow_run* run = fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
+  std::shared_ptr<void> frameRetain;
+  lyflow_run* run =
+      frame ? startFrame(graphJson.c_str(), &opts, frame, bindingsJson, &detail::dispatchEvent,
+                         &state->sink, frameRetain)
+            : fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
   if (!run)
     throw ClientError("lyflow_run_start 返回空句柄（内存不足）");
 
   auto freeRun = fn_.run_free;
-  handle.run_ = std::shared_ptr<void>(run, [freeRun](void* p) {
+  handle.run_ = std::shared_ptr<void>(run, [freeRun, lease = lease_, frameRetain](void* p) {
     if (p)
       freeRun(static_cast<lyflow_run*>(p));
   });
@@ -1024,5 +1087,7 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
 }
 
 } // namespace lyflow
+
+#include "lyflow/frames.hpp"
 
 #endif // LYFLOW_CLIENT_HPP

@@ -9,7 +9,7 @@ import * as THREE from 'three';
 
 import { num } from './Inspector';
 import { RAMPS, type RampName } from '../lib/ramps';
-import { fetchImageLevel } from '../lib/imageFetch';
+import { fetchImageLevel, imageEpochReady } from '../lib/imageFetch';
 import { transport } from '../transport';
 
 import '../styles.peek.tensor.css';
@@ -118,6 +118,7 @@ function draw(
   lo: number,
   hi: number,
   ramp: RampName,
+  normalEncoding = false,
 ): void {
   canvas.width = img.width;
   canvas.height = img.height;
@@ -143,6 +144,7 @@ function draw(
       const r = pixels[base + picks[0]!] ?? NaN;
       const g = pixels[base + picks[1]!] ?? NaN;
       const b = pixels[base + picks[2]!] ?? NaN;
+      if (normalEncoding && r === 0 && g === 0 && b === 0) continue;
       if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
         px[o] = 255;
         px[o + 1] = 0;
@@ -206,6 +208,7 @@ export interface ImageOverlayView {
   scale: number;
   fullWidth: number;
   fullHeight: number;
+  isCurrent?: boolean;
 }
 
 export interface ImageCanvasProps {
@@ -223,10 +226,12 @@ export interface ImageCanvasProps {
   testid: string;
   /** 画布挂上 / 摘下时回调（连线查看器的导出 PNG 要拿它）。 */
   onCanvas?: (canvas: HTMLCanvasElement | null) => void;
+  onRendered?: (canvas: HTMLCanvasElement | null, epoch?: string) => void;
   overlay?: (view: ImageOverlayView) => ReactNode;
   /** 预览时源头缩小过的图（valueJson 的 scale，ADR-0028）：一个像素对应原图 pixelScale × pixelScale 个像素。
    *  fullW / fullH 是这张图自己的尺寸；叠画、拖框与读数照旧用原图坐标，角标写明是预览。 */
   pixelScale?: number;
+  valueEncoding?: 'camera-unit-vector-xyz';
 }
 
 export function ImageCanvas({
@@ -240,8 +245,10 @@ export function ImageCanvas({
   errorText = null,
   testid,
   onCanvas,
+  onRendered,
   overlay,
   pixelScale = 1,
+  valueEncoding,
 }: ImageCanvasProps) {
   const [levelChoice, setLevelChoice] = useState<'auto' | number>('auto');
   // null = 还没手动选过：跟着图走（三通道以上看 RGB；u8 不拉伸，u16 / f32 拉伸）
@@ -249,7 +256,7 @@ export function ImageCanvas({
   const [ramp, setRamp] = useState<RampName>('gray');
   const [stretchPick, setStretch] = useState<boolean | null>(null);
   const channelChoice = channelPick ?? (channels >= 3 ? 'rgb' : 0);
-  const stretch = stretchPick ?? depth !== 'u8';
+  const stretch = stretchPick ?? (valueEncoding ? false : depth !== 'u8');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -322,7 +329,7 @@ export function ImageCanvas({
     loaded !== null && (loaded.key === fetchKey || sameFootprint(loaded.footprint, footprint))
       ? loaded
       : null;
-  const stale = img !== null && img.key !== fetchKey;
+  const stale = img !== null && !imageEpochReady(fetchKey, img.key);
 
   const picks = useMemo(() => {
     if (channels >= 3 && channelChoice === 'rgb') return [0, 1, 2];
@@ -331,13 +338,19 @@ export function ImageCanvas({
   }, [channels, channelChoice]);
 
   const extent = useMemo(() => (img ? extentOf(img, picks) : null), [img, picks]);
-  const [lo, hi] = stretch && extent ? [extent.lo, extent.hi] : naturalRange(depth);
+  const [lo, hi] =
+    stretch && extent ? [extent.lo, extent.hi] : valueEncoding ? [-1, 1] : naturalRange(depth);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !img) return;
-    draw(canvas, img, picks, lo, hi, ramp);
-  }, [img, picks, lo, hi, ramp]);
+    if (!canvas || !img || stale) {
+      onRendered?.(null);
+      return;
+    }
+    draw(canvas, img, picks, lo, hi, ramp, Boolean(valueEncoding));
+    onRendered?.(canvas, `${runId}|${nodeId}|${port}`);
+    return () => onRendered?.(null);
+  }, [img, stale, picks, lo, hi, ramp, valueEncoding, onRendered, runId, nodeId, port]);
 
   // 第一次有图、换了一张图（节点、端口或原图坐标下的尺寸变了）才适配到窗口；同一张图换了运行、换了级别、
   // 预览 ↔ 正式都不动视角（review 第二轮：按显示比例认图时，小一些的图与手选的级别每次切换都重新适配）
@@ -374,6 +387,7 @@ export function ImageCanvas({
 
   /** 原图像素 ↔ 屏幕：视角本来就按原图坐标记，与显示的是哪一级无关。 */
   const overlayView = (t: ViewXf): ImageOverlayView => ({
+    isCurrent: !stale,
     scale: t.scale,
     fullWidth: logicalW,
     fullHeight: logicalH,
@@ -523,7 +537,7 @@ export function ImageCanvas({
 
         <label
           className="peek-tensor__check"
-          title={`不拉伸时按 ${depth} 的原值范围 ${naturalRange(depth).join('–')} 显示`}
+          title={`不拉伸时按 ${depth} 的原值范围 ${(valueEncoding ? [-1, 1] : naturalRange(depth)).join('–')} 显示`}
         >
           <input
             type="checkbox"
@@ -563,6 +577,7 @@ export function ImageCanvas({
         <canvas
           className="peek-image__canvas"
           data-testid={`${testid}-canvas`}
+          data-image-epoch={img?.key ?? ''}
           ref={(el) => {
             canvasRef.current = el;
             onCanvas?.(el);
@@ -598,6 +613,7 @@ export function ImageCanvas({
       </div>
 
       <div className="peek-tensor__foot" data-testid={`${testid}-foot`}>
+        {stale && <span>正在更新图像 · 暂停结果叠加与导出 · </span>}
         {readout !== null ? (
           <span data-testid={`${testid}-readout`}>{readout}</span>
         ) : (

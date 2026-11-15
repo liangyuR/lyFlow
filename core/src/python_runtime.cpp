@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <mutex>
 #include <set>
@@ -14,7 +15,9 @@
 
 #include "exec/subgraph.h"
 #include "lyflow/operator.h"
+#include "lyflow/pose.h"
 #include "lyflow/registry.h"
+#include "lyflow/value.h"
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -30,6 +33,7 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t kMaxFrame = 16 * 1024 * 1024;
 constexpr std::size_t kMaxArray = 1024ull * 1024 * 1024;
+constexpr int kDataProtocolVersion = 2;
 std::atomic<std::uint64_t> sequence{0};
 
 struct Failure : std::runtime_error {
@@ -113,6 +117,106 @@ Json writeArray(const fs::path& dir, const void* data, std::size_t bytes,
   return {{"file", file.u8string()}, {"shape", shape}, {"dtype", dtype}};
 }
 
+bool featuresValid(const Json& data) {
+  if (!data.is_object() || (data.size() != 3 && data.size() != 4) ||
+      (data.size() == 4 && (!data.contains("sourceFrame") || !data.at("sourceFrame").is_string() ||
+                            data.at("sourceFrame").get<std::string>().empty())) ||
+      !data.contains("frame") || !data.at("frame").is_string() ||
+      data.at("frame").get<std::string>().empty() || !data.contains("unit") ||
+      data.at("unit") != "m" || !data.contains("items") || !data.at("items").is_array())
+    return false;
+  std::set<std::string> ids;
+  for (const auto& item : data.at("items")) {
+    if (!item.is_object() || !item.contains("type") || !item.at("type").is_string())
+      return false;
+    const auto type = item.at("type").get<std::string>();
+    if (type != "point" && type != "line" && type != "circle" && type != "plane" &&
+        type != "sphere")
+      return false;
+    if (item.contains("id") &&
+        (!item.at("id").is_string() || item.at("id").get<std::string>().empty() ||
+         !ids.insert(item.at("id").get<std::string>()).second))
+      return false;
+    if ((item.contains("frame") && item.at("frame") != data.at("frame")) ||
+        (item.contains("unit") && item.at("unit") != "m"))
+      return false;
+    if (type != "plane" &&
+        (!item.contains("position") || !poses::numericArray(item.at("position"), 3)))
+      return false;
+    if (type == "line" || type == "circle" || type == "plane") {
+      const char* key = type == "line" ? "direction" : "normal";
+      if (!item.contains(key) || !poses::numericArray(item.at(key), 3))
+        return false;
+      const auto& v = item.at(key);
+      if (std::abs(std::hypot(v[0].get<double>(), v[1].get<double>(), v[2].get<double>()) - 1) >
+          1e-6)
+        return false;
+    }
+    if ((type == "circle" || type == "sphere") &&
+        (!item.contains("radius") || !values::safeNumber(item.at("radius")) ||
+         item.at("radius").get<double>() <= 0))
+      return false;
+    if (type == "plane" && (!item.contains("d") || !values::safeNumber(item.at("d"))))
+      return false;
+    if (type == "line") {
+      if (item.contains("hasSegment") && !item.at("hasSegment").is_boolean())
+        return false;
+      if (item.value("hasSegment", false) &&
+          (!item.contains("start") || !item.contains("end") ||
+           !poses::numericArray(item.at("start"), 3) || !poses::numericArray(item.at("end"), 3) ||
+           item.at("start") == item.at("end")))
+        return false;
+    }
+  }
+  return true;
+}
+
+void recordValid(const Record& record, const char* code) {
+  std::string why;
+  if (record.type.size() > values::kMaxStringBytes || !values::boundedJson(record.data, why, true))
+    throw Failure(code, "Python Record 必须是有界有效 JSON：" + why);
+  const auto& type = record.type;
+  if (type == values::kValueType || type == values::kListType) {
+    if (!values::validate(record, why))
+      throw Failure(code, "Python 标准值无效：" + why);
+  } else if (type == poses::kPose2DType || type == poses::kPose3DType ||
+             type == poses::kPoses2DType || type == poses::kPoses3DType) {
+    if (!poses::validate(record, why))
+      throw Failure(code, "Python 工件位姿无效：" + why);
+  } else if (type == "geometry.Features3D.v1") {
+    if (!featuresValid(record.data))
+      throw Failure(code, "Python 三维几何记录无效");
+  } else {
+    for (const char* prefix : {"std.Value.", "std.List.", "vision.Pose2D.", "vision.Pose3D.",
+                               "vision.Poses2D.", "vision.Poses3D.", "geometry.Features3D."})
+      if (type.rfind(prefix, 0) == 0)
+        throw Failure(code, "不支持的 Python 标准 Record 版本：" + type);
+  }
+}
+
+const char* unitName(Unit2D unit) {
+  if (unit != Unit2D::Meter && unit != Unit2D::Pixel)
+    throw Failure("python_input_invalid", "二维几何单位必须为 m 或 px");
+  return unit == Unit2D::Pixel ? "px" : "m";
+}
+
+Json coordinates(const float* values, std::size_t count) {
+  Json result = Json::array();
+  for (std::size_t i = 0; i < count; ++i) {
+    if (!std::isfinite(values[i]))
+      throw Failure("python_input_invalid", "原生几何必须包含有限 float32 坐标");
+    result.push_back(values[i]);
+  }
+  return result;
+}
+
+bool supportedPort(const std::string& type) {
+  static const std::set<std::string> types{"PointCloud", "Image",     "Measurement", "Record",
+                                           "Tensor",     "Transform", "Plane",       "Point2D",
+                                           "Line2D",     "Circle2D",  "Box2D"};
+  return types.count(type) != 0;
+}
+
 Json encode(const Data& data, const fs::path& dir) {
   if (const auto* c = data.asCloud()) {
     if (!c->channelsConsistent())
@@ -129,14 +233,71 @@ Json encode(const Data& data, const fs::path& dir) {
     return j;
   }
   if (const auto* i = data.asImage()) {
-    if (!i->consistent())
+    if (!i->consistent() || i->scale < 1)
       throw Failure("python_input_invalid", "图像尺寸或像素缓冲无效");
     return {{"type", "Image"},
+            {"scale", i->scale},
             {"pixels",
              writeArray(dir, i->pixels.get(), i->byteSize(),
                         {static_cast<std::size_t>(i->height), static_cast<std::size_t>(i->width),
                          static_cast<std::size_t>(i->channels)},
                         pixelDepthName(i->depth))}};
+  }
+  if (const auto* t = data.asTensor()) {
+    if (!t->consistent() || t->shape.size() > 8 || data.tensorScale() < 1)
+      throw Failure("python_input_invalid", "Tensor 必须形状匹配、最多8维且 scale 为正");
+    std::vector<std::size_t> shape;
+    for (const auto dimension : t->shape) {
+      if (dimension < 0 || dimension > std::numeric_limits<std::int32_t>::max())
+        throw Failure("python_input_invalid", "Tensor 维度须为非负 int32");
+      shape.push_back(static_cast<std::size_t>(dimension));
+    }
+    return {
+        {"type", "Tensor"},
+        {"scale", data.tensorScale()},
+        {"values", writeArray(dir, t->data.data(), t->data.size() * sizeof(float), shape, "f32")}};
+  }
+  if (const auto* t = data.asTransform())
+    return {{"type", "Transform"}, {"matrix", coordinates(t->m, 16)}};
+  if (const auto* p = data.asPlane()) {
+    const auto normal = coordinates(p->normal, 3);
+    if (!std::isfinite(p->d) ||
+        std::abs(std::hypot(p->normal[0], p->normal[1], p->normal[2]) - 1) > 1e-4)
+      throw Failure("python_input_invalid", "Plane 必须包含单位法向量及有限 d");
+    return {{"type", "Plane"}, {"normal", normal}, {"d", p->d}};
+  }
+  if (const auto* p = data.asPoint2D())
+    return {{"type", "Point2D"}, {"position", coordinates(p->p, 2)}, {"unit", unitName(p->unit)}};
+  if (const auto* l = data.asLine2D()) {
+    Json result{{"type", "Line2D"},
+                {"point", coordinates(l->point, 2)},
+                {"direction", coordinates(l->dir, 2)},
+                {"unit", unitName(l->unit)}};
+    if (std::abs(std::hypot(l->dir[0], l->dir[1]) - 1) > 1e-4)
+      throw Failure("python_input_invalid", "Line2D 方向必须归一化");
+    if (l->hasSegment) {
+      result["start"] = coordinates(l->start, 2);
+      result["end"] = coordinates(l->end, 2);
+      if (l->start[0] == l->end[0] && l->start[1] == l->end[1])
+        throw Failure("python_input_invalid", "Line2D 线段端点必须不同");
+    }
+    return result;
+  }
+  if (const auto* c = data.asCircle2D()) {
+    if (!std::isfinite(c->radius) || c->radius <= 0)
+      throw Failure("python_input_invalid", "Circle2D 半径必须正有限");
+    return {{"type", "Circle2D"},
+            {"center", coordinates(c->center, 2)},
+            {"radius", c->radius},
+            {"unit", unitName(c->unit)}};
+  }
+  if (const auto* b = data.asBox2D()) {
+    if (b->min[0] > b->max[0] || b->min[1] > b->max[1])
+      throw Failure("python_input_invalid", "Box2D 最小边界大于最大边界");
+    return {{"type", "Box2D"},
+            {"minimum", coordinates(b->min, 2)},
+            {"maximum", coordinates(b->max, 2)},
+            {"unit", unitName(b->unit)}};
   }
   if (const auto* m = data.asMeasurement()) {
     Json j{{"type", "Measurement"}, {"value", std::isfinite(m->value) ? Json(m->value) : Json()},
@@ -149,8 +310,10 @@ Json encode(const Data& data, const fs::path& dir) {
     }
     return j;
   }
-  if (const auto* r = data.asRecord())
+  if (const auto* r = data.asRecord()) {
+    recordValid(*r, "python_input_invalid");
     return {{"type", "Record"}, {"recordType", r->type}, {"data", r->data}};
+  }
   throw Failure("python_input_invalid", std::string("Python 不支持端口类型 ") + data.typeName());
 }
 
@@ -163,10 +326,15 @@ struct Array {
 
 Array arrayInfo(const Json& j, const fs::path& dir) {
   Array a;
+  if (!j.is_object() || j.size() != 3 || !j.contains("file") || !j.contains("shape") ||
+      !j.contains("dtype"))
+    throw Failure("python_output_invalid", "数组描述必须只有 file、shape、dtype");
   a.dtype = j.at("dtype").get<std::string>();
   std::size_t size = a.dtype == "f32" ? 4 : a.dtype == "u16" ? 2 : a.dtype == "u8" ? 1 : 0;
-  if (!size || !j.at("shape").is_array() || j.at("shape").empty() || j.at("shape").size() > 3)
+  if (!size || !j.at("shape").is_array() || j.at("shape").size() > 8)
     throw Failure("python_output_invalid", "数组 dtype 或 shape 无效");
+  if (j.at("shape").empty())
+    size = 0;
   for (const auto& d : j.at("shape")) {
     if (!d.is_number_integer() || d.get<std::int64_t>() < 0 ||
         d.get<std::uint64_t>() > std::numeric_limits<std::int32_t>::max())
@@ -197,10 +365,52 @@ void readArray(const Array& a, void* target) {
     throw Failure("python_output_invalid", "无法完整读取输出数组");
 }
 
+void dtoFields(const Json& j, std::initializer_list<const char*> required,
+               std::initializer_list<const char*> optional = {}) {
+  std::set<std::string> allowed;
+  for (const auto* field : required) {
+    if (!j.contains(field))
+      throw Failure("python_output_invalid", std::string("输出 DTO 缺少字段 ") + field);
+    allowed.emplace(field);
+  }
+  for (const auto* field : optional)
+    allowed.emplace(field);
+  for (auto field = j.begin(); field != j.end(); ++field)
+    if (!allowed.count(field.key()))
+      throw Failure("python_output_invalid", "输出 DTO 包含未知字段 " + field.key());
+}
+
+void readCoordinates(const Json& j, float* values, std::size_t count) {
+  if (!j.is_array() || j.size() != count)
+    throw Failure("python_output_invalid", "几何坐标数量不符");
+  for (std::size_t i = 0; i < count; ++i) {
+    if (!j[i].is_number())
+      throw Failure("python_output_invalid", "几何坐标必须是数值");
+    const auto value = j[i].get<double>();
+    if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+      throw Failure("python_output_invalid", "几何坐标必须是有限 float32");
+    values[i] = static_cast<float>(value);
+  }
+}
+
+std::int32_t readScale(const Json& j) {
+  if (!j.is_number_integer() || j.get<std::int64_t>() < 1 ||
+      j.get<std::int64_t>() > std::numeric_limits<std::int32_t>::max())
+    throw Failure("python_output_invalid", "scale 必须是正 int32");
+  return j.get<std::int32_t>();
+}
+
+Unit2D readUnit(const Json& j) {
+  if (j != "m" && j != "px")
+    throw Failure("python_output_invalid", "二维几何单位必须为 m 或 px");
+  return j == "px" ? Unit2D::Pixel : Unit2D::Meter;
+}
+
 Data decode(const Json& j, const std::string& type, const fs::path& dir) {
   if (!j.is_object() || j.at("type") != type)
     throw Failure("python_output_invalid", "输出 DTO 类型与端口声明不符");
   if (type == "PointCloud") {
+    dtoFields(j, {"type", "xyz"}, {"intensity", "normals", "rgb"});
     PointCloud c;
     const auto xyz = arrayInfo(j.at("xyz"), dir);
     if (xyz.dtype != "f32" || xyz.shape.size() != 2 || xyz.shape[1] != 3)
@@ -229,6 +439,7 @@ Data decode(const Json& j, const std::string& type, const fs::path& dir) {
     return Data::cloud(std::move(c));
   }
   if (type == "Image") {
+    dtoFields(j, {"type", "pixels", "scale"});
     const auto a = arrayInfo(j.at("pixels"), dir);
     if ((a.shape.size() != 2 && a.shape.size() != 3) || !a.shape[0] || !a.shape[1])
       throw Failure("python_output_invalid", "图像应为非空 [H,W] 或 [H,W,C]");
@@ -242,9 +453,86 @@ Data decode(const Json& j, const std::string& type, const fs::path& dir) {
                         : a.dtype == "u16" ? PixelDepth::U16
                                            : PixelDepth::U8);
     readArray(a, image.mutablePixels());
+    image.scale = readScale(j.at("scale"));
     return Data::image(std::move(image));
   }
+  if (type == "Tensor") {
+    dtoFields(j, {"type", "values", "scale"});
+    const auto a = arrayInfo(j.at("values"), dir);
+    if (a.dtype != "f32")
+      throw Failure("python_output_invalid", "Tensor 必须使用 float32");
+    Tensor tensor;
+    for (const auto dimension : a.shape)
+      tensor.shape.push_back(static_cast<std::int64_t>(dimension));
+    tensor.data.resize(a.bytes / sizeof(float));
+    readArray(a, tensor.data.data());
+    if (!tensor.consistent())
+      throw Failure("python_output_invalid", "Tensor 的 shape 与数据长度不符");
+    return Data::tensor(std::move(tensor)).withTensorScale(readScale(j.at("scale")));
+  }
+  if (type == "Transform") {
+    dtoFields(j, {"type", "matrix"});
+    Transform transform;
+    readCoordinates(j.at("matrix"), transform.m, 16);
+    return Data::transform(transform);
+  }
+  if (type == "Plane") {
+    dtoFields(j, {"type", "normal", "d"});
+    Plane plane;
+    readCoordinates(j.at("normal"), plane.normal, 3);
+    readCoordinates(Json::array({j.at("d")}), &plane.d, 1);
+    if (std::abs(std::hypot(plane.normal[0], plane.normal[1], plane.normal[2]) - 1) > 1e-4)
+      throw Failure("python_output_invalid", "Plane 法向量必须归一化");
+    return Data::plane(plane);
+  }
+  if (type == "Point2D") {
+    dtoFields(j, {"type", "position", "unit"});
+    Point2D point;
+    readCoordinates(j.at("position"), point.p, 2);
+    point.unit = readUnit(j.at("unit"));
+    return Data::point2d(point);
+  }
+  if (type == "Line2D") {
+    dtoFields(j, {"type", "point", "direction", "unit"}, {"start", "end"});
+    Line2D line;
+    readCoordinates(j.at("point"), line.point, 2);
+    readCoordinates(j.at("direction"), line.dir, 2);
+    line.unit = readUnit(j.at("unit"));
+    if (std::abs(std::hypot(line.dir[0], line.dir[1]) - 1) > 1e-4 ||
+        j.contains("start") != j.contains("end"))
+      throw Failure("python_output_invalid", "Line2D 方向或线段字段无效");
+    line.hasSegment = j.contains("start");
+    if (line.hasSegment) {
+      readCoordinates(j.at("start"), line.start, 2);
+      readCoordinates(j.at("end"), line.end, 2);
+      if (line.start[0] == line.end[0] && line.start[1] == line.end[1])
+        throw Failure("python_output_invalid", "Line2D 线段端点必须不同");
+    }
+    return Data::line2d(line);
+  }
+  if (type == "Circle2D") {
+    dtoFields(j, {"type", "center", "radius", "unit"});
+    Circle2D circle;
+    readCoordinates(j.at("center"), circle.center, 2);
+    readCoordinates(Json::array({j.at("radius")}), &circle.radius, 1);
+    circle.unit = readUnit(j.at("unit"));
+    if (circle.radius <= 0)
+      throw Failure("python_output_invalid", "Circle2D 半径必须正有限");
+    return Data::circle2d(circle);
+  }
+  if (type == "Box2D") {
+    dtoFields(j, {"type", "minimum", "maximum", "unit"});
+    Box2D box;
+    readCoordinates(j.at("minimum"), box.min, 2);
+    readCoordinates(j.at("maximum"), box.max, 2);
+    box.unit = readUnit(j.at("unit"));
+    if (box.min[0] > box.max[0] || box.min[1] > box.max[1])
+      throw Failure("python_output_invalid", "Box2D 边界顺序错误");
+    return Data::box2d(box);
+  }
   if (type == "Measurement") {
+    dtoFields(j, {"type", "value", "ok"},
+              {"unit", "message", "verdict", "nominal", "lower", "upper"});
     Measurement m;
     m.value = j.at("value").is_null() ? std::numeric_limits<double>::quiet_NaN()
                                       : j.at("value").get<double>();
@@ -262,8 +550,12 @@ Data decode(const Json& j, const std::string& type, const fs::path& dir) {
       throw Failure("python_output_invalid", "有效测量值必须是有限数");
     return Data::measurement(std::move(m));
   }
-  if (type == "Record")
-    return Data::record({j.value("recordType", std::string()), j.at("data")});
+  if (type == "Record") {
+    dtoFields(j, {"type", "recordType", "data"});
+    Record record{j.at("recordType").get<std::string>(), j.at("data")};
+    recordValid(record, "python_output_invalid");
+    return Data::record(std::move(record));
+  }
   throw Failure("python_output_invalid", "Python 不支持此输出端口类型");
 }
 
@@ -745,8 +1037,15 @@ private:
   Json launch(Clock::time_point deadline, ExecContext* ctx = nullptr) {
     workerDefinitions_ = Json::object();
     worker_.start(executable_, sdk_, deadline, ctx);
-    auto result =
-        worker_.exchange({{"command", "discover"}, {"packagePaths", paths_}}, deadline, ctx);
+    auto result = worker_.exchange({{"command", "discover"},
+                                    {"dataProtocolVersion", kDataProtocolVersion},
+                                    {"packagePaths", paths_}},
+                                   deadline, ctx);
+    if (!result.contains("dataProtocolVersion") ||
+        !result["dataProtocolVersion"].is_number_integer() ||
+        result["dataProtocolVersion"] != kDataProtocolVersion)
+      throw Failure("python_protocol_error",
+                    "Python SDK/worker 数据协议版本不符，需要 dataProtocolVersion=2");
     for (const auto& definition : result.at("operators"))
       workerDefinitions_[definition.at("id").get<std::string>()] = definition;
     return result;
@@ -834,8 +1133,7 @@ private:
         Port port;
         port.name = p.at("name").get<std::string>();
         port.type = p.at("type").get<std::string>();
-        if (port.type != "PointCloud" && port.type != "Image" && port.type != "Measurement" &&
-            port.type != "Record")
+        if (!supportedPort(port.type))
           throw Failure("python_manifest_invalid", "Python 不支持端口类型 " + port.type);
         port.label = p.value("label", port.name);
         port.doc = p.value("doc", std::string());
@@ -929,6 +1227,7 @@ private:
             p.type == ParamType::Curve ? Json::parse(value.stringValue()) : valueJson(value);
       }
       Json result = worker_.exchange({{"command", "execute"},
+                                      {"dataProtocolVersion", kDataProtocolVersion},
                                       {"operatorId", id},
                                       {"inputs", std::move(encoded)},
                                       {"params", std::move(values)},
@@ -936,6 +1235,11 @@ private:
                                       {"threadBudget", ctx.threadBudget()},
                                       {"requestDir", directory.path.u8string()}},
                                      deadline, &ctx);
+      if (!result.contains("dataProtocolVersion") ||
+          !result["dataProtocolVersion"].is_number_integer() ||
+          result["dataProtocolVersion"] != kDataProtocolVersion)
+        throw Failure("python_protocol_error",
+                      "Python 输出数据协议版本不符，需要 dataProtocolVersion=2");
       const auto& encodedOutputs = result.at("outputs");
       if (!encodedOutputs.is_object() || encodedOutputs.size() != outputPorts.size())
         throw Failure("python_output_invalid", "输出端口字典与声明不符");

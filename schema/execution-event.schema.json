@@ -461,6 +461,10 @@
               "rootCode": {
                 "type": "string",
                 "description": "root 那个节点的错误码。"
+              },
+              "sourceCloudId": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
               }
             }
           }
@@ -605,6 +609,10 @@
                     "type": "string"
                   }
                 }
+              },
+              "sourceCloudId": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
               }
             }
           }

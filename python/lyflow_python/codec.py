@@ -9,11 +9,13 @@ from pathlib import Path
 import numpy as np
 
 from .api import NodeError
-from .data import Image, Measurement, PointCloud, Record, _plain
+from .data import Box2D, Circle2D, Image, Line2D, Measurement, Plane, Point2D, PointCloud, Record, Tensor, Transform, _plain
 
 
 DTYPES = {"f32": np.dtype("<f4"), "u8": np.dtype("u1"), "u16": np.dtype("<u2")}
-TYPES = {"PointCloud": PointCloud, "Image": Image, "Measurement": Measurement, "Record": Record}
+TYPES = {"PointCloud": PointCloud, "Image": Image, "Measurement": Measurement, "Record": Record,
+         "Tensor": Tensor, "Transform": Transform, "Plane": Plane, "Point2D": Point2D,
+         "Line2D": Line2D, "Circle2D": Circle2D, "Box2D": Box2D}
 
 
 class DataCodec:
@@ -48,13 +50,13 @@ class DataCodec:
         shape, dtype = descriptor["shape"], descriptor["dtype"]
         if not isinstance(dtype, str) or dtype not in DTYPES:
             raise NodeError(f"unsupported array dtype: {dtype!r}")
-        if not isinstance(shape, list) or not shape or len(shape) > 3 or any(isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in shape):
-            raise NodeError("array shape must have one to three nonnegative integer dimensions")
-        size = math.prod(shape) * DTYPES[dtype].itemsize
-        if size > sys.maxsize or path.stat().st_size != size:
+        if not isinstance(shape, list) or len(shape) > 8 or any(isinstance(n, bool) or not isinstance(n, int) or not 0 <= n <= 2147483647 for n in shape):
+            raise NodeError("array shape must have at most eight nonnegative int32 dimensions")
+        size = (math.prod(shape) if shape else 0) * DTYPES[dtype].itemsize
+        if size > min(sys.maxsize, 1024 ** 3) or path.stat().st_size != size:
             raise NodeError("array file byte size does not match shape and dtype")
         if size == 0:
-            array = np.empty(shape, dtype=DTYPES[dtype])
+            array = np.empty(shape if shape else (0,), dtype=DTYPES[dtype])
             array.flags.writeable = False
             return array
         array = np.memmap(path, mode="r", dtype=DTYPES[dtype], shape=tuple(shape), order="C")
@@ -69,9 +71,30 @@ class DataCodec:
                 raise NodeError("PointCloud DTO requires xyz and only declared channels")
             result = PointCloud(**{name: self.read_array(value) for name, value in dto.items() if name != "type"})
         elif expected_type == "Image":
-            if set(dto) != {"type", "pixels"}:
-                raise NodeError("Image DTO requires pixels")
-            result = Image(self.read_array(dto["pixels"]))
+            if set(dto) != {"type", "pixels", "scale"}:
+                raise NodeError("Image DTO requires pixels and scale")
+            result = Image(self.read_array(dto["pixels"]), dto["scale"])
+        elif expected_type == "Tensor":
+            if set(dto) != {"type", "values", "scale"}:
+                raise NodeError("Tensor DTO requires values and scale")
+            result = Tensor(self.read_array(dto["values"]), dto["scale"], dto["values"]["shape"])
+        elif expected_type == "Transform":
+            if set(dto) != {"type", "matrix"}:
+                raise NodeError("Transform DTO requires matrix")
+            if not isinstance(dto["matrix"], list) or len(dto["matrix"]) != 16:
+                raise NodeError("Transform DTO matrix requires sixteen row-major values")
+            result = Transform(np.asarray(dto["matrix"], dtype=object).reshape(4, 4))
+        elif expected_type == "Plane":
+            if set(dto) != {"type", "normal", "d"}:
+                raise NodeError("Plane DTO requires normal and d")
+            result = Plane(dto["normal"], dto["d"])
+        elif expected_type in {"Point2D", "Line2D", "Circle2D", "Box2D"}:
+            required = {"Point2D": {"position", "unit"}, "Line2D": {"point", "direction", "unit"},
+                        "Circle2D": {"center", "radius", "unit"}, "Box2D": {"minimum", "maximum", "unit"}}[expected_type]
+            fields = {key: value for key, value in dto.items() if key != "type"}
+            if not required <= fields.keys() or set(fields) - required - ({"start", "end"} if expected_type == "Line2D" else set()):
+                raise NodeError(f"{expected_type} DTO has missing or unknown fields")
+            result = TYPES[expected_type](**fields)
         elif expected_type == "Measurement":
             allowed = {"type", "value", "unit", "ok", "message", "verdict", "nominal", "lower", "upper"}
             if "value" not in dto or set(dto) - allowed:
@@ -115,8 +138,25 @@ class DataCodec:
             PointCloud(value.xyz, value.intensity, value.normals, value.rgb)
             return {"type": expected_type, **{name: self.write_array(getattr(value, name)) for name in ("xyz", "intensity", "normals", "rgb") if getattr(value, name) is not None}}
         if expected_type == "Image":
-            Image(value.pixels)
-            return {"type": expected_type, "pixels": self.write_array(value.pixels)}
+            Image(value.pixels, value.scale)
+            return {"type": expected_type, "pixels": self.write_array(value.pixels), "scale": value.scale}
+        if expected_type == "Tensor":
+            Tensor(value.values, value.scale, value.shape)
+            descriptor = self.write_array(value.values)
+            descriptor["shape"] = list(value.shape)
+            return {"type": expected_type, "values": descriptor, "scale": value.scale}
+        if expected_type == "Transform":
+            checked = Transform(value.matrix)
+            return {"type": expected_type, "matrix": checked.matrix.reshape(-1).tolist()}
+        if expected_type == "Plane":
+            checked = Plane(value.normal, value.d)
+            return {"type": expected_type, "normal": checked.normal.tolist(), "d": checked.d}
+        if expected_type in {"Point2D", "Line2D", "Circle2D", "Box2D"}:
+            fields = {key: item.tolist() if isinstance(item, np.ndarray) else item
+                      for key, item in vars(value).items() if key != "_readonly" and item is not None}
+            checked = TYPES[expected_type](**fields)
+            return {"type": expected_type, **{key: item.tolist() if isinstance(item, np.ndarray) else item
+                                               for key, item in vars(checked).items() if item is not None}}
         if expected_type == "Measurement":
             fields = {key: item for key, item in vars(value).items() if key != "_readonly" and item is not None}
             if value.value is None:
@@ -126,5 +166,5 @@ class DataCodec:
         data = _plain(value.data)
         if not isinstance(value.record_type, str):
             raise NodeError("Record.record_type must be a string")
-        json.dumps(data, allow_nan=False)
+        Record(data, value.record_type)
         return {"type": expected_type, "recordType": value.record_type, "data": data}

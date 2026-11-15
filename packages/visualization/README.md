@@ -31,3 +31,7 @@ Set `LYFLOW_BROWSER` or pass `browserPath` if a supported browser is not install
 The editor release entry `pnpm --filter @lyflow/editor pack:release --pack-destination <directory>` stages the shared source into the TypeScript tarball. Consumers do not need a separately published visualization package. Development continues to use the workspace package as the single source.
 
 Run `pnpm --filter @lyflow/visualization test` for pure scene/coordinate/geometry checks. Actual PNG rendering should also be inspected on supported deployment platforms.
+
+`poseCollection`, `poseGeometry`, `poseScene2D`, `projectedPoseScene`, `cloudGroupPreview` and `maskPreview` consume LyFlow's versioned result records without changing their inputs. `structuredScene` accepts only a `visualization.SceneSpec.v1` Record. This is a structured plotting contract, not an arbitrary SVG document reader. `renderImageOverlaySvg` keeps pixel coordinates and image extent exactly, including the pixel-centre half-pixel conversion; it does not add plot axes or margins.
+
+Cloud groups require the actual native `sourceCloudId` string and a proven ordered sampling stride. Projection requires camera calibration and an explicit source-to-camera rigid transform when frames differ. Scene, point, membership and pixel budgets fail explicitly. See [the P6 analysis](../../docs/p6-analysis-visualization.md) for the identity, units, distortion, masks, viewer controls, export and legacy-host boundaries.

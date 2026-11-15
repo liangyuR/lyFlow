@@ -11,6 +11,8 @@ import {
   worstTone,
 } from '../src/lib/outputs.ts';
 import { compareContentFor, viewerContentFor } from '../src/lib/viewRule.ts';
+import { poseLines } from '../src/lib/resultShapes.ts';
+import { decodeIndices } from '../src/types/execution.ts';
 
 const bundles = [
   { kind: 'gap.ScanPair', fields: [{ name: 'primary', type: 'PointCloud' }] },
@@ -68,6 +70,47 @@ test('预览内容选择：主视图按可画端口优先，对比两侧只有�
     ['value', 'value'],
   ].map(([a, b]) => compareContentFor(a, b));
   assert.deepEqual(got, ['cloud', 'cloud', 'cloud', 'value']);
+  const pose = {
+    port: 'instances',
+    type: 'Record',
+    elementCount: 1,
+    value: {
+      kind: 'Record',
+      type: 'vision.Pose3D.v1',
+      data: {
+        id: 'fixture',
+        frame: 'world',
+        unit: 'm',
+        position: [1024, 0, 0],
+        size: [0.001, 0.002, 0.003],
+        rotation: [0, 0, 0, 1],
+      },
+    },
+  };
+  assert.equal(viewerContentFor(['Record'], undefined, [], [pose]), 'cloud');
+  assert.equal(viewerContentFor(['Record'], undefined, ['Image'], [pose]), 'image');
+  const lines = poseLines([pose], null);
+  assert.equal(lines.length, 4);
+  const x = lines[0].geometry.getAttribute('position');
+  assert.ok(
+    Math.abs(x.getX(1) - x.getX(0) - 0.001) < 1e-9,
+    'local geometry retains mm extent at a 1024 m origin',
+  );
+  assert.equal(lines[0].userData.frame, 'world');
+  assert.equal(
+    poseLines([pose], { sourceCloudId: '1' }).length,
+    0,
+    'unframed clouds cannot silently align poses',
+  );
+  for (const line of lines) {
+    line.geometry.dispose();
+    line.material.dispose();
+  }
+  const buffer = new ArrayBuffer(24);
+  const header = new DataView(buffer);
+  header.setUint32(0, 0x5849594c, true);
+  header.setBigUint64(16, 18446744073709551614n, true);
+  assert.equal(decodeIndices(buffer).sourceCloudIdString, '18446744073709551614');
 });
 
 // 换了一片云要不要重新取景（lib/viewFit）。修前每片新云都取景：重跑、在链上逐个点节点都把视角拉回斜 45°

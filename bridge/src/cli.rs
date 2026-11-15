@@ -84,6 +84,23 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow python settings|refresh
   lyflow python configure --config <python-nodes.json>
         与桌面共用解释器、节点包路径和超时配置；LYFLOW_PYTHON_CONFIG 可覆盖配置文件路径。
+  lyflow record <graph> --recording <new-dir> [--count <n>] [--interval-ms <ms>]
+                       [--frame <coordinate-frame>] [--calibration-version <version>]
+                       [--timestamp-ns <u64>] [--max-bytes <n>] [--max-total-bytes <n>] [--input ...] [--set ...]
+        保存原图、生效参数、小索引及所有节点真实原生结果；默认时间是 host_capture，未声明坐标系为空。
+  lyflow replay <recording-dir> [--from-sequence <n>] [--to-sequence <n>] [--paced]
+                       [--from-timestamp-ns <u64>] [--to-timestamp-ns <u64>]
+                       [--recompute] [--graph <graph> --bind <source.nodePort=target.nodePort>]...
+                       [--base-dir <dir>] [--max-bytes <n>]
+        默认只读取归档结果；--recompute 仅注入经 plan 证明的源节点，显式图必须显式绑定。
+  lyflow publish <recording-dir> --endpoint tcp://<IP>:<port> --topic <name>
+                        [--timeout-ms <ms>] [--max-bytes <n>] [--from-sequence <n>]
+        LyFlow v1 二进制帧协议；完整 ACK 才确认交付。失败不自动重发，重新调用才建立新连接。
+  lyflow log <recording-dir> --node <node.port> --output <path> --log-kind string|poses2d|poses3d
+                        [--log-format jsonl|text] [--pose-format quat|xyz|XYZ|...] [--selection all|first]
+                        [--length-unit m|mm|px] [--angle-unit rad|deg] [--conflict fail|append]
+                        [--log-archive daily|none] [--max-bytes <n>]
+        默认按 UTC Unix 日归档，保留原始值与帧身份；默认拒绝已有文件，追加需要显式指定。
   lyflow info
         当前 core 的版本、构建指纹、实际 DLL 路径与算子包，JSON Lines。
   lyflow samples [--samples <jsonl> | --samples-glob <pat> --bind <n>.<p> | --samples-dir <root> ...]
@@ -503,6 +520,7 @@ mod console {
     }
 
     unsafe extern "system" fn on_break(_kind: u32) -> i32 {
+        let delivery_cancelled = super::delivery::cancel_active();
         if let Ok(runs) = super::active_runs().lock() {
             if !runs.is_empty() {
                 for run in runs.iter() {
@@ -513,7 +531,7 @@ mod console {
                 return 1;
             }
         }
-        0
+        i32::from(delivery_cancelled)
     }
 
     pub fn install() {
@@ -872,6 +890,14 @@ fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, Strin
 }
 
 pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
+    execute_frame(core, req, None)
+}
+
+fn execute_frame(
+    core: &Arc<Core>,
+    req: RunRequest<'_>,
+    frame: Option<(&lyflow_client::Frame, &str)>,
+) -> Result<RunResult, String> {
     console::install();
     let run_id = ulid::new();
     let ctx = Box::new(RunCtx {
@@ -890,8 +916,15 @@ pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult
         spec.preview_max_points = req.preview_points;
     }
     let handle = Arc::new(
-        unsafe { RunHandle::start(Arc::clone(core), spec, on_event, ctx) }
-            .map_err(|e| e.to_string())?,
+        unsafe {
+            match frame {
+                Some((frame, bindings)) => {
+                    core.run_with_frame(spec, frame, bindings, on_event, ctx)
+                }
+                None => RunHandle::start(Arc::clone(core), spec, on_event, ctx),
+            }
+        }
+        .map_err(|e| e.to_string())?,
     );
     if let Ok(mut runs) = active_runs().lock() {
         runs.push(Arc::clone(&handle));
@@ -1448,6 +1481,7 @@ impl RunProgress {
     }
 }
 
+mod delivery;
 pub(crate) mod snapshot;
 
 fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
@@ -2285,6 +2319,30 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 }
 
 const VALUE_OPTS: &[&str] = &[
+    "recording",
+    "count",
+    "interval-ms",
+    "frame",
+    "calibration-version",
+    "timestamp-ns",
+    "max-bytes",
+    "max-total-bytes",
+    "from-sequence",
+    "to-sequence",
+    "from-timestamp-ns",
+    "to-timestamp-ns",
+    "graph",
+    "endpoint",
+    "topic",
+    "timeout-ms",
+    "log-kind",
+    "log-format",
+    "log-archive",
+    "pose-format",
+    "length-unit",
+    "angle-unit",
+    "selection",
+    "conflict",
     "config",
     "snapshot-max-total-bytes",
     "snapshot-root",
@@ -2335,6 +2393,8 @@ const VALUE_OPTS: &[&str] = &[
     "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[
+    "recompute",
+    "paced",
     "progress-json",
     "no-cache",
     "preview",
@@ -2400,6 +2460,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         return EXIT_OK;
     }
     match command.as_str() {
+        "record" | "replay" | "publish" | "log" => delivery::command(&command, &parsed, out, err),
         "run" => cmd_run(&parsed, out, err),
         "validate" => cmd_validate(&parsed, out, err),
         "plan" => cmd_plan(&parsed, out, err),

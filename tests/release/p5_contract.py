@@ -98,6 +98,9 @@ def normalize(name, outputs, roles):
         require(stats["count"] == outputs[role]["elementCount"], f"{role}: observer count mismatch")
         require(isinstance(stats["sourceCloudId"], str) and stats["sourceCloudId"].isdigit(), f"{role}: invalid cloud identity")
         ids[role] = stats["sourceCloudId"]
+        if "sourceCloudId" in values[role]:
+            require(values[role]["sourceCloudId"] == ids[role], f"{role}: native metadata identity mismatch")
+            values[role]["sourceCloudId"] = "@cloud:" + role
     expected = copy.deepcopy(BINDINGS.get(name, {}))
     for role in roles:
         expected["__p5_observe_" + role] = {"sourceCloudId": role}

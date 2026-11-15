@@ -662,6 +662,13 @@ async function route(req, res, url) {
 
   if (req.method === 'GET' && p === '/lyflow/manifest') return send(res, 200, await manifest());
   if (req.method === 'GET' && p === '/lyflow/core-info') return send(res, 200, await coreInfo());
+  if (req.method === 'GET' && p === '/lyflow/runtime-capabilities')
+    return send(res, 200, {
+      schemaVersion: 1,
+      resultBindings: false,
+      frames: false,
+      sessions: false,
+    });
 
   if (req.method === 'POST' && p === '/lyflow/validate') {
     const body = await json();

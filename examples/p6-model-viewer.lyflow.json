@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "id": "p6-model-viewer",
+  "name": "P6 STL点模型与工件结果查看",
+  "nodes": [
+    {
+      "id": "image",
+      "op": "io.load_image",
+      "params": {
+        "path": "p3-marker-scene.png",
+        "mode": "color"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {
+        "path": "p3-camera.json"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 230
+        }
+      }
+    },
+    {
+      "id": "model",
+      "op": "io.load_cloud",
+      "params": {
+        "path": "p6-viewer-cuboid.stl",
+        "unit": "m",
+        "frame": "model",
+        "samples": 4096,
+        "seed": 7
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 460
+        }
+      }
+    },
+    {
+      "id": "partA",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "part-A",
+        "name": "工件甲",
+        "frame": "camera",
+        "position": [0, 0, 0.6],
+        "size": [0.1, 0.08, 0.05]
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "partB",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "part-B",
+        "name": "工件乙",
+        "frame": "camera",
+        "position": [0.18, 0.08, 0.9],
+        "size": [0.1, 0.08, 0.05],
+        "quaternion": [0, 0, 0.25881904510252074, 0.9659258262890683]
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 480
+        }
+      }
+    },
+    {
+      "id": "parts",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 650,
+          "y": 350
+        }
+      }
+    },
+    {
+      "id": "render",
+      "op": "image.render_model_3d",
+      "params": {
+        "renderMode": "overlay"
+      },
+      "ui": {
+        "position": {
+          "x": 950,
+          "y": 80
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "partA",
+        "port": "pose"
+      },
+      "to": {
+        "node": "parts",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "partB",
+        "port": "pose"
+      },
+      "to": {
+        "node": "parts",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "image",
+        "port": "image"
+      },
+      "to": {
+        "node": "render",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "render",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "model",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "render",
+        "port": "model"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "parts",
+        "port": "poses"
+      },
+      "to": {
+        "node": "render",
+        "port": "instances"
+      }
+    }
+  ],
+  "outputs": {
+    "image": {
+      "node": "render",
+      "port": "image"
+    },
+    "mask": {
+      "node": "render",
+      "port": "mask"
+    },
+    "edge_mask": {
+      "node": "render",
+      "port": "edge_mask"
+    },
+    "depth": {
+      "node": "render",
+      "port": "depth"
+    },
+    "normal": {
+      "node": "render",
+      "port": "normal"
+    },
+    "quality": {
+      "node": "render",
+      "port": "quality"
+    }
+  }
+}

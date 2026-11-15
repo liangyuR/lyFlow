@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.11)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.12)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -492,10 +492,10 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/lyflow_python"
         FILES_MATCHING PATTERN "*.py")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/examples/"
         DESTINATION examples/python
-        FILES_MATCHING PATTERN "*.py")
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.md")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/examples/"
         DESTINATION bin/python/examples
-        FILES_MATCHING PATTERN "*.py")
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.md")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../python/README.md"
               "${CMAKE_CURRENT_SOURCE_DIR}/../python/pyproject.toml"
         DESTINATION bin/python)
@@ -615,6 +615,20 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-examples.md"
               "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p5-analysis-pose-geometry.md"
         DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/adr/0031-depth-grid-association-and-derived-observations.md"
+        DESTINATION docs/adr)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p6-delivery_demo.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p6-delivery_receiver.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p6-delivery_host.cpp"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p6-model-viewer.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p6-viewer-cuboid.stl"
+        DESTINATION examples)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-examples.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-analysis-python.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-analysis-renderer.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-analysis-visualization.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../docs/p6-analysis-delivery.md"
+        DESTINATION docs)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/adr/0032-native-frames-and-result-delivery.md"
         DESTINATION docs/adr)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"

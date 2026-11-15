@@ -199,6 +199,135 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Model renderer exposes binary boundaries metric Z and camera normals from nearest points") {
+  PointCloud model;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x) {
+      model.push(x * .2f, y * .2f, 0);
+      model.normals.insert(model.normals.end(), {0, 0, 2});
+    }
+  test::OpCall call;
+  const auto near = poses::make3D("near", "camera", {0, 0, 2}, {0, 0, 0, 1}, {1, 1, 1});
+  const auto far = poses::make3D("far", "camera", {0, 0, 4}, {0, 0, 0, 1}, {1, 1, 1});
+  call.inputs = {
+      {"image", nativeImage(cv::Mat(12, 16, CV_16UC4, cv::Scalar(101, 202, 303, 404)))},
+      {"model", Data::cloud(model)},
+      {"instances", Data::record(poses::make3DList(Json::array({far.data, near.data}), "camera"))},
+      {"calib", Data::record(camera())}};
+  for (const char* mode : {"overlay", "mask", "edge_mask", "depth", "normal"}) {
+    CAPTURE(mode);
+    REQUIRE(call.run("image.render_model_3d", {{"renderMode", Value::text(mode)}}).ok);
+    const auto* mask = call.out("mask").asImage();
+    const auto* edge = call.out("edge_mask").asImage();
+    const auto* depth = call.out("depth").asImage();
+    const auto* normal = call.out("normal").asImage();
+    REQUIRE(normal != nullptr);
+    CHECK(mask->depth == PixelDepth::U8);
+    CHECK(mask->channels == 1);
+    CHECK(mask->at(8, 6, 0) == 255);
+    CHECK(mask->at(0, 0, 0) == 0);
+    CHECK(edge->at(8, 6, 0) == 0);
+    CHECK(edge->at(7, 6, 0) == 255);
+    CHECK(depth->depth == PixelDepth::F32);
+    CHECK(depth->channels == 1);
+    CHECK(depth->at(8, 6, 0) == doctest::Approx(2));
+    CHECK(depth->at(9, 6, 0) == doctest::Approx(2));
+    CHECK(depth->at(0, 0, 0) == 0);
+    CHECK(normal->depth == PixelDepth::F32);
+    CHECK(normal->channels == 3);
+    CHECK(normal->at(8, 6, 0) == 0);
+    CHECK(normal->at(8, 6, 2) == doctest::Approx(1));
+    CHECK(normal->at(0, 0, 2) == 0);
+    const auto& quality = call.out("quality").asRecord()->data;
+    CHECK(quality.at("renderMode") == mode);
+    CHECK(quality.at("normalAvailable") == true);
+    CHECK(quality.at("outputs").at("depth").at("encoding") == "camera-z-meters");
+    CHECK(quality.at("outputs").at("normal").at("encoding") == "camera-unit-vector-xyz");
+    const auto* image = call.out("image").asImage();
+    if (std::string(mode) == "overlay") {
+      CHECK(image->depth == PixelDepth::U16);
+      CHECK(image->channels == 4);
+      CHECK(image->at(8, 6, 3) == 404);
+    } else {
+      const auto* selected = call.out(mode).asImage();
+      CHECK(cv::norm(cvx::view(*image), cvx::view(*selected), cv::NORM_INF) == 0);
+    }
+  }
+  call.inputs["image"] = nativeImage(cv::Mat(6, 8, CV_8UC3, cv::Scalar(0)), 2);
+  REQUIRE(call.run("image.render_model_3d", {{"renderMode", Value::text("depth")}}).ok);
+  for (const char* name : {"image", "mask", "edge_mask", "depth", "normal"})
+    CHECK(call.out(name).asImage()->scale == 2);
+  CHECK(call.out("depth").asImage()->at(4, 3, 0) == doctest::Approx(2));
+  CHECK(model.normals[2] == 2);
+  call.inputs["image"] = nativeImage(cv::Mat(12, 16, CV_8UC3, cv::Scalar(0)));
+  const auto neighbor = poses::make3D("neighbor", "camera", {.6, 0, 2}, {0, 0, 0, 1}, {1, 1, 1});
+  call.inputs["instances"] =
+      Data::record(poses::make3DList(Json::array({near.data, neighbor.data}), "camera"));
+  REQUIRE(call.run("image.render_model_3d", {{"renderMode", Value::text("edge_mask")}}).ok);
+  CHECK(call.out("mask").asImage()->at(9, 6, 0) == 255);
+  CHECK(call.out("mask").asImage()->at(10, 6, 0) == 255);
+  CHECK(call.out("edge_mask").asImage()->at(9, 6, 0) == 255);
+  CHECK(call.out("edge_mask").asImage()->at(10, 6, 0) == 255);
+}
+
+TEST_CASE("Model renderer rotates normals into camera frame and diagnoses unavailable normals") {
+  PointCloud model;
+  model.push(0, 0, 0);
+  model.normals = {2, 0, 0};
+  const double root = std::sqrt(.5);
+  const auto pose = poses::make3D("part", "world", {0, 2, 0}, {0, 0, root, root}, {1, 1, 1});
+  Transform extrinsic;
+  extrinsic.m[5] = extrinsic.m[10] = 0;
+  extrinsic.m[6] = -1;
+  extrinsic.m[9] = 1;
+  test::OpCall call;
+  call.inputs = {{"image", nativeImage(cv::Mat(12, 16, CV_8UC3, cv::Scalar(0)))},
+                 {"model", Data::cloud(model)},
+                 {"instances", Data::record(poses::make3DList(Json::array({pose.data}), "world"))},
+                 {"calib", Data::record(camera())},
+                 {"sceneToCamera", Data::transform(extrinsic)}};
+  REQUIRE(call.run("image.render_model_3d", {{"renderMode", Value::text("normal")}}).ok);
+  const auto* normal = call.out("normal").asImage();
+  CHECK(normal->at(8, 6, 0) == doctest::Approx(0).epsilon(1e-6));
+  CHECK(normal->at(8, 6, 1) == doctest::Approx(0).epsilon(1e-6));
+  CHECK(normal->at(8, 6, 2) == doctest::Approx(1));
+  CHECK(call.out("depth").asImage()->at(8, 6, 0) == doctest::Approx(2));
+  const auto near = poses::make3D("near", "camera", {0, 0, 2}, {0, 1, 0, 0}, {1, 1, 1});
+  const auto far = poses::make3D("far", "camera", {0, 0, 4}, {0, 0, 0, 1}, {1, 1, 1});
+  call.inputs.erase("sceneToCamera");
+  call.inputs["instances"] =
+      Data::record(poses::make3DList(Json::array({far.data, near.data}), "camera"));
+  REQUIRE(call.run("image.render_model_3d", {{"renderMode", Value::text("normal")}}).ok);
+  CHECK(call.out("normal").asImage()->at(8, 6, 0) == doctest::Approx(-1));
+  CHECK(call.out("normal").asImage()->at(8, 6, 1) == 0);
+  {
+    const auto* op = ensureRegistry().find("image.render_model_3d");
+    ParamMap params;
+    for (const auto& param : op->params)
+      params.emplace(param.name, param.def);
+    std::unordered_map<std::string, Data> result;
+    Outputs output(result);
+    CancelContext cancelled;
+    CHECK(op->compute(Inputs(call.inputs), ParamView(params, call.base), output, cancelled).code ==
+          "cancelled");
+    CHECK(result.empty());
+  }
+  for (const std::vector<float> normals : {std::vector<float>{}, std::vector<float>{0, 0, 0}}) {
+    model.normals = normals;
+    call.inputs["model"] = Data::cloud(model);
+    REQUIRE(call.run("image.render_model_3d").ok);
+    CHECK_FALSE(call.outputs.count("normal"));
+    CHECK(call.out("quality").asRecord()->data.at("normalAvailable") == false);
+    const auto status = call.run("image.render_model_3d", {{"renderMode", Value::text("normal")}});
+    CHECK_FALSE(status.ok);
+    CHECK(status.portName == "model");
+    CHECK(call.outputs.empty());
+  }
+  CHECK_FALSE(call.run("image.render_model_3d", {{"renderMode", Value::text("invented")}}).ok);
+  CHECK(call.outputs.empty());
+}
+
+TEST_CASE(
     "P2 model projection rejects nonfinite data resource overflow and cancellation without output") {
   test::OpCall call;
   auto invalid = cloud();

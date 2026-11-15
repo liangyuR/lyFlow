@@ -35,7 +35,10 @@ struct OutputInfo {
   std::size_t byteSize = 0;
   /// 非点云输出的可读 JSON（Data::valueJson）。点云/Indices 为空串。
   std::string valueJson;
+  std::string sourceCloudId;
 };
+
+OutputInfo describeOutput(const std::string& port, const Data& data);
 
 /// Bundle 端口按字段展开（m8-plan L3）：在 out 末尾追加 `<port>.<field>` 各一项。
 /// 不是 Bundle 就什么都不做。事件、lyflow_output_info、缓存复用三处共用它。
@@ -51,6 +54,12 @@ struct NamedOutput {
   std::string name;
   std::string nodeId;
   std::string port;
+};
+
+struct CapturedOutput {
+  std::string nodeId;
+  std::string port;
+  Data data;
 };
 
 struct CacheStats {
@@ -125,6 +134,17 @@ public:
   void setNamedOutputs(const std::string& runId, std::vector<NamedOutput> outputs);
   std::vector<NamedOutput> namedOutputs(const std::string& runId) const;
 
+  bool capture(const std::string& runId, std::vector<CapturedOutput>& outputs,
+               std::vector<NamedOutput>& named, std::string& summary, std::string& error) const;
+  void addView(const std::string& id, const std::vector<CapturedOutput>& outputs,
+               const std::vector<NamedOutput>& named);
+  void removeView(const std::string& id);
+  bool isView(const std::string& id) const;
+  std::string bindingsJson(const std::string& runId) const;
+  void setRunInputs(const std::string& runId, std::vector<CapturedOutput> inputs);
+  std::vector<CapturedOutput> runInputs(const std::string& runId) const;
+  void setDeclaredOutputs(const std::string& runId, std::vector<NamedOutput> outputs);
+
   /// run summary（ADR-0022）。执行器在发 run_finished 之前登记，
   /// `lyflow_run_summary` 按 runId 取；run 结束之前取不到，返回 false。
   void setSummary(const std::string& runId, std::string json);
@@ -184,6 +204,13 @@ private:
   using NodeMap = std::map<std::string, PortMap>;
 
   mutable std::mutex mu_;
+  struct View {
+    std::map<std::string, std::map<std::string, Data>> nodes;
+    std::vector<NamedOutput> named;
+  };
+  std::unordered_map<std::string, View> views_;
+  std::unordered_map<std::string, std::vector<CapturedOutput>> runInputs_;
+  std::unordered_map<std::string, std::vector<NamedOutput>> declaredOutputs_;
   std::unordered_map<std::string, Entry> byKey_;
   std::unordered_map<std::string, NodeMap> index_;
   std::unordered_map<std::string, std::vector<NamedOutput>> namedOutputs_;

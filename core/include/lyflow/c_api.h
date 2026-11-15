@@ -37,6 +37,38 @@ LYFLOW_API char* lyflow_manifest_problems(void);
 
 LYFLOW_API void lyflow_string_free(char* s);
 
+typedef struct lyflow_frame lyflow_frame;
+typedef struct lyflow_session lyflow_session;
+typedef int32_t (*lyflow_cancel_cb)(void* user);
+
+/* Optional 1.3 capabilities. Unknown symbols must not prevent loading an older 1.3 runtime. */
+LYFLOW_API char* lyflow_runtime_capabilities(void);
+LYFLOW_API char* lyflow_run_bindings(const char* run_id);
+
+/* Status strings are empty on success, otherwise diagnostic JSON; always use string_free.
+   Frame view run IDs are read-only and live until their frame/session owner releases them. */
+LYFLOW_API char* lyflow_frame_capture(const char* run_id, const char* metadata_json,
+                                      const char* options_json, lyflow_frame** out);
+LYFLOW_API char* lyflow_frame_load(const char* path, uint64_t max_bytes, lyflow_frame** out);
+LYFLOW_API char* lyflow_frame_save(const lyflow_frame* frame, const char* path, int32_t overwrite);
+LYFLOW_API char* lyflow_frame_load_ex(const char* path, uint64_t max_bytes,
+                                      lyflow_cancel_cb cancelled, void* user, lyflow_frame** out);
+LYFLOW_API char* lyflow_frame_save_ex(const lyflow_frame* frame, const char* path,
+                                      int32_t overwrite, lyflow_cancel_cb cancelled, void* user);
+LYFLOW_API char* lyflow_frame_metadata(const lyflow_frame* frame);
+LYFLOW_API const char* lyflow_frame_run_id(const lyflow_frame* frame);
+LYFLOW_API void lyflow_frame_free(lyflow_frame* frame);
+
+LYFLOW_API char* lyflow_session_create(const char* options_json, lyflow_session** out);
+LYFLOW_API char* lyflow_session_push(lyflow_session* session, const lyflow_frame* frame,
+                                     int32_t reset);
+LYFLOW_API char* lyflow_session_push_ex(lyflow_session* session, const lyflow_frame* frame,
+                                        int32_t reset, lyflow_cancel_cb cancelled, void* user);
+LYFLOW_API char* lyflow_session_front(lyflow_session* session, int32_t remove, lyflow_frame** out);
+LYFLOW_API char* lyflow_session_reset(lyflow_session* session);
+LYFLOW_API char* lyflow_session_info(const lyflow_session* session);
+LYFLOW_API void lyflow_session_free(lyflow_session* session);
+
 // ------------------------------------------------------------------ 库算子
 
 // 设置库算子目录（ADR-0010）：每个 `*.lyflow-op.json` 注册成算子 `lib.<id>`。
@@ -209,6 +241,10 @@ LYFLOW_API char* lyflow_cache_evict_inputs(const char* graph_json, const char* b
 // 返回 NULL 表示连线程都没起来（内存不足），调用方应当当作运行失败。
 LYFLOW_API lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
                                         lyflow_event_cb cb, void* user);
+LYFLOW_API lyflow_run* lyflow_run_start_frame(const char* graph_json,
+                                              const lyflow_run_options* opts,
+                                              const lyflow_frame* frame, const char* bindings_json,
+                                              lyflow_event_cb cb, void* user);
 
 // 协作式取消。可重复调用，也可在 join 之后调用（无操作）。
 LYFLOW_API void lyflow_run_cancel(lyflow_run* run);
@@ -337,6 +373,11 @@ LYFLOW_API char* lyflow_run_summary(const char* run_id);
 // 在桥接层重算一遍迟早与执行器漂开。
 // 校验有错时返回**诊断数组**（'[' 开头），与 lyflow_plan 同一套区分办法。base_dir 可为 NULL。
 LYFLOW_API char* lyflow_effective_params(const char* graph_json, const char* base_dir);
+LYFLOW_API char* lyflow_effective_params_inputs(const char* graph_json, const char* base_dir,
+                                                const char* params_json,
+                                                const lyflow_run_input* inputs, size_t input_count,
+                                                const lyflow_run_image_input* image_inputs,
+                                                size_t image_input_count);
 
 // v7：走注册好的导入器把一段文本变成图（比如 gap 包的 "StandardGap.yml"）。
 // 成功返回 GraphDoc 对象（'{' 开头），失败返回诊断数组（'[' 开头），

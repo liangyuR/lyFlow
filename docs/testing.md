@@ -101,3 +101,9 @@ P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，�
 `-DLYFLOW_P4_MODEL_TESTS=ON`要求std-image和std-ml同时启用。先运行 `python scripts/fetch-p4-model-assets.py --output-dir build/p4-assets`，设置 `LYFLOW_P4_ASSETS` 为该目录；显式开启后模型/字典/图像缺失即失败，无新增跳过。Windows原生CI运行公开PPHumanSeg、PP-OCRv6检测/识别及配套方向模型，保留P1四模型检测门禁；Linux验证无PCL图像链及ZXing私有C++20静态后端。
 
 永久回归覆盖逐ROI掩膜复用的0/1/2次实际Run、unknown/类别冲突、中文多行/倒置/旋转OCR、合法零字节QR、增强前后反馈、原生重叠/孔洞标注、同尺寸文件更新和真实路径链接逃逸。准备脚本的离线、坏缓存、源归档和路径边界独立执行；来源和许可见[P4资产](p4-assets.md)。跨接口测试核对执行器、C ABI和动态C++ SDK的完整原生Tensor/图像，不以只检查manifest替代实际运行。
+
+## P2 原生帧、Python与结果交付门禁
+
+`core/tests/test_frames.cpp`覆盖所有原生载荷、来源身份与缓存独立所有权、坏归档/预算、FIFO容量/顺序/重置/取消。`core/tests/test_python.cpp`继续通过真实worker验证新直接几何/Tensor端口、版本错误与恢复。`python -B -m unittest discover -s python/tests -v`运行SDK侧测试。
+
+完整Windows视觉CI保留前阶段模型/SDK门禁，增加安装后的新CLI与C++17消费者：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。编辑器功能测试总数保持100以下，无新增跳过；查看器浏览器证据与样例见[P6指南](p6-examples.md)。

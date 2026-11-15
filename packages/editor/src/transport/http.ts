@@ -28,6 +28,8 @@ import type {
   Transport,
   TransportKind,
   Unlisten,
+  RuntimeCapabilities,
+  RunBindings,
 } from './types';
 
 /** WebSocket 上除 ExecutionEvent 以外的两种控制帧。见 docs/http-transport.md。 */
@@ -125,6 +127,16 @@ export class HttpTransport implements Transport {
   }
   getCoreInfo(): Promise<CoreInfo> {
     return this.#get<CoreInfo>('/lyflow/core-info');
+  }
+  async getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
+    try {
+      return await this.#get<RuntimeCapabilities>('/lyflow/runtime-capabilities');
+    } catch {
+      return { schemaVersion: 1, resultBindings: false, frames: false, sessions: false };
+    }
+  }
+  getRunBindings(runId: string): Promise<RunBindings> {
+    return this.#get<RunBindings>(`/lyflow/runs/${encodeURIComponent(runId)}/bindings`);
   }
 
   // ---- 校验、计划、执行 -----------------------------------------------------

@@ -17,6 +17,30 @@ export type TransportKind = 'tauri' | 'http' | 'static';
 
 export type Unlisten = () => void;
 
+export interface RuntimeCapabilities {
+  schemaVersion: 1;
+  resultBindings?: boolean;
+  cloudSampling?: 'ordered-stride-v1';
+  frames?: boolean;
+  sessions?: boolean;
+}
+
+export interface RunBindings {
+  schemaVersion: 1;
+  type: 'lyflow.RunBindings.v1';
+  runId: string;
+  entries: {
+    nodeId: string;
+    port: string;
+    type: string;
+    elementCount: number;
+    byteSize: number;
+    sourceCloudId?: string;
+    recordType?: string;
+  }[];
+  missing: { nodeId: string; port: string }[];
+}
+
 /** `load_graph` 的回包。migrations 由前端以 applyMigrations 写回 doc（ADR-0008）。 */
 export interface LoadedGraph {
   doc: GraphDoc;
@@ -150,6 +174,8 @@ export interface RecipeDirListing {
 
 export interface Transport {
   readonly kind: TransportKind;
+  getRuntimeCapabilities?(): Promise<RuntimeCapabilities>;
+  getRunBindings?(runId: string): Promise<RunBindings>;
   getManifest(): Promise<OperatorManifestBundle>;
   getCoreInfo(): Promise<CoreInfo>;
   saveGraph(path: string, doc: GraphDoc): Promise<void>;

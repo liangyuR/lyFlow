@@ -9,6 +9,32 @@
   "vcpkgBaseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd",
   "onnxruntimeVersion": "1.32.0",
   "packs": ["std-value", "std-geometry", "std-pointcloud", "std-image", "std-ml", "glue", "gap"],
+  "requiredSdkFiles": [
+    "include/lyflow/frames.hpp",
+    "bin/python/lyflow_python/records.py",
+    "bin/python/examples/p6_adapters/__init__.py",
+    "bin/python/examples/p6_adapters/README.md",
+    "examples/python/p6_adapters/__init__.py",
+    "examples/python/p6_adapters/README.md",
+    "examples/p6-delivery_demo.lyflow.json",
+    "examples/p6-delivery_receiver.py",
+    "examples/p6-delivery_host.cpp",
+    "examples/p6-model-viewer.lyflow.json",
+    "examples/p6-viewer-cuboid.stl",
+    "examples/p3-camera.json",
+    "examples/p3-marker-scene.png",
+    "docs/p6-examples.md",
+    "docs/p6-analysis-python.md",
+    "docs/p6-analysis-renderer.md",
+    "docs/p6-analysis-visualization.md",
+    "docs/p6-analysis-delivery.md",
+    "docs/adr/0032-native-frames-and-result-delivery.md"
+  ],
+  "requiredRuntimeFiles": [
+    "python/lyflow_python/records.py",
+    "python/examples/p6_adapters/__init__.py",
+    "python/examples/p6_adapters/README.md"
+  ],
   "requiredOperators": [
     "value.number",
     "value.boolean",

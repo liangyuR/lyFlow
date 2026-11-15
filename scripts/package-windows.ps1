@@ -279,6 +279,11 @@ try {
     Assert-ReleaseExit 'Installed P4 CLI saved default/override/default contracts'
     & python (Join-Path $root 'tests/release/p5_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p5-cli')
     Assert-ReleaseExit 'Installed P5 CLI native lineage and saved parameter contracts'
+    & python (Join-Path $root 'bridge/tests/p6_delivery_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --core (Join-Path $sdk 'bin/lyflow_core.dll') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p6-cli')
+    Assert-ReleaseExit 'Installed P6 CLI native frame recording replay logging and publication contracts'
+    foreach ($relative in $configuration.requiredSdkFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative) -PathType Leaf)) { throw "SDK missing $relative" }
+    }
     foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'scripts/fetch-p4-model-assets.py', 'scripts/generate-p4-ocr-fixture.py', 'packaging/p4-model-assets.json', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json', 'docs/p4-assets.md', 'scripts/generate-p5-fixtures.py', 'examples/p5-fixtures.json', 'examples/p5-depth-inspection.lyflow.json', 'examples/p5-depth-filters.lyflow.json', 'examples/p5-orthographic-roi.lyflow.json', 'examples/p5-box-crop.lyflow.json', 'examples/p5-pose-rigid.lyflow.json', 'examples/p5-pose-project-plane.lyflow.json', 'examples/p5-circles-3d.lyflow.json', 'examples/p5-mask-remove.lyflow.json', 'docs/p5-examples.md', 'library')) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }

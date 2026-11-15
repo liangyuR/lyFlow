@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [补齐计划](operator-completion-plan.md) · [外部原始清单](<xyz-vision-lib 算子清单.md>)
 
-审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05、阶段3 B03/B04、阶段4 B05 及阶段5 C01/B06/B07 开发版本 **1.3.11**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
+审计日期：2026-11-15。初始基线：`32a3700e435c753df46916e1dc029a9d59b8d95e`；本表已更新至 P0/P1 与 P2 A01、A05、阶段3 B03/B04、阶段4 B05 、阶段5 C01/B06/B07 及阶段6 C02/C03/D01/B07 开发版本 **1.3.12**。条目状态表示限定用途覆盖，不是外部流程或协议兼容声明。
 
 ## 结论与口径
 
@@ -20,7 +20,7 @@
 
 这些是**清单条目数**，不折算“功能覆盖率”：例如部分覆盖可能仅有一个基础模式，预置组又依赖多个算法。现有/组合项的“无需补齐”只针对表中限定用途；新格式、外部协议和现场验收另立需求。
 
-阶段5的19个清单条目已按完整源模式落实到21个新节点，入口及限制见[深度投影](p5-analysis-projection.md)、[深度检查](p5-analysis-cloud-inspection.md)和[姿态几何](p5-analysis-pose-geometry.md)。这里记录源码已实现；本阶段完整运行门禁仍在执行，不预写CLI/SDK、现场精度或碰撞安全已通过。
+阶段5的19个清单条目已按完整源模式落实到22个新节点，入口及限制见[深度投影](p5-analysis-projection.md)、[深度检查](p5-analysis-cloud-inspection.md)和[姿态几何](p5-analysis-pose-geometry.md)。阶段5已通过CLI/独立SDK、CI与审查并合并；现场精度和碰撞安全仍需业务验收。阶段6的15项通过现有计算节点、11类Python端口、共享查看器及有界原生帧宿主组合补齐，见[P6指南](p6-examples.md)；当前完整运行与交付门禁仍在执行。
 
 ## 分类统计
 
@@ -30,14 +30,14 @@
 | 2D图像处理 | 29 | 1 | 5 | 2 | 3 | 40 |
 | 3D点云处理 | 26 | 3 | 8 | 18 | 1 | 56 |
 | 位姿处理 | 9 | 0 | 4 | 11 | 0 | 24 |
-| 流数据运算 | 8 | 0 | 5 | 1 | 0 | 14 |
+| 流数据运算 | 8 | 2 | 4 | 0 | 0 | 14 |
 | 检查 | 1 | 0 | 0 | 4 | 0 | 5 |
 | 深度学习 | 3 | 0 | 2 | 1 | 1 | 7 |
-| 输出 | 1 | 2 | 2 | 4 | 0 | 9 |
-| 可视化 | 0 | 2 | 4 | 2 | 0 | 8 |
+| 输出 | 1 | 6 | 0 | 2 | 0 | 9 |
+| 可视化 | 0 | 7 | 0 | 1 | 0 | 8 |
 | 预置组节点 | 0 | 0 | 0 | 4 | 0 | 4 |
-| 内置 Python 脚本 | 8 | 0 | 2 | 6 | 0 | 16 |
-| **合计** | **93** | **8** | **36** | **56** | **5** | **198** |
+| 内置 Python 脚本 | 8 | 4 | 0 | 4 | 0 | 16 |
+| **合计** | **93** | **23** | **27** | **50** | **5** | **198** |
 
 ## 数据与证据边界
 
@@ -220,12 +220,12 @@
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
 | `BasicArithmetic`<br>基础数学运算 | 已有对应 | `value.arithmetic` | 加减乘除与无单位幂；明确单位规则，拒绝真正零分母、非法定义域及非有限结果。负分母与合法小分母可用。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
-| `CacheData`<br>数据缓存队列 | 缺失 | — | 引擎缓存复用同输入结果，不是先入先出数据队列；缺少容量、队首淘汰、会话状态、重置和取消语义。 [1](../core/include/lyflow/data.h) [2](../core/src/exec/disk_cache.cpp) | P2 · [D01](operator-completion-plan.md#d01) |
+| `CacheData`<br>数据缓存队列 | 可组合替代 | `C ABI FrameSession / Rust Session` | 独立FIFO所有权、容量/字节预算、队首淘汰/拒绝/丢新、时间顺序、代次、reset与取消事务；不使用引擎结果缓存充当队列。 [实现与边界](p6-examples.md)。 | P2 · [D01](operator-completion-plan.md#d01) |
 | `CloudVectorToCloud`<br>合并点云数组 | 已有对应 | `cloud.group_merge`、`cloud.group_concat` | 云+原生Indices+cloud.Groups.v1替代视图，按组序平坦化、保留重复点和全部通道；消费者校验来源/索引/帧，合法空集合输出空云，不兼容原CloudVector端口。 [源码与边界](p1-analysis-cloud.md) · [回归](../packs/std-pointcloud/tests/test_p1_cloud.cpp) | P1 限定切片已实现 · [A02](operator-completion-plan.md#a02) |
 | `CompareNumbers`<br>比较数字 | 已有对应 | `value.compare` | 绝对/相对容差，等于和不等为补集；有序比较在容差内视同等，拒绝跨单位。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `ConcateVector`<br>连接数组 | 部分覆盖 | `list.concat`、`value.concat` | 值列表/字符串拼接沿用P0；P1另有cloud.group_concat和pose.concat保留各自身份与帧校验，通用原生几何集合和原协议仍未覆盖。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
 | `Construct2DPose`<br>构造2D工件 | 已有对应 | `pose.construct_2d` | 常量和std.Value.v1动态坐标/角度，px/m及rad显式；动态值覆盖常量，输出带身份/帧/尺寸的受校验Pose2D。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
-| `CustomPythonScript`<br>自定义python模块 | 部分覆盖 | `Python 节点 SDK/worker` | 已交付文件/包加载、装饰器注册、参数、日志和执行隔离，可编写自定义算子；接口不同于外部脚本，SDK端口限 PointCloud/Image/Measurement/Record，未交付16个外部脚本或原生几何端口适配。 [1](../python/lyflow_python/api.py) [2](../python/lyflow_python/data.py) [3](../core/src/python_runtime.cpp) [4](../docs/python-nodes.md) | P2 · [C02](operator-completion-plan.md#c02) |
+| `CustomPythonScript`<br>自定义python模块 | 可组合替代 | `lyflow_python SDK/worker v2` | 11种直接端口、标准值/位姿/几何Record helper与5个可执行样例；版本、类型、只读、取消和恢复有校验。原16脚本逐项矩阵保留，接口不兼容旧SDK。 [实现与边界](p6-examples.md)。 | P2 · [C02](operator-completion-plan.md#c02) |
 | `Decompose2DInformation`<br>提取2D信息 | 已有对应 | `pose.decompose_2d` | 显式零基index提取x/y/angle/width/height带单位值，空/越界诊断；不静默只取首项或把任意几何当作工件。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `Extend2DInformation`<br>扩展2D信息 | 已有对应 | `geometry.extend_2d` | 原生点/线/圆、Features2D集合或Poses2D向指定X/Y/Z平面嵌入，px→m显式比例和可选刚体；保留线段端点、圆法向/半径及工件元数据/已知厚度。不依赖外部全局帧树。 [分析与边界](p5-analysis-pose-geometry.md) | P2阶段5限定用途已实现 · [B07](operator-completion-plan.md#b07) |
 | `FetchElement`<br>获取数组元素 | 部分覆盖 | `list.get` | P0有界值列表索引提取，加P1的cloud.group_get和pose.get；越界有诊断，不产默认值。通用原生几何集合及原协议仍未覆盖。 [1](../packs/std-value/ops/register.cpp) [2](../packs/std-value/tests/test_values.cpp) | P0 已交付限定用途 · [分析与边界](p0-operator-analysis.md) |
@@ -260,28 +260,28 @@
 
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
-| `BasicDatatypesPub`<br>发布基本数据类型 | 部分覆盖 | `图级命名输出、Measurement/Record、C ABI` | 可读取现有类型的命名结果；没有通用标量端口及 xyz-viz 基本数据发布协议适配。 [1](../docs/graph-doc.md) [2](../docs/embedding.md) [3](../core/include/lyflow/data.h) | P2 · [D01](operator-completion-plan.md#d01) |
+| `BasicDatatypesPub`<br>发布基本数据类型 | 可组合替代 | `命名结果 + TCP FrameArchive` | 标准值/列表通过Record发布，小结构与点云/图像/Tensor原生二进制同帧；原Apollo/Cyber基本数据线协议不兼容。 [实现与边界](p6-examples.md)。 | P2 · [D01](operator-completion-plan.md#d01) |
 | `CloudPub`<br>发布点云 | 可组合替代 | `图级命名输出、C ABI/Transport、点云预览` | 用宿主取回结果和 LyFlow 点云查看器替代查看用途；不能直接向 xyz-viz 发布，不具备其协议兼容性。 [1](../docs/graph-doc.md) [2](../docs/embedding.md) [3](../packages/editor/src/components/Viewer3D.tsx) | 无需补齐 |
 | `ImagePub`<br>发布图像 | 可组合替代 | `图级命名输出、C ABI/Transport、图像预览` | 用宿主取回结果和 LyFlow 图像查看器替代查看用途；不能直接向 xyz-viz 发布。 [1](../docs/graph-doc.md) [2](../docs/embedding.md) [3](../packages/editor/src/components/EdgePeek.tsx) | 无需补齐 |
 | `ImageSaveModel`<br>保存图像 | 已有对应 | `io.save_image` | 已有按路径保存图像；日志目录、时间戳命名和归档保留策略由宿主提供，不承诺外部目录约定。 [1](../packs/std-image/ops/io_image.cpp) | 无需补齐 |
 | `MeshPub`<br>发布模型 | 缺失 | — | 没有 Mesh 数据类型、网格结果载荷及模型发布或查看链；点云显示不能等同网格模型。 [1](../core/include/lyflow/data.h) [2](../packages/editor/src/components/Viewer3D.tsx) | P3 · [C03](operator-completion-plan.md#c03) |
-| `OutputPub`<br>输出结果 | 部分覆盖 | `图级命名输出、C ABI/Transport` | 可向宿主返回已有类型的结果；辅助外部源码的 xyz bridge Response 含工件位姿等结构，当前无相应协议和对象适配。 [1](../docs/graph-doc.md) [2](../docs/embedding.md) [3](../core/include/lyflow/data.h)（辅查外部源码；修订未验证） | P2 · [D01](operator-completion-plan.md#d01) |
-| `Primitive2DPub`<br>发布2D位姿 | 缺失 | — | P1已有受校验Pose2D集合，可由现有命名结果返回宿主；外部Primitive2DPub发布协议/端点适配仍未实现。 [1](../core/include/lyflow/data.h) [2](../docs/embedding.md) | P2 · [B07](operator-completion-plan.md#b07) |
-| `Primitive3DPub`<br>发布3D位姿 | 缺失 | — | P1已有受校验Pose3D集合并与Transform分开；外部Primitive3DPub发布协议/端点适配仍未实现。 [1](../core/include/lyflow/data.h) [2](../docs/embedding.md) | P2 · [B07](operator-completion-plan.md#b07) |
+| `OutputPub`<br>输出结果 | 可组合替代 | `Frame命名结果 + TCP发布` | 保留动态命名、原生全类型载荷和完整元信息；需要显式端点与匹配ACK，断线/超时/取消保持未确认，不自动重发。 [实现与边界](p6-examples.md)。 | P2 · [D01](operator-completion-plan.md#d01) |
+| `Primitive2DPub`<br>发布2D位姿 | 可组合替代 | `lyflow publish + FrameArchive` | 具备稳定实例ID、frame/unit和完整Pose2D的版本化TCP发布，端点持久化后匹配ACK；未确认不重试，原Cyber协议独立适配。 [实现与边界](p6-examples.md)。 | P2 · [B07](operator-completion-plan.md#b07) |
+| `Primitive3DPub`<br>发布3D位姿 | 可组合替代 | `lyflow publish + FrameArchive` | 原生Pose3D集合及所有配套载荷打包，保留帧/标定/会话/序列；外部Cyber拓扑和现场安全另行接入。 [实现与边界](p6-examples.md)。 | P2 · [B07](operator-completion-plan.md#b07) |
 | `UploadTimestamp`<br>上传异常3d工件位姿时间戳 | 缺失 | — | 运行事件带时间信息，但未交付关联异常工件、采集帧和外部上传服务的业务链。应由宿主负责。 [1](../docs/embedding.md) [2](../core/include/lyflow/data.h) | P3 · [D01](operator-completion-plan.md#d01) |
 
 ### 可视化
 
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
-| `DataShow`<br>打印信息 | 部分覆盖 | `结果检查器、Measurement/Record 预览` | 可检查当前Record/Measurement结果，含P1工件载荷；仍缺少外部工件高度等字段的专用显示与原查看协议。 [1](../packages/editor/src/components/Inspector.tsx) [2](../packages/editor/src/components/EdgePeek.tsx) [3](../core/include/lyflow/data.h) | P2 · [C03](operator-completion-plan.md#c03) |
+| `DataShow`<br>打印信息 | 可组合替代 | `值检查器与 ResultScene` | 支持字符串、标准值、工件身份/尺寸/方向及结构化场景；文本转义并限制字段数量。 [实现与边界](p6-examples.md)。 | P2 · [C03](operator-completion-plan.md#c03) |
 | `ImageShowModel`<br>可视化图像 | 可组合替代 | `图像预览、EdgePeek` | 编辑器已能显示图像结果，不必为单纯查看额外放置计算节点；叠加图元遵循现有场景契约。 [1](../packages/editor/src/components/EdgePeek.tsx) [2](../packages/editor/src/components/EdgePeekLayer.tsx) | 无需补齐 |
-| `SVGShowModel`<br>可视化矢量图 | 部分覆盖 | `共享 SceneSpec → SVG/PNG` | 可将支持的二维点、线、圆及图像场景输出 SVG；没有任意 SVG 文档输入端口或通用 SVG 浏览节点。 [1](../packages/visualization/README.md) [2](../packages/visualization/index.d.ts) | P2 · [C03](operator-completion-plan.md#c03) |
+| `SVGShowModel`<br>可视化矢量图 | 可组合替代 | `SceneSpec Record → SVG/PNG` | 源实现输入为SvgPlot结构化点线圆；通过现有共享场景适配并查看导出。任意SVG XML、外部资源及xyz-viz协议仍属P3。 [实现与边界](p6-examples.md)。 | P2 · [C03](operator-completion-plan.md#c03) |
 | `StartRerun`<br>（未翻译） | 缺失 | — | 没有 Rerun 启动或协议连接器；现有点云查看器不是 Rerun 协议实现，按宿主需求选做。 [1](../packages/editor/src/components/Viewer3D.tsx) [2](../packages/visualization/README.md) | P3 · [C03](operator-completion-plan.md#c03) |
 | `Visualize2DCloud`<br>可视化2D点云 | 可组合替代 | `点云二维预览、共享场景导出` | 可选择投影平面显示点云并导出矢量场景；需显式保持坐标帧、单位和投影轴，不依赖外部 SVG 数据类型。 [1](../packages/editor/src/components/EdgePeek.tsx) [2](../packages/editor/src/lib/cloudScene.ts) [3](../packages/visualization/README.md) | 无需补齐 |
-| `VisualizeCloudVector`<br>可视化点云数组 | 部分覆盖 | `单云预览、util.merge` | 已有云分组数据与提取/合并节点；查看器仍缺少按组身份着色、选择及相机投影叠加，不等于完整集合查看器。 [1](../packages/editor/src/components/Viewer3D.tsx) [2](../packs/std-pointcloud/ops/util_merge.cpp) [3](../core/include/lyflow/data.h) | P2 · [C03](operator-completion-plan.md#c03) |
-| `VisualizePrimitives2D`<br>可视化工件位姿2D | 部分覆盖 | `二维几何场景` | 已有点线圆等几何叠加和P1 Pose2D数据；仍未交付带实例身份的旋转工件集合专用显示。 [1](../packages/visualization/README.md) [2](../core/include/lyflow/data.h) | P2 · [C03](operator-completion-plan.md#c03) |
-| `VisualizePrimitives3D`<br>可视化工件位姿3D | 缺失 | — | 已有带实例/尺寸/帧的Pose3D集合数据；缺少其坐标轴、尺寸盒或工件模型的专用显示，点云查看器不能替代。 [1](../packages/editor/src/components/Viewer3D.tsx) [2](../core/include/lyflow/data.h) | P2 · [C03](operator-completion-plan.md#c03) |
+| `VisualizeCloudVector`<br>可视化点云数组 | 可组合替代 | `Groups + Indices + Viewer3D` | 真实来源云身份配对、稳定组色与组选择，显式帧/外参下相机投影；capability声明固定步长采样，不凭点数猜来源。 [实现与边界](p6-examples.md)。 | P2 · [C03](operator-completion-plan.md#c03) |
+| `VisualizePrimitives2D`<br>可视化工件位姿2D | 可组合替代 | `Pose2D实例场景/图像叠加` | 旋转尺寸框、方向轴、ID选择、mask绑定及同一SceneSpec导出；米/像素、frame、scale严格校验。 [实现与边界](p6-examples.md)。 | P2 · [C03](operator-completion-plan.md#c03) |
+| `VisualizePrimitives3D`<br>可视化工件位姿3D | 可组合替代 | `Pose3D场景 + image.render_model_3d` | 原生实例轴/尺寸盒/选择、点模型渲染的mask/edge_mask/depth/normal真实输出；STL采样不保留Mesh拓扑，任意Mesh查看独立P3。 [实现与边界](p6-examples.md)。 | P2 · [C03](operator-completion-plan.md#c03) |
 
 ### 预置组节点
 
@@ -296,9 +296,9 @@
 
 | 外部项 | 结论 | LyFlow 当前入口 | 语义边界与证据 | 下一步 |
 |---|---|---|---|---|
-| `LogString`<br>输出字符串到文件 | 部分覆盖 | `ExecContext.log`、`Python Context.log` | 已有运行日志基础设施与Python日志API，但没有带时间戳、接收字符串端口并指定文件输出的现成脚本；不能假定日志格式与外部兼容。 [1](../core/include/lyflow/operator.h) [2](../python/lyflow_python/api.py) [3](../core/src/python_runtime.cpp) | P2 · [D01](operator-completion-plan.md#d01) |
-| `LogPrimitive3D`<br>输出3D位姿到文件 | 缺失 | — | 已有Pose3D与JSON序列化，仍无带时间戳/归档策略的位姿文件导出节点或原脚本；SDK扩展能力不算现成算法。 [1](../core/include/lyflow/data.h) [2](../python/lyflow_python/data.py) [3](../python/examples/offset.py) | P2 · [B07](operator-completion-plan.md#b07) |
-| `LogPrimitive2D`<br>输出2D位姿到文件 | 缺失 | — | 已有Pose2D与JSON序列化，仍无标准时间戳/归档位姿文件输出脚本；通用日志不是文件导出。 [1](../core/include/lyflow/data.h) [2](../python/lyflow_python/data.py) [3](../python/examples/image_metrics/nodes.py) | P2 · [B07](operator-completion-plan.md#b07) |
+| `LogString`<br>输出字符串到文件 | 可组合替代 | `lyflow log --log-kind string` | 真实Record字符串写入JSONL或转义文本，带时间戳/frame/calibration，首项/全部、归档、拒覆写/追加与字节上限。 [实现与边界](p6-examples.md)。 | P2 · [D01](operator-completion-plan.md#d01) |
+| `LogPrimitive3D`<br>输出3D位姿到文件 | 可组合替代 | `lyflow log --log-kind poses3d` | 首项/全部、四元数与24种欧拉轴序、m/mm、rad/deg、奇异标记及归档冲突；不宣称原私有日志逐字兼容。 [实现与边界](p6-examples.md)。 | P2 · [B07](operator-completion-plan.md#b07) |
+| `LogPrimitive2D`<br>输出2D位姿到文件 | 可组合替代 | `lyflow log --log-kind poses2d` | 首项/全部实例、时间戳、单位、固定精度及UTC日归档；复用真实帧Record，明确拒覆写或追加。 [实现与边界](p6-examples.md)。 | P2 · [B07](operator-completion-plan.md#b07) |
 | `Primitive3DtoString`<br>转换3D位姿为字符串 | 已有对应 | `pose.to_text` | 原生版本化工件JSON序列化，保留单体/完整集合、帧/单位/属性和数值精度；64KiB上限明确拒绝超限。不声称原脚本分隔符/任意欧拉顺序协议或脚本本身已移植。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `Primitive2DtoString`<br>转换2D位姿为字符串 | 已有对应 | `pose.to_text` | 原生版本化工件JSON序列化，保留单体/完整集合、帧/单位/属性和数值精度；64KiB上限明确拒绝超限。不声称原脚本分隔符/任意欧拉顺序协议或脚本本身已移植。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `StringtoPrimitive3D`<br>转换字符串为3D位姿 | 已有对应 | `pose.from_text` | 只接受完整type/data及受校验v1工件JSON，类型/版本/深度/尺寸/旋转非法均拒绝；不是旧分隔文本的通用解析器或原脚本移植。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
@@ -306,7 +306,7 @@
 | `Compare2Primitive2D`<br>比较两个2D位姿 | 已有对应 | `pose.compare_2d` | 同帧同单位单实例的位置距离、周期角差和双门限判断；显式角度周期，不做跨帧或多实例关联。由原生节点提供用途，不执行原脚本。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `CheckPickablePrimtives2D`<br>检查2D位姿是否为Pickable | 缺失 | — | 没有基于两组2D位姿 IOU 的 pickable 标记脚本，与同名原生清单项应合并为一个能力任务。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `ShrinkBoxDimension`<br>收缩纸箱尺寸 | 缺失 | — | 没有箱体碰撞及尺寸收缩脚本，与 ShrinkBoxesDimension 归并规划，避免按名称重复建设。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
-| `RecordReplayer`<br>（未翻译） | 部分覆盖 | `CLI 输出快照/样本回放` | 现有输出快照保存及样本重跑可支持LyFlow调试，但没有外部视觉日志录制数据格式、时间序列重放及对应源节点；需核定录制格式后做适配。 [1](../bridge/src/cli/snapshot.rs) [2](../docs/cli.md) | P2 · [D01](operator-completion-plan.md#d01) |
+| `RecordReplayer`<br>（未翻译） | 可组合替代 | `lyflow record/replay` | 保存有效图/参数、全部原生载荷和原始注入，默认只读，显式重算只注入展开源及原注入；时间筛选/节奏/损坏/版本/冲突有检查，不兼容私有requests/response格式。 [实现与边界](p6-examples.md)。 | P2 · [D01](operator-completion-plan.md#d01) |
 | `MappingBoxDimension`<br>映射纸箱尺寸 | 缺失 | — | 没有纸箱尺寸表映射及现成Python脚本；与 MappingHeightFromSKU 共享SKU尺寸补齐任务。 [1](../core/include/lyflow/data.h) [2](../packs/std-pointcloud/ops/register.cpp) | P3 · [D02](operator-completion-plan.md#d02) |
 | `MakeOffset`<br>3D位姿添加偏移 | 已有对应 | `pose.offset_3d` | 米制局部/世界平移；local先乘工件旋转，world直接相加，保留尺寸/朝向/属性；不是点云Z偏移，也不是旧毫米脚本协议。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
 | `ConstructPrimitive3D`<br>构造3D位姿 | 已有对应 | `pose.construct_3d` | 常量/动态位置及旋转输入明确单位，生成带身份/帧/尺寸及可选属性的Pose3D；动态值覆盖而非隐式相加，不宣称原脚本代码已移植。 [源码与边界](p1-analysis-pose.md) · [回归](../packs/std-geometry/tests/test_pose.cpp) | P1 限定切片已实现 · [B07](operator-completion-plan.md#b07) |
