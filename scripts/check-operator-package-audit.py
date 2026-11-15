@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 AUDIT = ROOT / 'docs/operator-package-audit.json'
 FIELDS = ('id', 'currentPack', 'targetPack', 'action', 'wave', 'source', 'dependencies',
           'currentContract', 'targetContract', 'migrationPrerequisites', 'acceptance', 'notes')
+CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/manifest.cpp',
+                    'core/include/lyflow/*.h', 'core/include/lyflow/*.hpp', 'core/CMakeLists.txt',
+                    'packs/*/ops/*.cpp', 'packs/*/lyflow_op_pack.cmake',
+                    'python/examples/**/*.py', 'packaging/release.json')
 
 
 def source_hash(path):
@@ -31,6 +35,9 @@ def validate(data, manifests):
     identifiers = [r.get('id') for r in rows]
     require(len(identifiers) == len(set(identifiers)), '出现重复算子ID')
     require(len(native) == data.get('nativeCount'), '原生算子统计不符')
+    registered = data.get('registeredNativeIds', [])
+    require(bool(registered) and len(registered) == len(set(registered)), '缺少有效的独立注册ID快照')
+    require({r['id'] for r in native} == set(registered), '原生清单与注册ID快照不一致')
     require(len(examples) == data.get('pythonExampleCount'), 'Python示例统计不符')
     require(dict(collections.Counter(r['currentPack'] for r in native)) == data.get('currentPackCounts'), '当前包统计不符')
     require(dict(collections.Counter(r['targetPack'] for r in native)) == data.get('targetPackCounts'), '目标包统计不符')
@@ -74,11 +81,17 @@ def validate(data, manifests):
     for row in examples:
         require(row.get('operatorKind') == 'python-example' and row['id'].startswith('py.'), f"{row['id']}: 示例分类错误")
     require([r['wave'] for r in sorted(native, key=lambda r: r['migrationOrder'])] == sorted(r['wave'] for r in native), '原生清单波次顺序不单调')
-    for relative, expected in data.get('sourceFingerprints', {}).items():
+    current_sources = {p.relative_to(ROOT).as_posix() for pattern in CONTRACT_SOURCES
+                       for p in ROOT.glob(pattern) if p.is_file()}
+    registered_sources = set(data.get('contractSourcePaths', []))
+    require(current_sources == registered_sources,
+            '契约来源文件集合变化，需复核新增/删除文件：' + ', '.join(sorted(current_sources ^ registered_sources)))
+    fingerprints = data.get('sourceFingerprints', {})
+    for relative in sorted(registered_sources):
         path = ROOT / relative
         require(path.is_file(), f'指纹来源缺失：{relative}')
         if path.is_file():
-            require(source_hash(path) == expected, f'源码已变化，需复核清单：{relative}')
+            require(source_hash(path) == fingerprints.get(relative), f'契约源码已变化，需复核清单：{relative}')
     require(bool(data.get('sourceFingerprints')), '缺少源码指纹')
     assets = data.get('relatedAssets', {})
     require(len(assets.get('importers', [])) == 6, '本基线的6种导入器登记不符')
@@ -130,7 +143,8 @@ def main():
         print('\n'.join(problems), file=sys.stderr)
         return 1
     print(f"OK: {data['nativeCount']} native operators, {data['pythonExampleCount']} Python examples, "
-          f"{len(data['sourceFingerprints'])} source fingerprints; fields, order, sources and links verified")
+          f"{len(data['contractSourcePaths'])} contract sources; fields, order, sources and links verified")
+    print(f"Historical source fingerprints retained for provenance: {len(data['sourceFingerprints'])}")
     print('Static audit only; no migrated runtime, algorithm, SDK or field acceptance is claimed.')
     return 0
 

@@ -73,10 +73,12 @@ M0是全体清点，不以重复登记251项来计数。序号001–251给出尊
 python scripts/check-operator-package-audit.py
 ```
 
-该命令核对清单集合、描述字段、顺序、来源指纹及引用。若已有导出的当前manifest，可额外传入：
+该命令核对清单与独立注册ID快照、描述字段、顺序、契约来源文件集合及引用。158个注册/端口/构建契约文件的增删和内容变化会要求复核；376个历史源码指纹保留作来源记录，测试框架或普通测试维护不受其余指纹阻断。若已有导出的当前manifest，可额外传入：
 
 ```powershell
 python scripts/check-operator-package-audit.py --manifest build/operator-package-audit/native-main.json --manifest build/operator-package-audit/dts-operators.json
 ```
 
 第二个参数示例是已核验DTS描述数组，不表示运行库自带DTS。若未来导出包含全部包的单份manifest，只传该文件即可。改变算法/声明后应重新审计对应项并刷新基线，而不是直接忽略指纹差异。
+
+CI的原生视觉任务显式启用全部标准包及dts/gap/glue，再用本次构建实际导出的全包manifest核对ID全集、版本、包归属、端口及参数，独立于JSON内部统计。quality任务先执行无需重后端的静态检查；完整原生任务通过后才说明当前全包描述已匹配，不把静态检查当作运行证据。

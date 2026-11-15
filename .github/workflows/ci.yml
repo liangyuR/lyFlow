@@ -54,7 +54,9 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: 算子分包规划清单校验
-        run: python scripts/check-operator-package-audit.py
+        run: |
+          python scripts/check-operator-package-audit.py
+          python tests/release/test_operator_package_audit.py
 
       - name: 前端 / MCP / workflow 格式检查（Prettier）
         run: pnpm format:check
@@ -490,12 +492,17 @@ jobs:
           $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
           $env:LYFLOW_P4_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p4-assets'
           $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
-          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON -DLYFLOW_PACKS=gap -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
+          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON '-DLYFLOW_PACKS=dts;gap;glue' -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
           cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
           ./build/p1-native/bin/lyflow-dump-manifest.exe --check
           if ($LASTEXITCODE -ne 0) { throw 'P1 算子契约失败' }
+          $auditManifest = ./build/p1-native/bin/lyflow-dump-manifest.exe
+          if ($LASTEXITCODE -ne 0) { throw '全包算子描述导出失败' }
+          $auditManifest | Set-Content -LiteralPath build/p1-native/operator-package-manifest.json -Encoding utf8
+          python scripts/check-operator-package-audit.py --manifest build/p1-native/operator-package-manifest.json
+          if ($LASTEXITCODE -ne 0) { throw '分包清单与全包原生注册不一致' }
           ctest --test-dir build/p1-native --output-on-failure --no-tests=error --output-junit test-results.xml
           if ($LASTEXITCODE -ne 0) { throw 'P1 点云/检测组合回归失败' }
 
