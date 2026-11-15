@@ -1,6 +1,6 @@
 # packs/std-image
 
-图像域的标准算子包，当前版本 **0.6.0**（[文档中心](../../docs/README.md)、[ADR-0026](../../docs/adr/0026-image-data-domain.md)）。
+图像域的标准算子包，当前版本 **0.8.0**（[文档中心](../../docs/README.md)、[ADR-0026](../../docs/adr/0026-image-data-domain.md)）。
 默认开，依赖固定源码 OpenCV 5.1.0（core / imgproc / imgcodecs / geometry / objdetect），工作空间文件使用 yaml-cpp：
 
 ```powershell
@@ -151,6 +151,31 @@ YOLOX-Nano 使用独立 `image.yolox_preprocess/decode` 与 modelContract=yolox-
 
 ## 分割、OCR、识码与标注
 
-std-image0.7.0提供 `image.segmentation_preprocess/decode`、`image.ocr_preprocess/db_decode/crops/orient/ctc_decode`、`image.barcode_decode`、`image.qr_refine` 和 `image.load_annotations`。原图/掩膜/四边形使用原生Image/Tensor，小型Record保留ID、类别、质量与配对信息，不在JSON中搬运数组。输入只读，位深/RGB/alpha与资源上限显式校验。
+std-image自0.7.0起提供 `image.segmentation_preprocess/decode`、`image.ocr_preprocess/db_decode/crops/orient/ctc_decode`、`image.barcode_decode`、`image.qr_refine` 和 `image.load_annotations`。原图/掩膜/四边形使用原生Image/Tensor，小型Record保留ID、类别、质量与配对信息，不在JSON中搬运数组。输入只读，位深/RGB/alpha与资源上限显式校验。
 
 [完整示例与准备](../../docs/p4-examples.md) · [分割及逐ROI保留](../../docs/p4-analysis-segmentation.md) · [OCR模型和字符集](../../docs/p4-analysis-ocr.md) · [条码和二维码](../../docs/p4-analysis-barcodes.md) · [标注格式](../../docs/p4-analysis-annotations.md)。模型需单独准备；CPU公开样本回归不能代替工件现场质量验收。
+
+## P2 阶段5：深度关联、检查与三维投影
+
+LyFlow 1.3.11 / std-image 0.8.0 的源码新增下列入口。逐项源模式与数值边界见[投影与滤波](../../docs/p5-analysis-projection.md)、[深度检查](../../docs/p5-analysis-cloud-inspection.md)、[姿态投影](../../docs/p5-analysis-pose-geometry.md)，可执行图见[八个阶段5示例](../../docs/p5-examples.md)。本节说明源码已实现，不预先宣称正在执行的完整运行门禁或现场验收通过。
+
+| 入口                           | 模式与主要边界                                                                                                                     |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `cloud.height_map`             | 显式工作空间原点/分辨率/刚体，最高Z正交高度及灰度/伪彩；独立状态保留合法零和负高度。                                               |
+| `cloud.orthographic_map`       | height、normal_angle、pseudo_height；独立normalResolution下真实邻域法线角，缺邻域明确无效。                                        |
+| `cloud.project_camera`         | 完整K/D、显式跨帧、最近Z-buffer，RGB或源颜色；compact可见云、源索引及父点遮挡状态，原RGBA只读。                                    |
+| `image.depth_filter`           | mean/median/gaussian/fill/eliminate；IDW/min/max、方向凸凹消除、边缘门控和迭代。无变化保留原XYZ，改深度沿原射线，输出实际过滤云。  |
+| `cloud.roi_extract`            | 组织映射或标定未组织云，P4实例/NHW掩膜、visible/all、多ROI与所选组织视图；旋转框须显式usingMask=false，裁剪偏移须显式usingOffset。 |
+| `cloud.fill_holes`             | 闭运算定位候选，原observed中值/跨度门控补点；新云追加点、重绑索引，status=interpolated，不级联使用本次补值。                       |
+| `depth.defects`                | UP/DOWN/BOTH平面残差，闭运算分组，长度/宽度/面积/体积四OR判退；实际观测深度四角足迹积分，缺观测unknown。                           |
+| `image.find_circles_3d`        | 自动/手动Canny、弧段与椭圆质量、已知半径和K/D恢复空间圆；两歧义解保留，叠图保持位深/通道/alpha。                                   |
+| `depth.profile_slices`         | 组织三角网格与真实切平面交线，x/y多截面、六特征及x-x/y-y；孔洞分链，交点保源三角支持和派生通道。                                   |
+| `pose.project_3d`              | 有限box/cylinder/sphere/circle真实射线支持，individual/union、full/top、锚点、膨胀及nearest遮挡；完整原图NHW并集不填对象间空隙。   |
+| `pose.project_to_plane`        | 输入平面/ID平面集合/Workspace上下表面，center已知尺寸或dimensions真实mask/明确无mask框边界拟合；声明mask却缺载荷拒绝。             |
+| `cloud.remove_mask_primitives` | 三维实例显式primitive2DId关联真实检测掩膜，按列向上topExpand；OOB/未知点保留并单独统计，不隐含三维体裁剪。                         |
+
+组织视图由原生F32米制depth、U8 status、float32整数Tensor `[H,W] indexMap` 与小型 `vision.DepthMapping.v1` 组成。PointCloud没有隐式宽高；每个有效索引必须引用当前云，mapping绑定云ID和三份载荷摘要，另有父索引追踪。observed=1、interpolated=2、filtered=4、collision=8；缺陷/截面默认不把补点当实测。pointState为父云长度N的向量，不按图像scale缩放元素。
+
+二维imageFrame与三维camera/grid/cloud帧独立。投影/滤波显式保留Image.scale及原图坐标，末尾不足scale的像素块使用真实覆盖中心/边界；填洞、缺陷、截面、空间圆只接受全分辨率。无Image输入的Pose投影固定标定完整网格scale1。逆畸变共享有界Newton/线搜索、正投影残差门控和累计预算，只处理ROI内射线。
+
+掩膜是原生完整原图NHW、scale1、二值0/1，与 `vision.Masks2D.v1` 的ID/index/hasMask/source逐层配对；缺mask不伪装bbox，空ROI不回退整图。大像素/点云/截面数组不进入JSON。各节点有显式资源上限和取消诊断，正常空结果与bad_input/resource_limit分开；具体预算以各分析页及源码为准。合成夹具、离散面积/体积和点计数均不构成传感器精度或生产安全保证。

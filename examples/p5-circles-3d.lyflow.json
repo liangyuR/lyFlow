@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-circles-3d",
+  "name": "P5 已知半径真实圆孔、两解姿态与圆盘投影",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_image",
+      "params": {
+        "mode": "unchanged"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "circles",
+      "op": "image.find_circles_3d",
+      "params": {
+        "radius": 0.05,
+        "imageFrame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "project",
+      "op": "pose.project_3d",
+      "params": {
+        "imageFrame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-image-circles-image",
+      "from": {
+        "node": "source",
+        "port": "image"
+      },
+      "to": {
+        "node": "circles",
+        "port": "image"
+      }
+    },
+    {
+      "id": "camera-calib-circles-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "circles",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "circles-instances-project-poses",
+      "from": {
+        "node": "circles",
+        "port": "instances"
+      },
+      "to": {
+        "node": "project",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "camera-calib-project-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "project",
+        "port": "calib"
+      }
+    }
+  ],
+  "params": {
+    "imagePath": {
+      "type": "path",
+      "default": "p5-circle-front.png",
+      "binds": ["source.path"]
+    },
+    "cameraPath": {
+      "type": "path",
+      "default": "p5-circle-camera.json",
+      "binds": ["camera.path"]
+    }
+  },
+  "outputs": {
+    "instances": {
+      "node": "circles",
+      "port": "instances"
+    },
+    "circles": {
+      "node": "circles",
+      "port": "circles"
+    },
+    "ellipses": {
+      "node": "circles",
+      "port": "ellipses"
+    },
+    "circles2d": {
+      "node": "circles",
+      "port": "circles2d"
+    },
+    "image": {
+      "node": "circles",
+      "port": "image"
+    },
+    "edges": {
+      "node": "circles",
+      "port": "edges"
+    },
+    "projected": {
+      "node": "project",
+      "port": "poses"
+    },
+    "masks": {
+      "node": "project",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "project",
+      "port": "maskInfo"
+    },
+    "projectionQuality": {
+      "node": "project",
+      "port": "quality"
+    }
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-pose-project-plane",
+  "name": "P5 三维顶面真实掩膜及已知平面尺寸回投",
+  "nodes": [
+    {
+      "id": "box",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "plane-box",
+        "frame": "camera",
+        "position": [0, 0, 1],
+        "size": [0.12, 0.08, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "plane",
+      "op": "geometry.plane",
+      "params": {
+        "normal": [0, 0, 1],
+        "offset": -1.01
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "project",
+      "op": "pose.project_3d",
+      "params": {
+        "imageFrame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "lift",
+      "op": "pose.project_to_plane",
+      "params": {
+        "imageFrame": "image",
+        "planeFrame": "camera",
+        "planeSource": "input",
+        "size3D": [0.12, 0.08, 0.02],
+        "thickness": 0.02
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "box-pose-project-poses",
+      "from": {
+        "node": "box",
+        "port": "pose"
+      },
+      "to": {
+        "node": "project",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "camera-calib-project-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "project",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "project-poses-lift-poses",
+      "from": {
+        "node": "project",
+        "port": "poses"
+      },
+      "to": {
+        "node": "lift",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "project-masks-lift-masks",
+      "from": {
+        "node": "project",
+        "port": "masks"
+      },
+      "to": {
+        "node": "lift",
+        "port": "masks"
+      }
+    },
+    {
+      "id": "project-maskInfo-lift-maskInfo",
+      "from": {
+        "node": "project",
+        "port": "maskInfo"
+      },
+      "to": {
+        "node": "lift",
+        "port": "maskInfo"
+      }
+    },
+    {
+      "id": "camera-calib-lift-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "lift",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "plane-plane-lift-plane",
+      "from": {
+        "node": "plane",
+        "port": "plane"
+      },
+      "to": {
+        "node": "lift",
+        "port": "plane"
+      }
+    }
+  ],
+  "params": {
+    "cameraPath": {
+      "type": "path",
+      "default": "p5-camera.json",
+      "binds": ["camera.path"]
+    },
+    "surface": {
+      "type": "string",
+      "default": "top",
+      "binds": ["project.surface"]
+    },
+    "liftMode": {
+      "type": "string",
+      "default": "dimensions",
+      "binds": ["lift.mode"]
+    }
+  },
+  "outputs": {
+    "sourcePose": {
+      "node": "box",
+      "port": "pose"
+    },
+    "projected": {
+      "node": "project",
+      "port": "poses"
+    },
+    "masks": {
+      "node": "project",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "project",
+      "port": "maskInfo"
+    },
+    "projectionQuality": {
+      "node": "project",
+      "port": "quality"
+    },
+    "poses": {
+      "node": "lift",
+      "port": "poses"
+    },
+    "quality": {
+      "node": "lift",
+      "port": "quality"
+    }
+  }
+}

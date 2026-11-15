@@ -39,6 +39,9 @@ void registerP4Annotations(Registry& r);
 void registerP4Barcodes(Registry& r);
 void registerP4OcrImage(Registry& r);
 void registerP4Segmentation(Registry& r);
+void registerP5Projection(Registry& r);
+void registerP5Inspection(Registry& r);
+void registerP5PoseProjection(Registry& r);
 
 } // namespace lyflow::ops
 

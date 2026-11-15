@@ -1,0 +1,310 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-mask-remove",
+  "name": "P5 显式实例ID关联真实像素掩膜移除与未知点保留",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "camera",
+        "unit": "m"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "annotations",
+      "op": "image.load_annotations",
+      "params": {
+        "format": "lyflow-annotations-v1",
+        "timestamp": "1700000001000",
+        "frame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "up",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "up3d",
+        "frame": "camera",
+        "position": [0.13, 0.075, 1.02],
+        "size": [0.06, 0.05, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "upLink",
+      "op": "pose.update",
+      "params": {
+        "patch": "{\"attributes\": {\"primitive2DId\": \"patch-up\"}}"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "down",
+      "op": "pose.construct_3d",
+      "params": {
+        "id": "down3d",
+        "frame": "camera",
+        "position": [-0.16, -0.09, 0.985],
+        "size": [0.05, 0.05, 0.02]
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "downLink",
+      "op": "pose.update",
+      "params": {
+        "patch": "{\"attributes\": {\"primitive2DId\": \"patch-down\"}}"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "poses",
+      "op": "pose.concat",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "remove",
+      "op": "cloud.remove_mask_primitives",
+      "params": {
+        "imageFrame": "image",
+        "cloudFrame": "camera"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 260
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "up-pose-upLink-poses",
+      "from": {
+        "node": "up",
+        "port": "pose"
+      },
+      "to": {
+        "node": "upLink",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "down-pose-downLink-poses",
+      "from": {
+        "node": "down",
+        "port": "pose"
+      },
+      "to": {
+        "node": "downLink",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "upLink-poses-poses-a",
+      "from": {
+        "node": "upLink",
+        "port": "poses"
+      },
+      "to": {
+        "node": "poses",
+        "port": "a"
+      }
+    },
+    {
+      "id": "downLink-poses-poses-b",
+      "from": {
+        "node": "downLink",
+        "port": "poses"
+      },
+      "to": {
+        "node": "poses",
+        "port": "b"
+      }
+    },
+    {
+      "id": "source-cloud-remove-cloud",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "remove",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "camera-calib-remove-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "remove",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "poses-poses-remove-poses",
+      "from": {
+        "node": "poses",
+        "port": "poses"
+      },
+      "to": {
+        "node": "remove",
+        "port": "poses"
+      }
+    },
+    {
+      "id": "annotations-instances-remove-detections",
+      "from": {
+        "node": "annotations",
+        "port": "instances"
+      },
+      "to": {
+        "node": "remove",
+        "port": "detections"
+      }
+    },
+    {
+      "id": "annotations-masks-remove-masks",
+      "from": {
+        "node": "annotations",
+        "port": "masks"
+      },
+      "to": {
+        "node": "remove",
+        "port": "masks"
+      }
+    },
+    {
+      "id": "annotations-maskInfo-remove-maskInfo",
+      "from": {
+        "node": "annotations",
+        "port": "maskInfo"
+      },
+      "to": {
+        "node": "remove",
+        "port": "maskInfo"
+      }
+    }
+  ],
+  "params": {
+    "cloudPath": {
+      "type": "path",
+      "default": "p5-scene.pcd",
+      "binds": ["source.path"]
+    },
+    "cameraPath": {
+      "type": "path",
+      "default": "p5-camera.json",
+      "binds": ["camera.path"]
+    },
+    "dataset": {
+      "type": "path",
+      "default": "p5-annotations-index.json",
+      "binds": ["annotations.path"]
+    },
+    "topExpand": {
+      "type": "int",
+      "default": 0,
+      "binds": ["remove.topExpand"]
+    }
+  },
+  "outputs": {
+    "sourceCloud": {
+      "node": "source",
+      "port": "cloud"
+    },
+    "poses": {
+      "node": "poses",
+      "port": "poses"
+    },
+    "detections": {
+      "node": "annotations",
+      "port": "instances"
+    },
+    "masks": {
+      "node": "annotations",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "annotations",
+      "port": "maskInfo"
+    },
+    "image": {
+      "node": "annotations",
+      "port": "image"
+    },
+    "cloud": {
+      "node": "remove",
+      "port": "cloud"
+    },
+    "keptIndices": {
+      "node": "remove",
+      "port": "keptIndices"
+    },
+    "removedIndices": {
+      "node": "remove",
+      "port": "removedIndices"
+    },
+    "unknownIndices": {
+      "node": "remove",
+      "port": "unknownIndices"
+    },
+    "quality": {
+      "node": "remove",
+      "port": "quality"
+    }
+  }
+}

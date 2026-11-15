@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-depth-filters",
+  "name": "P5 五模式深度滤波与原观测、补值分离",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "camera",
+        "unit": "m"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "image",
+      "op": "io.load_image",
+      "params": {
+        "mode": "unchanged"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "op": "image.load_camera_calib",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "project",
+      "op": "cloud.project_camera",
+      "params": {
+        "cloudFrame": "camera",
+        "imageFrame": "image",
+        "colorSource": "cloud"
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "filter",
+      "op": "image.depth_filter",
+      "params": {
+        "maxDepthJump": 0,
+        "eliminateType": "both",
+        "threshold": 0.005
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-cloud-project-cloud",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "project",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "image-image-project-image",
+      "from": {
+        "node": "image",
+        "port": "image"
+      },
+      "to": {
+        "node": "project",
+        "port": "image"
+      }
+    },
+    {
+      "id": "camera-calib-project-calib",
+      "from": {
+        "node": "camera",
+        "port": "calib"
+      },
+      "to": {
+        "node": "project",
+        "port": "calib"
+      }
+    },
+    {
+      "id": "project-cloud-filter-cloud",
+      "from": {
+        "node": "project",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "filter",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "project-depth-filter-depth",
+      "from": {
+        "node": "project",
+        "port": "depth"
+      },
+      "to": {
+        "node": "filter",
+        "port": "depth"
+      }
+    },
+    {
+      "id": "project-status-filter-status",
+      "from": {
+        "node": "project",
+        "port": "status"
+      },
+      "to": {
+        "node": "filter",
+        "port": "status"
+      }
+    },
+    {
+      "id": "project-indexMap-filter-indexMap",
+      "from": {
+        "node": "project",
+        "port": "indexMap"
+      },
+      "to": {
+        "node": "filter",
+        "port": "indexMap"
+      }
+    },
+    {
+      "id": "project-mapping-filter-mapping",
+      "from": {
+        "node": "project",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "filter",
+        "port": "mapping"
+      }
+    }
+  ],
+  "params": {
+    "cloudPath": {
+      "type": "path",
+      "default": "p5-scene.pcd",
+      "binds": ["source.path"]
+    },
+    "imagePath": {
+      "type": "path",
+      "default": "1700000001000-p5-scene.png",
+      "binds": ["image.path"]
+    },
+    "cameraPath": {
+      "type": "path",
+      "default": "p5-camera.json",
+      "binds": ["camera.path"]
+    },
+    "mode": {
+      "type": "string",
+      "default": "mean",
+      "binds": ["filter.mode"]
+    },
+    "kernelSize": {
+      "type": "int",
+      "default": 1,
+      "binds": ["filter.kernelSize"]
+    },
+    "fillMethod": {
+      "type": "string",
+      "default": "idw",
+      "binds": ["filter.fillMethod"]
+    },
+    "direction": {
+      "type": "string",
+      "default": "xy",
+      "binds": ["filter.direction"]
+    }
+  },
+  "outputs": {
+    "sourceCloud": {
+      "node": "source",
+      "port": "cloud"
+    },
+    "projectedCloud": {
+      "node": "project",
+      "port": "cloud"
+    },
+    "projectionQuality": {
+      "node": "project",
+      "port": "quality"
+    },
+    "projectionMapping": {
+      "node": "project",
+      "port": "mapping"
+    },
+    "projectedDepth": {
+      "node": "project",
+      "port": "depth"
+    },
+    "projectedStatus": {
+      "node": "project",
+      "port": "status"
+    },
+    "projectedIndexMap": {
+      "node": "project",
+      "port": "indexMap"
+    },
+    "sourceIndexMap": {
+      "node": "project",
+      "port": "sourceIndexMap"
+    },
+    "pointState": {
+      "node": "project",
+      "port": "pointState"
+    },
+    "sourceImage": {
+      "node": "project",
+      "port": "image"
+    },
+    "cloud": {
+      "node": "filter",
+      "port": "cloud"
+    },
+    "depth": {
+      "node": "filter",
+      "port": "depth"
+    },
+    "status": {
+      "node": "filter",
+      "port": "status"
+    },
+    "indexMap": {
+      "node": "filter",
+      "port": "indexMap"
+    },
+    "mapping": {
+      "node": "filter",
+      "port": "mapping"
+    },
+    "filterSourceIndexMap": {
+      "node": "filter",
+      "port": "sourceIndexMap"
+    },
+    "changed": {
+      "node": "filter",
+      "port": "changed"
+    },
+    "quality": {
+      "node": "filter",
+      "port": "quality"
+    }
+  }
+}

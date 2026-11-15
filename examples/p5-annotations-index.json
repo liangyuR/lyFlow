@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "samples": [
+    {
+      "timestamp": "1700000001000",
+      "image": "1700000001000-p5-scene.png",
+      "annotation": "p5-annotations.json"
+    }
+  ]
+}

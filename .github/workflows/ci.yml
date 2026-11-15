@@ -64,8 +64,10 @@ jobs:
           python tests/release/test-fetch-barcode-deps.py
           python tests/release/test_fetch_p4_assets.py
 
-      - name: P4示例JSON Schema契约（仅schema，不代替真实CLI门禁）
-        run: python tests/release/p4_contract.py --schema-only
+      - name: P4/P5示例JSON Schema契约（仅schema，不代替真实CLI门禁）
+        run: |
+          python tests/release/p4_contract.py --schema-only
+          python tests/release/p5_contract.py --schema-only
 
       - name: C++ 格式检查（clang-format 20.1.8）
         shell: bash

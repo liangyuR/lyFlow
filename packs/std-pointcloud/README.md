@@ -1,6 +1,6 @@
 # std-pointcloud —— LyFlow 的标准点云算子包
 
-版本 **0.3.0**。仓库内的标准算子包（[ADR-0014](../../docs/adr/0014-std-as-pack-core-zero-dep.md)），
+版本 **0.4.0**。仓库内的标准算子包（[ADR-0014](../../docs/adr/0014-std-as-pack-core-zero-dep.md)），
 走的是和外部领域包完全相同的 `lyflow_op_pack` 机制（[ADR-0013](../../docs/adr/0013-op-packs-static.md)、
 [docs/op-packs.md](../../docs/op-packs.md)）。
 
@@ -210,3 +210,19 @@ RANSAC 等参数外露，默认值取自迁出来的那份（xyz-gap-inspector �
 相机/云帧是调用者明确声明；没有自动证明外参真实有效。空统计通过valid=false和无效Measurement表示；非法数据/退化/质量不达标返回诊断。新回归入口是`tests/test_p1_cloud.cpp`，采用自制合成数据和确定性文件，不代表现场设备或生产质量验收。
 
 聚类组 ID 按规范 XYZ 点序计算的质心、点数和完整 XYZ 字典序分配；同质心同点数簇不会依赖输入顺序平手。成员索引仍指向原始点云，组 ID 仅代表本次结果规范顺序，不承诺跨帧跟踪。
+
+## P2 阶段5：工件采样、有限体裁云与移除
+
+LyFlow 1.3.11 / std-pointcloud 0.4.0 源码增加以下三节点，参考模式及全部边界见[盒体采样](../../docs/p5-analysis-cloud-inspection.md)和[有限体/模型移除](../../docs/p5-analysis-pose-geometry.md)，组合图见[阶段5示例](../../docs/p5-examples.md)。完整阶段门禁仍在执行；这里不预写运行全绿或现场碰撞安全结论。
+
+| 入口                      | 契约                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cloud.box_sample`        | 中心Pose3D盒体的surface/volume、pose/local坐标、可见面、确定性种子、带端点线框、RGB/法线和独立分组；volume必须关闭normals及visibleOnly。不生成Mesh，不支持源未实现的front锚定。 |
+| `cloud.crop_primitives`   | 精确有限box/cylinder/sphere，Pose尺寸或显式覆盖、padding、center/top、开闭边界；输出inner/outer及原云索引，cloud端口为outer。重叠逐体组保留独立支持，合并inner去重。            |
+| `cloud.remove_primitives` | shape或局部采样模型model_radius，未知高度显式替代，compact或preserve_order；后者对移除XYZ置NaN并输出validity，不能假称PointCloud已有组织H/W。                                   |
+
+采样使用米制全尺寸及xyzw旋转，float32交付检查八角点互异及逐点量化误差，不能将远处小盒体塌成点仍成功。local结果逐组保留sourcePose，不是统一世界坐标。模型半径移除对实际float32查询做距离复核；全部选择保留已有intensity/normals/RGB，groups/groupIndices绑定原云，不能误接新提取云。
+
+碰撞分类基于给定观测云的点数阈值。未知坐标或完全无支持的工件归unknown，已知支持足够才区分collision/free；输出pickable=false，quality明确physicalCollisionSafetyVerified=false。原生数组保留完整源索引，取消/预算失败不发布部分结果。关联2D掩膜和按列向上扩展由std-image的 `cloud.remove_mask_primitives` 提供，可与本包shape/model_radius显式串接。
+
+盒体最多128个、累计1M点；有限体裁云最多4Mi源点/128MiB载荷，扫描/查询、分组索引另有显式上限。限制、正常空集、unknown与非法输入分别处理；合成采样和离散点计数不替代设备观测、工业碰撞检测或抓取许可。

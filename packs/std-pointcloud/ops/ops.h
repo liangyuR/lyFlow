@@ -38,6 +38,8 @@ void registerProfileAnalysis(Registry& r);
 void registerAdvancedFit3D(Registry& r);
 void registerP2HeightRules(Registry& r);
 void registerP2GlobalMatching(Registry& r);
+void registerP5CloudInspection(Registry& r);
+void registerP5PrimitiveCrop(Registry& r);
 
 /// 把一片点云写到磁盘（按扩展名选 PCD 或 PLY）。装进 core 的 setCloudWriter，
 /// C ABI 的 lyflow_output_save 与 CLI 的 `lyflow dump` 都经它落盘（单线程）。

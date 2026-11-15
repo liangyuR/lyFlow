@@ -12,6 +12,7 @@
 namespace lyflow::packs::std_geometry {
 void registerPoseOps(Registry&);
 void registerGeometryTransforms(Registry&);
+void registerP5PoseGeometry(Registry&);
 namespace {
 
 struct Vec {
@@ -952,6 +953,7 @@ void registerPackOps(Registry& r) {
     return Status::Ok();
   };
   r.addOperator(std::move(op));
+  registerP5PoseGeometry(r);
 }
 
 } // namespace lyflow::packs::std_geometry

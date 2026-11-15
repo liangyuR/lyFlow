@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "id": "p5-orthographic-roi",
+  "name": "P5 零及负高度正交图、法线图与真实标注掩膜裁云",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "io.load_cloud",
+      "params": {
+        "frame": "workspace",
+        "unit": "m"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "height",
+      "op": "cloud.height_map",
+      "params": {
+        "width": 64,
+        "height": 48,
+        "resolution": 0.01,
+        "originX": -0.315,
+        "originY": -0.235,
+        "cloudFrame": "workspace",
+        "gridFrame": "workspace",
+        "imageFrame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "orthographic",
+      "op": "cloud.orthographic_map",
+      "params": {
+        "width": 64,
+        "height": 48,
+        "resolution": 0.01,
+        "originX": -0.315,
+        "originY": -0.235,
+        "cloudFrame": "workspace",
+        "gridFrame": "workspace",
+        "imageFrame": "image",
+        "normalResolution": 0.01
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "annotations",
+      "op": "image.load_annotations",
+      "params": {
+        "format": "lyflow-annotations-v1",
+        "timestamp": "1700000001000",
+        "frame": "image"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "roi",
+      "op": "cloud.roi_extract",
+      "params": {
+        "cloudFrame": "workspace",
+        "imageFrame": "image",
+        "usingMask": true
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 260
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "source-cloud-height-cloud",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "height",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "source-cloud-orthographic-cloud",
+      "from": {
+        "node": "source",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "orthographic",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "orthographic-cloud-roi-cloud",
+      "from": {
+        "node": "orthographic",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "roi",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "orthographic-depth-roi-depth",
+      "from": {
+        "node": "orthographic",
+        "port": "depth"
+      },
+      "to": {
+        "node": "roi",
+        "port": "depth"
+      }
+    },
+    {
+      "id": "orthographic-status-roi-status",
+      "from": {
+        "node": "orthographic",
+        "port": "status"
+      },
+      "to": {
+        "node": "roi",
+        "port": "status"
+      }
+    },
+    {
+      "id": "orthographic-indexMap-roi-indexMap",
+      "from": {
+        "node": "orthographic",
+        "port": "indexMap"
+      },
+      "to": {
+        "node": "roi",
+        "port": "indexMap"
+      }
+    },
+    {
+      "id": "orthographic-mapping-roi-mapping",
+      "from": {
+        "node": "orthographic",
+        "port": "mapping"
+      },
+      "to": {
+        "node": "roi",
+        "port": "mapping"
+      }
+    },
+    {
+      "id": "annotations-instances-roi-instances",
+      "from": {
+        "node": "annotations",
+        "port": "instances"
+      },
+      "to": {
+        "node": "roi",
+        "port": "instances"
+      }
+    },
+    {
+      "id": "annotations-masks-roi-masks",
+      "from": {
+        "node": "annotations",
+        "port": "masks"
+      },
+      "to": {
+        "node": "roi",
+        "port": "masks"
+      }
+    },
+    {
+      "id": "annotations-maskInfo-roi-maskInfo",
+      "from": {
+        "node": "annotations",
+        "port": "maskInfo"
+      },
+      "to": {
+        "node": "roi",
+        "port": "maskInfo"
+      }
+    }
+  ],
+  "params": {
+    "cloudPath": {
+      "type": "path",
+      "default": "p5-orthographic.pcd",
+      "binds": ["source.path"]
+    },
+    "outputMode": {
+      "type": "string",
+      "default": "height",
+      "binds": ["orthographic.outputMode"]
+    },
+    "dataset": {
+      "type": "path",
+      "default": "p5-annotations-index.json",
+      "binds": ["annotations.path"]
+    },
+    "selectedRoi": {
+      "type": "int",
+      "default": 0,
+      "binds": ["roi.selectedRoi"]
+    }
+  },
+  "outputs": {
+    "sourceCloud": {
+      "node": "source",
+      "port": "cloud"
+    },
+    "heightCloud": {
+      "node": "height",
+      "port": "cloud"
+    },
+    "heightDepth": {
+      "node": "height",
+      "port": "depth"
+    },
+    "heightStatus": {
+      "node": "height",
+      "port": "status"
+    },
+    "heightMapping": {
+      "node": "height",
+      "port": "mapping"
+    },
+    "heightQuality": {
+      "node": "height",
+      "port": "quality"
+    },
+    "heightImage": {
+      "node": "height",
+      "port": "image"
+    },
+    "orthographicCloud": {
+      "node": "orthographic",
+      "port": "cloud"
+    },
+    "depth": {
+      "node": "orthographic",
+      "port": "depth"
+    },
+    "status": {
+      "node": "orthographic",
+      "port": "status"
+    },
+    "indexMap": {
+      "node": "orthographic",
+      "port": "indexMap"
+    },
+    "mapping": {
+      "node": "orthographic",
+      "port": "mapping"
+    },
+    "quality": {
+      "node": "orthographic",
+      "port": "quality"
+    },
+    "image": {
+      "node": "orthographic",
+      "port": "image"
+    },
+    "pseudo": {
+      "node": "orthographic",
+      "port": "pseudo"
+    },
+    "normalAngle": {
+      "node": "orthographic",
+      "port": "normalAngle"
+    },
+    "normalValid": {
+      "node": "orthographic",
+      "port": "normalValid"
+    },
+    "instances": {
+      "node": "annotations",
+      "port": "instances"
+    },
+    "masks": {
+      "node": "annotations",
+      "port": "masks"
+    },
+    "maskInfo": {
+      "node": "annotations",
+      "port": "maskInfo"
+    },
+    "annotationImage": {
+      "node": "annotations",
+      "port": "image"
+    },
+    "cloud": {
+      "node": "roi",
+      "port": "cloud"
+    },
+    "roiDepth": {
+      "node": "roi",
+      "port": "depth"
+    },
+    "roiStatus": {
+      "node": "roi",
+      "port": "status"
+    },
+    "roiIndexMap": {
+      "node": "roi",
+      "port": "indexMap"
+    },
+    "roiSourceIndexMap": {
+      "node": "roi",
+      "port": "sourceIndexMap"
+    },
+    "roiMapping": {
+      "node": "roi",
+      "port": "mapping"
+    },
+    "roiQuality": {
+      "node": "roi",
+      "port": "quality"
+    },
+    "indices": {
+      "node": "roi",
+      "port": "indices"
+    },
+    "sourceIndices": {
+      "node": "roi",
+      "port": "sourceIndices"
+    },
+    "groups": {
+      "node": "roi",
+      "port": "groups"
+    }
+  }
+}

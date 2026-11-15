@@ -1,0 +1,99 @@
+{
+  "origin": "repository-generated mathematical fixtures; no customer data",
+  "generator": "scripts/generate-p5-fixtures.py",
+  "units": "m",
+  "imageFrame": "image",
+  "cloudFrame": "camera",
+  "size": [64, 48],
+  "channels": ["intensity", "normals", "rgb"],
+  "scene": {
+    "sourcePoints": 3066,
+    "visiblePoints": 3063,
+    "holes": 9,
+    "occludedPixel": [20, 20],
+    "occludedPointIndex": 3063,
+    "outsidePointIndex": 3064,
+    "behindPointIndex": 3065,
+    "upPixels": 42,
+    "downPixels": 36,
+    "plane": [0.0, 0.0, 1.0, -1.0],
+    "areaModel": "observed depth pixel footprint orthogonally projected onto reference plane",
+    "referenceCellAreaM2": 6.944444444444444e-5,
+    "upCellAreaM2": 7.225e-5,
+    "downCellAreaM2": 6.737673611111111e-5,
+    "upHeightM": 0.02,
+    "downHeightM": -0.015,
+    "upAreaM2": 0.0030345,
+    "downAreaM2": 0.0024255625,
+    "upVolumeM3": 6.0689999999999997e-5,
+    "downVolumeM3": 3.63834375e-5,
+    "heightToleranceM": 5e-7
+  },
+  "orthographic": {
+    "frame": "workspace",
+    "resolutionM": [0.01, 0.01],
+    "pixelZeroCenterM": [-0.315, -0.23500000000000001],
+    "sourcePoints": 3063,
+    "validZeroHeightPoints": 2985
+  },
+  "circles": {
+    "front": {
+      "centerM": [0.01, -0.008, 0.4],
+      "unorientedNormal": [0.0, 0.0, -1.0],
+      "radiusM": 0.05,
+      "centerToleranceM": 0.004,
+      "normalCosineMinimum": 0.98,
+      "surface": "filled circular aperture bounded by the known radius"
+    },
+    "tilted": {
+      "centerM": [0.0, 0.0, 0.4],
+      "unorientedNormal": [0.0, 0.6, -0.8],
+      "radiusM": 0.05,
+      "centerToleranceM": 0.004,
+      "normalCosineMinimum": 0.98,
+      "surface": "filled circular aperture bounded by the known radius"
+    }
+  },
+  "files": {
+    "p5-scene.pcd": {
+      "bytes": 162607,
+      "sha256": "7c8e8a8c221a2ee101b5d9a7465f48fb9f0fc393eb2e6f005ee5255855e2111c"
+    },
+    "p5-plane.pcd": {
+      "bytes": 162264,
+      "sha256": "3b328b8249d2ede6d92129401dc0abdb522d940cc8aca3987bcf5caecf6bd6e5"
+    },
+    "p5-orthographic.pcd": {
+      "bytes": 163983,
+      "sha256": "f8e9c883c9407e5cd2ab784ff95f740b78d7b31035f1c94ecafe895f4786846a"
+    },
+    "p5-camera.json": {
+      "bytes": 206,
+      "sha256": "4b63a985d5096ef4cf3fadcb2cbf8a7c9712197ef050a9426f725e51615f1ce0"
+    },
+    "p5-circle-camera.json": {
+      "bytes": 210,
+      "sha256": "d937b0eb1060b1c8c21b8449a7736d02a790845bdff8618a3763df103c9e9da8"
+    },
+    "1700000001000-p5-scene.png": {
+      "bytes": 11624,
+      "sha256": "c4b76d38be9d48af84cfbcbbeeea0d2c9e1606eb1f693dfba035f7113be64514"
+    },
+    "p5-annotations.json": {
+      "bytes": 1251,
+      "sha256": "2a696d3888697f5205008e2995160b8623e1dba564eae725855dfe662482d08d"
+    },
+    "p5-annotations-index.json": {
+      "bytes": 180,
+      "sha256": "a3d2bafc0cad7199003c6e4f5c01071131c535d94448a07586ef9e3bc60143c6"
+    },
+    "p5-circle-front.png": {
+      "bytes": 1211,
+      "sha256": "b5773c601971a04b3de4c17d9b130295c5ef99a993b2fa821b15abbe483a9d14"
+    },
+    "p5-circle-tilted.png": {
+      "bytes": 1164,
+      "sha256": "d224b7fabf1b189f36efe488d6743b40f785e08d36ccf95aff2122994fab2c56"
+    }
+  }
+}
