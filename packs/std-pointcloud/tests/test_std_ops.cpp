@@ -27,40 +27,76 @@
 using namespace lyflow;
 using namespace lyflow::test;
 
-TEST_CASE("包里的 20 个算子都注册了，且都带 pack 标记") {
+TEST_CASE("点云包的完整 50 项算子集合与归属版本一致") {
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems)
     MESSAGE(p);
   CHECK(problems.empty());
 
   const std::vector<std::string> expected = {
-      "io.load_pcd",
-      "io.save_pcd",
-      "filter.passthrough",
-      "filter.voxel_grid",
+      "cloud.bounds_obb",
+      "cloud.box_sample",
+      "cloud.crop_primitives",
+      "cloud.edges_3d",
+      "cloud.empty_tote",
+      "cloud.group_concat",
+      "cloud.group_get",
+      "cloud.group_merge",
+      "cloud.group_pack",
+      "cloud.group_statistics",
+      "cloud.group_subset",
+      "cloud.neighbor_height",
+      "cloud.pca",
+      "cloud.plane_patches",
+      "cloud.remove_primitives",
+      "cloud.statistics",
+      "cloud.template_3d",
+      "cloud.top_layer",
+      "cloud.view_sample",
+      "edit.translate_region",
+      "features.normals",
       "filter.crop_box",
+      "filter.crop_box2d",
+      "filter.passthrough",
+      "filter.radius_outlier",
       "filter.random_sample",
       "filter.statistical_outlier",
-      "filter.radius_outlier",
-      "features.normals",
-      "segment.ransac_plane",
+      "filter.voxel_grid",
+      "fit.circle_2d",
+      "fit.line_2d",
+      "io.load_cloud",
+      "io.load_pcd",
+      "io.save_pcd",
+      "profile.analyze",
+      "profile.gap_flush",
+      "profile.project_pair",
+      "register.constrained_fit_3d",
+      "register.global_3d",
+      "register.icp_2d",
+      "register.icp_3d",
+      "register.local_search_3d",
+      "register.pose_search_3d",
+      "register.rigid_fit",
+      "segment.euclidean_clusters",
       "segment.extract_indices",
-      "transform.make",
+      "segment.multi_planes",
+      "segment.ransac_plane",
+      "segment.region_growing_2d",
       "transform.apply",
       "util.merge",
-      "filter.crop_box2d",
-      "fit.line_2d",
-      "fit.circle_2d",
-      "register.icp_2d",
-      "edit.translate_region",
-      "segment.region_growing_2d",
   };
   for (const auto& id : expected) {
     CAPTURE(id);
     const OperatorDesc* op = ensureRegistry().find(id);
     REQUIRE(op != nullptr);
-    CHECK(op->pack == "std-pointcloud@0.4.0");
+    CHECK(op->pack == "std-pointcloud@0.5.0");
   }
+  std::vector<std::string> actual;
+  for (const auto& op : ensureRegistry().operators())
+    if (op.pack == "std-pointcloud@0.5.0")
+      actual.push_back(op.id);
+  std::sort(actual.begin(), actual.end());
+  CHECK(actual == expected);
   // D10：PointCloudXYZI 已从类型表删除
   CHECK(ensureRegistry().findType("PointCloudXYZI") == nullptr);
   CHECK(ensureRegistry().findType("Plane") != nullptr);
@@ -160,26 +196,6 @@ TEST_CASE("体素栅格：相距很远的点不会被折叠进同一个体素") 
     CHECK(voxels.xyz[i * 3 + 1] == doctest::Approx(0.0f));
     CHECK(voxels.xyz[i * 3 + 2] == doctest::Approx(0.0f));
   }
-}
-
-TEST_CASE("体素栅格：坐标相对叶大小过大时报错而不是静默算错") {
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic", Json{{"pointCount", 100}}},
-          {"t", "transform.make", Json{{"translation", {1e30, 0.0, 0.0}}}},
-          {"a", "transform.apply"},
-          {"v", "filter.voxel_grid"},
-      },
-      {
-          {"g.cloud", "a.cloud"},
-          {"t.transform", "a.transform"},
-          {"a.cloud", "v.cloud"},
-      });
-  const RunLog log = runGraph(doc);
-  CHECK(log.finalState("v") == "error");
-  const Json e = log.nodeEvent("v", "error");
-  REQUIRE(e.contains("errors"));
-  CHECK(e["errors"][0]["paramPath"] == "leafSize");
 }
 
 TEST_CASE("体素栅格 nearest 模式也响应取消") {

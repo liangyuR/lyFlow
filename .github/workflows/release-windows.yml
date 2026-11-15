@@ -81,7 +81,7 @@ jobs:
         if: ${{ !inputs.rebuild_deps }}
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-profile-glue-gap-v4
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-public-kernels-metrology-glue-gap-v5
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
@@ -146,7 +146,7 @@ jobs:
         if: steps.native-cache-restore.outputs.cache-hit != 'true'
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-profile-glue-gap-v4
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-public-kernels-metrology-glue-gap-v5
 
       - name: 保存 ONNX Runtime 缓存
         uses: actions/cache/save@v4
@@ -266,7 +266,7 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-profile-glue-gap-v4
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-public-kernels-metrology-glue-gap-v5
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 

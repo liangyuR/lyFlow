@@ -1,6 +1,6 @@
 # 现有算子分包审计
 
-状态：实施中。当前产品 1.4.0，256 个原生算子及 8 个随附Python示例。
+状态：实施中。当前产品 1.4.1，256 个原生算子及 8 个随附Python示例。
 
 原规划基线仍为 251 原生 / 7 示例，源码基线 `9940c8c45ef301910add57e48186fce0b543e341`；完整原文件可从 Git `a2f6883b2c16e36c534dd4c9d74412041b12439c:docs/operator-package-audit.json` 追溯，当前机器清单的baselineReference保留原ID全集与证据摘要。
 
@@ -13,10 +13,11 @@
 | core | 4 | [查看](operator-package-audit/core.md) |
 | std-value | 16 | [查看](operator-package-audit/std-value.md) |
 | std-profile | 3 | [查看](operator-package-audit/std-profile.md) |
-| std-image | 77 | [查看](operator-package-audit/std-image.md) |
+| std-image | 76 | [查看](operator-package-audit/std-image.md) |
 | dts | 9 | [查看](operator-package-audit/dts.md) |
-| std-geometry | 35 | [查看](operator-package-audit/std-geometry.md) |
-| std-pointcloud | 52 | [查看](operator-package-audit/std-pointcloud.md) |
+| std-geometry | 37 | [查看](operator-package-audit/std-geometry.md) |
+| std-metrology | 1 | [查看](operator-package-audit/std-metrology.md) |
+| std-pointcloud | 50 | [查看](operator-package-audit/std-pointcloud.md) |
 | gap | 39 | [查看](operator-package-audit/gap.md) |
 | glue | 20 | [查看](operator-package-audit/glue.md) |
 | std-ml | 1 | [查看](operator-package-audit/std-ml.md) |
@@ -46,7 +47,8 @@
 | 阶段 | 状态 | 原生 / 示例 | 证据边界 |
 | --- | --- | --- | --- |
 | M0 | complete | 251 / 7 | 原逐项清单与分包规划已交付；不代表任何算法迁移已完成。 |
-| M1 | validated_manifest | 256 / 8 | 全包manifest SHA256 `5b3ac7097b5dc75a766501b37cbc28582ca51baacb5174d12b214e962fc4cd51`；描述匹配，不代表阶段全部验收已完成 |
+| M1 | complete | 256 / 8 | 全包manifest SHA256 `5b3ac7097b5dc75a766501b37cbc28582ca51baacb5174d12b214e962fc4cd51`；描述匹配，不代表阶段全部验收已完成；[PR62](https://github.com/liangyuR/lyFlow/pull/62)已合并 `f0c043c6341755e8f254ac499a1593df087b6d94` |
+| M2 | validated_manifest | 256 / 8 | 全包manifest SHA256 `59253822a594df08927c9a5d263f3bee5b2a4bf002191cd12c122cf65add33cb`；描述匹配，不代表阶段全部验收已完成 |
 
 ## 波次和顺序
 
@@ -61,13 +63,13 @@
 | M6 | 标准包/后端隔离 | 124 |
 | M7 | 切换、交付与退役 | 1 |
 
-原项目标包、依赖、迁移前置、数据约束与验收要求保留；M1新增适配不表示M3场景算法已迁移。序号随新增项重排，只提供满足已列前置的一种实施顺序，不改变惰性调度或业务定义。
+原项目标包、依赖、迁移前置、数据约束与验收要求保留，M2当前依赖与验收边界另列；M1/M2不表示M3场景算法已迁移。序号随新增项重排，只提供满足已列前置的一种实施顺序，不改变惰性调度或业务定义。
 
 ## 静态检查与复核刷新
 
 ```powershell
 python scripts/check-operator-package-audit.py
-python scripts/check-operator-package-audit.py --manifest build/m1-full/manifest.json
+python scripts/check-operator-package-audit.py --manifest build/m2-full/manifest.json
 ```
 
 静态检查比较契约来源集合/指纹、ID、版本、包归属、端口、参数及本地文档链接；不能替代运行、SDK、算法或现场验收。全包manifest必须来自真实启用全部包的构建，轻量构建不构成全集证据。
@@ -75,9 +77,9 @@ python scripts/check-operator-package-audit.py --manifest build/m1-full/manifest
 审查实际源码差异后执行刷新，逐个传入变化路径：
 
 ```powershell
-python scripts/refresh-operator-package-audit.py --manifest build/m1-full/manifest.json --product-version 1.4.0 --reviewed-change "M1公共契约及显式适配逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>
+python scripts/refresh-operator-package-audit.py --stage M2 --manifest build/m2-full/manifest.json --product-version 1.4.1 --reviewed-change "当前阶段公共契约、包归属及依赖边界逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>
 ```
 
-工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将M1设为validated_manifest，阶段完成需另行验收后登记。
+工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。M2仅允许明确定义的3项迁包，保持版本/端口/参数，并保留原包和源码历史。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将当前阶段设为validated_manifest，完成需另行验收后登记，先前阶段证据保持。
 
 Python示例由源码装饰器AST发现，只有用户导入后注册；用户lib.*/py.*、外部包和测试节点不属于固定原生全集。原6导入器、7片段、6Bundle等附属资产仍按机器清单登记。

@@ -57,6 +57,7 @@ jobs:
         run: |
           python scripts/check-operator-package-audit.py
           python tests/release/test_operator_package_audit.py
+          python tests/quality/test_module_graph.py
 
       - name: 前端 / MCP / workflow 格式检查（Prettier）
         run: pnpm format:check
@@ -213,7 +214,7 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
       LYFLOW_STD_PACKS: '0'
-      LYFLOW_PACKS: dts;std-value;std-geometry;std-profile
+      LYFLOW_PACKS: dts;std-value;std-geometry;std-profile;std-metrology
       LYFLOW_PREBUILT_CORE_DIR: ${{ github.workspace }}/build/core/bin
     steps:
       - uses: actions/checkout@v4
@@ -253,7 +254,7 @@ jobs:
         run: pnpm --filter lyflow-app build
 
       - name: C++ 配置（平台 / dts / 值与几何）
-        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=dts;std-value;std-geometry;std-profile" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=dts;std-value;std-geometry;std-profile;std-metrology" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - uses: actions/setup-python@v5
         with:
@@ -275,6 +276,14 @@ jobs:
 
       - name: C++ 单元测试（CTest / doctest）
         run: ctest --test-dir build/core -C RelWithDebInfo --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-results.xml"
+
+      - name: M2轻量安装与独立公共核消费
+        shell: pwsh
+        run: |
+          cmake --install build/core --prefix build/m2-sdk-light
+          if ($LASTEXITCODE -ne 0) { throw 'M2轻量SDK安装失败' }
+          python tests/release/public_kernel_contract.py --sdk build/m2-sdk-light --runtime build/core/bin/lyflow_core.dll --output-dir build/m2-kernel-light
+          if ($LASTEXITCODE -ne 0) { throw 'M2轻量依赖或独立静态核消费失败' }
 
       - name: Rust 编译（桌面应用与 CLI）
         run: cargo build --locked --manifest-path bridge/Cargo.toml
@@ -424,7 +433,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-std-profile-glue-gap-v4
+          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-public-kernels-metrology-glue-gap-v5
           restore-keys: |
             windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-
 
@@ -496,7 +505,7 @@ jobs:
           $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
           cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON '-DLYFLOW_PACKS=dts;gap;glue' -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
-          cmake --build build/p1-native --target lyflow-core-tests lyflow-dump-manifest --parallel 2
+          cmake --build build/p1-native --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
           ./build/p1-native/bin/lyflow-dump-manifest.exe --check
           if ($LASTEXITCODE -ne 0) { throw 'P1 算子契约失败' }
@@ -515,6 +524,8 @@ jobs:
           $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
           cmake --install build/p1-native --prefix "$sdk"
           if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 安装失败' }
+          python tests/release/public_kernel_contract.py --sdk "$sdk" --output-dir build/m2-kernel-full
+          if ($LASTEXITCODE -ne 0) { throw 'M2完整SDK公共核隔离消费失败' }
           cmake -S tests/release/p5_sdk_consumer -B build/p5-sdk-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= "-Dlyflow_DIR=$sdk" "-DLYFLOW_CONSUMER_VERSION=$version"
           if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 配置失败' }
           cmake --build build/p5-sdk-consumer --parallel 2

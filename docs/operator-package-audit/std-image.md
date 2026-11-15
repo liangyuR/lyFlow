@@ -1,6 +1,6 @@
 # std-image 逐算子迁移清单
 
-状态：实施中；当前 77 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 76 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
@@ -17,21 +17,6 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：缺单位/错误单位/版本/奇异H拒绝；m/mm映射一致、齐次尺度不敏感、幂等升级、帧冲突失败且输入输出原子。
 - 说明：M1新增显式契约适配；不替代M3轮廓与DTS场景算法迁移。
-
-## 060 · image.calibrated_distance
-
-- 当前：`std-image` / `1.1.0` / 平面标定距离量测。目标：`std-metrology`；迁移归属；**M2**。
-- 源码：[packs/std-image/ops/image_p1_calib.cpp:445](../../packs/std-image/ops/image_p1_calib.cpp#L445)。
-- 端口：`a:Point2D`, `b:Point2D`, `calib:Record` → `distance:Measurement`。
-- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
-- 依赖：当前compute：标准C++、公共calibration::Plane解析及标量H映射，不使用OpenCV；同TU其他节点使用OpenCV。；目标：轻量几何/标定模型公共核，不链接OpenCV/PCL/ORT。
-- 当前契约：输入[a:Point2D, b:Point2D, calib:Record] → 输出[distance:Measurement]。两个原图像素Point2D经image.PlaneCalib映射到平面单位，再乘metersPerUnit，输出单位m的Measurement；单位/单应无效或非有限结果诊断。
-- 目标契约：两个像素点经PlaneCalib得到米制距离迁std-metrology；公共单应标量映射核无OpenCV，不靠图像包注册。
-- 迁移前置：M1；std-metrology量纲与Measurement契约；公共PlaneCalib验证与单应标量映射；M1统一PlaneCalib单位及齐次矩阵验证，提供旧输入显式迁移
-- 关联算子：无额外逐ID前置；公共协议见前置项
-- 验收：验证m/mm标定等价、px点单位拒绝、单应奇点和米制Measurement。
-- 说明：主职责为具有标定基准的物理距离，图像像素坐标是输入域；必须保留先映射再换米，不能直接用像素距离乘常数。 现有PlaneCalib有两套验证器：lyflow_cv/plane_calib.h默认mm且允许非空unit，core/calibration.h要求显式m/mm并归一化H。统一校验属于契约变更，不能在搬包时静默替换。
-- M1契约更新（1.1.0）：新增显式frame参数，版本化PlaneCalib使用共享schemaVersion=1/frame/unit解析；旧非版本化分支保持兼容。；验收：v1帧缺失/不匹配拒绝；米/毫米一致；旧参数与旧标定路径不漂移。
 
 ## 133 · cloud.fill_holes
 
@@ -120,7 +105,7 @@
 ## 139 · cloud.remove_mask_primitives
 
 - 当前：`std-image` / `1.0.0` / 按三维工件关联像素掩膜移除云。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/p5_pose_projection.cpp:931](../../packs/std-image/ops/p5_pose_projection.cpp#L931)。
+- 源码：[packs/std-image/ops/p5_pose_projection.cpp:1065](../../packs/std-image/ops/p5_pose_projection.cpp#L1065)。
 - 端口：`cloud:PointCloud`, `poses:Record`, `detections:Record`, `calib:Record`, `masks:Tensor`, `maskInfo:Record`, `cloudToCamera:Transform?` → `cloud:PointCloud`, `keptIndices:Indices`, `removedIndices:Indices`, `unknownIndices:Indices`, `quality:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前算法：OpenCV core/imgproc及相机畸变/数值求解的geometry模块、LyFlow轻量云/位姿类型；无需PCL。；目标：投影/栅格适配使用图像后端，共享映射/射线数值核，不引点云包注册依赖。
@@ -247,7 +232,7 @@
 ## 148 · image.board_pose
 
 - 当前：`std-image` / `1.0.0` / 棋盘格三维位姿估计。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/image_p1_calib.cpp:456](../../packs/std-image/ops/image_p1_calib.cpp#L456)。
+- 源码：[packs/std-image/ops/image_p1_calib.cpp:420](../../packs/std-image/ops/image_p1_calib.cpp#L420)。
 - 端口：`image:Image`, `calib:Record`, `corners:Record?` → `pose:Transform`, `instance:Record`, `rms:Measurement`, `corners:Record`, `quality:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前算法：OpenCV core/imgproc/geometry（OpenCV4为calib3d）；标定数据类型由公共协议提供。；目标：相机几何数值核共享，图像特征检测/重采样留OpenCV模块。
@@ -527,7 +512,7 @@
 ## 168 · image.load_camera_calib
 
 - 当前：`std-image` / `1.0.0` / 相机内参读取。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/image_p1_calib.cpp:408](../../packs/std-image/ops/image_p1_calib.cpp#L408)。
+- 源码：[packs/std-image/ops/image_p1_calib.cpp:383](../../packs/std-image/ops/image_p1_calib.cpp#L383)。
 - 端口：无 → `calib:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前计算：标准C++文件IO、JSON和公共calibration验证器，无求解/检测后端。；目标：标定文件适配与类型验证独立；不因加载标定强制启用Marker或ONNX。
@@ -905,7 +890,7 @@
 ## 195 · image.undistort
 
 - 当前：`std-image` / `1.0.0` / 相机图像去畸变。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/image_p1_calib.cpp:416](../../packs/std-image/ops/image_p1_calib.cpp#L416)。
+- 源码：[packs/std-image/ops/image_p1_calib.cpp:391](../../packs/std-image/ops/image_p1_calib.cpp#L391)。
 - 端口：`image:Image`, `calib:Record` → `image:Image`, `valid:Image`, `calib:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前算法：OpenCV core/imgproc/geometry（OpenCV4为calib3d）；标定数据类型由公共协议提供。；目标：相机几何数值核共享，图像特征检测/重采样留OpenCV模块。
@@ -919,7 +904,7 @@
 ## 196 · image.warp_perspective
 
 - 当前：`std-image` / `1.0.0` / 平面透视重采样。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/image_p1_calib.cpp:425](../../packs/std-image/ops/image_p1_calib.cpp#L425)。
+- 源码：[packs/std-image/ops/image_p1_calib.cpp:400](../../packs/std-image/ops/image_p1_calib.cpp#L400)。
 - 端口：`image:Image`, `calib:Record` → `image:Image`, `valid:Image`, `mapping:Record`。
 - 参数单位标注：width=px, height=px。
 - 依赖：当前算法：OpenCV core/imgproc/geometry（OpenCV4为calib3d）；标定数据类型由公共协议提供。；目标：相机几何数值核共享，图像特征检测/重采样留OpenCV模块。
@@ -1031,7 +1016,7 @@
 ## 204 · pose.project_3d
 
 - 当前：`std-image` / `1.0.0` / 三维有限工件原图掩膜投影。目标：`std-image`；拆公共能力/适配；**M6**。
-- 源码：[packs/std-image/ops/p5_pose_projection.cpp:893](../../packs/std-image/ops/p5_pose_projection.cpp#L893)。
+- 源码：[packs/std-image/ops/p5_pose_projection.cpp:1027](../../packs/std-image/ops/p5_pose_projection.cpp#L1027)。
 - 端口：`poses:Record`, `calib:Record`, `posesToCamera:Transform?`, `rois:Record?` → `poses:Record`, `masks:Tensor`, `maskInfo:Record`, `quality:Record`。
 - 参数单位标注：nearDepth=m。
 - 依赖：当前算法：OpenCV core/imgproc及相机畸变/数值求解的geometry模块、LyFlow轻量云/位姿类型；无需PCL。；目标：投影/栅格适配使用图像后端，共享映射/射线数值核，不引点云包注册依赖。
@@ -1045,7 +1030,7 @@
 ## 205 · pose.project_to_plane
 
 - 当前：`std-image` / `1.0.0` / 二维实例任意平面反投影及实体尺寸。目标：`std-image`；拆公共能力/适配；**M6**。
-- 源码：[packs/std-image/ops/p5_pose_projection.cpp:909](../../packs/std-image/ops/p5_pose_projection.cpp#L909)。
+- 源码：[packs/std-image/ops/p5_pose_projection.cpp:1043](../../packs/std-image/ops/p5_pose_projection.cpp#L1043)。
 - 端口：`poses:Record`, `calib:Record`, `plane:Plane?`, `planes:Record?`, `workspace:Record?`, `planeToCamera:Transform?`, `masks:Tensor?`, `maskInfo:Record?` → `poses:Record`, `quality:Record`。
 - 参数单位标注：thickness=m, nearDepth=m。
 - 依赖：当前算法：OpenCV core/imgproc及相机畸变/数值求解的geometry模块、LyFlow轻量云/位姿类型；无需PCL。；目标：投影/栅格适配使用图像后端，共享映射/射线数值核，不引点云包注册依赖。
@@ -1073,7 +1058,7 @@
 ## 207 · workspace.load
 
 - 当前：`std-image` / `1.0.0` / 三维工作空间加载。目标：`std-geometry`；迁移归属；**M6**。
-- 源码：[packs/std-image/ops/p3_workspace.cpp:519](../../packs/std-image/ops/p3_workspace.cpp#L519)。
+- 源码：[packs/std-image/ops/p3_workspace.cpp:591](../../packs/std-image/ops/p3_workspace.cpp#L591)。
 - 端口：`overrideRegion:Record?` → `region:Record`, `fromWorkspace:Transform`, `toWorkspace:Transform`, `workspace:Record`。
 - 参数单位标注：maxTranslationError=m。
 - 依赖：当前算法：yaml-cpp（含JSON/YAML文件读取）+标准C++与std-geometry私有pose_common头，无OpenCV/PCL调用。；目标：公共几何数据协议；workspace-io可选yaml-cpp，默认轻量几何模块不链接文件适配依赖。

@@ -196,31 +196,6 @@ Status warp(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx
   return image_p1::putImage(out, "image", std::move(result));
 }
 
-Status calibratedDistance(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&) {
-  const Record* record = in.get("calib").asRecord();
-  const Point2D* a = in.get("a").asPoint2D();
-  const Point2D* b = in.get("b").asPoint2D();
-  calibration::Plane plane;
-  std::string why;
-  if (!record || !calibration::parsePlane(*record, plane, why))
-    return img::badInput(why.empty() ? "缺少平面标定" : why, "calib");
-  if (!plane.imageFrame.empty() && plane.imageFrame != p.text("imageFrame"))
-    return img::badInput("版本化标定的图像帧必须匹配量测点的明确声明", "calib");
-  if (!a || !b || a->unit != Unit2D::Pixel || b->unit != Unit2D::Pixel)
-    return img::badInput("物理量测输入必须是原图像素Point2D", "a");
-  double ax, ay, bx, by;
-  if (!plane.map(a->p[0], a->p[1], ax, ay) || !plane.map(b->p[0], b->p[1], bx, by))
-    return img::badInput("量测点位于单应性无效区域", "a");
-  Measurement measurement;
-  measurement.value = std::hypot(ax - bx, ay - by) * plane.metersPerUnit;
-  measurement.ok = std::isfinite(measurement.value);
-  measurement.unit = "m";
-  if (!measurement.ok)
-    return img::badInput("物理量测结果非有限", "a");
-  out.set("distance", Data::measurement(std::move(measurement)));
-  return Status::Ok();
-}
-
 Status boardPose(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const Image* input = in.get("image").asImage();
   auto s = image_p1::image(input);
@@ -440,17 +415,6 @@ void registerImageP1Calibration(Registry& r) {
                               {{"linear", "线性", ""}, {"nearest", "最近邻", ""}}, "")};
   op.doc = "H是原图像素到平面m/mm，输出密度与原点显式；valid仅标记完整插值采样有效像素。";
   op.compute = &warp;
-  r.addOperator(std::move(op));
-
-  op = image_p1::descriptor("image.calibrated_distance", "平面标定距离量测",
-                            "calibrated physical planar point distance homography");
-  op.version = "1.1.0";
-  op.inputs = {Port{"a", "Point2D", "A", "原图像素点。", true},
-               Port{"b", "Point2D", "B", "原图像素点。", true},
-               image_p1::recordPort("calib", calibration::kPlaneType)};
-  op.outputs = {Port{"distance", "Measurement", "Distance", "米制平面距离。", true}};
-  op.params = {image_p1::text("imageFrame", "量测点图像坐标帧", "")};
-  op.compute = &calibratedDistance;
   r.addOperator(std::move(op));
 
   op = image_p1::descriptor("image.board_pose", "棋盘格三维位姿估计",

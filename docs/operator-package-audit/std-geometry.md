@@ -1,13 +1,13 @@
 # std-geometry 逐算子迁移清单
 
-状态：实施中；当前 35 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 37 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
 ## 025 · geometry.circle_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维圆构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:706](../../packs/std-geometry/ops/geometry.cpp#L706)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:219](../../packs/std-geometry/ops/geometry.cpp#L219)。
 - 端口：`x:Record?`, `y:Record?`, `radius:Record?` → `circle:Circle2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -17,11 +17,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：非正半径和混单位拒绝；后续几何运算不丢单位
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 026 · geometry.distance_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何距离。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:771](../../packs/std-geometry/ops/geometry.cpp#L771)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:286](../../packs/std-geometry/ops/geometry.cpp#L286)。
 - 端口：`a:Any`, `b:Any` → `distance:Measurement`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -31,6 +35,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：点线圆/有限线段退化和非对称anchor回归；不改成业务gap定义
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 027 · geometry.extend_2d
 
@@ -45,11 +53,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：无深度信息不恢复3D；新轴/单位/变换保留几何含义
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 028 · geometry.intersect_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何求交。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:820](../../packs/std-geometry/ops/geometry.cpp#L820)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:328](../../packs/std-geometry/ops/geometry.cpp#L328)。
 - 端口：`a:Any`, `b:Any` → `intersections:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -59,11 +71,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：相切、平行、连续重合与数值极端回归；不伪造交点
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 029 · geometry.line_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维直线与线段构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:637](../../packs/std-geometry/ops/geometry.cpp#L637)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:150](../../packs/std-geometry/ops/geometry.cpp#L150)。
 - 端口：`x:Record?`, `y:Record?`, `angle:Record?` → `line:Line2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -73,11 +89,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：零方向、重合端点拒绝；端点与角度两种模式不混用
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 030 · geometry.midpoint_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点中点。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:857](../../packs/std-geometry/ops/geometry.cpp#L857)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:366](../../packs/std-geometry/ops/geometry.cpp#L366)。
 - 端口：`a:Point2D`, `b:Point2D` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -87,11 +107,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：混单位拒绝；大数坐标有限且对称
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 031 · geometry.plane
 
 - 当前：`std-geometry` / `1.0.0` / 三维平面构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:735](../../packs/std-geometry/ops/geometry.cpp#L735)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:248](../../packs/std-geometry/ops/geometry.cpp#L248)。
 - 端口：无 → `plane:Plane`。
 - 参数单位标注：offset=m。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -101,11 +125,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：缩放输入系数得到相同平面；零法向拒绝
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 032 · geometry.point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:618](../../packs/std-geometry/ops/geometry.cpp#L618)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:131](../../packs/std-geometry/ops/geometry.cpp#L131)。
 - 端口：`x:Record?`, `y:Record?` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -115,11 +143,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：非有限和单位不符拒绝；构造/分解一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 033 · geometry.point_at
 
 - 当前：`std-geometry` / `1.0.0` / 交点索引提取。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:914](../../packs/std-geometry/ops/geometry.cpp#L914)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:418](../../packs/std-geometry/ops/geometry.cpp#L418)。
 - 端口：`intersections:Record` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -129,11 +161,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：空、coincident及越界诊断；有限点单位不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 034 · geometry.project_point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点正交投影。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:877](../../packs/std-geometry/ops/geometry.cpp#L877)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:385](../../packs/std-geometry/ops/geometry.cpp#L385)。
 - 端口：`point:Point2D`, `line:Line2D` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -143,11 +179,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：端外投影在两种clamp模式符合契约；保留px/m
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 035 · geometry.transform_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何相似变换。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry_transform.cpp:126](../../packs/std-geometry/ops/geometry_transform.cpp#L126)。
+- 源码：[packs/std-geometry/ops/geometry_transform.cpp:67](../../packs/std-geometry/ops/geometry_transform.cpp#L67)。
 - 端口：`geometry:Any`, `transform:Transform` → `geometry:Any`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -157,11 +197,15 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：圆拒绝非相似仿射；方向无平移，原类型与单位保留
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 036 · geometry.transform_plane
 
 - 当前：`std-geometry` / `1.0.0` / 三维平面仿射变换。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry_transform.cpp:140](../../packs/std-geometry/ops/geometry_transform.cpp#L140)。
+- 源码：[packs/std-geometry/ops/geometry_transform.cpp:81](../../packs/std-geometry/ops/geometry_transform.cpp#L81)。
 - 端口：`plane:Plane`, `transform:Transform` → `plane:Plane`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -171,6 +215,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：非均匀缩放、平移与近奇异矩阵回归；不附带外部帧树协议
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 037 · pose.compare_2d
 
@@ -185,6 +233,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：临界容差及跨周期角差；纯几何matched不充当生产OK/NG
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 038 · pose.compare_3d
 
@@ -199,6 +251,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：跨帧非交换链、对称等价及临界容差；不推断工件可抓或生产许可
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 039 · pose.concat
 
@@ -213,6 +269,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：混帧、重复ID拒绝；合法空集合和顺序保持
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 040 · pose.construct_2d
 
@@ -227,6 +287,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：拒绝混单位、非正尺寸和非有限输入；身份与显式frame保留
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 041 · pose.construct_3d
 
@@ -241,6 +305,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：q与-q规范化、零四元数拒绝；动态m/rad与常量一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 042 · pose.decompose_2d
 
@@ -255,6 +323,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：输出单位继承px/m；索引越界失败；与construct往返
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 043 · pose.filter
 
@@ -269,6 +341,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：相同项重排时贪心结果符合旧契约；matched/rejected互补；不赋予抓取许可
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 044 · pose.flip_axis_2d
 
@@ -283,6 +359,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：不自动推断矩形/物体对称；目标角和边界相位一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 045 · pose.flip_axis_3d
 
@@ -297,6 +377,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：q/-q、有限枚举上限与非法轴回归；身份和位置不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 046 · pose.frame_from_points
 
@@ -311,6 +395,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：重合/共线/不等长失败；X/Y/Z正交且det为+1
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 047 · pose.from_text
 
@@ -325,6 +413,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：拒绝未知type、重复ID和混单位；与to_text往返
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 048 · pose.get
 
@@ -339,6 +431,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：空集合和越界明确失败；不生成新身份
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 049 · pose.offset_3d
 
@@ -353,6 +449,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：local/world在旋转工件上产生预期不同结果；不改姿态与frame
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 050 · pose.rigid_check
 
@@ -367,6 +467,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：镜像与共线案例不能误报可观姿态；正常空配对不造工件
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 051 · pose.rigid_register
 
@@ -381,6 +485,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：共线和非唯一旋转拒绝；误差阈值在float32交付后仍成立
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 052 · pose.rigid_template
 
@@ -395,6 +503,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：重复点/退化/超限拒绝；模板序列化及ID一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 053 · pose.rotate_axis_3d
 
@@ -409,6 +521,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：未声明对称拒绝；固定轴约束和退化方向回归
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 054 · pose.to_text
 
@@ -423,6 +539,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：Unicode/浮点往返；超过文本上限明确失败而非截断
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 055 · pose.to_transform
 
@@ -437,6 +557,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：拒绝px直接转米制矩阵、非法索引；与pose位置/方向一致
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 056 · pose.to_world_plane
 
@@ -452,6 +576,10 @@
 - 验收：标定mm/m一致；不把像素框猜成物理尺寸，不恢复未知深度
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID；只消费公开PlaneCalib Record并计算H，无OpenCV/YAML依赖；标定记录schema共享，不依赖std-image私有头
 - M1契约更新（1.1.0）：新增显式frame参数，版本化PlaneCalib使用共享schemaVersion=1/frame/unit解析；旧非版本化分支保持兼容。；验收：v1帧缺失/不匹配拒绝；米/毫米一致；旧参数与旧标定路径不漂移。
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 057 · pose.transform_2d
 
@@ -466,6 +594,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：平移/旋转非交换链、混单位与镜像拒绝；不改变属性
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 058 · pose.transform_3d
 
@@ -480,6 +612,10 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：非交换链、反射/缩放拒绝；保持身份与尺寸
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 
 ## 059 · pose.update
 
@@ -494,3 +630,45 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：非法补丁在空集合仍失败；同对象位置/身份保持
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
+
+## 061 · register.constraints_3d
+
+- 当前：`std-geometry` / `1.0.0` / 三维几何约束构造。目标：`std-geometry`；迁移归属；**M2**。
+- 源码：[packs/std-geometry/ops/constraints_3d.cpp:36](../../packs/std-geometry/ops/constraints_3d.cpp#L36)。
+- 端口：无 → `constraints:Record`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：小Record JSON构造及fit3共享约束字段校验；当前p1_common/Eigen与p2_fit头耦合；目标拆出无PCL/OpenCV的公共约束schema与校验接口
+- 当前契约：无 → constraints:Record。最多64KiB items JSON→cloud.Constraints3D.v1；校验类型、单位、权重及3-2-1结构，几何可观性由拟合器判断，不收任意大数组。
+- 目标契约：迁std-geometry的约束描述构造；保留米制source/target帧和有界schema，校验独立于PCL空间搜索后端。
+- 迁移前置：M1
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：字段/单位/权重/3-2-1合法性、大小上限、非有限值和拟合器schema一致；几何包单独构建不加载PCL。
+- 说明：构造Record不等于实现配准；不得把拟合可观性检查提前伪造成构造成功即定位成功。
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/constraints.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
+- M2迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/p2_advanced_fit.cpp:684` @ `f0c043c6341755e8f254ac499a1593df087b6d94`；原目标包和依赖规划保留。
+
+## 062 · transform.make
+
+- 当前：`std-geometry` / `1.0.0` / 刚体变换构造。目标：`std-geometry`；迁移归属；**M2**。
+- 源码：[packs/std-geometry/ops/transform_make.cpp:24](../../packs/std-geometry/ops/transform_make.cpp#L24)。
+- 端口：无 → `transform:Transform`。
+- 参数单位标注：translation=m, rotation=°。
+- 依赖：C++标准库三角函数；原生Transform；当前整包传递PCL；目标std-geometry无PCL/OpenCV
+- 当前契约：无 → transform:Transform。平移m、欧拉角deg构造4×4；现有矩阵顺序Rz·Ry·Rx，不能等同其他节点的Rx·Ry·Rz约定。
+- 目标契约：归std-geometry的刚体构造adapter；保留此节点的角度单位与矩阵乘序，逐步提供带source/target帧的明确契约。
+- 迁移前置：M1
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：非交换XYZ旋转、deg/rad、行主序、平移m、正交/末行验证及旧工作流矩阵逐项一致。
+- 说明：不能直接替换为现有pose构造节点；重复接口合并须显式图迁移。
+- M2边界验收（manifest_verified）：M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。
+- 阶段依赖边界：std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。
+- 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
+- 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
+- M2迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/transform_make.cpp:56` @ `f0c043c6341755e8f254ac499a1593df087b6d94`；原目标包和依赖规划保留。

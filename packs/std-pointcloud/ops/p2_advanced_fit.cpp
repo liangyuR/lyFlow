@@ -1,11 +1,12 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
 #include <array>
-#include <set>
 
 #include "p1_common.h"
 #include "../algo/p2_fit.h"
 #include "lyflow/pose.h"
+#include "lyflow/kernel/constraints.h"
+#include "lyflow/kernel/metrology.h"
 
 namespace lyflow::ops {
 namespace {
@@ -14,7 +15,6 @@ using Json = nlohmann::json;
 using V6 = Eigen::Matrix<double, 6, 1>;
 using M6 = Eigen::Matrix<double, 6, 6>;
 using J36 = Eigen::Matrix<double, 3, 6>;
-constexpr std::size_t kMaxConstraints = 4096;
 constexpr std::size_t kMaxOutputPoints = 4U * 1024U * 1024U;
 
 struct Constraint {
@@ -27,135 +27,34 @@ struct Constraint {
   Mat3 projection = Mat3::Identity();
 };
 
-bool keys(const Json& item, std::initializer_list<const char*> allowed) {
-  if (!item.is_object())
-    return false;
-  std::set<std::string> names;
-  for (const char* name : allowed)
-    names.insert(name);
-  for (auto it = item.begin(); it != item.end(); ++it)
-    if (!names.count(it.key()))
-      return false;
-  return true;
-}
-
 Status constraints(const Inputs& in, const ParamView& p, std::vector<Constraint>& result) {
   const auto* record = in.get("constraints").asRecord();
-  std::string why;
-  if (!record || record->type != "cloud.Constraints3D.v1" ||
-      !values::boundedJson(record->data, why))
-    return error("需要有界cloud.Constraints3D.v1约束记录：" + why, "constraints");
-  const auto& data = record->data;
-  if (!keys(data, {"sourceFrame", "targetFrame", "unit", "items"}) || data.size() != 4 ||
-      data.value("sourceFrame", Json{}) != p.text("sourceFrame") ||
-      data.value("targetFrame", Json{}) != p.text("targetFrame") ||
-      data.value("unit", Json{}) != "m" || !data.contains("items") || !data["items"].is_array() ||
-      data["items"].empty() || data["items"].size() > kMaxConstraints)
-    return error("约束必须有匹配的sourceFrame/targetFrame、米制unit与1..4096项items",
-                 "constraints");
-  std::set<std::string> ids;
-  double maximumWeight = 0;
-  for (const auto& item : data["items"]) {
-    if (!keys(item, {"id", "type", "source", "target", "direction", "weight", "offset", "datum"}) ||
-        !poses::textField(item, "id") || !poses::textField(item, "type") ||
-        !item.contains("source") || !poses::numericArray(item["source"], 3) ||
-        !item.contains("target") || !poses::numericArray(item["target"], 3) ||
-        !item.contains("weight") || !values::safeNumber(item["weight"]))
-      return error("约束需要唯一id、type、有限三维source/target及正weight", "constraints");
+  if (!record || record->type != kernel::constraints::kRecordType)
+    return error("需要有界cloud.Constraints3D.v1约束记录：", "constraints");
+  std::vector<kernel::constraints::Constraint> parsed;
+  kernel::constraints::Error issue;
+  if (!kernel::constraints::parse3D(record->data, p.text("sourceFrame"), p.text("targetFrame"),
+                                    p.choice("mode"), parsed, issue))
+    return error(issue.message, issue.field, issue.code);
+  std::vector<Constraint> converted;
+  converted.reserve(parsed.size());
+  for (auto& value : parsed) {
     Constraint c;
-    c.id = item["id"];
-    c.type = item["type"];
-    c.source = Eigen::Map<const Vec3>(item["source"].get<std::array<double, 3>>().data());
-    c.target = Eigen::Map<const Vec3>(item["target"].get<std::array<double, 3>>().data());
-    c.weight = item["weight"].get<double>();
-    if (!ids.insert(c.id).second || c.id.size() > 1024 || !std::isfinite(c.weight) ||
-        c.weight <= 0 || c.source.cwiseAbs().maxCoeff() > 1e12 ||
-        c.target.cwiseAbs().maxCoeff() > 1e12)
-      return error("约束id重复、weight非正或坐标超过1e12米预算", "constraints");
-    if (c.type != "point" && c.type != "line" && c.type != "plane" && c.type != "axis")
-      return error("约束type仅支持point/line/plane/axis", "constraints");
-    if (c.type == "point") {
-      if (item.contains("direction") || item.contains("offset") || item.contains("datum"))
-        return error("point不消费direction/offset/datum字段", "constraints");
-    } else {
-      if (!item.contains("direction") || !poses::numericArray(item["direction"], 3))
-        return error("线方向或平面/轴向法向必须是非零三维向量", "constraints");
-      const auto vector = item["direction"].get<std::array<double, 3>>();
-      c.direction = Vec3(vector[0], vector[1], vector[2]);
-      const double magnitude = c.direction.stableNorm();
-      if (!(magnitude > 0) || !std::isfinite(magnitude))
-        return error("direction必须有限且非零", "constraints");
-      c.direction /= magnitude;
-      if (c.type == "line") {
-        c.projection = Mat3::Identity() - c.direction * c.direction.transpose();
-        if (item.contains("offset") || item.contains("datum"))
-          return error("line不消费offset/datum字段", "constraints");
-      } else {
-        c.projection = c.direction * c.direction.transpose();
-        if (item.contains("offset")) {
-          if (!values::safeNumber(item["offset"]) || std::abs(item["offset"].get<double>()) > 1e12)
-            return error("offset必须为有限米制有符号偏移", "constraints");
-          c.offset = item["offset"].get<double>();
-        }
-        if (item.contains("datum")) {
-          if (!item["datum"].is_number_integer() || item["datum"] < 0 || item["datum"] > 2)
-            return error("datum必须为整数0/1/2", "constraints");
-          c.datum = item["datum"].get<int>();
-        }
-      }
-    }
-    maximumWeight = std::max(maximumWeight, c.weight);
-    result.push_back(std::move(c));
+    c.id = std::move(value.id);
+    c.type = std::move(value.type);
+    c.source = Eigen::Map<const Vec3>(value.source.data());
+    c.target = Eigen::Map<const Vec3>(value.target.data());
+    c.direction = Eigen::Map<const Vec3>(value.direction.data());
+    c.weight = value.weight;
+    c.offset = value.offset;
+    c.datum = value.datum;
+    if (c.type == "line")
+      c.projection = Mat3::Identity() - c.direction * c.direction.transpose();
+    else if (c.type == "plane" || c.type == "axis")
+      c.projection = c.direction * c.direction.transpose();
+    converted.push_back(std::move(c));
   }
-  for (auto& c : result) {
-    c.weight /= maximumWeight;
-    if (c.weight < 1e-12)
-      return error("最大/最小权重之比不得超过1e12", "constraints");
-  }
-  if (p.choice("mode") == "weighted_321") {
-    std::array<int, 3> count{};
-    std::array<Vec3, 3> axes{Vec3::Zero(), Vec3::Zero(), Vec3::Zero()};
-    for (const auto& c : result) {
-      if ((c.type != "axis" && c.type != "plane") || c.datum < 0)
-        return error("weighted_321仅接受带datum=0/1/2的axis/plane约束", "constraints");
-      if (count[c.datum]++ == 0)
-        axes[c.datum] = c.direction;
-      else if (std::abs(axes[c.datum].dot(c.direction)) < 1 - 1e-8)
-        return error("同datum的轴向约束必须平行", "constraints");
-    }
-    if (count[0] < 3 || count[1] < 2 || count[2] < 1 || std::abs(axes[0].dot(axes[1])) > 1e-8 ||
-        std::abs(axes[0].dot(axes[2])) > 1e-8 || std::abs(axes[1].dot(axes[2])) > 1e-8)
-      return error("weighted_321需要正交的3/2/1及以上有效datum约束", "constraints");
-  } else if (p.choice("mode") != "mixed") {
-    return error("未知约束拟合模式", "mode", "bad_param");
-  }
-  return Status::Ok();
-}
-
-Status constructConstraints(const Inputs&, const ParamView& p, Outputs& out, ExecContext& ctx) {
-  if (!frameValid(p.text("sourceFrame")) || !frameValid(p.text("targetFrame")))
-    return error("源/目标帧必须显式有效", "sourceFrame", "bad_param");
-  if (ctx.cancelled())
-    return error("约束构造已取消", "items", "cancelled");
-  const std::string& source = p.text("items");
-  if (source.empty() || source.size() > values::kMaxStringBytes)
-    return error("items必须为1..65536字节的约束JSON数组", "items", "bad_param");
-  const Json items = Json::parse(source, nullptr, false);
-  if (items.is_discarded())
-    return error("items不是合法JSON数组", "items", "bad_param");
-  Record record{"cloud.Constraints3D.v1",
-                {{"sourceFrame", p.text("sourceFrame")},
-                 {"targetFrame", p.text("targetFrame")},
-                 {"unit", "m"},
-                 {"items", items}}};
-  std::unordered_map<std::string, Data> values{{"constraints", Data::record(record)}};
-  std::vector<Constraint> parsed;
-  const Status status = constraints(Inputs(values), p, parsed);
-  if (!status.ok)
-    return error(status.message, "items", "bad_param");
-  if (ctx.cancelled())
-    return error("约束构造已取消", "items", "cancelled");
-  out.set("constraints", Data::record(std::move(record)));
+  result = std::move(converted);
   return Status::Ok();
 }
 
@@ -203,14 +102,12 @@ Vec3 deliveredPoint(const Transform& matrix, const Vec3& source) {
 ConstraintQuality measured(const std::vector<Constraint>& cs, const Transform& pose,
                            const Transform& before) {
   ConstraintQuality q;
-  double sum = 0, weight = 0;
+  kernel::metrology::ResidualAccumulator residuals;
   for (const auto& c : cs) {
     const Vec3 afterResidual = residual(c, deliveredPoint(pose, c.source));
     const Vec3 beforeResidual = residual(c, deliveredPoint(before, c.source));
     const double distance = afterResidual.norm();
-    sum += c.weight * distance * distance;
-    weight += c.weight;
-    q.maxError = std::max(q.maxError, distance);
+    residuals.add(distance, c.weight);
     Json item{{"id", c.id},
               {"type", c.type},
               {"weight", c.weight},
@@ -222,7 +119,8 @@ ConstraintQuality measured(const std::vector<Constraint>& cs, const Transform& p
     }
     q.items.push_back(std::move(item));
   }
-  q.rmse = std::sqrt(sum / weight);
+  q.rmse = residuals.weightedRmse();
+  q.maxError = residuals.maxError();
   return q;
 }
 
@@ -680,23 +578,6 @@ Status poseSearch(const Inputs& in, const ParamView& p, Outputs& out, ExecContex
 } // namespace
 
 void registerAdvancedFit3D(Registry& r) {
-  OperatorDesc constructor =
-      descriptor("register.constraints_3d", "三维几何约束构造",
-                 "weighted 3D constraints point line plane datum 321 JSON constructor");
-  constructor.outputs = {
-      withContract(Port{"constraints", "Record", "三维约束", "cloud.Constraints3D.v1。", true},
-                   {{"recordType", "cloud.Constraints3D.v1"}})};
-  Param items = text("items", "约束项JSON", "[]");
-  items.type = ParamType::Text;
-  constructor.params = {text("sourceFrame", "源参考帧", "source"),
-                        text("targetFrame", "目标参考帧", "target"),
-                        choice("mode", "约束模型校验", "mixed",
-                               {{"mixed", "混合点线面"}, {"weighted_321", "加权3-2-1基准"}}),
-                        std::move(items)};
-  constructor.doc =
-      "从最多64KiB的items JSON构造有界cloud.Constraints3D.v1。复用拟合器相同的字段、单位、权重、3-2-1结构校验；不接受任意Record或大点云数组。几何可观性与质量由下游拟合器验证。";
-  constructor.compute = constructConstraints;
-  r.addOperator(std::move(constructor));
   OperatorDesc op =
       descriptor("register.constrained_fit_3d", "三维加权几何约束拟合",
                  "weighted mixed point line plane datum 321 constrained rigid fitting");

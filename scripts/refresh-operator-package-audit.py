@@ -40,6 +40,52 @@ ADDITIONS = {
 }
 CHANGED = ('pose.to_world_plane', 'image.calibrated_distance')
 EXAMPLE_ID = 'py.profile_copy.offset_z'
+M1_MERGED_REVISION = 'f0c043c6341755e8f254ac499a1593df087b6d94'
+M2_MOVES = {
+    'transform.make': dict(fromPack='std-pointcloud', toPack='std-geometry', source='packs/std-geometry/ops/transform_make.cpp'),
+    'register.constraints_3d': dict(fromPack='std-pointcloud', toPack='std-geometry', source='packs/std-geometry/ops/constraints_3d.cpp'),
+    'image.calibrated_distance': dict(fromPack='std-image', toPack='std-metrology', source='packs/std-metrology/ops/register.cpp'),
+}
+
+
+def assess_m2(row, status):
+    if row['id'] == 'image.calibrated_distance':
+        interfaces = ['kernels/include/lyflow/kernel/metrology.h', 'core/include/lyflow/calibration.h']
+        boundary = 'std-metrology -> metrology-kernel -> data-contract；C++17/std及公开core校验，无OpenCV/PCL/ORT。'
+    else:
+        interfaces = ['kernels/include/lyflow/kernel/geometry.h', 'kernels/include/lyflow/kernel/rigid.h', 'core/include/lyflow/pose.h']
+        if row['id'] == 'register.constraints_3d':
+            interfaces = ['kernels/include/lyflow/kernel/constraints.h']
+        boundary = 'std-geometry -> geometry-kernel -> data-contract；公开几何/刚体/Record契约，无PCL/OpenCV/ORT及跨包私有ops头。'
+    records = row.setdefault('stageAssessments', [])
+    record = next((entry for entry in records if entry.get('stage') == 'M2'), None)
+    if record is None:
+        record = dict(stage='M2')
+        records.append(record)
+    record.update(status=status, publicInterfaces=interfaces, dependencyBoundary=boundary,
+        scope='M2公共核、轻量包归属与声明式依赖边界；原ID/版本/数据数值与错误语义保持。',
+        acceptance=('待真实全包manifest核验；' if status == 'pending_manifest' else '当前描述已与真实全包manifest核验；') +
+        '独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。')
+
+
+def relocate_operator(row, op, stage):
+    actual_pack = op.get('pack', 'core').split('@')[0]
+    move = M2_MOVES.get(row['id']) if stage == 'M2' else None
+    if move:
+        if actual_pack != move['toPack'] or row['targetPack'] != move['toPack']:
+            raise ValueError(f"{row['id']}: M2真实manifest必须包含已审迁包结果 {move['toPack']}")
+        if op.get('version') != row['currentVersion'] or op.get('params', []) != row['currentParams'] or {
+            key: op.get(key, []) for key in ('inputs', 'outputs')
+        } != row['currentPorts']:
+            raise ValueError(f"{row['id']}: M2迁包必须保持原版本、端口和参数，不得隐式改契约")
+    if actual_pack != row['currentPack']:
+        if not move or row['currentPack'] != move['fromPack']:
+            raise ValueError(f"{row['id']}: 包变更必须先人工审计目标/依赖/契约")
+        row.setdefault('packageHistory', []).append(dict(stage='M2', fromPack=row['currentPack'],
+            fromPackVersion=row.get('currentPackVersion'), source=row['source'], currentVersion=row['currentVersion'], sourceRevision=M1_MERGED_REVISION,
+            toPack=actual_pack))
+        row['currentPack'] = actual_pack
+        row['source'] = move['source']
 
 
 def load(path):
@@ -57,7 +103,7 @@ def manifest_generator(manifest):
     return generator
 
 
-def prepare(data):
+def prepare(data, stage='M2'):
     result = copy.deepcopy(data)
     if 'baselineReference' not in result:
         revision = subprocess.check_output(['git', 'rev-parse', BASELINE_REVISION], cwd=ROOT, text=True).strip()
@@ -77,6 +123,22 @@ def prepare(data):
         stages.append(dict(stage='M1', status='pending_manifest', expectedNativeCount=256,
             expectedPythonExampleCount=8, introducedNativeIds=list(ADDITIONS), introducedPythonIds=[EXAMPLE_ID],
             changedNativeIds=list(CHANGED), note='仅公共契约/显式适配；M3场景算法迁移尚未实施；阶段完成需另行运行与交付验收。'))
+    if stage == 'M2':
+        m1 = next(s for s in stages if s['stage'] == 'M1')
+        if not m1.get('manifestEvidence'):
+            raise ValueError('M2需要先完成M1真实manifest基线，不能跳过公共契约验收')
+        m1['status'] = 'complete'
+        m1.setdefault('mergeEvidence', {}).update(pr=62, url='https://github.com/liangyuR/lyFlow/pull/62', revision=M1_MERGED_REVISION)
+        scoped = sorted(row['id'] for row in result['operators'] if row['wave'] == 'M2')
+        if not any(s['stage'] == 'M2' for s in stages):
+            stages.append(dict(stage='M2', status='pending_manifest', expectedNativeCount=256,
+                expectedPythonExampleCount=8, targetProductVersion='1.4.1', introducedNativeIds=[], introducedPythonIds=[],
+                changedNativeIds=scoped, scopeNativeIds=scoped, relatedNativeIds=['register.constrained_fit'],
+                packageMoves=[dict(id=identifier, **move) for identifier, move in M2_MOVES.items()],
+                note='38项轻量几何/测量边界；3项迁包保持原ID/版本；M3/DTS场景算法未在本阶段迁移。'))
+        for row in result['operators']:
+            if row['wave'] == 'M2' and not any(entry.get('stage') == 'M2' for entry in row.get('stageAssessments', [])):
+                assess_m2(row, 'pending_manifest')
     return result
 
 
@@ -108,11 +170,11 @@ def pending_sources(data):
             CHECKER.source_hash(ROOT / p) != fingerprints.get(p)]
 
 
-def refreshed(data, manifest_path, reviewed_paths, review_note, product_version):
-    result = prepare(data)
+def refreshed(data, manifest_path, reviewed_paths, review_note, product_version, stage='M2'):
+    result = prepare(data, stage)
     for field, baseline_ids, added in (
-        ('operators', result['baselineReference']['registeredNativeIds'], set(ADDITIONS)),
-        ('pythonExamples', result['baselineReference']['pythonExampleIds'], {EXAMPLE_ID}),
+        ('operators', set(result['baselineReference']['registeredNativeIds']) | (set(ADDITIONS) if stage == 'M2' else set()), set(ADDITIONS)),
+        ('pythonExamples', set(result['baselineReference']['pythonExampleIds']) | ({EXAMPLE_ID} if stage == 'M2' else set()), {EXAMPLE_ID}),
     ):
         identifiers = [row['id'] for row in result[field]]
         if len(identifiers) != len(set(identifiers)) or not set(baseline_ids) <= set(identifiers) or not set(identifiers) <= set(baseline_ids) | added:
@@ -124,6 +186,8 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version)
     if len(exported) != len(operators) or set(exported) != expected:
         raise ValueError('需要真实全包manifest且ID全集等于原251项+已审5项；不得用轻量构建或占位描述刷新')
     generator = manifest_generator(manifest)
+    if generator != 'lyflow-core/' + product_version:
+        raise ValueError('请求的产品版本与真实manifest.generatedBy不一致')
     paths = {p.relative_to(ROOT).as_posix() for pattern in CHECKER.CONTRACT_SOURCES for p in ROOT.glob(pattern) if p.is_file()}
     fingerprints = result['sourceFingerprints']
     source_changes = pending_sources(result)
@@ -145,11 +209,10 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version)
     ordered[split:split] = additions
     for row in ordered:
         op = exported[row['id']]
-        if op.get('pack', 'core').split('@')[0] != row['currentPack']:
-            raise ValueError(f"{row['id']}: 包变更必须先人工审计目标/依赖/契约")
+        relocate_operator(row, op, stage)
         row.update(currentVersion=op['version'], currentPackVersion=op.get('pack', 'core'),
                    label=op.get('label', row.get('label')), currentPorts={k: op.get(k, []) for k in ('inputs', 'outputs')},
-                   currentParams=op.get('params', []), descriptionEvidence='M1真实全包manifest核对；目标/依赖/约束来自逐项源码复核。')
+                   currentParams=op.get('params', []), descriptionEvidence=f'{stage}真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。')
         source = row['source'].rsplit(':', 1)[0] if re.search(r':\d+$', row['source']) else row['source']
         lines = (ROOT / source).read_text(encoding='utf-8').splitlines()
         line = next((i for i, text in enumerate(lines, 1) if '"' + row['id'] + '"' in text), None)
@@ -196,11 +259,15 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version)
     fingerprints.update({p: CHECKER.source_hash(ROOT / p) for p in paths})
     for path in set(result['contractSourcePaths']) - paths:
         fingerprints.pop(path, None)
-    stage = next(s for s in result['stageLedger'] if s['stage'] == 'M1')
-    stage.update(status='validated_manifest', reviewedChange=review_note,
-                 reviewedSourceChanges=stage.get('reviewedSourceChanges', []) + source_changes,
+    stage_entry = next(s for s in result['stageLedger'] if s['stage'] == stage)
+    stage_entry.update(status='validated_manifest', reviewedChange=review_note,
+                 reviewedSourceChanges=stage_entry.get('reviewedSourceChanges', []) + source_changes,
                  manifestEvidence=dict(sha256=artifact_hash(manifest_path), operatorCount=len(exported),
                                        path=manifest_path.resolve().relative_to(ROOT).as_posix()))
+    if stage == 'M2':
+        for row in ordered:
+            if row['wave'] == 'M2':
+                assess_m2(row, 'manifest_verified')
     result['evidence'] = dict(nativeManifestGeneratedBy=generator,
         nativeManifestOperatorCount=len(exported), manifestSha256=artifact_hash(manifest_path),
         sourceState='reviewed-working-tree', note='当前全包manifest与逐项元数据一致；构建/算法/现场验收按阶段ledger另行记录。')
@@ -231,6 +298,13 @@ def render_details(data):
                 '- 验收：' + row['acceptance'], '- 说明：' + row['notes']]
             for update in row.get('contractUpdates', []):
                 lines += [f"- {update['stage']}契约更新（{update['version']}）：{update['contract']}；验收：{update['acceptance']}"]
+            for assessment in row.get('stageAssessments', []):
+                lines += [f"- {assessment['stage']}边界验收（{assessment['status']}）：{assessment['scope']}",
+                    '- 阶段依赖边界：' + assessment['dependencyBoundary'],
+                    '- 公开接口：' + '；'.join(assessment['publicInterfaces']),
+                    '- 阶段验收边界：' + assessment['acceptance']]
+            for move in row.get('packageHistory', []):
+                lines += [f"- {move['stage']}迁包来源：`{move['fromPack']}` / `{move['source']}` @ `{move['sourceRevision']}`；原目标包和依赖规划保留。"]
             lines += ['']
         documents['python-examples' if pack == 'python-examples' else pack] = '\n'.join(lines)
     return documents
@@ -238,6 +312,9 @@ def render_details(data):
 
 def render_overview(data):
     baseline = data['baselineReference']
+    current_stage = next(s for s in reversed(data['stageLedger']) if s['stage'] != 'M0')
+    manifest_example = f"build/{current_stage['stage'].lower()}-full/manifest.json"
+    version_example = current_stage.get('targetProductVersion', data['productVersion'])
     lines = ['# 现有算子分包审计', '',
         f"状态：实施中。当前产品 {data['productVersion']}，{data['nativeCount']} 个原生算子及 {data['pythonExampleCount']} 个随附Python示例。", '',
         f"原规划基线仍为 {baseline['nativeCount']} 原生 / {baseline['pythonExampleCount']} 示例，源码基线 `{baseline['sourceRevision']}`；"
@@ -255,18 +332,20 @@ def render_overview(data):
     for stage in data['stageLedger']:
         proof = stage.get('manifestEvidence', {})
         evidence = ('全包manifest SHA256 `' + proof['sha256'] + '`；描述匹配，不代表阶段全部验收已完成') if proof else stage['note']
+        if stage.get('mergeEvidence'):
+            evidence += f"；[PR{stage['mergeEvidence']['pr']}]({stage['mergeEvidence']['url']})已合并 `{stage['mergeEvidence']['revision']}`"
         lines.append(f"| {stage['stage']} | {stage['status']} | {stage['expectedNativeCount']} / {stage['expectedPythonExampleCount']} | {evidence} |")
     waves = collections.Counter(row['wave'] for row in data['operators'])
     lines += ['', '## 波次和顺序', '', '| 波次 | 内容 | 原生项数 |', '| --- | --- | ---: |']
     lines += [f'| {wave} | {label} | {waves[wave]} |' for wave, label in data['migrationWaves'].items()]
-    lines += ['', '原项目标包、依赖、迁移前置、数据约束与验收要求保留；M1新增适配不表示M3场景算法已迁移。序号随新增项重排，只提供满足已列前置的一种实施顺序，不改变惰性调度或业务定义。', '',
+    lines += ['', '原项目标包、依赖、迁移前置、数据约束与验收要求保留，M2当前依赖与验收边界另列；M1/M2不表示M3场景算法已迁移。序号随新增项重排，只提供满足已列前置的一种实施顺序，不改变惰性调度或业务定义。', '',
         '## 静态检查与复核刷新', '', '```powershell', 'python scripts/check-operator-package-audit.py',
-        'python scripts/check-operator-package-audit.py --manifest build/m1-full/manifest.json', '```', '',
+        f'python scripts/check-operator-package-audit.py --manifest {manifest_example}', '```', '',
         '静态检查比较契约来源集合/指纹、ID、版本、包归属、端口、参数及本地文档链接；不能替代运行、SDK、算法或现场验收。全包manifest必须来自真实启用全部包的构建，轻量构建不构成全集证据。', '',
         '审查实际源码差异后执行刷新，逐个传入变化路径：', '', '```powershell',
-        'python scripts/refresh-operator-package-audit.py --manifest build/m1-full/manifest.json --product-version 1.4.0 --reviewed-change "M1公共契约及显式适配逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>',
+        f'python scripts/refresh-operator-package-audit.py --stage {current_stage["stage"]} --manifest {manifest_example} --product-version {version_example} --reviewed-change "当前阶段公共契约、包归属及依赖边界逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>',
         '```', '',
-        '工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将M1设为validated_manifest，阶段完成需另行验收后登记。', '',
+        '工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。M2仅允许明确定义的3项迁包，保持版本/端口/参数，并保留原包和源码历史。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将当前阶段设为validated_manifest，完成需另行验收后登记，先前阶段证据保持。', '',
         'Python示例由源码装饰器AST发现，只有用户导入后注册；用户lib.*/py.*、外部包和测试节点不属于固定原生全集。原6导入器、7片段、6Bundle等附属资产仍按机器清单登记。', '']
     return '\n'.join(lines)
 
@@ -279,6 +358,7 @@ def main():
     parser.add_argument('--reviewed-path', action='append', default=[])
     parser.add_argument('--reviewed-change', default='')
     parser.add_argument('--product-version')
+    parser.add_argument('--stage', choices=['M1', 'M2'], default='M2')
     args = parser.parse_args()
     if args.list_pending_sources:
         print(json.dumps(pending_sources(load(AUDIT)), ensure_ascii=False, indent=2))
@@ -286,12 +366,12 @@ def main():
     if args.prepare:
         if args.manifest or args.reviewed_path or args.reviewed_change:
             parser.error('--prepare不刷新manifest或指纹')
-        data = prepare(load(AUDIT))
+        data = prepare(load(AUDIT), args.stage)
         documents = {}
     else:
         if not args.manifest or not args.product_version:
             parser.error('刷新需要--manifest和--product-version')
-        data = refreshed(load(AUDIT), args.manifest, args.reviewed_path, args.reviewed_change, args.product_version)
+        data = refreshed(load(AUDIT), args.manifest, args.reviewed_path, args.reviewed_change, args.product_version, args.stage)
         documents = {ROOT / 'docs/operator-package-audit' / f'{pack}.md': content for pack, content in render_details(data).items()}
         documents[ROOT / 'docs/operator-package-audit.md'] = render_overview(data)
         problems = CHECKER.validate(data, [args.manifest], documents)

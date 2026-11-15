@@ -1,4 +1,6 @@
 #include "pose_common.h"
+#include "lyflow/kernel/geometry.h"
+#include <type_traits>
 
 namespace lyflow::packs::std_geometry {
 namespace {
@@ -6,116 +8,55 @@ namespace {
 using namespace pose_detail;
 
 Status transform2D(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&) {
-  M4 matrix{};
+  const auto* transform = in.get("transform").asTransform();
+  M4 matrix;
   double scale = 1;
   std::string why;
-  if (!similarity2D(in.get("transform").asTransform(), matrix, scale, false, why))
+  if (!similarity2D(transform, matrix, scale, false, why))
     return bad(why, "transform");
-  const Unit2D expected = p.choice("unit") == "m" ? Unit2D::Meter : Unit2D::Pixel;
-  const auto map = [&](const float* xy, float* target, bool direction = false) {
-    const V3 value = pose_detail::apply(matrix, {xy[0], xy[1], 0}, direction);
-    if (!nativeFloat(value[0]) || !nativeFloat(value[1]))
-      return false;
-    target[0] = static_cast<float>(value[0]);
-    target[1] = static_cast<float>(value[1]);
-    return true;
-  };
-  const Data& geometry = in.get("geometry");
-  if (const auto* point = geometry.asPoint2D()) {
-    if (point->unit != expected)
-      return badParam("几何单位必须与矩阵平移单位一致", "unit");
-    Point2D result = *point;
-    if (!map(point->p, result.p))
-      return bad("点坐标超出原生 float32 范围", "geometry");
-    out.set("geometry", Data::point2d(result));
-  } else if (const auto* line = geometry.asLine2D()) {
-    if (line->unit != expected)
-      return badParam("几何单位必须与矩阵平移单位一致", "unit");
-    Line2D result = *line;
-    if (!map(line->point, result.point))
-      return bad("直线坐标超出 float32 范围", "geometry");
-    V3 direction{};
-    if (line->hasSegment) {
-      if (!map(line->start, result.start) || !map(line->end, result.end))
-        return bad("线段端点超出 float32 范围", "geometry");
-      direction = {double(result.end[0]) - result.start[0], double(result.end[1]) - result.start[1],
-                   0};
-      result.point[0] = result.start[0];
-      result.point[1] = result.start[1];
-    } else {
-      direction = pose_detail::apply(matrix, {line->dir[0], line->dir[1], 0}, true);
-    }
-    if (!normalize(direction))
-      return bad("直线方向非法或变换后线段端点在float32精度下重合", "geometry");
-    result.dir[0] = static_cast<float>(direction[0]);
-    result.dir[1] = static_cast<float>(direction[1]);
-    out.set("geometry", Data::line2d(result));
-  } else if (const auto* circle = geometry.asCircle2D()) {
-    if (circle->unit != expected)
-      return badParam("几何单位必须与矩阵平移单位一致", "unit");
-    const double radius = double(circle->radius) * scale;
-    Circle2D result = *circle;
-    if (!map(circle->center, result.center) || !nativeFloat(radius) || radius <= 0 ||
-        static_cast<float>(radius) == 0)
-      return bad("圆心或半径非法，或超出float32可表示范围", "geometry");
-    result.radius = static_cast<float>(radius);
-    out.set("geometry", Data::circle2d(result));
-  } else {
+  kernel::Geometry2D geometry;
+  const auto& data = in.get("geometry");
+  if (const auto* value = data.asPoint2D())
+    geometry = *value;
+  else if (const auto* value = data.asLine2D())
+    geometry = *value;
+  else if (const auto* value = data.asCircle2D())
+    geometry = *value;
+  else
     return bad("仅支持 Point2D、Line2D 和 Circle2D", "geometry");
-  }
+  kernel::Geometry2D result;
+  kernel::GeometryIssue issue;
+  if (!kernel::transformGeometry2D(geometry, *transform,
+                                   p.choice("unit") == "m" ? Unit2D::Meter : Unit2D::Pixel, result,
+                                   issue))
+    return issue.parameter ? badParam(issue.message, "unit")
+                           : bad(issue.message, issue.operand == 1 ? "transform" : "geometry");
+  std::visit(
+      [&out](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, Point2D>)
+          out.set("geometry", Data::point2d(value));
+        else if constexpr (std::is_same_v<T, Line2D>)
+          out.set("geometry", Data::line2d(value));
+        else
+          out.set("geometry", Data::circle2d(value));
+      },
+      result);
   return Status::Ok();
 }
-
 Status transformPlane(const Inputs& in, const ParamView&, Outputs& out, ExecContext&) {
-  M4 m{};
+  const auto* transform = in.get("transform").asTransform();
+  M4 matrix;
   std::string why;
-  if (!affine(in.get("transform").asTransform(), m, why))
+  if (!affine(transform, matrix, why))
     return bad(why, "transform");
-  const Plane* plane = in.get("plane").asPlane();
-  if (!plane || !std::isfinite(plane->d))
+  const auto* plane = in.get("plane").asPlane();
+  if (!plane)
     return bad("需要有效平面", "plane");
-  V3 normal{plane->normal[0], plane->normal[1], plane->normal[2]};
-  const double oldNorm = std::hypot(normal[0], normal[1], normal[2]);
-  if (!std::isfinite(oldNorm) || oldNorm == 0 || std::abs(oldNorm - 1) > 1e-5)
-    return bad("平面需要单位法向", "plane");
-  double scale = 0;
-  for (int row = 0; row < 3; ++row)
-    for (int col = 0; col < 3; ++col)
-      scale = std::max(scale, std::abs(m[row * 4 + col]));
-  if (scale == 0)
-    return bad("仿射线性部分不可逆", "transform");
-  poses::Matrix3 a{};
-  for (int row = 0; row < 3; ++row)
-    for (int col = 0; col < 3; ++col)
-      a[row * 3 + col] = m[row * 4 + col] / scale;
-  const double det = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) +
-                     a[2] * (a[3] * a[7] - a[4] * a[6]);
-  if (!std::isfinite(det) || std::abs(det) <= 1e-12)
-    return bad("仿射线性部分奇异或接近奇异（相对行列式≤1e-12）", "transform");
-  const poses::Matrix3 cofactor{
-      a[4] * a[8] - a[5] * a[7], a[5] * a[6] - a[3] * a[8], a[3] * a[7] - a[4] * a[6],
-      a[2] * a[7] - a[1] * a[8], a[0] * a[8] - a[2] * a[6], a[1] * a[6] - a[0] * a[7],
-      a[1] * a[5] - a[2] * a[4], a[2] * a[3] - a[0] * a[5], a[0] * a[4] - a[1] * a[3]};
-  V3 transformed{};
-  for (int i = 0; i < 3; ++i)
-    transformed[i] = productSum({{cofactor[i * 3], normal[0]},
-                                 {cofactor[i * 3 + 1], normal[1]},
-                                 {cofactor[i * 3 + 2], normal[2]}}) /
-                     (det * scale);
-  const double length = std::hypot(transformed[0], transformed[1], transformed[2]);
-  if (!std::isfinite(length) || length == 0)
-    return bad("变换后的法向不可表示", "transform");
-  const double d = productSum({{plane->d, 1},
-                               {-transformed[0], m[3]},
-                               {-transformed[1], m[7]},
-                               {-transformed[2], m[11]}}) /
-                   length;
-  if (!nativeFloat(d))
-    return bad("变换后的平面系数超出float32范围", "transform");
   Plane result;
-  for (int i = 0; i < 3; ++i)
-    result.normal[i] = static_cast<float>(transformed[i] / length);
-  result.d = static_cast<float>(d);
+  kernel::GeometryIssue issue;
+  if (!kernel::transformPlane(*plane, *transform, result, issue))
+    return bad(issue.message, issue.operand == 1 ? "transform" : "plane");
   out.set("plane", Data::plane(result));
   return Status::Ok();
 }
