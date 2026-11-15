@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { transport } from '../transport';
+import { useExecutionStore } from '../store/execution';
+import { resultBindingsChanged } from '../lib/resultBindings';
 import type { OutputInfo } from '../types/execution';
 import { useRuntimeCapabilities } from './useRuntimeCapabilities';
 
@@ -13,7 +15,14 @@ export function useResultBindings(runId: string | null, enabled = true) {
     outputs: RelatedOutput[];
     error: string;
   }>({ runId: null, outputs: [], error: '' });
+  const [revision, setRevision] = useState(0);
   const capabilities = useRuntimeCapabilities();
+  useEffect(() => {
+    if (!enabled || !runId) return;
+    return useExecutionStore.subscribe((current, previous) => {
+      if (resultBindingsChanged(runId, current, previous)) setRevision((value) => value + 1);
+    });
+  }, [runId, enabled]);
   useEffect(() => {
     if (!enabled || !runId || !transport.getRunBindings || capabilities.resultBindings !== true) {
       setState({ runId, outputs: [], error: '' });
@@ -23,6 +32,7 @@ export function useResultBindings(runId: string | null, enabled = true) {
     void (async () => {
       try {
         const bindings = await transport.getRunBindings!(runId);
+        if (cancelled) return;
         if (bindings.entries.length > 16_384) throw new Error('可视化结果端口数量超过 16384');
         if (
           bindings.entries
@@ -54,7 +64,7 @@ export function useResultBindings(runId: string | null, enabled = true) {
           if (cancelled) return;
           outputs.push(...batch.flat());
         }
-        setState({ runId, outputs, error: '' });
+        if (!cancelled) setState({ runId, outputs, error: '' });
       } catch (error) {
         if (!cancelled) setState({ runId, outputs: [], error: String(error) });
       }
@@ -62,6 +72,6 @@ export function useResultBindings(runId: string | null, enabled = true) {
     return () => {
       cancelled = true;
     };
-  }, [runId, enabled, capabilities.resultBindings]);
+  }, [runId, enabled, capabilities.resultBindings, revision]);
   return state.runId === runId ? state : { runId, outputs: [], error: '' };
 }

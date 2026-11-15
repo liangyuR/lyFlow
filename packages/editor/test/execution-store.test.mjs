@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { matchShortcut } from '../src/lib/keymap.ts';
+import { resultBindingsChanged } from '../src/lib/resultBindings.ts';
 import {
   docNodeKey,
   listGraphNodes,
@@ -147,6 +148,61 @@ test('运行结果生命周期：全图/targets/isolate归属、排队取消/失
     later,
     '手按的运行在跑：看这一次的',
   );
+  useExecutionStore.getState().reset();
+  seqs = new Map();
+  const refreshes = [];
+  const stop = useExecutionStore.subscribe((current, previous) => {
+    if (resultBindingsChanged('bindings-live', current, previous))
+      refreshes.push(current.runStatus);
+  });
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 40));
+  try {
+    useExecutionStore.getState().beginRun('bindings-live', [], true);
+    apply(ev('bindings-live', 'run_started', { plan: ['source', 'late'], nodes: [] }));
+    const initial = refreshes.length;
+    apply(ev('bindings-live', 'node_state', { nodeId: 'late', state: 'running' }));
+    for (let index = 0; index < 10; index++) {
+      apply(ev('bindings-live', 'node_progress', { nodeId: 'late', progress: index / 10 }));
+      apply(ev('bindings-live', 'log', { level: 'info', message: 'no new outputs' }));
+    }
+    await flush();
+    assert.equal(refreshes.length, initial, '进度和日志不触发结果轮询');
+    const stats = { outputs: [{ port: 'groups', type: 'Record', elementCount: 1 }] };
+    apply(ev('bindings-live', 'node_state', { nodeId: 'late', state: 'done', stats }));
+    await flush();
+    assert.equal(refreshes.length, initial + 1, '同run后完成节点刷新初次为空的结果绑定');
+    apply(ev('bindings-live', 'node_progress', { nodeId: 'late', progress: 1 }));
+    apply(ev('bindings-live', 'node_state', { nodeId: 'late', state: 'done', stats }));
+    await flush();
+    assert.equal(refreshes.length, initial + 1, '同一有效输出快照不重复查询');
+    apply(
+      ev('bindings-live', 'node_state', { nodeId: 'late', state: 'done', stats: { ...stats } }),
+    );
+    await flush();
+    assert.equal(refreshes.length, initial + 2, '同run输出快照更新继续刷新');
+    apply(
+      ev('bindings-live', 'node_state', {
+        nodeId: 'source',
+        state: 'skipped',
+        stats: { cached: true },
+      }),
+    );
+    await flush();
+    assert.equal(refreshes.length, initial + 3, '可用缓存输出同样刷新');
+    apply(ev('bindings-live', 'run_finished', { status: 'ok' }));
+    assert.equal(refreshes.length, initial + 4, '运行完成后刷新挂接的结果');
+    useExecutionStore.getState().beginRun('bindings-next', ['late'], true);
+    assert.equal(refreshes.length, initial + 4, '下一run排队时不重取旧run');
+    apply(ev('bindings-next', 'run_started', { plan: ['late'], nodes: [] }));
+    apply(
+      ev('bindings-live', 'node_state', { nodeId: 'late', state: 'done', stats: { ...stats } }),
+    );
+    await flush();
+    assert.equal(refreshes.length, initial + 4, '新run和迟到旧事件均不串入旧查询');
+  } finally {
+    stop();
+    useExecutionStore.getState().reset();
+  }
 });
 
 // 子图内部节点的错误（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」，要自己进去找

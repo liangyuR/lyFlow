@@ -1842,8 +1842,9 @@ void Run::workImpl() {
   const int workers = resolveMaxParallel(options_.maxParallel);
   std::vector<NamedOutput> declaredOutputs;
   for (const auto& node : plan.nodes)
-    for (const auto& port : node.op->outputs)
-      declaredOutputs.push_back({"", node.id, port.name});
+    if (node.op)
+      for (const auto& port : node.op->outputs)
+        declaredOutputs.push_back({"", node.id, port.name});
   ResultStore::instance().setDeclaredOutputs(options_.runId, std::move(declaredOutputs));
   const bool preview = options_.mode == RunMode::Preview;
   sink.runStarted(plan, options_.targets, options_.isolate, options_.force, workers, preview,
