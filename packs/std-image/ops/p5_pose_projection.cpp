@@ -665,9 +665,7 @@ Status lift(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx
       double maxPlaneError = 0;
       if (dimensions) {
         std::vector<cv::Point2d> pixels;
-        if (ms.tensor) {
-          const auto& mi = ms.info->data["items"][i];
-          require(mi["hasMask"] == true, "尺寸拟合需要真实非零mask支持", "masks");
+        if (ms.tensor && ms.info->data["items"][i]["hasMask"].get<bool>()) {
           const auto* data = ms.tensor->data.data() + i * ms.pixels;
           for (int row = 0; row < c.height; ++row) {
             poll(ctx);

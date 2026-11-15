@@ -34,7 +34,7 @@
 
 任意平面可用原生 Plane + planeFrame，或 `geometry.Planes3D.v1={frame,unit:'m',items:[{id,normal:[nx,ny,nz],d}]}`。平面满足 `n·p+d=0`，法向和 d 同时归一化。一个 id=`*` 广播，其他情况与 Pose ID 严格一一对应。Workspace 模式消费既有 workspace.load 输出的中心 Pose3D region，不读取全局帧树；上/下表面中心为 region.center±localZ*sizeZ/2。
 
-dimensions 模式中，若 Pose 声明 hasMask=true，缺少原生 masks/maskInfo 必须失败，不能退回外接框；明确没有 mask 的实例仍可用框边界拟合。center 模式使用声明的已知物理尺寸，不依赖分割支持。三轴夹角通过单位轴的 atan2(cross范数,dot) 求值，避免 acos 在同一姿态的舍入范数附近放大成虚假角差，不放宽调用者的容差。
+dimensions 模式中，若 Pose 声明 hasMask=true，缺少原生 masks/maskInfo 必须失败，不能退回外接框；明确没有 mask 的实例仍可用框边界拟合；即使连接整个批次的 NHW masks/maskInfo，也按每项 hasMask 独立选择真实掩膜或传感器内裁剪框，hasMask=false 对应的原生零平面不是坏掩膜。center 模式使用声明的已知物理尺寸，不依赖分割支持。三轴夹角通过单位轴的 atan2(cross范数,dot) 求值，避免 acos 在同一姿态的舍入范数附近放大成虚假角差，不放宽调用者的容差。
 
 `geometry.extend_2d` 五类输入互斥：poses/point/line/circle/features。集合 `geometry.Features2D.v1={frame,unit:'px'|'m',items}`，每项 id/type/position，line 加 direction、可成对给 start/end，circle 加 radius；可保留标准名称/类别/置信度/attributes。输出 `geometry.Features3D.v1` 内含真正三维 point、单位化 line/有限端点、circle 中心/单位法向/米制半径，不用占位矩阵代表几何。新增 Y 轴时输入 XY 映到 XZ，其右手平面法向为 -Y；新增 X/Z 时分别为 +X/+Z。Pose2D 则输出可消费的标准 Pose3D。每次成功调用始终写出 poses 与 features 两个端口；非适用端口为同帧、带类型的空集合，不使用缺失 Data 或空矩阵。
 

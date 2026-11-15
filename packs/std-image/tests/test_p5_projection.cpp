@@ -645,8 +645,7 @@ TEST_CASE("P5 cancelled hash and compute fail atomically without upstream mutati
   auto copied = Image::allocate(9, 9, 1, PixelDepth::F32);
   std::memcpy(copied.mutablePixels(), wrongDepth.pixels.get(), wrongDepth.byteSize());
   reinterpret_cast<float*>(copied.mutablePixels())[39] = 2;
-  metadata = pr::rebind(metadata, *call.out("cloud").asCloud(), copied,
-                        *call.out("status").asImage(), indices, normal);
+  metadata.data["depthHash"] = pr::hash(copied, &normal);
   status = pr::parse(*call.out("cloud").asCloud(), copied, *call.out("status").asImage(), indices,
                      metadata, grid, normal);
   CHECK_FALSE(status.ok);
@@ -739,4 +738,58 @@ TEST_CASE(
   CHECK_FALSE(roi.run("cloud.roi_extract",
                       {{"usingOffset", Value::boolean(true)}, {"offsetX", Value::number(3)}})
                   .ok);
+}
+
+TEST_CASE("P5 filtered depth rejects float32 world quantization before publishing a derived map") {
+  auto registry = projectionRegistry();
+  for (const float translation : {0.f, 1024.f}) {
+    CAPTURE(translation);
+    PointCloud cloud;
+    cloud.push(0, 0, translation);
+    cloud.push(2, 0, translation + .0001220703125f);
+    cloud.intensity = {3, 7};
+    cloud.normals = {0, 0, 1, 0, 0, 1};
+    cloud.rgb = {1, 2, 3, 4, 5, 6};
+    const auto original = cloud;
+    Transform transform;
+    transform.m[11] = translation;
+    OpCall project(registry);
+    project.inputs = {{"cloud", Data::cloud(std::move(cloud))},
+                      {"gridToCloud", Data::transform(transform)}};
+    REQUIRE(project
+                .run("cloud.orthographic_map", {{"width", Value::integer(3)},
+                                                {"height", Value::integer(1)},
+                                                {"resolution", Value::number(1)},
+                                                {"normalResolution", Value::number(1)},
+                                                {"originX", Value::number(0)},
+                                                {"originY", Value::number(0)}})
+                .ok);
+    checkMap(project);
+    OpCall filter(registry);
+    connectMap(filter, project);
+    REQUIRE(filter
+                .run("image.depth_filter",
+                     {{"mode", Value::text("mean")}, {"kernelSize", Value::integer(1)}})
+                .ok);
+    checkMap(filter);
+    CHECK(filter.out("cloud").asCloud()->xyz == original.xyz);
+    auto result = filter.run("image.depth_filter", {{"mode", Value::text("fill")},
+                                                    {"fillMethod", Value::text("idw")},
+                                                    {"kernelSize", Value::integer(3)}});
+    if (translation == 1024) {
+      CHECK_FALSE(result.ok);
+      CHECK(result.code == "precision_loss");
+      CHECK(filter.outputs.empty());
+    } else {
+      REQUIRE_MESSAGE(result.ok, result.message);
+      checkMap(filter);
+      CHECK(filter.out("depth").asImage()->at(1, 0, 0) == .00006103515625);
+      CHECK(filter.out("cloud").asCloud()->pointCount() == 3);
+    }
+    CHECK(project.inputs.at("cloud").asCloud()->xyz == original.xyz);
+    CHECK(project.inputs.at("cloud").asCloud()->intensity == original.intensity);
+    CHECK(project.inputs.at("cloud").asCloud()->normals == original.normals);
+    CHECK(project.inputs.at("cloud").asCloud()->rgb == original.rgb);
+    checkMap(project);
+  }
 }

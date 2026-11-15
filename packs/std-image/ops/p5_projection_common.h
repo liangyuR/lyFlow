@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 #include "lyflow/calibration.h"
 #include "lyflow/operator.h"
@@ -37,6 +38,9 @@ inline Status failure(const std::string& message, const char* port = "mapping",
 inline bool valid(std::uint8_t value) { return (value & (kObserved | kInterpolated)) != 0; }
 
 struct Cancelled {};
+struct PrecisionLoss : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 inline std::string hash(const void* values, std::size_t bytes, ExecContext* ctx = nullptr) {
   std::uint64_t value = 14695981039346656037ull;
@@ -104,6 +108,10 @@ inline nlohmann::json cameraData(const calibration::Camera& camera) {
           {"unit", "m"}};
 }
 
+inline Status parseMapping(const PointCloud& cloud, const Image& depth, const Image& status,
+                           const Tensor& indexMap, const Record& mapping, Grid& grid,
+                           ExecContext& ctx, bool verifyHashes);
+
 inline Record rebind(const Record& previous, const PointCloud& cloud, const Image& depth,
                      const Image& status, const Tensor& indexMap, ExecContext& ctx,
                      const Tensor* sourceIndexMap = nullptr) {
@@ -122,6 +130,12 @@ inline Record rebind(const Record& previous, const PointCloud& cloud, const Imag
   result.data["indexHash"] = hash(indexMap, &ctx);
   result.data["depthHash"] = hash(depth, &ctx);
   result.data["statusHash"] = hash(status, &ctx);
+  Grid checked;
+  const auto validity = parseMapping(cloud, depth, status, indexMap, result, checked, ctx, false);
+  if (validity.code == "cancelled")
+    throw Cancelled{};
+  if (!validity.ok)
+    throw PrecisionLoss("发布的float32点云与深度映射不一致：" + validity.message);
   return result;
 }
 
@@ -308,8 +322,9 @@ inline bool backProjectBoundary(const Grid& grid, double x, double y, double z, 
   return backProjectFull(grid, fullBoundaryX(grid, x), fullBoundaryY(grid, y), z, output, budget);
 }
 
-inline Status parse(const PointCloud& cloud, const Image& depth, const Image& status,
-                    const Tensor& indexMap, const Record& mapping, Grid& grid, ExecContext& ctx) {
+inline Status parseMapping(const PointCloud& cloud, const Image& depth, const Image& status,
+                           const Tensor& indexMap, const Record& mapping, Grid& grid,
+                           ExecContext& ctx, bool verifyHashes) {
   try {
     std::string why;
     const auto& d = mapping.data;
@@ -377,9 +392,9 @@ inline Status parse(const PointCloud& cloud, const Image& depth, const Image& st
       return failure("深度、状态图、原生索引图必须与映射尺寸/scale一致");
     if (depth.pixelCount() > kMaxPixels)
       return failure("映射超过8Mi像素预算", "mapping", "resource_limit");
-    if (d.value("indexHash", "") != hash(indexMap, &ctx) ||
-        d.value("depthHash", "") != hash(depth, &ctx) ||
-        d.value("statusHash", "") != hash(status, &ctx))
+    if (verifyHashes && (d.value("indexHash", "") != hash(indexMap, &ctx) ||
+                         d.value("depthHash", "") != hash(depth, &ctx) ||
+                         d.value("statusHash", "") != hash(status, &ctx)))
       return failure("深度、状态或索引载荷不属于该映射");
     const auto cloudToGrid = inverse(grid.gridToCloud);
     for (std::size_t i = 0; i < indexMap.data.size(); ++i) {
@@ -420,6 +435,11 @@ inline Status parse(const PointCloud& cloud, const Image& depth, const Image& st
   } catch (const std::exception& error) {
     return failure(std::string("深度映射字段类型无效：") + error.what());
   }
+}
+
+inline Status parse(const PointCloud& cloud, const Image& depth, const Image& status,
+                    const Tensor& indexMap, const Record& mapping, Grid& grid, ExecContext& ctx) {
+  return parseMapping(cloud, depth, status, indexMap, mapping, grid, ctx, true);
 }
 
 } // namespace lyflow::ops::projection5

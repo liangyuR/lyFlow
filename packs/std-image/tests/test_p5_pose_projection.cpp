@@ -378,3 +378,83 @@ TEST_CASE("P5 plane dimensions never substitutes bbox for declared native mask")
   REQUIRE(c.run("pose.project_to_plane", {{"mode", Value::text("dimensions")}}).ok);
   CHECK(projectionData(c, "poses")["items"][0]["attributes"]["shape"] == "box");
 }
+
+TEST_CASE("P5 plane dimensions select native mask or clipped box independently per instance") {
+  using namespace lyflow;
+  bool mixed = false;
+  SUBCASE("all bbox annotations retain valid zero mask planes") { mixed = false; }
+  SUBCASE("mixed annotations retain actual mask footprints and bbox footprints") { mixed = true; }
+  auto bbox = poses::make2D("bbox", "image", "px", {0, 11.5}, 0, {8, 6});
+  bbox.data["attributes"] = {{"hasMask", false}, {"maskIndex", mixed ? 1 : 0}};
+  auto masked = poses::make2D("masked", "image", "px", {23.5, 11.5}, 0, {8, 6});
+  masked.data["attributes"] = {{"hasMask", true}, {"maskIndex", 0}};
+  Json items = mixed ? Json::array({masked.data, bbox.data}) : Json::array({bbox.data});
+  Tensor tensor;
+  tensor.shape = {mixed ? 2 : 1, 24, 32};
+  tensor.data.assign((mixed ? 2 : 1) * 24 * 32, 0);
+  if (mixed)
+    for (int row = 10; row <= 13; ++row)
+      for (int col = 22; col <= 25; ++col)
+        tensor.data[row * 32 + col] = 1;
+  Json bindings = Json::array();
+  if (mixed)
+    bindings.push_back({{"id", "masked"}, {"index", 0}, {"hasMask", true}, {"source", "native"}});
+  bindings.push_back(
+      {{"id", "bbox"}, {"index", mixed ? 1 : 0}, {"hasMask", false}, {"source", "none"}});
+  Record info{"vision.Masks2D.v1",
+              {{"frame", "image"},
+               {"unit", "px"},
+               {"width", 32},
+               {"height", 24},
+               {"layout", "NHW"},
+               {"items", bindings}}};
+  Plane plane;
+  plane.d = -2;
+  test::OpCall c;
+  c.inputs = {{"poses", Data::record(poses::make2DList(items))},
+              {"calib", projectionCamera()},
+              {"plane", Data::plane(plane)},
+              {"masks", Data::tensor(tensor)},
+              {"maskInfo", Data::record(info)}};
+  REQUIRE_MESSAGE(c.run("pose.project_to_plane", {{"mode", Value::text("dimensions")}}).ok,
+                  c.status.message);
+  const auto& result = projectionData(c, "poses")["items"];
+  REQUIRE(result.size() == items.size());
+  for (const auto& pose : result) {
+    const bool isMask = pose["id"] == "masked";
+    const double lowX = isMask ? .3 : -.8, highX = isMask ? .5 : -.575, lowY = isMask ? -.1 : -.15,
+                 highY = isMask ? .1 : .15;
+    CHECK(pose["position"][0].get<double>() == doctest::Approx((lowX + highX) / 2).epsilon(1e-6));
+    CHECK(pose["position"][1].get<double>() == doctest::Approx(0).epsilon(1e-6));
+    CHECK(pose["position"][2].get<double>() == doctest::Approx(2).epsilon(1e-6));
+    auto size = pose["size"].get<std::array<double, 3>>();
+    auto wanted = std::array<double, 2>{highX - lowX, highY - lowY};
+    std::sort(size.begin(), size.begin() + 2);
+    std::sort(wanted.begin(), wanted.end());
+    CHECK(size[0] == doctest::Approx(wanted[0]).epsilon(1e-6));
+    CHECK(size[1] == doctest::Approx(wanted[1]).epsilon(1e-6));
+    const auto r = poses::rotationMatrix(pose["rotation"].get<poses::Quaternion>());
+    const auto actualSize = pose["size"].get<std::array<double, 3>>();
+    std::array<double, 2> minimum{1e10, 1e10}, maximum{-1e10, -1e10};
+    for (int sx : {-1, 1})
+      for (int sy : {-1, 1})
+        for (int axis = 0; axis < 2; ++axis) {
+          const double corner = pose["position"][axis].get<double>() +
+                                sx * r[axis * 3] * actualSize[0] / 2 +
+                                sy * r[axis * 3 + 1] * actualSize[1] / 2;
+          minimum[axis] = std::min(minimum[axis], corner);
+          maximum[axis] = std::max(maximum[axis], corner);
+        }
+    CHECK(minimum[0] == doctest::Approx(lowX).epsilon(1e-6));
+    CHECK(maximum[0] == doctest::Approx(highX).epsilon(1e-6));
+    CHECK(minimum[1] == doctest::Approx(lowY).epsilon(1e-6));
+    CHECK(maximum[1] == doctest::Approx(highY).epsilon(1e-6));
+  }
+  if (mixed) {
+    CHECK(projectionData(c, "quality")["items"][0]["supportCount"] == 16);
+    std::fill(tensor.data.begin(), tensor.data.begin() + 24 * 32, 0);
+    c.inputs["masks"] = Data::tensor(tensor);
+    CHECK_FALSE(c.run("pose.project_to_plane", {{"mode", Value::text("dimensions")}}).ok);
+    CHECK(c.outputs.empty());
+  }
+}

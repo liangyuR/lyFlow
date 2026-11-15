@@ -54,10 +54,14 @@ pointState是原父云长度N的向量，不是HW图像，quality.pointStateScop
 
 反投影的零畸变路径精确线性计算；非零畸变使用OpenCV相同K/D正投影及Jacobian，以最多32轮Newton、每轮12次阻尼线搜索求逆。只有真实回投影像素残差不超过1e-7才返回射线；不能收敛的合法有限参数也返回明确bad_input，不能把错误XYZ标为observed。每批像素共享RayBudget，最多64Mi次正投影评估，支持调用者累计预算及取消。这样覆盖径向、切向、薄棱镜和倾斜14D模型，避免默认固定点迭代在强畸变下错误成功。非单射模型不承诺全局唯一逆。
 
-所有大循环周期检查取消，载荷摘要每64KiB检查；摘要计算、逆投影及节点guard均传播cancelled。OpenCV单次小批投影调用内部不宣称可抢占。
+所有make/rebind映射发布前，使用消费者同一校验路径核对实际交付的float32 XYZ、状态、索引、来源及帧，不仅核算舍入前的double坐标。刚刚生成的载荷摘要不重复计算，消费者入口仍验证完整摘要。若大平移下的float32量化导致栅格Z与深度差超过既有 `1e-5 × max(1, |实际栅格Z|)` 米容差，则原子返回precision_loss；不能把深度悄悄改成量化值、放宽消费者公差或发布下游拒绝的关联。投影、滤波、ROI与填洞共用该发布保护；大平移下保持真实XYZ的合法no-op仍可成功。
+
+所有大循环周期检查取消，载荷摘要每64KiB检查；摘要计算、逆投影及节点guard均传播cancelled。发布保护的取消继续返回cancelled，不转换为精度错误。OpenCV单次小批投影调用内部不宣称可抢占。
 
 ## 验证状态
 
-独立MSVC14.51/OpenCV5.1 probe使用实际生产compute及core数据实现，13组34034断言全部执行通过、0skip，日志为build/p5-projection-probe/build.log与tests.log。覆盖五滤波模式、真实root生成PCD全部3066父点的3063可见关联及全通道、负/零高度、法线角、RGBA三位深输入只读、真实XYZ无变化保留、4/5/8/12/14D畸变、跨三维帧、scale2与odd末块、原生P4绑定坏载荷、缺mask空结果、裁剪偏移、强k1=1逆投影真值、不可逆拒绝、取消及内存/运算预算。
+独立MSVC14.51/OpenCV5.1 probe使用实际生产compute及core数据实现，最终14组34080断言全部执行通过、0skip，日志为build/p5-projection-probe/precision-green-build.log与precision-green.log。覆盖五滤波模式、真实root生成PCD全部3066父点的3063可见关联及全通道、负/零高度、法线角、RGBA三位深输入只读、真实XYZ无变化保留、4/5/8/12/14D畸变、跨三维帧、scale2与odd末块、原生P4绑定坏载荷、缺mask空结果、裁剪偏移、强k1=1逆投影真值、不可逆拒绝、取消及内存/运算预算。
+
+精度回归先以正交3×1、gridToCloud的Z平移1024m复现：左右实测Z为1024和1024.0001220703125m，中间IDW补值应为0.00006103515625m，但实际float32世界Z量化到1024m，旧实现仍成功发布；precision-red.log记录3个实际失败断言。修复后同一情形precision_loss且无输出，原云/通道不变；零平移补值及大平移no-op均继续成功并通过消费者校验。
 
 这是局部生产compute测试，不代表完整调度器、CLI/CABI/SDK的Full/Preview已经通过；这些由阶段总集成独立运行。合成/自有固定样本不构成传感器、现场精度或吞吐验收。

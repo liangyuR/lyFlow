@@ -1185,6 +1185,8 @@ template <class Function> Status guarded(Function&& fn) {
     return failure.status;
   } catch (const pr::Cancelled&) {
     return pr::failure("深度处理已取消", "", "cancelled");
+  } catch (const pr::PrecisionLoss& error) {
+    return pr::failure(error.what(), "cloud", "precision_loss");
   } catch (const std::bad_alloc&) {
     return pr::failure("深度处理内存分配失败", "", "resource_limit");
   } catch (const std::exception& error) {

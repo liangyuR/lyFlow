@@ -86,4 +86,6 @@ python tests/release/p5_contract.py --cli build/rust/release/lyflow.exe
 
 点云的进程内 ID 不跨运行保证一致。脚本仅在保存副本追加 cloud.statistics 观察节点，逐运行验证每个 sourceCloudId/parentCloudId/resultCloudId/sliceCloudId 实际绑定的云角色后再规范化这些字段；不删除工件 ID、掩膜 ID、帧名或几何摘要，也不把绑定错误隐藏成“ID本来会变化”。CLI JSON 的云/掩膜/四边形仍为元信息；完整原生数组、索引身份、C ABI 和动态 C++ SDK 的保存重载一致性由正式 core 集成测试另验。Rust CLI 经过 Rust 客户端执行工作流，不能据此冒充 Rust SDK 全数组专项验收。
 
+独立安装的 C++17 SDK 门禁使用 `tests/release/p5_sdk_consumer`，必须显式传入 `LYFLOW_CONSUMER_VERSION=X.Y.Z` 并以 EXACT 查找安装包，编译时不读取源码构建路径或 vcpkg。`p5_sdk_contract.py --sdk <安装目录> --consumer <编译后的程序> --bait-dir <构建bin> --output-dir <日志目录>` 实际运行八图、核物理真值和资产不变，并在 Windows 暂移SDK内OpenCV依赖时验证有效CWD/PATH诱饵仍被拒绝。该门禁纳入原生Windows CI；不能把旧补丁客户端兼容运行冒充当前头文件重新编译。
+
 详细算法、预算和坐标契约见 [深度投影](p5-analysis-projection.md)、[点云检查](p5-analysis-cloud-inspection.md)、[姿态几何](p5-analysis-pose-geometry.md)及 [ADR-0031](adr/0031-depth-grid-association-and-derived-observations.md)。

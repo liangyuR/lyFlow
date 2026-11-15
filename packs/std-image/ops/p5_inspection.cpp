@@ -489,6 +489,8 @@ Status fillHoles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext
     return Status::Ok();
   } catch (const projection5::Cancelled&) {
     return Status::Error(Phase::Execute, "cancelled", "任务已取消");
+  } catch (const projection5::PrecisionLoss& error) {
+    return Status::Error(Phase::Execute, "precision_loss", error.what(), {}, "cloud");
   } catch (const Failure& e) {
     return e.status;
   } catch (const std::bad_alloc&) {

@@ -565,7 +565,8 @@ TEST_CASE(
   f.assign(call);
   auto map = f.map;
   map.data[0] = .5f;
-  auto malformed = ops::projection5::make(f.grid, f.cloud, f.depth, f.status, map, f.ctx);
+  auto malformed = *call.inputs.at("mapping").asRecord();
+  malformed.data["indexHash"] = ops::projection5::hash(map, &f.ctx);
   call.inputs["indexMap"] = Data::tensor(map);
   call.inputs["mapping"] = Data::record(malformed);
   CHECK_FALSE(call.run("depth.defects").ok);
