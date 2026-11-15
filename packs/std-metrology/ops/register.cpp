@@ -7,6 +7,8 @@
 #include "lyflow/registry.h"
 
 namespace lyflow::packs::std_metrology {
+void registerProfileMetrology(Registry&);
+void registerProfileGapFlush(Registry&);
 namespace {
 
 Status calibratedDistance(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&) {
@@ -43,6 +45,8 @@ void registerPackOps(Registry& registry) {
   op.params = {std::move(imageFrame)};
   op.compute = &calibratedDistance;
   registry.addOperator(std::move(op));
+  registerProfileGapFlush(registry);
+  registerProfileMetrology(registry);
 }
 
 } // namespace lyflow::packs::std_metrology

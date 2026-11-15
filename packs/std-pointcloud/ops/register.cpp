@@ -39,7 +39,6 @@ void registerPackOps(Registry& r) {
   ops::registerCloudAnalysis(r);
   ops::registerRegistration3D(r);
   ops::registerIoLoadCloud(r);
-  ops::registerProfileAnalysis(r);
   ops::registerAdvancedFit3D(r);
   ops::registerP2HeightRules(r);
   ops::registerP2GlobalMatching(r);

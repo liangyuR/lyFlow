@@ -8,6 +8,8 @@
 #include <lyflow/kernel/geometry.h>
 #include <lyflow/kernel/metrology.h>
 #include <lyflow/kernel/rigid.h>
+#include <lyflow/kernel/profile.h>
+#include <lyflow/kernel/profile_analysis.h>
 
 namespace {
 void require(bool condition, const std::string& message) {
@@ -140,6 +142,35 @@ int main() {
     require(near(quality.weightedRmse(), std::sqrt(34.0 / 3.0) * 0.001, 1e-12) &&
                 near(quality.maxError(), 0.004, 1e-12),
             "Weighted residual statistics must use observation weights");
+    k::profile::PlanarSamples planar;
+    std::vector<float> xyz, channels;
+    std::vector<std::uint8_t> colors;
+    for (int i = 0; i < 101; ++i) {
+      const float x = static_cast<float>(i * 0.1);
+      planar.x.push_back(x);
+      planar.z.push_back(2);
+      xyz.insert(xyz.end(), {static_cast<float>(i * 0.0001), 0.002f, 0});
+    }
+    const auto pieces = k::profile::splitPieces(planar, 0.2, 1, 12);
+    require(pieces.size() == 1, "Ordered profile must form one piece");
+    const auto view = k::profile::pieceView(planar, pieces.front());
+    k::profile::Line millimeterLine;
+    require(k::profile::fitLine(view, 0, view.size() - 1, millimeterLine) &&
+                near(millimeterLine.pz, 2),
+            "Profile kernel must retain explicitly declared mm working coordinates");
+    const k::profile_analysis::CloudView sampleView(xyz, channels, channels, colors);
+    require(k::profile_analysis::validateCloud(sampleView, 12, why), why);
+    k::profile_analysis::LineFit metricLine;
+    require(k::profile_analysis::fitLine(sampleView, 0, 1, 0, 0.01, metricLine) &&
+                near(metricLine.center[1], 0.002),
+            "TLS analysis must operate on the supplied metric coordinates");
+    k::metrology::SignedPointLine signedDistance;
+    require(k::metrology::signedPointLine({0.003, 0.004}, {0, 0.002}, {1, 0}, {0, 1},
+                                          k::metrology::DirectionPolicy::Normalize, signedDistance,
+                                          why),
+            why);
+    require(near(signedDistance.distance, 0.002) && near(signedDistance.foot[1], 0.002),
+            "Signed distance and foot must use the same declared units");
     std::cout
         << "Static kernels OK: " << sourceFrame << "->" << targetFrame
         << " in m; 3 constraints validated (no pose solving); camera-A->table 0.01 m; weighted RMSE "

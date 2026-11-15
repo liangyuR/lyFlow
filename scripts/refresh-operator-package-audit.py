@@ -47,6 +47,96 @@ M2_MOVES = {
     'image.calibrated_distance': dict(fromPack='std-image', toPack='std-metrology', source='packs/std-metrology/ops/register.cpp'),
 }
 
+M2_MERGED_REVISION = '36c969149e119614b7d221c8006d1a311d6d2995'
+M3_RETIREMENTS = {
+    'dts.profile_clean': 'profile.clean',
+    'dts.split_faces': 'profile.split_faces',
+}
+M3_DEFINITIONS = {
+    'profile.input': ('std-profile', 'packs/std-profile/ops/input.cpp',
+        '显式描述的原生Profile输入；CSV v1严格解析指定平面两轴与可选强度，NaN保槽，Inf/非法行拒绝；宿主可注入完整LYPR。',
+        'CSV各平面/m和mm/NaN/通道/预算/取消/中文路径；完整LYPR跨CLI与独立宿主一致，坏输入不运行不落部分输出。'),
+    'profile.clean': ('std-profile', 'packs/std-profile/ops/processing.cpp',
+        '原始槽邻域中值后按强度与有限性降有效掩码；默认preserve_slots，显式compact保留原sourceCount/sourceIndices和可选通道，不排序。',
+        '无效中心不补值；缺样/有限无效/端点/even窗口/附加通道/输入只读/取消；旧DTS压缩有效数值等价。'),
+    'profile.split_faces': ('std-profile', 'packs/std-profile/ops/processing.cpp',
+        'acquisition轮廓转mm工作视图，压缩有效样本后按相邻采样间断分片，片内稳定x排序；profile.Faces.v1绑定完整源契约/hash及槽/源索引。',
+        'mm/m及各分析平面、缺槽/重复x/重叠面/RMS与角度严格边界；不修改源数组，faces与另一轮廓混配拒绝。'),
+    'profile.fit_line': ('std-profile', 'packs/std-profile/ops/native_analysis.cpp',
+        '按原生Profile声明平面和m/mm显式换算SI，TLS拟合；默认拒绝无效槽，valid_only显式过滤；输出米制Line2D及源绑定统计/几何上下文。',
+        'TLS浮点收窄后RMS、退化/范围/残差/NaN策略、通道有限性；统计与线hash对应、输入只读。'),
+    'profile.transform_pair': ('std-profile', 'packs/std-profile/ops/native_analysis.cpp',
+        '显式共同帧、输出帧和平面及三段刚体变换；输出SI Profile并保槽/掩码/通道/源索引，valid_only无效槽仅换单位而不冒充观测。',
+        '变换组合顺序、proper rigid、法线旋转、源身份/手性、无效槽策略及失败原子性。'),
+    'metrology.profile_gap_flush': ('std-metrology', 'packs/std-metrology/ops/profile_metrology.cpp',
+        '消费米制左右拟合线与各自profile.LineFit.v1，验证线hash/帧/平面/手性；间隙取实采样边缘差，面差为referenceX处右减左，不当作法向距离。',
+        '左右/符号/采样范围/RMS/外推/竖直退化及上下文混配；Measurement单位m，质量不替生产判据。'),
+    'metrology.signed_point_line': ('std-metrology', 'packs/std-metrology/ops/profile_metrology.cpp',
+        '米制点线及各自profile.Geometry.v1，验证帧/平面/手性/实际几何hash；指定正法向的有符号距离与垂足，公共核支持显式方向规范。',
+        '符号/反向/垂直/非法方向/不同单位帧与非有限拒绝；DTS复用DeclaredUnit保持旧float方向数值路径。'),
+}
+M3_MOVES = {
+    'profile.analyze': dict(fromPack='std-pointcloud', toPack='std-profile', source='packs/std-profile/ops/analysis.cpp'),
+    'profile.project_pair': dict(fromPack='std-pointcloud', toPack='std-profile', source='packs/std-profile/ops/analysis.cpp'),
+    'profile.gap_flush': dict(fromPack='std-pointcloud', toPack='std-metrology', source='packs/std-metrology/ops/profile_gap_flush.cpp'),
+}
+for _id, _file in {
+    'dts.profile_in': 'profile_in', 'dts.seal_dome': 'seal_dome', 'dts.pick_metal': 'pick_metal',
+    'dts.seal_root': 'seal_root', 'dts.flush': 'flush', 'dts.profile_bundle': 'bundle',
+    'dts.geometry_to_metric': 'geometry_adapter',
+}.items():
+    M3_MOVES[_id] = dict(fromPack='dts', toPack='solution-dts', source=f'solutions/dts/ops/{_file}.cpp')
+
+
+def prepare_m3(data):
+    result = prepare(data, 'M2')
+    m2 = next(item for item in result['stageLedger'] if item['stage'] == 'M2')
+    if not m2.get('manifestEvidence'):
+        raise ValueError('M3需要先验证M2全包manifest')
+    m2.update(status='complete', mergeEvidence=dict(pr=63,
+        url='https://github.com/liangyuR/lyFlow/pull/63', revision=M2_MERGED_REVISION))
+    if not any(item['stage'] == 'M3' for item in result['stageLedger']):
+        result['stageLedger'].append(dict(stage='M3', status='pending_manifest',
+            expectedNativeCount=261, expectedPythonExampleCount=8, targetProductVersion='1.4.2',
+            introducedNativeIds=sorted(M3_DEFINITIONS), introducedPythonIds=[],
+            retiredNativeIds=sorted(M3_RETIREMENTS),
+            scopeNativeIds=sorted(row['id'] for row in result['operators'] if row['wave'] == 'M3'),
+            note='公共轮廓/度量、DTS场景v2及显式图迁移；待整体验证/SDK交付/CI及审查，不以manifest代替运行验收。'))
+    return result
+
+
+def new_m3_rows():
+    return [dict(id=identifier, currentPack=pack, targetPack=pack, source=source,
+        action='retain', wave='M3', operatorKind='native',
+        dependencies=['公开Profile/几何/Record契约与C++17；分析内核仅编译期Eigen5.0.1，无PCL/OpenCV/ORT'],
+        currentContract=contract, targetContract=contract, acceptance=acceptance,
+        prerequisites=['M1', 'M2'], migrationPrerequisites=['M1', 'M2'], relatedOperators=[],
+        notes='M3明确新增公共能力；保留既有数值方法与源契约，非旧ID别名或第二份场景算法。')
+        for identifier, (pack, source, contract, acceptance) in M3_DEFINITIONS.items()]
+
+
+def retire_m3_rows(result):
+    retired = result.setdefault('retiredOperators', [])
+    for row in list(result['operators']):
+        replacement = M3_RETIREMENTS.get(row['id'])
+        if not replacement:
+            continue
+        if any(item['id'] == row['id'] for item in retired):
+            raise ValueError('退役ID重复登记')
+        retired.append(dict(**copy.deepcopy(row), retiredStage='M3', replacedBy=[replacement],
+            sourceFingerprint=result['sourceFingerprints'][row['source'].rsplit(':', 1)[0]],
+            sourceRevision=M2_MERGED_REVISION,
+            migration='显式dtsProfile.v1图升级插入Profile适配并保留节点ID/参数/UI；不注册旧计算别名。'))
+        result['operators'].remove(row)
+    existing = {row['id'] for row in result['operators']}
+    additions = [row for row in new_m3_rows() if row['id'] not in existing]
+    ordered = sorted(result['operators'], key=lambda row: row['migrationOrder'])
+    split = next((i for i, row in enumerate(ordered) if row['wave'] >= 'M3'), len(ordered))
+    ordered[split:split] = additions
+    for index, row in enumerate(ordered + result['pythonExamples'], 1):
+        row['migrationOrder'] = index
+    result['operators'] = ordered
+
 
 def assess_m2(row, status):
     if row['id'] == 'image.calibrated_distance':
@@ -70,19 +160,19 @@ def assess_m2(row, status):
 
 def relocate_operator(row, op, stage):
     actual_pack = op.get('pack', 'core').split('@')[0]
-    move = M2_MOVES.get(row['id']) if stage == 'M2' else None
+    move = M2_MOVES.get(row['id']) if stage == 'M2' else M3_MOVES.get(row['id']) if stage == 'M3' else None
     if move:
-        if actual_pack != move['toPack'] or row['targetPack'] != move['toPack']:
+        if actual_pack != move['toPack'] or (stage == 'M2' and row['targetPack'] != move['toPack']):
             raise ValueError(f"{row['id']}: M2真实manifest必须包含已审迁包结果 {move['toPack']}")
-        if op.get('version') != row['currentVersion'] or op.get('params', []) != row['currentParams'] or {
+        if (stage == 'M2' or row['id'].startswith('profile.')) and (op.get('version') != row['currentVersion'] or op.get('params', []) != row['currentParams'] or {
             key: op.get(key, []) for key in ('inputs', 'outputs')
-        } != row['currentPorts']:
+        } != row['currentPorts']):
             raise ValueError(f"{row['id']}: M2迁包必须保持原版本、端口和参数，不得隐式改契约")
     if actual_pack != row['currentPack']:
         if not move or row['currentPack'] != move['fromPack']:
             raise ValueError(f"{row['id']}: 包变更必须先人工审计目标/依赖/契约")
-        row.setdefault('packageHistory', []).append(dict(stage='M2', fromPack=row['currentPack'],
-            fromPackVersion=row.get('currentPackVersion'), source=row['source'], currentVersion=row['currentVersion'], sourceRevision=M1_MERGED_REVISION,
+        row.setdefault('packageHistory', []).append(dict(stage=stage, fromPack=row['currentPack'],
+            fromPackVersion=row.get('currentPackVersion'), source=row['source'], currentVersion=row['currentVersion'], sourceRevision=M1_MERGED_REVISION if stage == 'M2' else M2_MERGED_REVISION,
             toPack=actual_pack))
         row['currentPack'] = actual_pack
         row['source'] = move['source']
@@ -104,6 +194,8 @@ def manifest_generator(manifest):
 
 
 def prepare(data, stage='M2'):
+    if stage == 'M3':
+        return prepare_m3(data)
     result = copy.deepcopy(data)
     if 'baselineReference' not in result:
         revision = subprocess.check_output(['git', 'rev-parse', BASELINE_REVISION], cwd=ROOT, text=True).strip()
@@ -172,19 +264,29 @@ def pending_sources(data):
 
 def refreshed(data, manifest_path, reviewed_paths, review_note, product_version, stage='M2'):
     result = prepare(data, stage)
-    for field, baseline_ids, added in (
-        ('operators', set(result['baselineReference']['registeredNativeIds']) | (set(ADDITIONS) if stage == 'M2' else set()), set(ADDITIONS)),
-        ('pythonExamples', set(result['baselineReference']['pythonExampleIds']) | ({EXAMPLE_ID} if stage == 'M2' else set()), {EXAMPLE_ID}),
-    ):
+    if stage == 'M3':
+        retire_m3_rows(result)
+    native_expected = set(result['baselineReference']['registeredNativeIds']) | set(ADDITIONS)
+    if stage == 'M3':
+        native_expected = (native_expected - set(M3_RETIREMENTS)) | set(M3_DEFINITIONS)
+    for field, required in [('operators', native_expected),
+                            ('pythonExamples', set(result['baselineReference']['pythonExampleIds']) | {EXAMPLE_ID})]:
         identifiers = [row['id'] for row in result[field]]
-        if len(identifiers) != len(set(identifiers)) or not set(baseline_ids) <= set(identifiers) or not set(identifiers) <= set(baseline_ids) | added:
-            raise ValueError(f'{field}: 现有清单丢失原基线ID、重复或包含未经定义的ID，拒绝刷新')
+        allowed = required if stage in {'M2', 'M3'} else required | set(ADDITIONS)
+        if len(identifiers) != len(set(identifiers)) or not set(identifiers) <= allowed:
+            raise ValueError(f'{field}: 重复或未经定义的ID，拒绝刷新')
+        original = set(result['baselineReference']['registeredNativeIds'] if field == 'operators' else
+                       result['baselineReference']['pythonExampleIds'])
+        if stage == 'M1' and not original <= set(identifiers):
+            raise ValueError(f'{field}: 原基线ID丢失，拒绝刷新')
+        if stage in {'M2', 'M3'} and set(identifiers) != required:
+            raise ValueError(f'{field}: 现有清单丢失已审ID，拒绝刷新')
     manifest = load(manifest_path)
     operators = manifest if isinstance(manifest, list) else manifest['operators']
     exported = {op['id']: op for op in operators}
-    expected = set(result['baselineReference']['registeredNativeIds']) | set(ADDITIONS)
+    expected = native_expected
     if len(exported) != len(operators) or set(exported) != expected:
-        raise ValueError('需要真实全包manifest且ID全集等于原251项+已审5项；不得用轻量构建或占位描述刷新')
+        raise ValueError('需要真实全包manifest且ID全集精确匹配已审新增/迁移/退役清单；不得用轻量构建或占位描述刷新')
     generator = manifest_generator(manifest)
     if generator != 'lyflow-core/' + product_version:
         raise ValueError('请求的产品版本与真实manifest.generatedBy不一致')
@@ -264,6 +366,25 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version,
                  reviewedSourceChanges=stage_entry.get('reviewedSourceChanges', []) + source_changes,
                  manifestEvidence=dict(sha256=artifact_hash(manifest_path), operatorCount=len(exported),
                                        path=manifest_path.resolve().relative_to(ROOT).as_posix()))
+    if stage == 'M3':
+        for row in ordered:
+            if row['id'] in M3_MOVES or row['id'] in M3_DEFINITIONS:
+                assessment = dict(stage='M3', status='manifest_verified',
+                    scope='原生Profile公共链、DTS场景v2与显式旧图迁移；旧源输入壳保留至M7以支持既有宿主注入。',
+                    publicInterfaces=['kernels/include/lyflow/kernel/profile.h',
+                                      'kernels/include/lyflow/kernel/profile_analysis.h',
+                                      'kernels/include/lyflow/kernel/metrology.h',
+                                      'packs/std-profile/include/lyflow_profile/context.h'],
+                    dependencyBoundary='仅标准库和编译期Eigen；无PCL/OpenCV/ORT；场景DTS依赖公开轮廓/度量核及原生Profile契约。',
+                    acceptance='真实全包manifest描述核验；完整数值、SDK、CLI与图升级回归另由运行证据证明。')
+                rows = row.setdefault('stageAssessments', [])
+                rows[:] = [item for item in rows if item.get('stage') != 'M3'] + [assessment]
+                if row['id'].startswith('dts.') and row['id'] != 'dts.profile_in':
+                    updates = row.setdefault('contractUpdates', [])
+                    updates[:] = [item for item in updates if item.get('stage') != 'M3'] + [dict(
+                        stage='M3', version=row['currentVersion'],
+                        contract='场景v2使用显式Profile的XZ/acquisition/frame/hand/source上下文；工作数值mm但裸几何真实m；Record与实际几何hash绑定。旧v1不自动猜单位，显式dtsProfile.v1整图升级保留资产。',
+                        acceptance='既有默认/相邻基准和失败行为不变；签名、源索引、单位及桥v1/v2避免重复缩放；独立宿主数值一致。')]
     if stage == 'M2':
         for row in ordered:
             if row['wave'] == 'M2':
@@ -307,6 +428,12 @@ def render_details(data):
                 lines += [f"- {move['stage']}迁包来源：`{move['fromPack']}` / `{move['source']}` @ `{move['sourceRevision']}`；原目标包和依赖规划保留。"]
             lines += ['']
         documents['python-examples' if pack == 'python-examples' else pack] = '\n'.join(lines)
+    historical_packs = {item['currentPack'] for item in data.get('retiredOperators', [])}
+    historical_packs.update(item['fromPack'] for row in rows for item in row.get('packageHistory', []))
+    for pack in historical_packs - set(documents):
+        documents[pack] = ('# ' + pack + ' 历史归属\n\n本目录的活动计算已按显式迁移分配到新包。'
+            '参见[当前清单](../operator-package-audit.md)中的逐项入口与退役记录；'
+            '原契约、来源修订与迁移去向保留在[机器清单](../operator-package-audit.json)。\n')
     return documents
 
 
@@ -347,6 +474,14 @@ def render_overview(data):
         '```', '',
         '工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。M2仅允许明确定义的3项迁包，保持版本/端口/参数，并保留原包和源码历史。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将当前阶段设为validated_manifest，完成需另行验收后登记，先前阶段证据保持。', '',
         'Python示例由源码装饰器AST发现，只有用户导入后注册；用户lib.*/py.*、外部包和测试节点不属于固定原生全集。原6导入器、7片段、6Bundle等附属资产仍按机器清单登记。', '']
+    if data.get('retiredOperators'):
+        lines += ['', '## 已退役计算ID', '', '| 原ID | 显式替代 | 历史源码 |', '| --- | --- | --- |']
+        for row in data['retiredOperators']:
+            original = row['source'].rsplit(':', 1)[0]
+            url = f"https://github.com/liangyuR/lyFlow/blob/{row['sourceRevision']}/{original}"
+            replacements = ', '.join('`' + value + '`' for value in row['replacedBy'])
+            lines.append(f"| `{row['id']}` | {replacements}；通过显式图升级 | [原契约及实现]({url}) |")
+        lines += ['', '完整原行、端口/参数/约束及源码修订保留在JSON的retiredOperators；退役ID不计入当前注册全集，也不保留算法别名。', '']
     return '\n'.join(lines)
 
 
@@ -358,7 +493,7 @@ def main():
     parser.add_argument('--reviewed-path', action='append', default=[])
     parser.add_argument('--reviewed-change', default='')
     parser.add_argument('--product-version')
-    parser.add_argument('--stage', choices=['M1', 'M2'], default='M2')
+    parser.add_argument('--stage', choices=['M1', 'M2', 'M3'], default='M2')
     args = parser.parse_args()
     if args.list_pending_sources:
         print(json.dumps(pending_sources(load(AUDIT)), ensure_ascii=False, indent=2))
@@ -377,9 +512,9 @@ def main():
         problems = CHECKER.validate(data, [args.manifest], documents)
         if problems:
             raise ValueError('候选清单校验失败，未写回：\n' + '\n'.join(problems))
-    AUDIT.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    AUDIT.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
     for path, content in documents.items():
-        path.write_text(content, encoding='utf-8')
+        path.write_text(content, encoding='utf-8', newline='\n')
     print(f"Audit {'prepared; manifest pending' if args.prepare else 'refreshed from real manifest'}: {data['nativeCount']} native, {data['pythonExampleCount']} Python")
 
 

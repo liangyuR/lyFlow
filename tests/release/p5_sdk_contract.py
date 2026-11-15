@@ -24,6 +24,25 @@ def run_consumer(consumer, runtime, graph, output, environment, label, timeout):
     return result
 
 
+def profile_contract(consumer, runtime, output, environment):
+    require(consumer.is_file(), "Installed Profile SDK consumer must be compiled")
+    result = subprocess.run([str(consumer), str(runtime)], cwd=output, env=environment,
+                            capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
+    (output / "profile-sdk.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (output / "profile-sdk.stderr.log").write_text(result.stderr, encoding="utf-8")
+    require(result.returncode == 0, f"Installed Profile SDK consumer failed: {result.stderr}")
+    report = json.loads(result.stdout)
+    require(report.get("type") == "lyflow.ProfileSdkAcceptance.v1" and report.get("slots") == 8
+            and report.get("validSlots") == 6 and report.get("unit") == "m", "Profile SDK slot/unit contract changed")
+    for key in ("optionalChannelsPreserved", "sourceMappingPreserved", "badInputRejected"):
+        require(report.get(key) is True, f"Profile SDK contract failed: {key}")
+    for key in ("gap", "flush"):
+        value = report.get(key, {})
+        require(value.get("ok") is True and value.get("unit") == "m"
+                and abs(value.get("value", 0) - 0.002) < 1e-7, f"Typed {key} must be 0.002 m")
+    return report
+
+
 def missing_dependency(sdk, consumer, output, environment, bait_directory):
     binary = (sdk / "bin").resolve(strict=True)
     require(binary.parent == sdk, "SDK bin must belong to the selected SDK")
@@ -77,6 +96,8 @@ def main():
     parser.add_argument("--consumer", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--bait-dir", type=Path)
+    parser.add_argument("--profile-consumer", type=Path)
+    parser.add_argument("--profile-only", action="store_true")
     args = parser.parse_args()
     require(os.name == "nt", "This isolated SDK contract requires Windows; it cannot be skipped")
     sdk = args.sdk.resolve(strict=True)
@@ -84,6 +105,18 @@ def main():
     require(sdk.is_dir() and consumer.is_file(), "SDK and compiled consumer must already exist")
     runtime = (sdk / "bin/lyflow_core.dll").resolve(strict=True)
     require(runtime.parent.parent == sdk, "Runtime DLL must belong to the selected installed SDK")
+    output = args.output_dir.resolve()
+    require(output != (sdk / "bin").resolve(), "Output directory must differ from SDK bin")
+    output.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+    profile_consumer = (args.profile_consumer or consumer.with_name("profile_sdk_consumer.exe")).resolve(strict=True)
+    profile = profile_contract(profile_consumer, runtime, output, environment)
+    if args.profile_only:
+        report = {"mode": "installed-cpp-profile-sdk", "sdk": str(sdk), "profile": profile, "noSkipped": True}
+        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False))
+        return
     examples = sdk / "examples"
     truth_path = examples / "p5-fixtures.json"
     truth = json.loads(truth_path.read_text(encoding="utf-8"))
@@ -93,12 +126,7 @@ def main():
         require(path.stat().st_size == expected["bytes"] and digest(path) == expected["sha256"], f"Installed fixture size/SHA256 mismatch: {name}")
     sources = [truth_path, *(examples / name for name in truth["files"]), *(examples / f"{name}.lyflow.json" for name in CASES)]
     original = {str(path): digest(path) for path in sources}
-    output = args.output_dir.resolve()
-    require(output != (sdk / "bin").resolve(), "Output directory must differ from SDK bin")
-    output.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
-    environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
-    report = {"mode": "installed-cpp-sdk", "sdk": str(sdk), "consumer": str(consumer), "cases": []}
+    report = {"mode": "installed-cpp-sdk", "sdk": str(sdk), "consumer": str(consumer), "profile": profile, "cases": []}
     for name in CASES:
         result = run_consumer(consumer, runtime, examples / f"{name}.lyflow.json", output, environment, name, 240)
         require(result.returncode == 0, f"{name}: independent SDK consumer failed ({result.returncode}): {result.stderr}")

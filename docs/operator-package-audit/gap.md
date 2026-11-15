@@ -4,7 +4,7 @@
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 074 · gap.fit_line
+## 079 · gap.fit_line
 
 - 当前：`gap` / `1.1.0` / 二维剖面直线拟合。目标：`std-profile`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/fit.cpp:1232](../../packs/gap/ops/fit.cpp#L1232)。
@@ -18,7 +18,7 @@
 - 验收：minInliers、free/band/fixed方向、端点模式、segmentApplied、RMS/点序和输出内点索引基线。
 - 说明：新轻量包默认不能强绑PCL；保留方法作为可选能力并声明依赖，算法替换另开任务。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 075 · gap.fit_gap_circles
+## 080 · gap.fit_gap_circles
 
 - 当前：`gap` / `1.4.0` / 间隙双侧圆拟合。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/fit.cpp:1375](../../packs/gap/ops/fit.cpp#L1375)。
@@ -32,7 +32,7 @@
 - 验收：所有回退分支、固定半径/软先验、LM边界钳制、相切带、ArcBearing/MinArc与Indices归属回归。
 - 说明：不能替换为一个默认 fit.circle_2d；业务quality字段与算法报告要分层。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 076 · gap.flush
+## 081 · gap.flush
 
 - 当前：`gap` / `1.1.0` / 面差测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/measure.cpp:300](../../packs/gap/ops/measure.cpp#L300)。
@@ -46,7 +46,7 @@
 - 验收：水平/竖直线、反转方向、负面差、scale/offset和baseLine扩展都保持；与DTS符号分别验证。
 - 说明：不能仅迁value而丢掉后续gap definition A使用的扩展baseLine。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 077 · gap.gap
+## 082 · gap.gap
 
 - 当前：`gap` / `1.0.0` / 间隙测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/measure.cpp:348](../../packs/gap/ops/measure.cpp#L348)。
@@ -60,7 +60,7 @@
 - 验收：两种定义、圆相交/左右接反、零间隙、缺基准端点及scale换算基线。
 - 说明：不得把B误写成纯圆心距离或统一成绝对距离掩盖交叉。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 078 · gap.groove_joint
+## 083 · gap.groove_joint
 
 - 当前：`gap` / `1.0.0` / 槽形对接缝测量。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/groove.cpp:458](../../packs/gap/ops/groove.cpp#L458)。
@@ -74,7 +74,7 @@
 - 验收：无槽/缝闭合、圆角/槽底干扰、单/双相机点数不足、gapDepth边界与读数质量。
 - 说明：不是通用孔槽测宽；不能与notch_width自动互换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 079 · gap.judge
+## 084 · gap.judge
 
 - 当前：`gap` / `1.0.0` / 间隙面差判定。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/measure.cpp:470](../../packs/gap/ops/measure.cpp#L470)。
@@ -88,7 +88,7 @@
 - 验收：上下限包含边界、margin=0/正值、patrol超差、上游无效值及原始量值不被覆盖。
 - 说明：不要把可计算值与业务OK/NG合成同一通用测量定义。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 080 · gap.load_profile_pair
+## 085 · gap.load_profile_pair
 
 - 当前：`gap` / `1.0.0` / 双相机剖面加载。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/io.cpp:173](../../packs/gap/ops/io.cpp#L173)。
@@ -102,7 +102,7 @@
 - 验收：目录多采集的确定性选文件、layout 两种布局、1280槽 NaN 与颜色/强度保持。
 - 说明：只改包归属不能改变文件自动选择策略。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 081 · gap.load_template
+## 086 · gap.load_template
 
 - 当前：`gap` / `1.0.0` / 剖面模板加载。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/io.cpp:282](../../packs/gap/ops/io.cpp#L282)。
@@ -116,7 +116,7 @@
 - 验收：旧路径解析、双模板配对、错误文件和禁止二次换轴的迁移用例。
 - 说明：模板身份并非仅文件路径。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 082 · gap.make_roi_set
+## 087 · gap.make_roi_set
 
 - 当前：`gap` / `1.1.0` / 角色 ROI 集组装。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/bundle_ops.cpp:134](../../packs/gap/ops/bundle_ops.cpp#L134)。
@@ -130,7 +130,7 @@
 - 验收：构造/拆解往返，必需字段检查、可选info与米/mm边界；类型不匹配拒绝。
 - 说明：Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 083 · gap.make_scan_pair
+## 088 · gap.make_scan_pair
 
 - 当前：`gap` / `1.0.0` / 剖面对组装。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/bundle_ops.cpp:85](../../packs/gap/ops/bundle_ops.cpp#L85)。
@@ -144,7 +144,7 @@
 - 验收：构造/拆解往返，必需字段检查、可选info与米/mm边界；类型不匹配拒绝。
 - 说明：Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 084 · gap.nearest_to_line
+## 089 · gap.nearest_to_line
 
 - 当前：`gap` / `1.0.0` / 直线最近点提取。目标：`std-profile`；迁移归属；**M4**。
 - 源码：[packs/gap/ops/geometry.cpp:462](../../packs/gap/ops/geometry.cpp#L462)。
@@ -158,7 +158,7 @@
 - 验收：线段外最近点、反向线、平局稳定性和裁前/裁后索引关系。
 - 说明：移动代码时保留无限线语义。
 
-## 085 · gap.notch_width
+## 090 · gap.notch_width
 
 - 当前：`gap` / `1.0.0` / V 形缝开口测量。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/notch.cpp:631](../../packs/gap/ops/notch.cpp#L631)。
@@ -172,7 +172,7 @@
 - 验收：遮挡视角、闭合固有宽度、levelDepth超cornerDepth与单相机策略基线。
 - 说明：不能把固有V角宽度当真实张开量或通用槽宽。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 086 · gap.overall_roi
+## 091 · gap.overall_roi
 
 - 当前：`gap` / `1.0.0` / 整体 ROI 构建。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/geometry.cpp:332](../../packs/gap/ops/geometry.cpp#L332)。
@@ -186,7 +186,7 @@
 - 验收：空/单边缺失、两头点数不均、背景干扰和固定宽高对照。
 - 说明：不是任意云的通用自动 ROI 分割器。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 087 · gap.align_template
+## 092 · gap.align_template
 
 - 当前：`gap` / `1.1.0` / 模板配准。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/align.cpp:339](../../packs/gap/ops/align.cpp#L339)。
@@ -200,7 +200,7 @@
 - 验收：长直边退化、trustClamped、左右同模板复用、低分候选和最终选模结果。
 - 说明：分包迁移不等于改用 KISS 或另一个 ICP。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。 关联的register.icp_2d在本波次使用既有接口；其M6隔离验收不是本项迁移前置，后续隔离须保持该接口。
 
-## 088 · gap.corner_vertex
+## 093 · gap.corner_vertex
 
 - 当前：`gap` / `1.0.0` / 夹角接缝间隙测量。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/measure.cpp:390](../../packs/gap/ops/measure.cpp#L390)。
@@ -214,7 +214,7 @@
 - 验收：平行/小角退化、约90度不可辨识、对齐前后原点和gap/flush符号对照。
 - 说明：几何有数值不代表两项业务量都可判定；patrol语义留场景。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 089 · gap.point_offset
+## 094 · gap.point_offset
 
 - 当前：`gap` / `1.0.0` / 二维位移分解。目标：`std-metrology`；迁移归属；**M4**。
 - 源码：[packs/gap/ops/offset.cpp:92](../../packs/gap/ops/offset.cpp#L92)。
@@ -228,7 +228,7 @@
 - 验收：轴旋转、正负dx/dy、重合点、独立scale/offset与线段方向回归。
 - 说明：scaleDx/scaleDy现有参数单位标注需单独审计，比例因子不能因标mm就作长度换算。
 
-## 090 · gap.result_bundle
+## 095 · gap.result_bundle
 
 - 当前：`gap` / `2.1.0` / 间隙检测结果汇总。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/result_bundle.cpp:398](../../packs/gap/ops/result_bundle.cpp#L398)。
@@ -242,7 +242,7 @@
 - 验收：宿主必需字段、roi_source、graph_hash、左右点数既有含义与inactive缺项回归。
 - 说明：left/right_point_count当前均按合并云统计，迁移不应无声纠正历史字段意义。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 091 · gap.role_line
+## 096 · gap.role_line
 
 - 当前：`gap` / `1.0.0` / 角色区域直线拟合。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:1019](../../packs/gap/ops/blocks.cpp#L1019)。
@@ -256,7 +256,7 @@
 - 验收：datum/target、缺refLine、左右datumSide、继承拟线quality与segment截取。
 - 说明：不能只复用无toward的直线拟合。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 092 · gap.seam_circles
+## 097 · gap.seam_circles
 
 - 当前：`gap` / `1.2.0` / 缝隙双侧圆拟合。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:1131](../../packs/gap/ops/blocks.cpp#L1131)。
@@ -270,7 +270,7 @@
 - 验收：参数透传、左右参考线、固定半径/先验/相切带及quality原子失败。
 - 说明：底层generic参数结构迁移必须覆盖此节点的paramOf拷贝。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 093 · gap.select_alignment
+## 098 · gap.select_alignment
 
 - 当前：`gap` / `1.0.0` / 配准结果选择。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/align.cpp:426](../../packs/gap/ops/align.cpp#L426)。
@@ -284,7 +284,7 @@
 - 验收：全打平、端口交换、缺候选/全低分、稳定id决定平局的结果一致。
 - 说明：这是领域决策，不进入 std-metrology。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 094 · gap.business_rois
+## 099 · gap.business_rois
 
 - 当前：`gap` / `1.2.0` / 测量 ROI 映射。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/geometry.cpp:386](../../packs/gap/ops/geometry.cpp#L386)。
@@ -298,7 +298,7 @@
 - 验收：大旋转不扩框、datumSide与左右变换、seam中心及框尺寸逐项对照。
 - 说明：不能直接替换成旋转包围盒变换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 095 · gap.datum_window
+## 100 · gap.datum_window
 
 - 当前：`gap` / `1.0.0` / 方向基准区域构建。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/geometry.cpp:277](../../packs/gap/ops/geometry.cpp#L277)。
@@ -312,7 +312,7 @@
 - 验收：左右侧、单独heightAnchor、锚框漂移和开区间边界案例。
 - 说明：领域默认不能提升为通用框构造默认。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 096 · gap.datum_direction
+## 101 · gap.datum_direction
 
 - 当前：`gap` / `1.0.0` / 方向基准线提取。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:1181](../../packs/gap/ops/blocks.cpp#L1181)。
@@ -326,7 +326,7 @@
 - 验收：短台肩/邻长面、左右窗、开区间点和端点模式、少内点诊断。
 - 说明：必须和gap.datum_window、role_line方向约束一起迁。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 097 · gap.selected_point
+## 102 · gap.selected_point
 
 - 当前：`gap` / `1.0.0` / 区域锚点近邻提取。目标：`std-profile`；迁移归属；**M4**。
 - 源码：[packs/gap/ops/geometry.cpp:437](../../packs/gap/ops/geometry.cpp#L437)。
@@ -340,7 +340,7 @@
 - 验收：最近点在ROI外、相同距离、原列映射和非有限样本处理保持。
 - 说明：不能把旧算子误迁为框内选点。
 
-## 098 · gap.ref_point
+## 103 · gap.ref_point
 
 - 当前：`gap` / `1.0.0` / 参考点提取。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:1074](../../packs/gap/ops/blocks.cpp#L1074)。
@@ -354,7 +354,7 @@
 - 验收：三种ref_type、ROI外选点与无限线最近点、未激活输出和失败quality对照。
 - 说明：参考点不能一律抽成同一最近点算法。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 099 · gap.split_roi_set
+## 104 · gap.split_roi_set
 
 - 当前：`gap` / `1.0.0` / 角色 ROI 集解包。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/bundle_ops.cpp:197](../../packs/gap/ops/bundle_ops.cpp#L197)。
@@ -368,7 +368,7 @@
 - 验收：构造/拆解往返，必需字段检查、可选info与米/mm边界；类型不匹配拒绝。
 - 说明：Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 100 · gap.split_scan_pair
+## 105 · gap.split_scan_pair
 
 - 当前：`gap` / `1.0.0` / 剖面对解包。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/bundle_ops.cpp:111](../../packs/gap/ops/bundle_ops.cpp#L111)。
@@ -382,7 +382,7 @@
 - 验收：构造/拆解往返，必需字段检查、可选info与米/mm边界；类型不匹配拒绝。
 - 说明：Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 101 · gap.to_measurement_frame
+## 106 · gap.to_measurement_frame
 
 - 当前：`gap` / `1.0.0` / 测量坐标系转换。目标：`std-profile`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/io.cpp:256](../../packs/gap/ops/io.cpp#L256)。
@@ -396,7 +396,7 @@
 - 验收：正负高度、NaN槽、强度/RGB 和映射两次还原；手性被明确记录。
 - 说明：与 std-geometry 的 source→target 刚体必须区分。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 102 · gap.drop_non_finite
+## 107 · gap.drop_non_finite
 
 - 当前：`gap` / `1.0.0` / 非有限点剔除。目标：`std-profile`；迁移归属；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:688](../../packs/gap/ops/model_roi.cpp#L688)。
@@ -410,7 +410,7 @@
 - 验收：NaN/Inf 坐标删除、RGB/强度长度匹配；压缩云不得误接1280槽模型链。
 - 说明：该节点不能当离群点滤波。
 
-## 103 · gap.profile_tensor
+## 108 · gap.profile_tensor
 
 - 当前：`gap` / `1.0.0` / 剖面特征张量构建。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:505](../../packs/gap/ops/model_roi.cpp#L505)。
@@ -424,7 +424,7 @@
 - 验收：逐通道与训练侧向量核对；点数错误拒绝；无效槽 valid 掩码正确且批次主副顺序稳定。
 - 说明：名字含 tensor 不代表通用推理能力。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 104 · gap.camera_guard
+## 109 · gap.camera_guard
 
 - 当前：`gap` / `1.0.0` / 双相机一致性校验。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/camera_guard.cpp:213](../../packs/gap/ops/camera_guard.cpp#L213)。
@@ -438,7 +438,7 @@
 - 验收：fail/keepPrimary/keepSecondary/record/off、不同采样密度、重叠不足和复制后点数翻倍。
 - 说明：不是三维配准器或自动相机校准。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 105 · gap.labels_from_logits
+## 110 · gap.labels_from_logits
 
 - 当前：`gap` / `1.0.0` / Logits 标签解码。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:545](../../packs/gap/ops/model_roi.cpp#L545)。
@@ -452,7 +452,7 @@
 - 验收：并列logits、全部低置信度、形状错误、主副顺序与旧 GapLabels 一致。
 - 说明：不能给原流程悄悄增加置信度门限。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。 关联的ml.onnx_run在本波次使用既有接口；其M6隔离验收不是本项迁移前置，后续隔离须保持该接口。
 
-## 106 · gap.labels_to_cloud
+## 111 · gap.labels_to_cloud
 
 - 当前：`gap` / `1.0.0` / 点云标签可视化。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:643](../../packs/gap/ops/model_roi.cpp#L643)。
@@ -466,7 +466,7 @@
 - 验收：NaN槽对齐、RGB色表、intensity覆盖和压缩云误用拒绝。
 - 说明：这是可视化适配，不是模型预测。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 107 · gap.read_scan
+## 112 · gap.read_scan
 
 - 当前：`gap` / `1.1.0` / 双相机剖面读取。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:755](../../packs/gap/ops/blocks.cpp#L755)。
@@ -480,7 +480,7 @@
 - 验收：注入不读盘、主副连接缺项、原始槽和合并顺序、半径去噪结果与通道长度。
 - 说明：不能将一份压缩后merged回填原双头。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 108 · gap.locate_template
+## 113 · gap.locate_template
 
 - 当前：`gap` / `2.1.0` / 模板定位。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:836](../../packs/gap/ops/blocks.cpp#L836)。
@@ -494,7 +494,7 @@
 - 验收：单/多模板、全部失败、各模板独立角色框、scan透传/裁剪与诊断来源。
 - 说明：内部参数拷贝paramOf和Step节点id是迁移依赖，不只是顶层id改名。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 109 · gap.roi_from_labels
+## 114 · gap.roi_from_labels
 
 - 当前：`gap` / `1.2.0` / 标签区域提取。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:576](../../packs/gap/ops/model_roi.cpp#L576)。
@@ -508,7 +508,7 @@
 - 验收：缺分段诊断、左右角色、米/毫米转换、同帧 backdrop 透传和精修结果基线。
 - 说明：refinements 是小型诊断，不得携带完整图像/云数组。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 110 · gap.roll_anchored_crop
+## 115 · gap.roll_anchored_crop
 
 - 当前：`gap` / `1.1.0` / 零件随动裁剪。目标：`solution-gap`；拆公共能力/适配；**M4**。
 - 源码：[packs/gap/ops/model_roi.cpp:716](../../packs/gap/ops/model_roi.cpp#L716)。
@@ -522,7 +522,7 @@
 - 验收：五类保护与 minPointsKept 边界；未裁不能变空云；合并云与双头同窗。
 - 说明：不能以简单 crop_box 节点取代整套保护。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 111 · gap.locate_model
+## 116 · gap.locate_model
 
 - 当前：`gap` / `1.0.0` / 分割模型定位。目标：`solution-gap`；保留场景职责；**M4**。
 - 源码：[packs/gap/ops/blocks.cpp:958](../../packs/gap/ops/blocks.cpp#L958)。
@@ -536,7 +536,7 @@
 - 验收：六通道与标签槽对齐、模型初始化复用、ROI失败、原云/裁后merged分流和取消。
 - 说明：模型能力必须可选，禁用模板模式不能仍隐式加载模型。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 256 · gap.measure_reference
+## 261 · gap.measure_reference
 
 - 当前：`gap` / `1.0.0` / 参考基线测量。目标：`solution-gap`；保留场景职责；**M7**。
 - 源码：[packs/gap/ops/measure_reference.cpp:204](../../packs/gap/ops/measure_reference.cpp#L204)。

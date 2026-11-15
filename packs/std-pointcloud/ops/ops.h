@@ -33,7 +33,6 @@ void registerSegmentRegionGrowing2D(Registry& r);
 void registerCloudAnalysis(Registry& r);
 void registerRegistration3D(Registry& r);
 void registerIoLoadCloud(Registry& r);
-void registerProfileAnalysis(Registry& r);
 void registerAdvancedFit3D(Registry& r);
 void registerP2HeightRules(Registry& r);
 void registerP2GlobalMatching(Registry& r);

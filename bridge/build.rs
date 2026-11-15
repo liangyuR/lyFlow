@@ -170,18 +170,20 @@ fn main() {
     // tests/host.rs 的注入测试要 dts 包（默认关，ADR-0015）。没点名时记 ignored，
     // 与 std_packs_off 同一个道理：汇总行里看得见，不会静默地「全绿」。
     println!("cargo:rustc-check-cfg=cfg(dts_pack)");
-    if repo_packs.split(';').any(|p| p.trim() == "dts") {
+    if repo_packs.split(';').any(|p| p.trim() == "solution-dts") {
         println!("cargo:rustc-cfg=dts_pack");
     }
 
-    let packs_root = core.parent().expect("core 应当有父目录").join("packs");
-    // LYFLOW_STD_PACKS=0 时也可能按 LYFLOW_PACKS 点名编仓库内的包，那一趟 packs/ 照样要监听，
-    // 否则改 packs/dts 里的算子不会触发 core 重编。
-    if (std_packs != "0" || !repo_packs.trim().is_empty()) && packs_root.is_dir() {
-        let (mut pf, mut pd) = (Vec::new(), Vec::new());
-        collect(&packs_root, &mut pf, &mut pd);
-        for f in pf.iter().chain(pd.iter()) {
-            println!("cargo:rerun-if-changed={}", f.display());
+    let repository = core.parent().expect("core 应当有父目录");
+    for directory in ["kernels", "packs", "solutions"] {
+        let path = repository.join(directory);
+        if !path.is_dir() {
+            continue;
+        }
+        let (mut files, mut directories) = (Vec::new(), Vec::new());
+        collect(&path, &mut files, &mut directories);
+        for entry in files.iter().chain(directories.iter()) {
+            println!("cargo:rerun-if-changed={}", entry.display());
         }
     }
 
@@ -353,7 +355,7 @@ fn tauri_step() {}
 
 /// 安装包里的 core 运行时（`tauri.conf.json` 的 `bundle.resources` 指向这里）。
 /// 必须就是这一次构建编出来的那一份：以前指向 `build-core.ps1` 的 `build/core/bin`，那是另一棵构建树，
-/// 装进去的是那边最后一次编的 —— `LYFLOW_PACKS=gap;dts pnpm tauri build` 打出来的包里没有 gap。
+/// 装进去的是那边最后一次编的 —— `LYFLOW_PACKS=gap;solution-dts pnpm tauri build` 打出来的包里没有 gap。
 /// 也不能取 `target/<profile>/`：CLI（`--no-default-features`）的构建脚本也往那里拷，谁后拷谁说了算。
 ///
 /// release 每次都整份换掉（先删旧的 DLL：换了一组包时多出来的不该留在安装包里）；debug 只在还没有时放一份 ——

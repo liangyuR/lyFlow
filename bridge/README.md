@@ -6,16 +6,16 @@ Tauri 桌面壳。职责：IPC、序列化、文件读写、进程生命周期�
 
 ## 模块
 
-| 模块 | feature | 说明 |
-|---|---|---|
-| `core_ffi.rs` | — | C ABI 边界：加载 DLL、调用、把 C 的堆内存拷成 Rust 的（ADR-0004/0009）。 |
-| `graph.rs` | — | GraphDoc 的 Rust 表示与结构校验（三层校验的中间那层）。 |
-| `cli.rs` / `eval.rs` / `perturb.rs` | — | headless CLI（ADR-0012/0020）。一行 Tauri 都不碰。 |
-| `commands.rs` | `host` | 34 条 `#[tauri::command]`。每条都对 `R: tauri::Runtime` 泛型 —— 外部宿主与测试里的 `MockRuntime` 都不是 `Wry`。 |
-| `execution.rs` | `host` | `RunManager`：运行的生命周期、事件推流、二进制编码。 |
-| `watcher.rs` | `host` | 开发期热重载与库目录监视（ADR-0009/0010）。 |
-| `host.rs` | `host` | `attach()` / `lyflow_handler!` / `SceneProvider` / `resolve_path` —— 外部 Rust 宿主复用上面三个模块的入口（[docs/embedding.md](../docs/embedding.md#rusttauri-宿主)）。 |
-| `lib.rs::run()` | `desktop` | LyFlow 自己的桌面壳。只比宿主多一个窗口、一个 dialog 插件和 `generate_context!`，其余走同一份 `host::attach`。 |
+| 模块                                | feature   | 说明                                                                                                                                                                    |
+| ----------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core_ffi.rs`                       | —         | C ABI 边界：加载 DLL、调用、把 C 的堆内存拷成 Rust 的（ADR-0004/0009）。                                                                                                |
+| `graph.rs`                          | —         | GraphDoc 的 Rust 表示与结构校验（三层校验的中间那层）。                                                                                                                 |
+| `cli.rs` / `eval.rs` / `perturb.rs` | —         | headless CLI（ADR-0012/0020）。一行 Tauri 都不碰。                                                                                                                      |
+| `commands.rs`                       | `host`    | 34 条 `#[tauri::command]`。每条都对 `R: tauri::Runtime` 泛型 —— 外部宿主与测试里的 `MockRuntime` 都不是 `Wry`。                                                         |
+| `execution.rs`                      | `host`    | `RunManager`：运行的生命周期、事件推流、二进制编码。                                                                                                                    |
+| `watcher.rs`                        | `host`    | 开发期热重载与库目录监视（ADR-0009/0010）。                                                                                                                             |
+| `host.rs`                           | `host`    | `attach()` / `lyflow_handler!` / `SceneProvider` / `resolve_path` —— 外部 Rust 宿主复用上面三个模块的入口（[docs/embedding.md](../docs/embedding.md#rusttauri-宿主)）。 |
+| `lib.rs::run()`                     | `desktop` | LyFlow 自己的桌面壳。只比宿主多一个窗口、一个 dialog 插件和 `generate_context!`，其余走同一份 `host::attach`。                                                          |
 
 `desktop = ["host", …]`，所以 `--no-default-features --features host` 编出来的 lib
 有完整 IPC 层，却不依赖 `tauri-build` 与 dialog 插件。
@@ -39,7 +39,7 @@ M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
    指向这里，安装包里的 core 因此**就是这一次构建编出来的那一份**。release 每次整份换掉，
    debug 只在还没有时放一份（tauri-build 在 debug 下也按 resources 拷文件，glob 空了要报错）。
    以前 resources 指向 `build-core.ps1` 的 `build/core/bin`：另一棵构建树，
-   `LYFLOW_PACKS=gap;dts pnpm tauri build` 打出来的包里没有 gap（2026-10-01 实测）。
+   `LYFLOW_PACKS=gap;solution-dts pnpm tauri build` 打出来的包里没有 gap（2026-10-01 实测）。
 4. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
    （D9：`activeCodePage=UTF-8`），lyflow-app 再合并 `lyflow-app.manifest`（Common-Controls v6）。
 
@@ -88,24 +88,24 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 
 ## 暴露给前端的 command
 
-| command | 方向 | 说明 |
-|---|---|---|
-| `get_manifest` | C++ → 前端 | 全量算子描述。按**代数**缓存解析结果，热重载后自动作废。 |
-| `get_core_info` | C++ → 前端 | core 版本、算子/类型数量、热重载代数，给状态栏用。 |
-| `save_graph` | 前端 → 磁盘 | 结构校验后写盘，pretty JSON。 |
-| `load_graph` | 磁盘 → 前端 | 读盘 + 结构校验，返回 `{ doc, migrations }`（ADR-0008）。 |
-| `validate_graph` | 前端 → C++ | 权威校验，返回**全部**诊断（D5）。 |
-| `plan_graph` | 前端 → C++ | 编译但不执行，报每节点的 cacheKey 与是否已缓存（ADR-0007）。 |
-| `clear_cache` / `cache_stats` | 前端 → C++ | 结果仓的清空与统计，给菜单和状态栏用。`clear_cache` 是**进程级**的，别的 run 的结果也会没；只想让一次运行不吃缓存用 `no_reuse`（CLI `--no-cache`）。 |
-| `run_graph` | 前端 → C++ | 启动一次运行，立刻返回 runId。带 `sceneId` 时先问宿主的 `SceneProvider` 要注入的点云（ADR-0017）。 |
-| `cancel_run` | 前端 → C++ | 协作式取消。id 对不上就无操作。 |
-| `get_output_info` | C++ → 前端 | 某节点全部输出的 type/elementCount。 |
-| `get_output_cloud` | C++ → 前端 | **二进制**点云（见下）。 |
-| `get_recent_files` / `push_recent_file` | 磁盘 ↔ 前端 | 最近文件，存在 Tauri 的 app data 里，最多 10 条。 |
-| `write_backup` / `backup_status` / `read_backup` / `discard_backup` | 磁盘 ↔ 前端 | `<file>~` 自动备份与崩溃恢复。 |
-| `write_file_bytes` | 前端 → 磁盘 | 写一段二进制到用户选的路径。3D 视图导出 PNG 走它。 |
-| `get_library_status` / `refresh_library` | C++ ↔ 前端 | 库算子目录的状态与重扫（ADR-0010）。 |
-| `save_as_library` | 前端 → 磁盘 | 把 doc 里的一个子图写成 `<id>.lyflow-op.json`。 |
+| command                                                             | 方向         | 说明                                                                                                                                                 |
+| ------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_manifest`                                                      | C++ → 前端   | 全量算子描述。按**代数**缓存解析结果，热重载后自动作废。                                                                                             |
+| `get_core_info`                                                     | C++ → 前端   | core 版本、算子/类型数量、热重载代数，给状态栏用。                                                                                                   |
+| `save_graph`                                                        | 前端 → 磁盘  | 结构校验后写盘，pretty JSON。                                                                                                                        |
+| `load_graph`                                                        | 磁盘 → 前端  | 读盘 + 结构校验，返回 `{ doc, migrations }`（ADR-0008）。                                                                                            |
+| `validate_graph`                                                    | 前端 → C++   | 权威校验，返回**全部**诊断（D5）。                                                                                                                   |
+| `plan_graph`                                                        | 前端 → C++   | 编译但不执行，报每节点的 cacheKey 与是否已缓存（ADR-0007）。                                                                                         |
+| `clear_cache` / `cache_stats`                                       | 前端 → C++   | 结果仓的清空与统计，给菜单和状态栏用。`clear_cache` 是**进程级**的，别的 run 的结果也会没；只想让一次运行不吃缓存用 `no_reuse`（CLI `--no-cache`）。 |
+| `run_graph`                                                         | 前端 → C++   | 启动一次运行，立刻返回 runId。带 `sceneId` 时先问宿主的 `SceneProvider` 要注入的点云（ADR-0017）。                                                   |
+| `cancel_run`                                                        | 前端 → C++   | 协作式取消。id 对不上就无操作。                                                                                                                      |
+| `get_output_info`                                                   | C++ → 前端   | 某节点全部输出的 type/elementCount。                                                                                                                 |
+| `get_output_cloud`                                                  | C++ → 前端   | **二进制**点云（见下）。                                                                                                                             |
+| `get_recent_files` / `push_recent_file`                             | 磁盘 ↔ 前端 | 最近文件，存在 Tauri 的 app data 里，最多 10 条。                                                                                                    |
+| `write_backup` / `backup_status` / `read_backup` / `discard_backup` | 磁盘 ↔ 前端 | `<file>~` 自动备份与崩溃恢复。                                                                                                                       |
+| `write_file_bytes`                                                  | 前端 → 磁盘  | 写一段二进制到用户选的路径。3D 视图导出 PNG 走它。                                                                                                   |
+| `get_library_status` / `refresh_library`                            | C++ ↔ 前端  | 库算子目录的状态与重扫（ADR-0010）。                                                                                                                 |
+| `save_as_library`                                                   | 前端 → 磁盘  | 把 doc 里的一个子图写成 `<id>.lyflow-op.json`。                                                                                                      |
 
 `run_graph` 多了 `mode` / `previewMaxPoints` / `previewBudgetMs`
 （[ADR-0011](../docs/adr/0011-preview-as-decimated-run.md)）。`mode: "preview"` 时
@@ -214,10 +214,10 @@ clamp**，否则一个一亿元素的张量会一次性 400 MB 过 IPC。上限�
 
 ## 两个 bin
 
-| bin | 说明 |
-|---|---|
+| bin          | 说明                                                                                    |
+| ------------ | --------------------------------------------------------------------------------------- |
 | `lyflow-app` | Tauri 桌面壳，需要 `desktop` feature（默认开）。`tauri.conf.json` 的 `mainBinaryName`。 |
-| `lyflow` | headless CLI，**不依赖 Tauri**（[ADR-0012](../docs/adr/0012-headless-cli.md)）。 |
+| `lyflow`     | headless CLI，**不依赖 Tauri**（[ADR-0012](../docs/adr/0012-headless-cli.md)）。        |
 
 `cargo build --bin lyflow --no-default-features` 是这条边界唯一靠得住的证据，
 它进了 `pnpm check`。实现在 `src/cli.rs`（lib 里）而不是 bin 里，
@@ -373,11 +373,27 @@ lyflow patch 4.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflo
 - `--json` 一行：
 
   ```jsonc
-  {"kind":"patch_result",
-   "applied":{"removed":["b_alt"],"added":[],"rewired":["a:cloud=g:cloud"],"set":["a.leafSize"]},
-   "noops":[{"action":"set","spec":"a.leafSize=[0.05,0.05,0.05]","reason":"same_value","message":"…"}],
-   "wrote":"g.lyflow.json",     // --dry-run 或「全 no-op 的原地覆写」时是 null
-   "diff":{ /* 与 lyflow diff --json 同一个对象 */ }}
+  {
+    "kind": "patch_result",
+    "applied": {
+      "removed": ["b_alt"],
+      "added": [],
+      "rewired": ["a:cloud=g:cloud"],
+      "set": ["a.leafSize"],
+    },
+    "noops": [
+      {
+        "action": "set",
+        "spec": "a.leafSize=[0.05,0.05,0.05]",
+        "reason": "same_value",
+        "message": "…",
+      },
+    ],
+    "wrote": "g.lyflow.json", // --dry-run 或「全 no-op 的原地覆写」时是 null
+    "diff": {
+      /* 与 lyflow diff --json 同一个对象 */
+    },
+  }
   ```
 
 - 退出码：0 成功；1 = 动作对不上这张图（没有那个节点、id 撞了、图输出还指着被删节点）

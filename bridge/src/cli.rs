@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
 
-use crate::core_ffi::{self, Core, RunHandle, RunInput, RunSpec};
+use crate::core_ffi::{self, Core, RunHandle, RunInput, RunProfileInput, RunSpec};
 use crate::eval;
 use crate::graph::GraphDoc;
 use crate::patch;
@@ -52,8 +52,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--preview] [--preview-points <n>] [--outputs] [--summary]
                           [--snapshot-dir <new-dir>] [--capture-policy all|selected|failures|metrics]
                           [--capture-output node:port] [--capture-max-bytes <n>]
-                          [--input <nodeId>.<port>=<file.pcd>]...
-        --input：把一片点云注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
+                          [--input <nodeId>.<port>=<file.pcd|file.lypr>]...
+        --input：把点云或完整 LYPR Profile 注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
                  整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.pcd
                  --input n_scan.secondary=b.pcd 直接喂 gap.read_scan（m8-plan L18）。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
@@ -79,7 +79,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                      graph（顶层图参数灌进来的，graphParam 说是哪一个）。
         --set 先应用再解析，所以「这组 --set 之后生效值是什么」一条命令。
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
-  lyflow migrate  <graph> [--write]
+  lyflow migrate  <graph> [--write] [--profile-source <node> --profile-frame <frame> --profile-source-id <id>]
   lyflow manifest [--check]
   lyflow python settings|refresh
   lyflow python configure --config <python-nodes.json>
@@ -831,15 +831,42 @@ pub(crate) fn read_cloud_file(
         .map_err(|e| e.to_string())
 }
 
-/// `--input <节点>.<端口>=<file.pcd>`：CLI 这边的注入，与宿主经 C ABI 的 `lyflow_run_options.inputs`
-/// 是同一条路。端口是输出时整节点注入，只是输入（例如 `n_scan.primary`）时是输入注入。
-///
-/// PCD 由 `crate::pcd` 原样读出（点序、NaN 槽、intensity、rgb 都在）：core 的取数视图没有 rgb，
-/// 而 gap 的模型定位靠 rgb 的 R 当强度特征。别的格式借 core 的 `io.load_pcd`（见 read_cloud_file）。
-fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, String> {
-    let mut out = Vec::new();
+#[derive(Default)]
+struct LoadedInputs {
+    clouds: Vec<RunInput>,
+    profiles: Vec<RunProfileInput>,
+}
+
+impl LoadedInputs {
+    fn is_empty(&self) -> bool {
+        self.clouds.is_empty() && self.profiles.is_empty()
+    }
+
+    fn plan(
+        &self,
+        core: &Arc<Core>,
+        loaded: &Loaded,
+        targets: &[String],
+    ) -> Result<String, String> {
+        core.plan_with_profiles(
+            &loaded.json,
+            &loaded.base_dir,
+            targets,
+            None,
+            &self.clouds,
+            &[],
+            &self.profiles,
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+
+fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<LoadedInputs, String> {
+    use std::io::Read;
+    const PROFILE_INPUT_MAX_BYTES: usize = 256 * 1024 * 1024;
+    let mut out = LoadedInputs::default();
     for spec in parsed.many("input") {
-        let bad = || format!("--input 的写法是 <节点>.<端口>=<file.pcd>，收到 {spec}");
+        let bad = || format!("--input 的写法是 <节点>.<端口>=<file.pcd|file.lypr>，收到 {spec}");
         let (left, file) = spec.split_once('=').ok_or_else(bad)?;
         let (node, port) = left.rsplit_once('.').ok_or_else(bad)?;
         if node.is_empty() || port.is_empty() || file.is_empty() {
@@ -848,6 +875,22 @@ fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, Strin
         let path = std::path::absolute(file).map_err(|e| format!("--input {spec}: {e}"))?;
         if !path.is_file() {
             return Err(format!("--input {spec}: 文件不存在 {}", path.display()));
+        }
+        let mut magic = [0; 4];
+        let mut source = std::fs::File::open(&path).map_err(|e| format!("--input {spec}: {e}"))?;
+        let magic_len = source
+            .read(&mut magic)
+            .map_err(|e| format!("--input {spec}: {e}"))?;
+        let is_profile = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("lypr"))
+            || (magic_len == 4 && &magic == b"LYPR");
+        if is_profile {
+            out.profiles.push(
+                core.load_profile_input(&path, node, port, PROFILE_INPUT_MAX_BYTES)
+                    .map_err(|e| format!("--input {spec}: {e}"))?,
+            );
+            continue;
         }
         let is_pcd = path
             .extension()
@@ -884,19 +927,28 @@ fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, Strin
                 rgb: Vec::new(),
             }
         };
-        out.push(input);
+        out.clouds.push(input);
     }
     Ok(out)
 }
 
 pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
-    execute_frame(core, req, None)
+    execute_frame(core, req, None, &[])
+}
+
+fn execute_with_profiles(
+    core: &Arc<Core>,
+    req: RunRequest<'_>,
+    profiles: &[RunProfileInput],
+) -> Result<RunResult, String> {
+    execute_frame(core, req, None, profiles)
 }
 
 fn execute_frame(
     core: &Arc<Core>,
     req: RunRequest<'_>,
     frame: Option<(&lyflow_client::Frame, &str)>,
+    profiles: &[RunProfileInput],
 ) -> Result<RunResult, String> {
     console::install();
     let run_id = ulid::new();
@@ -911,6 +963,7 @@ fn execute_frame(
     spec.no_reuse = req.no_cache;
     spec.params_json = req.params_json;
     spec.inputs = req.inputs;
+    spec.profile_inputs = profiles;
     if req.preview {
         spec.mode = 1;
         spec.preview_max_points = req.preview_points;
@@ -961,6 +1014,26 @@ pub(crate) fn diagnostics_of(core: &Arc<Core>, loaded: &Loaded) -> Result<Vec<Va
         .validate(&loaded.json, &loaded.base_dir)
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的诊断不是合法 JSON: {e}"))
+}
+
+fn input_diagnostics(
+    core: &Arc<Core>,
+    loaded: &Loaded,
+    inputs: &LoadedInputs,
+) -> Result<Vec<Value>, String> {
+    if inputs.is_empty() {
+        return diagnostics_of(core, loaded);
+    }
+    inputs.plan(core, loaded, &[]).and_then(|text| {
+        serde_json::from_str::<Vec<Value>>(&text)
+            .map(|items| {
+                items
+                    .into_iter()
+                    .filter(|item| item["severity"].is_string())
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
+    })
 }
 
 pub(crate) fn has_errors(diags: &[Value]) -> bool {
@@ -1023,7 +1096,11 @@ fn cmd_validate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
-    let diags = match diagnostics_of(&core, &loaded) {
+    let inputs = match load_inputs(&core, parsed) {
+        Ok(inputs) => inputs,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
+    let diags = match input_diagnostics(&core, &loaded, &inputs) {
         Ok(d) => d,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
@@ -1053,7 +1130,11 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let targets: Vec<String> = parsed.many("to").to_vec();
-    let raw = match core.plan(&loaded.json, &loaded.base_dir, &targets) {
+    let inputs = match load_inputs(&core, parsed) {
+        Ok(inputs) => inputs,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
+    let raw = match inputs.plan(&core, &loaded, &targets) {
         Ok(r) => r,
         Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
     };
@@ -1168,7 +1249,18 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
-    let raw = match core.effective_params(&loaded.json, &loaded.base_dir) {
+    let inputs = match load_inputs(&core, parsed) {
+        Ok(inputs) => inputs,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
+    let raw = match core.effective_params_with_profiles(
+        &loaded.json,
+        &loaded.base_dir,
+        None,
+        &inputs.clouds,
+        &[],
+        &inputs.profiles,
+    ) {
         Ok(r) => r,
         Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
     };
@@ -1334,10 +1426,76 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
+    let profile_options = ["profile-source", "profile-frame", "profile-source-id"];
+    if profile_options
+        .iter()
+        .any(|name| parsed.one(name).is_some())
+    {
+        if profile_options.iter().any(|name| {
+            parsed.many(name).len() != 1 || parsed.one(name).map_or(true, |v| v.is_empty())
+        }) {
+            return fail(
+                err,
+                "DTS升级必须同时明确 --profile-source、--profile-frame、--profile-source-id",
+                EXIT_USAGE,
+            );
+        }
+        let source_path = parsed.one("profile-source").unwrap();
+        let parts: Vec<&str> = source_path.split('/').collect();
+        if parts.len() > 2 || parts.iter().any(|part| part.is_empty()) {
+            return fail(
+                err,
+                "--profile-source 为节点ID或子图定义ID/节点ID；库图请直接迁移图资产",
+                EXIT_USAGE,
+            );
+        }
+        let source = parts[parts.len() - 1];
+        let mut request = loaded
+            .doc
+            .contract_upgrade
+            .clone()
+            .unwrap_or_else(|| json!({"schemaVersion":1,"rules":[]}));
+        let Some(rules) = request["rules"].as_array_mut() else {
+            return fail(err, "已有contractUpgrade请求无有效rules", EXIT_USAGE);
+        };
+        let mut rule = json!({"kind":"dtsProfile.v1", "source":{"node":source,"op":"dts.profile_in","opVersion":"1.0.0","port":"profile"},
+            "profile":{"frame":parsed.one("profile-frame").unwrap(),"sourceId":parsed.one("profile-source-id").unwrap(),"unit":"mm","plane":"XZ","handedness":"right","sampleOrder":"acquisition"},
+            "adapterId":format!("{source}_profile_contract")});
+        if parts.len() == 2 {
+            rule["scope"] = json!({"subgraph":parts[0]});
+        }
+        let retired = loaded
+            .doc
+            .meta
+            .as_ref()
+            .and_then(|meta| meta["contractUpgradeHistory"].as_array())
+            .is_some_and(|history| {
+                history.iter().any(|entry| {
+                    entry["request"]["rules"]
+                        .as_array()
+                        .is_some_and(|rules| rules.contains(&rule))
+                })
+            });
+        if !retired {
+            rules.push(rule);
+            loaded.doc.contract_upgrade = Some(request);
+        }
+        loaded.json = match serde_json::to_string(&loaded.doc) {
+            Ok(json) => json,
+            Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
+        };
+    }
     let diags = match diagnostics_of(&core, &loaded) {
         Ok(d) => d,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
+    if diags.iter().any(|d| d["severity"] == "error") {
+        json_line(
+            out,
+            &json!({"diagnostics":diags,"migrations":[],"written":null}),
+        );
+        return fail(err, "图迁移未通过原生校验，未写入文件", EXIT_FAILED);
+    }
     let migrations: Vec<Value> = diags
         .into_iter()
         .filter(|d| d["kind"] == "migration")
@@ -1348,14 +1506,16 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         // 与前端 applyMigrations 同一套语义：params 是完整对象而不是补丁（ADR-0008），
         // edits 里的连线改动一并写回（ADR-0025）
         for m in &migrations {
-            loaded.doc.apply_migration(m);
+            if !loaded.doc.apply_migration(m) {
+                return fail(err, "迁移动作与当前图不匹配，未写入文件", EXIT_FAILED);
+            }
         }
         let mut text = match serde_json::to_string_pretty(&loaded.doc) {
             Ok(t) => t,
             Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
         };
         text.push('\n');
-        if let Err(e) = std::fs::write(&loaded.path, text) {
+        if let Err(e) = patch::write_atomic(&loaded.path, &text) {
             return fail(
                 err,
                 &format!("写入 {} 失败: {e}", loaded.path.display()),
@@ -1509,13 +1669,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(i) => i,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
-    let diagnostics = if inputs.is_empty() {
-        diagnostics_of(&core, &loaded)
-    } else {
-        core.plan_with_inputs(&loaded.json, &loaded.base_dir, &[], None, &inputs, &[])
-            .map_err(|e| e.to_string())
-            .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).map_err(|e| e.to_string()))
-    };
+    let diagnostics = input_diagnostics(&core, &loaded, &inputs);
     match diagnostics {
         Ok(remaining) => {
             if has_errors(&remaining) {
@@ -1544,7 +1698,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }) as EventHook
     });
 
-    let result = execute(
+    let result = execute_with_profiles(
         &core,
         RunRequest {
             graph_json: &loaded.json,
@@ -1556,10 +1710,11 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
             params_json: None,
-            inputs: &inputs,
+            inputs: &inputs.clouds,
             group: None,
             on_event: hook,
         },
+        &inputs.profiles,
     );
     if let Some(p) = &progress {
         if let Ok(mut p) = p.lock() {
@@ -1767,7 +1922,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(inputs) => inputs,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let result = match execute(
+    let result = match execute_with_profiles(
         &core,
         RunRequest {
             graph_json: &loaded.json,
@@ -1779,10 +1934,11 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
             params_json: None,
-            inputs: &inputs,
+            inputs: &inputs.clouds,
             group: None,
             on_event: None,
         },
+        &inputs.profiles,
     ) {
         Ok(r) => r,
         Err(e) => return fail(err, &e, EXIT_FAILED),
@@ -2400,6 +2556,9 @@ const VALUE_OPTS: &[&str] = &[
     "node",
     "only",
     "input",
+    "profile-source",
+    "profile-frame",
+    "profile-source-id",
     "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[

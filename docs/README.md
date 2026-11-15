@@ -26,7 +26,7 @@
 | [JSON Schema](../schema/README.md)           | 可由机器校验的图、事件、配方和样本格式                  |
 | [嵌入指南](embedding.md)                     | C ABI、C++ / Rust 客户端、输入注入与 React / Tauri 宿主 |
 | [Profile 宿主协议](profile-host-protocol.md) | 1.4 ABI、稳定载荷与缓存、Frame、LYPR 二进制及宿主接入   |
-| [公共 C++ 内核](public-kernels.md) | C++17 静态几何/度量目标、约束解析与源码树外 SDK 消费 |
+| [公共 C++ 内核](public-kernels.md)           | C++17 静态几何/度量目标、约束解析与源码树外 SDK 消费    |
 | [React 编辑器](../packages/editor/README.md) | 组件属性、Transport、依赖与宿主样式                     |
 | [HTTP 契约](http-transport.md)               | REST、WebSocket、结果载荷与快照                         |
 
@@ -63,3 +63,5 @@
 ## 追溯旧资料
 
 源码和测试注释中的 M 编号、R 编号等是历史实现标识，不是待执行计划。需要原始说明时可运行 `git log --all -- docs/<旧文件名>`，再用 `git show <修订>:docs/<旧文件名>` 查看；清理前的完整文档树位于提交 `7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032`。ADR 中需要支撑决策的历史来源链接已固定到该修订。
+
+DTS轮廓试点的显式来源声明、旧图与子图保存流程见[DTS Profile迁移](dts-profile-migration.md)；可执行原生输入链见[Profile示例](../examples/m3-native-profile.md)。

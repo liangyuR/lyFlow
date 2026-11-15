@@ -2437,3 +2437,87 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
         run.out
     );
 }
+
+#[test]
+fn migrate_dts_profile_requires_evidence_and_roundtrips_atomic_graph_replacement() {
+    let dir = workspace("migrate-dts-profile");
+    let original =
+        include_str!("../../../core/tests/fixtures/contract-upgrade/dts-profile-v1.lyflow.json");
+    let file = dir.join("旧DTS.lyflow.json");
+    std::fs::write(&file, original).unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let missing = cli(&["migrate", &path, "--profile-source", "n_in", "--write"]);
+    assert_eq!(missing.code, EXIT_USAGE, "{} {}", missing.err, missing.out);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    let flags = [
+        "--profile-source",
+        "n_in",
+        "--profile-frame",
+        "scan",
+        "--profile-source-id",
+        "scanner",
+    ];
+    let mut args = vec!["migrate", path.as_str()];
+    args.extend_from_slice(&flags);
+    let preview = cli(&args);
+    assert_eq!(preview.code, EXIT_OK, "{} {}", preview.err, preview.out);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    assert_eq!(preview.first()["migrations"].as_array().unwrap().len(), 1);
+    args.push("--write");
+    let written = cli(&args);
+    assert_eq!(written.code, EXIT_OK, "{} {}", written.err, written.out);
+    let saved = std::fs::read_to_string(&file).unwrap();
+    let doc: Value = serde_json::from_str(&saved).unwrap();
+    assert!(doc.get("contractUpgrade").is_none());
+    assert_eq!(doc["nodes"][1]["op"], "profile.clean");
+    assert_eq!(doc["nodes"][3]["opVersion"], "2.0.0");
+    assert_eq!(
+        doc["meta"]["contractUpgradeHistory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let reopened = cli(&args);
+    assert_eq!(reopened.code, EXIT_OK, "{} {}", reopened.err, reopened.out);
+    assert!(reopened.first()["migrations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), saved);
+    let mut unknown: Value = serde_json::from_str(original).unwrap();
+    unknown["nodes"][0]["opVersion"] = json!("1.0.1");
+    let unknown_text = serde_json::to_string(&unknown).unwrap();
+    std::fs::write(&file, &unknown_text).unwrap();
+    let rejected = cli(&args);
+    assert_eq!(rejected.code, EXIT_FAILED);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), unknown_text);
+    let inner: Value = serde_json::from_str(original).unwrap();
+    let nested = json!({"schemaVersion":1,"id":"nested-upgrade","nodes":[{"id":"group","op":"sub:inside","params":{}}],"edges":[],
+        "subgraphs":{"inside":{"nodes":inner["nodes"],"edges":inner["edges"],"inputs":[],"outputs":[],"params":[]}},
+        "outputs":{"bundle":{"node":"group/n_bundle","port":"bundle"}}});
+    std::fs::write(&file, serde_json::to_string(&nested).unwrap()).unwrap();
+    let nested_result = cli(&[
+        "migrate",
+        &path,
+        "--profile-source",
+        "inside/n_in",
+        "--profile-frame",
+        "scan",
+        "--profile-source-id",
+        "scanner",
+        "--write",
+    ]);
+    assert_eq!(
+        nested_result.code, EXIT_OK,
+        "{} {}",
+        nested_result.err, nested_result.out
+    );
+    let nested_saved: Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(nested_saved["outputs"], nested["outputs"]);
+    assert_eq!(
+        nested_saved["subgraphs"]["inside"]["nodes"][1]["op"],
+        "profile.clean"
+    );
+}

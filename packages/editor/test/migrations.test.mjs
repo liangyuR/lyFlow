@@ -268,6 +268,62 @@ test('版本化契约升级夹具在编辑器迁移、保存及撤销后保留�
     assert.equal(mixed.nodes.find((n) => n.id === 'load').opVersion, '1.1.0');
     assert.equal(mixed.edges.find((e) => e.id === old.id).to.port, 'newIn');
   }
+  const legacyDts = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../core/tests/fixtures/contract-upgrade/dts-profile-v1.lyflow.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  );
+  g.loadDoc(legacyDts, '旧图.lyflow.json');
+  const casBefore = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  const casAfter = structuredClone(casBefore);
+  casAfter.nodes.find((node) => node.op === 'dts.profile_clean').op = 'profile.clean';
+  casAfter.nodes.push({
+    id: 'profile_contract',
+    op: 'profile.from_cloud',
+    opVersion: '1.0.0',
+    params: {},
+  });
+  casAfter.edges.push({
+    id: 'profile_contract_in',
+    from: { node: 'n_in', port: 'profile' },
+    to: { node: 'profile_contract', port: 'cloud' },
+  });
+  casAfter.meta.contractUpgradeHistory = [
+    { schemaVersion: 1, request: { schemaVersion: 1, rules: [] }, appliedSources: [] },
+  ];
+  casAfter.subgraphs.saved = { nodes: [], edges: [], inputs: [], outputs: [], params: [] };
+  const replacement = {
+    ...action,
+    nodeId: '',
+    edits: { removeEdges: [], addNodes: [], addEdges: [] },
+    graphUpdate: { contractUpgradeReplacement: { before: casBefore, after: casAfter } },
+  };
+  assert.equal(g.applyMigrations([]), 0, '取消或未选择整图动作保持原状');
+  assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), casBefore);
+  g.setTopologyLocked(true);
+  for (const lockedReplacement of [replacement, { ...replacement, edits: undefined }]) {
+    assert.equal(g.applyMigrations([lockedReplacement]), 0, '拓扑锁定时拒绝整图替换');
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(useGraphStore.getState().doc)),
+      casBefore,
+      '锁定拒绝保留全部节点、连线及历史',
+    );
+  }
+  g.setTopologyLocked(false);
+  assert.equal(g.applyMigrations([replacement]), 1, 'DTS整图动作一次提交所有结构及历史');
+  assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), casAfter);
+  assert.equal(g.applyMigrations([replacement]), 0, '重复CAS不会重复追加历史');
+  g.undo();
+  assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), casBefore);
+  const staleBefore = structuredClone(casBefore);
+  staleBefore.name = '验证后的修改';
+  g.loadDoc(staleBefore, 'changed.lyflow.json');
+  assert.equal(g.applyMigrations([replacement]), 0, '验证后用户修改文档时拒绝过期CAS');
+  assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), staleBefore);
 });
 
 test('edits：删两条旧边、插一个节点、加三条边，一次撤销全部回去；不带 edits 的只改版本与参数', () => {

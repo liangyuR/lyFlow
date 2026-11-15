@@ -39,7 +39,10 @@ export interface MigrationAction extends GraphDiagnostic {
   notes?: string[];
   /** 端口增删时的连线改写（ADR-0025）。节点 id 已由 core 分配好，照做即可。 */
   edits?: MigrationEdits;
-  graphUpdate?: { contractUpgradeRetirement: ContractUpgradeRetirement };
+  graphUpdate?: {
+    contractUpgradeRetirement?: ContractUpgradeRetirement;
+    contractUpgradeReplacement?: { before: GraphDoc; after: GraphDoc };
+  };
 }
 
 export interface ContractUpgradeRetirement {

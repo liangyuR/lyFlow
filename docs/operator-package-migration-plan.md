@@ -1,23 +1,24 @@
 # 算子边界迁移计划
 
-状态：实施中，M1 已合并，当前推进 M2。原始规划基线为 `9940c8c`；逐项清单保留原始注册快照与目标边界，不把文档完成记为算法迁移完成。
+状态：实施中，M1/M2 已合并，当前推进 M3。原始规划基线为 `9940c8c`；逐项清单保留原始注册快照与目标边界，不把文档完成记为算法迁移完成。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
 ## 实施进度
 
-| 波次  | 当前状态                                                                  | 证据入口                                                                                                                            |
-| ----- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| M0    | 分包规划与完整清单已合并                                                  | [PR61](https://github.com/liangyuR/lyFlow/pull/61)                                                                                  |
-| M1    | 已合并：原生Profile、版本化标定、显式图适配与跨宿主接口 | [PR62](https://github.com/liangyuR/lyFlow/pull/62)、[数据契约](profile-data-contract.md)、[宿主协议](profile-host-protocol.md) |
-| M2    | 公共静态内核、声明式模块与三项算子归属调整已实施，待完成整体验证及审查 | [公共内核](public-kernels.md)、[安装后示例](../examples/public_kernels.cpp) |
-| M3–M7 | 待实施；不将适配接口和公共核抽取算作后续场景算法迁移 | 下表的波次及验收门槛 |
+| 波次  | 当前状态                                                              | 证据入口                                                                                                                       |
+| ----- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| M0    | 分包规划与完整清单已合并                                              | [PR61](https://github.com/liangyuR/lyFlow/pull/61)                                                                             |
+| M1    | 已合并：原生Profile、版本化标定、显式图适配与跨宿主接口               | [PR62](https://github.com/liangyuR/lyFlow/pull/62)、[数据契约](profile-data-contract.md)、[宿主协议](profile-host-protocol.md) |
+| M2    | 已合并：公共静态内核、声明式模块与三项算子归属调整                    | [PR63](https://github.com/liangyuR/lyFlow/pull/63)、[公共内核](public-kernels.md)                                              |
+| M3    | 实施及整体验证中：公共Profile链、DTS场景v2、显式旧图升级、CLI/SDK交付 | [图迁移](dts-profile-migration.md)、[原生Profile示例](../examples/m3-native-profile.md)                                        |
+| M4–M7 | 待实施；不将M3试点算作gap/glue或最终退役完成                          | 下表的波次及验收门槛                                                                                                           |
 
 M1提升产品/ABI至1.4.0：`lyflow_run_options`扩展后与1.3系列二进制不兼容，所有客户端按1.4系列加载。`std-profile`仅包含三项数据适配；DTS、gap、glue的计算与归属暂未迁移。旧DTS几何的数值换算必须带已知v1来源声明，不推断未知外部节点的单位。
 
-M2 随产品 1.4.1 交付公开静态 SDK；C ABI 布局保持 1.4 系列兼容。抽取可独立静态链接的 geometry/metrology 内核，约束 schema/解析/构造进入 geometry 内核，Eigen 投影和三维拟合仍留点云适配层。`transform.make`、`register.constraints_3d` 转属 `std-geometry`，`image.calibrated_distance` 转属 `std-metrology`，保持算子 ID/版本及端口参数。场景度量定义、轮廓拟合和 DTS/gap/glue 的业务实现留待后续波次；无重依赖组合及安装 SDK 独立消费/导入检查已通过，完整后端组合与 PR 的 CI/审查仍待验收。
+M2 随产品 1.4.1 交付公开静态 SDK；C ABI 布局保持 1.4 系列兼容。抽取可独立静态链接的 geometry/metrology 内核，约束 schema/解析/构造进入 geometry 内核，Eigen 投影和三维拟合仍留点云适配层。`transform.make`、`register.constraints_3d` 转属 `std-geometry`，`image.calibrated_distance` 转属 `std-metrology`，保持算子 ID/版本及端口参数。场景度量定义、轮廓拟合和 DTS/gap/glue 的业务实现留待后续波次；无重依赖组合及安装 SDK 独立消费/导入检查已通过，完整后端组合与PR63的7项CI及Codex复核已通过并合并。
 
-图级`contractUpgrade`以`schemaVersion=1`和精确源节点/算子版本/端口及目标消费边申请升级；当前支持`planeCalib.v1`和`dtsGeometry.v1`。各宿主进入相同原生解析路径，生成迁移诊断及可保存的结构编辑。未提供明确来源版本、重复适配、无匹配连线或未来版本时拒绝推断。全部适配与两段连线写回后，活动请求移除，原请求及应用来源去重追加到`meta.contractUpgradeHistory`；历史不参与执行，之后删除消费节点、重新连线或组合子图不会被旧请求锁死。分批写回时，宿主按原生诊断给出的完整要求核验；未全部完成则保留活动请求，再次加载只补齐缺失适配。诊断只携带一份完整退休要求，已全部适配的旧活动请求会得到仅退休图元数据的诊断。升级只影响所指定的消费边，其他meta字段和已有算子迁移钩子保持原语义。版本化标定消费者仍必须明确对应imageFrame/planeFrame，不能用适配节点替调用方猜测。
+图级`contractUpgrade`以`schemaVersion=1`和精确源节点/算子版本/端口及目标消费边申请升级；当前支持`planeCalib.v1`、`dtsGeometry.v1`和M3的`dtsProfile.v1`全链升级。M3采用整图CAS结构替换并支持显式子图定义作用域，见[DTS迁移指南](dts-profile-migration.md)。各宿主进入相同原生解析路径，生成迁移诊断及可保存的结构编辑。未提供明确来源版本、重复适配、无匹配连线或未来版本时拒绝推断。全部适配与两段连线写回后，活动请求移除，原请求及应用来源去重追加到`meta.contractUpgradeHistory`；历史不参与执行，之后删除消费节点、重新连线或组合子图不会被旧请求锁死。分批写回时，宿主按原生诊断给出的完整要求核验；未全部完成则保留活动请求，再次加载只补齐缺失适配。诊断只携带一份完整退休要求，已全部适配的旧活动请求会得到仅退休图元数据的诊断。升级只影响所指定的消费边，其他meta字段和已有算子迁移钩子保持原语义。版本化标定消费者仍必须明确对应imageFrame/planeFrame，不能用适配节点替调用方猜测。
 
 ## 波次与完成门槛
 
@@ -81,7 +82,7 @@ M2 随产品 1.4.1 交付公开静态 SDK；C ABI 布局保持 1.4 系列兼容�
 | `gap.measure_skeleton`               | gap片段               | solution-gap / M4                                          | 完整ROI/Bundle/图输出连接正确，无缺失公共算子                                                            |
 | `gap.locate_model_template_fallback` | gap片段               | solution-gap / M4                                          | 模型失效才请求模板闭包；正常模型路径不启动模板依赖                                                       |
 | `glue.bead_inspect`                  | glue片段              | solution-glue / M5                                         | 路径、宽、断胶、边距及判定的公共/场景schema一致                                                          |
-| DTS两张默认图                        | packs/dts/graphs      | solutions/dts / M3                                         | 默认/相邻钣金基准选择及宿主注入节点迁移；不能将两张图误合成一种基准定义                                  |
+| DTS两张默认图及原生源变体            | solutions/dts/graphs  | solutions/dts / M3                                         | 默认/相邻钣金基准选择及宿主注入节点迁移；不能将两张图误合成一种基准定义                                  |
 | gap/glue随包图和工具                 | packs/gap、packs/glue | 对应solutions / M4、M5                                     | 扫描所有图的节点/版本、相对模型/图片路径、工具CLI参数与输出字段；个人工作流不提交到仓库                  |
 | 共享可视化/渲染与模型查看            | core/renderer、editor | 原所属平台层 / M1、M7                                      | 显示明确的mm/m与轴/手性，Bundle新schema适配；不为场景分包复制渲染器                                      |
 | Python SDK/worker及7个示例           | python                | Python执行扩展保留core；示例仍为SDK示例 / M1、M7           | 大数组继续原生/映射缓冲；类型白名单、只读/取消/超时、worker恢复与临时文件清理；新Profile需同步完整codec  |

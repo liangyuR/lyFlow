@@ -310,6 +310,18 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
     }
   }
 
+  if (doc.contains("nodes") && doc["nodes"].is_array()) {
+    for (const auto& node : doc["nodes"]) {
+      const auto op = node.value("op", std::string());
+      if (op == "dts.profile_clean" || op == "dts.split_faces") {
+        diags.error(
+            node.value("id", std::string()), Phase::Validate, "migration_required",
+            "旧DTS PointCloud消费链需要显式升级：lyflow migrate <graph> --profile-source <dts.profile_in节点> --profile-frame <frame> --profile-source-id <sourceId> --write；子图来源使用<定义ID>/<节点ID>，库图直接迁移原始图资产");
+        return false;
+      }
+    }
+  }
+
   {
     auto it = doc.find("schemaVersion");
     if (it != doc.end() && it->is_number_integer() && it->get<int>() != 1) {
