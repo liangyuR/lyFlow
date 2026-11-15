@@ -44,6 +44,7 @@
 | 车门胶条面差 | [dts 包](../packs/dts/README.md) |
 | 开发新算子或外部包 | [算子包机制](op-packs.md) · [core 开发指南](../core/README.md) |
 | 算子资源与性能约束 | [缓存、结果读取与推理资源](operator-optimization.md) |
+| 算子包边界重整（规划） | [目标边界](operator-package-boundaries.md) · [251项原生算子逐项审计](operator-package-audit.md) · [迁移顺序与验收](operator-package-migration-plan.md) |
 
 ## 外部库能力参考
 

@@ -5,6 +5,8 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
+本页描述当前机制。正在规划的能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)；`std-profile`、`std-metrology`及`solution-*`目前尚未实现，不能直接作为包名启用。
+
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
 | | 仓库内的包 | 外部包 |
@@ -22,10 +24,12 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 
 | 包 | 版本 | DEFAULT | 算子 | 依赖 |
 |---|---|---|---|---|
-| `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
-| `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
-| `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云（[图像包](../packs/std-image/README.md)） | OpenCV 4（core / imgproc / imgcodecs / calib3d） |
-| `glue` | 0.1.0 | **OFF** | 胶路（自由搜索 / 示教）、胶宽、断胶、边距、判定、人造断胶、飞拍定位与逐点卡尺（[README](../packs/glue/README.md)） | std-image 的 `lyflow_opencv_support` |
+| `std-value` | 0.2.0 | ON | 16项数值、逻辑、列表与受限表达式 | core与标准库 |
+| `std-geometry` | 0.3.0 | ON | 35项几何、位姿、坐标变换与刚体关系 | core与标准库 |
+| `std-pointcloud` | 0.4.0 | ON | 52项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子 | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计 |
+| `std-ml` | 0.3.0 | ON | `ml.onnx_run` | ONNX Runtime |
+| `std-image` | 0.9.0 | ON | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `glue` | 0.3.3 | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)） | std-image的`lyflow_opencv_support` |
 | `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
 | `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
 

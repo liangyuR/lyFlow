@@ -53,6 +53,9 @@ jobs:
           python -m pip install -r scripts/requirements.txt
           pnpm install --frozen-lockfile
 
+      - name: 算子分包规划清单校验
+        run: python scripts/check-operator-package-audit.py
+
       - name: 前端 / MCP / workflow 格式检查（Prettier）
         run: pnpm format:check
 
