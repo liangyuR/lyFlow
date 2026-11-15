@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "d23db4ff9a8428af15cbb4a543469dfe1ec2227d",
+  "sourceRevision": "6fd511430cd4e58ee1de07aefb4bd2974f8aed67",
   "productVersion": "1.4.0",
   "nativeCount": 256,
   "pythonExampleCount": 8,
@@ -440,7 +440,7 @@
     "python/examples/p6_adapters/__init__.py": "d882046f66ebda185f983824234bca386387792809fd4e04efa50fc52b5b8292",
     "python/lyflow_python/data.py": "ef483c07b0496f9ba6dbe6555dcfbd0d038498922f000cecfe605fde49331de4",
     "python/lyflow_python/discovery.py": "75d7d284fd577b9029c91c39467a99400b88e42aad9f43da0f0395333c520bf9",
-    "core/src/graph_contract_upgrade.cpp": "dbbb9a7e09e0e26063f975ecaf535bdb23937ab912a4e3663371b107127de24e",
+    "core/src/graph_contract_upgrade.cpp": "9217b3df0444c1aa900b9e6e6e55997f067bc97cfde37d6bad495a66731618d5",
     "python/lyflow_python/worker.py": "7ece03566c407f8169e955c925fa48140c2d1f96ff28b71a17ba0a92be1be423",
     "python/examples/profile_copy.py": "7e5daf99117e5fc91e2d32d66ad7efd39444ddcd1bb9107863d0cad71a5f6121",
     "python/lyflow_python/codec.py": "e168ac6a99b6aeb882e68473f29139e061f13287724131cf9dd479435a26f087",
@@ -39304,7 +39304,7 @@
         "image.calibrated_distance"
       ],
       "note": "仅公共契约/显式适配；M3场景算法迁移尚未实施；阶段完成需另行运行与交付验收。",
-      "reviewedChange": "M1图升级入口与迁移诊断序列化纳入契约来源，退休与部分写回语义已交叉复核",
+      "reviewedChange": "PR62 Codex P2复核：既有契约适配节点必须启用；拒绝bypass:true及非法类型，防止毫米载荷绕过转换后退休；226断言及客户端写回回归已通过",
       "reviewedSourceChanges": [
         {
           "path": "core/CMakeLists.txt",
@@ -39773,6 +39773,12 @@
           "previousSha256": "8c32e18f04d544329ae543bdad8fd4adedd57013a31935ac5623eeaa3cf05cc0",
           "sha256": "7b1f6dbbf3c920597b059bbbe49b9a94a12e2bf485adc82738fdcaa1b94346f9",
           "kind": "tracking_added"
+        },
+        {
+          "path": "core/src/graph_contract_upgrade.cpp",
+          "previousSha256": "dbbb9a7e09e0e26063f975ecaf535bdb23937ab912a4e3663371b107127de24e",
+          "sha256": "9217b3df0444c1aa900b9e6e6e55997f067bc97cfde37d6bad495a66731618d5",
+          "kind": "modified"
         }
       ],
       "manifestEvidence": {

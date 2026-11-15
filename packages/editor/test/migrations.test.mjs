@@ -203,8 +203,22 @@ test('版本化契约升级夹具在编辑器迁移、保存及撤销后保留�
   ]);
   const historicalActive = structuredClone(completed);
   historicalActive.contractUpgrade = structuredClone(multi.contractUpgrade);
-  g.loadDoc(historicalActive, 'historical-active.lyflow.json');
   const graphOnly = { ...first, nodeId: '', op: '', opVersion: '', params: {}, edits: undefined };
+  for (const bypass of [true, null, 'false', 0]) {
+    const disabled = structuredClone(historicalActive);
+    disabled.meta = { owner: 'keep', contractUpgradeHistory: [] };
+    disabled.nodes.find((node) => node.id === rule.adapterId).bypass = bypass;
+    g.loadDoc(disabled, 'disabled-adapter.lyflow.json');
+    assert.equal(g.applyMigrations([graphOnly]), 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), disabled);
+    const enabled = structuredClone(disabled);
+    enabled.nodes.find((node) => node.id === rule.adapterId).bypass = false;
+    g.loadDoc(enabled, 'enabled-adapter.lyflow.json');
+    assert.equal(g.applyMigrations([graphOnly]), 1);
+    assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
+    assert.deepEqual(useGraphStore.getState().doc.meta.contractUpgradeHistory, [multiHistory]);
+  }
+  g.loadDoc(historicalActive, 'historical-active.lyflow.json');
   assert.equal(g.applyMigrations([graphOnly]), 1);
   assert.equal(useGraphStore.getState().doc.contractUpgrade, undefined);
   assert.equal(useGraphStore.getState().doc.meta.contractUpgradeHistory.length, 2);

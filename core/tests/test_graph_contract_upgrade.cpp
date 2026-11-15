@@ -58,6 +58,30 @@ TEST_CASE("Graph contract upgrade: exact version evidence, edge scope and idempo
     REQUIRE(retirement.size() == 1);
     CHECK(retirement[0]["nodeId"] == "");
     CHECK(retirement[0]["edits"]["addNodes"].empty());
+    for (const auto& bypass : {Json(true), Json("false"), Json(), Json(0)}) {
+      auto disabled = legacyApplied;
+      disabled["meta"] = {{"owner", "keep"}};
+      disabled["nodes"].back()["bypass"] = bypass;
+      const auto snapshot = disabled;
+      const auto priorResult = retired;
+      const auto priorReport = retirement;
+      CHECK_FALSE(
+          upgradeGraphContracts(disabled, graph["contractUpgrade"], retired, retirement, error));
+      CHECK(disabled == snapshot);
+      CHECK(retired == priorResult);
+      CHECK(retirement == priorReport);
+      CHECK(error.message.find("必须启用") != std::string::npos);
+      exec::RawGraph rejected;
+      Diagnostics rejection;
+      CHECK_FALSE(exec::parseGraph(disabled.dump(), rejected, rejection));
+      REQUIRE(rejection.items().size() == 1);
+      CHECK(rejection.items()[0].status.code == "bad_input");
+      CHECK(rejection.items()[0].migration == nullptr);
+    }
+    legacyApplied["nodes"].back()["bypass"] = false;
+    REQUIRE(
+        upgradeGraphContracts(legacyApplied, graph["contractUpgrade"], retired, retirement, error));
+    CHECK_FALSE(retired.contains("contractUpgrade"));
     exec::RawGraph already;
     Diagnostics unchanged;
     REQUIRE(exec::parseGraph(upgraded.dump(), already, unchanged));

@@ -138,6 +138,9 @@ bool upgradeGraphContracts(const Json& graph, const Json& request, Json& upgrade
       const auto existing = nodeIndex(nodes, adapterId);
       const auto oldEdge = edgeIndex(edges, from, target);
       if (existing < nodes.size()) {
+        require(!nodes[existing].contains("bypass") || (nodes[existing]["bypass"].is_boolean() &&
+                                                        !nodes[existing]["bypass"].get<bool>()),
+                "已有契约适配节点必须启用，不能旁路单位或坐标契约转换");
         require(nodes[existing].value("op", std::string()) == adapterOp &&
                     nodes[existing].value("opVersion", std::string()) == "1.0.0" &&
                     nodes[existing].value("params", Json()) == params && oldEdge == edges.size() &&

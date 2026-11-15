@@ -333,6 +333,7 @@ impl GraphDoc {
                 || source_node.op_version.as_deref() != source["opVersion"].as_str()
                 || Some(adapter_node.op.as_str()) != adapter["op"].as_str()
                 || adapter_node.op_version.as_deref() != adapter["opVersion"].as_str()
+                || adapter_node.bypass
                 || serde_json::Value::Object(adapter_node.params.clone()) != adapter["params"]
                 || !self
                     .nodes
@@ -721,6 +722,46 @@ mod tests {
         resumed.nodes[0].op_version = Some("1.0.0".into());
         resumed.contract_upgrade = Some(request);
         let graph_only = serde_json::json!({"nodeId":"","graphUpdate":update});
+        let mut disabled = resumed.clone();
+        disabled.meta = Some(serde_json::json!({"owner":"keep","contractUpgradeHistory":[]}));
+        disabled
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "explicit_calib")
+            .unwrap()
+            .bypass = true;
+        let untouched = serde_json::to_value(&disabled).unwrap();
+        assert!(!disabled.apply_migration(&graph_only));
+        assert_eq!(serde_json::to_value(&disabled).unwrap(), untouched);
+        for bypass in [
+            serde_json::Value::Null,
+            serde_json::json!("false"),
+            serde_json::json!(0),
+        ] {
+            let mut malformed = untouched.clone();
+            malformed["nodes"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|node| node["id"] == "explicit_calib")
+                .unwrap()["bypass"] = bypass;
+            assert!(serde_json::from_value::<GraphDoc>(malformed).is_err());
+        }
+        disabled
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "explicit_calib")
+            .unwrap()
+            .bypass = false;
+        assert!(disabled.apply_migration(&graph_only));
+        assert!(disabled.contract_upgrade.is_none());
+        assert_eq!(
+            disabled.meta.as_ref().unwrap()["contractUpgradeHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(resumed.apply_migration(&graph_only));
         assert!(resumed.contract_upgrade.is_none());
         assert_eq!(

@@ -131,7 +131,7 @@ fn input_injects_a_cloud_into_an_input_port() {
         .expect("没有 --outputs 那一行");
     assert_eq!(outputs["merged"]["elementCount"], 5);
 
-    // 端口名写错：执行期校验报 unknown_port，退出码 2；写法不对是参数错
+    // 端口名写错：带注入的预校验报 unknown_port，退出码 1；写法不对是参数错
     let wrong = format!("m.nope={}", a.to_string_lossy());
     let r = cli(&[
         "run",
@@ -144,7 +144,7 @@ fn input_injects_a_cloud_into_an_input_port() {
         &wrong,
         "--no-cache",
     ]);
-    assert_eq!(r.code, EXIT_FAILED, "{}", r.out);
+    assert_eq!(r.code, EXIT_INVALID, "{}", r.out);
     assert!(r.out.contains("unknown_port"), "{}", r.out);
     assert_eq!(cli(&["run", &graph, "--input", "m.a"]).code, EXIT_USAGE);
     let missing = format!("m.a={}", dir.join("nope.pcd").to_string_lossy());
@@ -623,7 +623,7 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         (
             vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"],
             EXIT_USAGE,
-            "--format 只认 binary / ascii / binary_compressed，收到 asci",
+            "--format 只认 binary / ascii / binary_compressed / profile，收到 asci",
         ),
         (
             vec!["dump", &empty, "zzz:cloud", "out.pcd"],

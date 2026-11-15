@@ -40,6 +40,27 @@ TEST_CASE("DTS graph upgrade: plan and run convert only the selected metric boun
   Json upgraded, changes;
   GraphContractUpgradeError error;
   REQUIRE(upgradeGraphContracts(graph, graph["contractUpgrade"], upgraded, changes, error));
+  auto pendingBypass = upgraded;
+  pendingBypass["contractUpgrade"] = graph["contractUpgrade"];
+  pendingBypass["meta"] = {{"owner", "keep"}};
+  pendingBypass["nodes"].back()["bypass"] = true;
+  const auto rejectedPlan =
+      Json::parse(exec::planGraphJson(pendingBypass.dump(), {}, {}, "", inputs));
+  REQUIRE(rejectedPlan.size() == 1);
+  CHECK(rejectedPlan[0]["code"] == "bad_input");
+  CHECK(rejectedPlan[0]["nodeId"] == "metric");
+  Session bypassRun(pendingBypass, {}, {}, false, 1, false, inputs);
+  CHECK(bypassRun.wait().runStatus() == "error");
+  Data bypassOutput;
+  CHECK_FALSE(exec::ResultStore::instance().get(bypassRun.runId(), "metric", "out", bypassOutput));
+  CHECK_FALSE(pendingBypass["meta"].contains("contractUpgradeHistory"));
+  pendingBypass["nodes"].back()["bypass"] = false;
+  Session enabledRun(pendingBypass, {}, {}, false, 1, false, inputs);
+  REQUIRE(enabledRun.wait().runStatus() == "ok");
+  Data enabledMetric;
+  REQUIRE(exec::ResultStore::instance().get(enabledRun.runId(), "metric", "out", enabledMetric));
+  REQUIRE(enabledMetric.asPoint2D());
+  CHECK(enabledMetric.asPoint2D()->p[0] == doctest::Approx(1));
   auto saved = Json::parse(upgraded.dump());
   REQUIRE_FALSE(saved.contains("contractUpgrade"));
   const auto history = saved["meta"]["contractUpgradeHistory"];

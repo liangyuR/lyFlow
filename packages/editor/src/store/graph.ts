@@ -201,6 +201,7 @@ function retireContractUpgrade(d: GraphDoc, update: MigrationAction['graphUpdate
       source.opVersion !== required.source.opVersion ||
       adapter?.op !== required.adapter.op ||
       adapter.opVersion !== required.adapter.opVersion ||
+      (adapter.bypass !== undefined && adapter.bypass !== false) ||
       !valueEquals(adapter.params ?? {}, required.adapter.params) ||
       !d.nodes.some((n) => n.id === required.target.node) ||
       d.edges.some((e) => same(e.from, from) && same(e.to, required.target)) ||
