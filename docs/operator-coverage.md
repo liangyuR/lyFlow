@@ -20,7 +20,7 @@
 
 这些是**清单条目数**，不折算“功能覆盖率”：例如部分覆盖可能仅有一个基础模式，预置组又依赖多个算法。现有/组合项的“无需补齐”只针对表中限定用途；新格式、外部协议和现场验收另立需求。
 
-阶段5的19个清单条目已按完整源模式落实到22个新节点，入口及限制见[深度投影](p5-analysis-projection.md)、[深度检查](p5-analysis-cloud-inspection.md)和[姿态几何](p5-analysis-pose-geometry.md)。阶段5已通过CLI/独立SDK、CI与审查并合并；现场精度和碰撞安全仍需业务验收。阶段6的15项通过现有计算节点、11类Python端口、共享查看器及有界原生帧宿主组合补齐，见[P6指南](p6-examples.md)；当前完整运行与交付门禁仍在执行。
+阶段5的19个清单条目已按完整源模式落实到22个新节点，入口及限制见[深度投影](p5-analysis-projection.md)、[深度检查](p5-analysis-cloud-inspection.md)和[姿态几何](p5-analysis-pose-geometry.md)。阶段5已通过CLI/独立SDK、CI与审查并合并；现场精度和碰撞安全仍需业务验收。阶段6的15项通过现有计算节点、11类Python端口、共享查看器及有界原生帧宿主组合补齐，见[P6指南](p6-examples.md)；本地完整运行与独立安装交付门禁已通过；CI与Codex审查状态以[PR #59](https://github.com/liangyuR/lyFlow/pull/59)为准。
 
 ## 分类统计
 

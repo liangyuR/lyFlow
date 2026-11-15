@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [198 项能力对照](operator-coverage.md) · [当前范围](roadmap.md)
 
-状态：**P0/P1限定切片、P2 A01受限表达式及A05高光限定用途已实现；六阶段交付阶段1/2/3/4/5已合并，当前阶段6进行中，其余按原优先级继续**。初始基线为 `32a3700e435c753df46916e1dc029a9d59b8d95e`；当前阶段6开发版本 1.3.12，日期 2026-11-15。P0 按 23 项外部源码逐个核实、优化后实现，详见[分析与剩余边界](p0-operator-analysis.md)及 [ADR-0029](adr/0029-p0-values-geometry-and-image-contracts.md)。P1新增55个算子，逐条分析与可用链见[P1实现索引](p1-operator-analysis.md)。外部名称用于追踪需求，不作为 LyFlow 新 ID 或接口设计。
+状态：**P0/P1限定切片、P2 A01受限表达式及A05高光限定用途已实现；六阶段交付阶段1/2/3/4/5已合并，阶段6已实现并验证（合并门禁见PR #59），其余按原优先级继续**。初始基线为 `32a3700e435c753df46916e1dc029a9d59b8d95e`；当前阶段6开发版本 1.3.12，日期 2026-11-15。P0 按 23 项外部源码逐个核实、优化后实现，详见[分析与剩余边界](p0-operator-analysis.md)及 [ADR-0029](adr/0029-p0-values-geometry-and-image-contracts.md)。P1新增55个算子，逐条分析与可用链见[P1实现索引](p1-operator-analysis.md)。外部名称用于追踪需求，不作为 LyFlow 新 ID 或接口设计。
 
 ## 决策摘要
 
