@@ -6,43 +6,14 @@
 #include <Eigen/Core>
 
 #include "algo/cloud2d.h"
+#include "lyflow/kernel/profile_robust.h"
 
 namespace lyflow::std_pc {
 
-struct Line2DFitOptions {
-  /// 内点判定距离，米。假设选择阶段用它的 1/3（双迹线剖面靠这个隔开两条轨迹）。
-  float distThresh = 0.0001F;
-  int maxIterations = 1000;
-  bool optimize = true;
-};
-
-struct Circle2DFitOptions {
-  float distThresh = 0.00003F;
-  double minRadius = 0.0005;
-  double maxRadius = 0.01;
-  int maxIterations = 10000;
-  bool optimizeCoefficients = true;
-  /// 半径软先验，米。radiusPriorSigma > 0 时生效：细化的目标函数多一项
-  /// ((r − radiusPrior) / radiusPriorSigma)²，点残差按 distThresh / 2 归一。
-  /// 弧长时点的信息压过先验，弧短时半径往 radiusPrior 收。0 = 不加（默认）。
-  double radiusPrior = 0.0;
-  double radiusPriorSigma = 0.0;
-};
-
-/// fitCircle2D 的半径最后是怎么定下来的。
-enum class Circle2DRadiusOutcome {
-  Free,       ///< 细化后半径在界内，照常
-  Prior,      ///< 走了带先验的细化，半径在界内
-  ClampedMin, ///< 细化把半径推到下界以外，钉在下界上只重定圆心
-  ClampedMax, ///< 同上，上界
-  Unrefined,  ///< 细化发散（非有限值），用 RANSAC 的原始圆
-};
-
-struct Circle2DFitReport {
-  Circle2DRadiusOutcome radius = Circle2DRadiusOutcome::Free;
-  /// 钉之前细化给出的半径（米）；没钉时等于最终半径。
-  double unclampedRadius = 0.0;
-};
+using Line2DFitOptions = kernel::profile_robust::Line2DFitOptions;
+using Circle2DFitOptions = kernel::profile_robust::Circle2DFitOptions;
+using Circle2DRadiusOutcome = kernel::profile_robust::Circle2DRadiusOutcome;
+using Circle2DFitReport = kernel::profile_robust::Circle2DFitReport;
 
 /// 双迹线感知的直线拟合。line 是 6 维 PCL 直线系数（点 + 方向），
 /// inliers 是按 distThresh 重收的内点（升序）。点太少返回 false。

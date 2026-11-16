@@ -205,6 +205,48 @@ class PackageAuditTests(unittest.TestCase):
         self.assertIn('kernels/include/**/*.h', patterns)
         self.assertIn('packs/*/include/**/*.h', patterns)
 
+    def test_m4a_requires_merged_m3_and_does_not_complete_the_whole_wave(self):
+        before = copy.deepcopy(self.baseline)
+        before['stageLedger'] = [entry for entry in before['stageLedger'] if entry['stage'] != 'M4a']
+        prepared = REFRESH.prepare(before, 'M4a')
+        m4a = next(entry for entry in prepared['stageLedger'] if entry['stage'] == 'M4a')
+        self.assertEqual(m4a['expectedNativeCount'], 261)
+        self.assertEqual(m4a['introducedNativeIds'], [])
+        self.assertEqual(m4a['introducedPythonIds'], [])
+        self.assertEqual(m4a['retiredNativeIds'], [])
+        self.assertEqual(m4a['status'], 'pending_manifest')
+        self.assertEqual(next(entry for entry in prepared['stageLedger'] if entry['stage'] == 'M4')['status'], 'planned')
+        self.assertIn('| M4 | planned | 待确定 / 待确定 |', REFRESH.render_overview(prepared))
+        for mutation in ('status', 'merge'):
+            damaged = copy.deepcopy(self.baseline)
+            m3 = next(entry for entry in damaged['stageLedger'] if entry['stage'] == 'M3')
+            if mutation == 'status':
+                m3['status'] = 'validated_manifest'
+            else:
+                m3['mergeEvidence']['revision'] = '0' * 40
+            with self.assertRaisesRegex(ValueError, 'PR64合并证据'):
+                REFRESH.prepare(damaged, 'M4a')
+            self.assertTrue(any('M4a缺少已合并M3前置证据' in problem for problem in CHECKER.validate(damaged, [])))
+        m4a['introducedPythonIds'] = ['py.unreviewed.node']
+        self.assertTrue(any('M4a只能抽公共核' in problem for problem in CHECKER.validate(prepared, [])))
+
+    def test_m4a_refuses_hidden_operator_contract_changes(self):
+        first = min(self.baseline['operators'], key=lambda row: row['migrationOrder'])['id']
+        operators = [dict(id=row['id'], version=row['currentVersion'], pack=row['currentPackVersion'],
+                          params=row['currentParams'], **row['currentPorts'])
+                     for row in self.baseline['operators']]
+        for field in ('version', 'pack', 'params', 'inputs', 'outputs'):
+            with self.subTest(field=field):
+                manifest = dict(generatedBy='lyflow-core/1.4.3', operators=copy.deepcopy(operators))
+                op = next(row for row in manifest['operators'] if row['id'] == first)
+                if field in ('version', 'pack'):
+                    op[field] = '999.0.0' if field == 'version' else 'unexpected-package@1.0.0'
+                else:
+                    op[field] = op[field] + [dict(name='unexpected', type='PointCloud')]
+                with patch.object(REFRESH, 'load', return_value=manifest), patch.object(REFRESH, 'pending_sources', return_value=[]):
+                    with self.assertRaisesRegex(ValueError, '不得改变注册包、版本、端口或参数'):
+                        REFRESH.refreshed(self.baseline, Path('unit-fixture.json'), [], 'contract guard', '1.4.3', 'M4a')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

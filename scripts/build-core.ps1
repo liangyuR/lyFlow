@@ -65,6 +65,7 @@ if ($stdPacks -eq "0") { Write-Host "标准包: 关（纯平台构建）" -Foreg
 
 # 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔，例如 LYFLOW_PACKS=gap。
 $repoPacks = if ($env:LYFLOW_PACKS) { $env:LYFLOW_PACKS } else { "" }
+$modules = if ($env:LYFLOW_MODULES) { $env:LYFLOW_MODULES } else { "" }
 if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
 if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks -split ';')) {
@@ -100,7 +101,7 @@ $line = "call `"$vcvars`" >nul 2>&1" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
         " -DLYFLOW_OP_PACKS=`"$packs`" -DLYFLOW_STD_PACKS=`"$stdPacks`"" +
-        " -DLYFLOW_PACKS=`"$repoPacks`"" + $releaseArgs +
+        " -DLYFLOW_PACKS=`"$repoPacks`" -DLYFLOW_MODULES=`"$modules`"" + $releaseArgs +
         " && `"$cmake`" --build `"$build`" --target lyflow_core lyflow-dump-manifest"
 if ($runTests) { $line += " lyflow-core-tests" }
 

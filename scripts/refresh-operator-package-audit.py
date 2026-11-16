@@ -48,6 +48,7 @@ M2_MOVES = {
 }
 
 M2_MERGED_REVISION = '36c969149e119614b7d221c8006d1a311d6d2995'
+M3_MERGED_REVISION = 'b22fde7fad01b7aea67886b6fe3345e92a5fe8bb'
 M3_RETIREMENTS = {
     'dts.profile_clean': 'profile.clean',
     'dts.split_faces': 'profile.split_faces',
@@ -194,6 +195,19 @@ def manifest_generator(manifest):
 
 
 def prepare(data, stage='M2'):
+    if stage == 'M4a':
+        result = copy.deepcopy(data)
+        m3 = next((entry for entry in result.get('stageLedger', []) if entry['stage'] == 'M3'), {})
+        proof = m3.get('mergeEvidence', {})
+        if m3.get('status') != 'complete' or proof.get('pr') != 64 or proof.get('revision') != M3_MERGED_REVISION:
+            raise ValueError('M4a需要M3已完成且PR64合并证据准确，不能以源码存在代替前置验收')
+        if not any(entry['stage'] == 'M4a' for entry in result['stageLedger']):
+            result['stageLedger'].append(dict(stage='M4a', status='pending_manifest',
+                expectedNativeCount=261, expectedPythonExampleCount=8,
+                targetProductVersion='1.4.3',
+                introducedNativeIds=[], introducedPythonIds=[], retiredNativeIds=[],
+                note='M4首个切片：单一RANSAC/LM实现的公共静态核与可选后端声明；注册ID/版本/端口/参数保持，整个M4的38项迁移尚未完成。'))
+        return result
     if stage == 'M3':
         return prepare_m3(data)
     result = copy.deepcopy(data)
@@ -264,22 +278,24 @@ def pending_sources(data):
 
 def refreshed(data, manifest_path, reviewed_paths, review_note, product_version, stage='M2'):
     result = prepare(data, stage)
+    if stage == 'M4a' and product_version != '1.4.3':
+        raise ValueError('M4a公共SDK使用产品版本1.4.3，不能复用旧版本声明')
     if stage == 'M3':
         retire_m3_rows(result)
     native_expected = set(result['baselineReference']['registeredNativeIds']) | set(ADDITIONS)
-    if stage == 'M3':
+    if stage in {'M3', 'M4a'}:
         native_expected = (native_expected - set(M3_RETIREMENTS)) | set(M3_DEFINITIONS)
     for field, required in [('operators', native_expected),
                             ('pythonExamples', set(result['baselineReference']['pythonExampleIds']) | {EXAMPLE_ID})]:
         identifiers = [row['id'] for row in result[field]]
-        allowed = required if stage in {'M2', 'M3'} else required | set(ADDITIONS)
+        allowed = required if stage in {'M2', 'M3', 'M4a'} else required | set(ADDITIONS)
         if len(identifiers) != len(set(identifiers)) or not set(identifiers) <= allowed:
             raise ValueError(f'{field}: 重复或未经定义的ID，拒绝刷新')
         original = set(result['baselineReference']['registeredNativeIds'] if field == 'operators' else
                        result['baselineReference']['pythonExampleIds'])
         if stage == 'M1' and not original <= set(identifiers):
             raise ValueError(f'{field}: 原基线ID丢失，拒绝刷新')
-        if stage in {'M2', 'M3'} and set(identifiers) != required:
+        if stage in {'M2', 'M3', 'M4a'} and set(identifiers) != required:
             raise ValueError(f'{field}: 现有清单丢失已审ID，拒绝刷新')
     manifest = load(manifest_path)
     operators = manifest if isinstance(manifest, list) else manifest['operators']
@@ -311,6 +327,10 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version,
     ordered[split:split] = additions
     for row in ordered:
         op = exported[row['id']]
+        if stage == 'M4a' and (op.get('pack', 'core').split('@')[0] != row['currentPack'] or
+                op.get('version') != row['currentVersion'] or op.get('params', []) != row['currentParams'] or
+                {key: op.get(key, []) for key in ('inputs', 'outputs')} != row['currentPorts']):
+            raise ValueError(f"{row['id']}: M4a公共核提取不得改变注册包、版本、端口或参数；节点迁移应在后续切片显式声明")
         relocate_operator(row, op, stage)
         row.update(currentVersion=op['version'], currentPackVersion=op.get('pack', 'core'),
                    label=op.get('label', row.get('label')), currentPorts={k: op.get(k, []) for k in ('inputs', 'outputs')},
@@ -439,7 +459,7 @@ def render_details(data):
 
 def render_overview(data):
     baseline = data['baselineReference']
-    current_stage = next(s for s in reversed(data['stageLedger']) if s['stage'] != 'M0')
+    current_stage = next(s for s in reversed(data['stageLedger']) if s['stage'] in {'M1', 'M2', 'M3', 'M4a'})
     manifest_example = f"build/{current_stage['stage'].lower()}-full/manifest.json"
     version_example = current_stage.get('targetProductVersion', data['productVersion'])
     lines = ['# 现有算子分包审计', '',
@@ -461,7 +481,7 @@ def render_overview(data):
         evidence = ('全包manifest SHA256 `' + proof['sha256'] + '`；描述匹配，不代表阶段全部验收已完成') if proof else stage['note']
         if stage.get('mergeEvidence'):
             evidence += f"；[PR{stage['mergeEvidence']['pr']}]({stage['mergeEvidence']['url']})已合并 `{stage['mergeEvidence']['revision']}`"
-        lines.append(f"| {stage['stage']} | {stage['status']} | {stage['expectedNativeCount']} / {stage['expectedPythonExampleCount']} | {evidence} |")
+        lines.append(f"| {stage['stage']} | {stage['status']} | {stage.get('expectedNativeCount', '待确定')} / {stage.get('expectedPythonExampleCount', '待确定')} | {evidence} |")
     waves = collections.Counter(row['wave'] for row in data['operators'])
     lines += ['', '## 波次和顺序', '', '| 波次 | 内容 | 原生项数 |', '| --- | --- | ---: |']
     lines += [f'| {wave} | {label} | {waves[wave]} |' for wave, label in data['migrationWaves'].items()]
@@ -493,7 +513,7 @@ def main():
     parser.add_argument('--reviewed-path', action='append', default=[])
     parser.add_argument('--reviewed-change', default='')
     parser.add_argument('--product-version')
-    parser.add_argument('--stage', choices=['M1', 'M2', 'M3'], default='M2')
+    parser.add_argument('--stage', choices=['M1', 'M2', 'M3', 'M4a'], default='M2')
     args = parser.parse_args()
     if args.list_pending_sources:
         print(json.dumps(pending_sources(load(AUDIT)), ensure_ascii=False, indent=2))

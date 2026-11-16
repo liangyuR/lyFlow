@@ -20,12 +20,14 @@ CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/man
                     'core/cmake/*.cmake', 'core/cmake/*.cmake.in',
                     'kernels/include/**/*.h', 'kernels/src/*.cpp',
                     'packs/*/ops/*.cpp', 'packs/*/ops/*.h', 'packs/*/include/**/*.h',
+                    'packs/std-pointcloud/algo/fit2d.cpp', 'packs/std-pointcloud/algo/fit2d.h',
                     'packs/*/include/**/*.hpp', 'packs/*/lyflow_op_pack.cmake',
                     'packs/*/lyflow_pack_dependencies.cmake',
                     'solutions/*/ops/*.cpp', 'solutions/*/ops/*.h', 'solutions/*/algo/*.cpp',
                     'solutions/*/algo/*.h', 'solutions/*/lyflow_op_pack.cmake',
                     'solutions/*/lyflow_pack_dependencies.cmake',
                     'examples/public_kernels.cpp', 'examples/public-kernels/CMakeLists.txt',
+                    'examples/profile-robust/CMakeLists.txt', 'examples/profile-robust/main.cpp',
                     'python/lyflow_python/*.py',
                     'python/examples/**/*.py', 'packaging/release.json')
 
@@ -128,6 +130,16 @@ def validate(data, manifests, generated_docs=None):
                 'M3新增/退役/原11项范围登记不完整')
         require(set(m3.get('scopeNativeIds', [])) <= set(registered) | set(retired_ids), 'M3原始范围丢失')
     targets = set(data.get('targetPackages', []))
+    m4a = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M4a'), None)
+    if m4a:
+        require(m3 is not None and m3.get('status') == 'complete' and
+                m3.get('mergeEvidence', {}).get('pr') == 64 and
+                m3.get('mergeEvidence', {}).get('revision') == 'b22fde7fad01b7aea67886b6fe3345e92a5fe8bb',
+                'M4a缺少已合并M3前置证据')
+        require(m4a.get('expectedNativeCount') == 261 and m4a.get('expectedPythonExampleCount') == 8 and
+                m4a.get('introducedNativeIds') == [] and m4a.get('introducedPythonIds') == [] and
+                m4a.get('retiredNativeIds') == [],
+                'M4a只能抽公共核，不得隐式新增/退役算子')
     waves = set(data.get('migrationWaves', {}))
     for row in rows:
         identifier = row['id']
