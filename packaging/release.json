@@ -17,8 +17,9 @@
     "std-image",
     "std-ml",
     "glue",
-    "gap"
+    "solution-gap"
   ],
+  "modules": ["gap-template", "gap-model", "gap-import", "gap-compat"],
   "requiredSdkFiles": [
     "include/lyflow/kernel/geometry.h",
     "include/lyflow/kernel/rigid.h",
@@ -82,7 +83,15 @@
     "examples/m4-native-profile.lyflow.json",
     "examples/m4-native-profile.csv",
     "examples/m4-native-profile.md",
-    "examples/embed_profile_workflow.cpp"
+    "examples/embed_profile_workflow.cpp",
+    "docs/gap-profile-migration.md",
+    "examples/gap/README.md",
+    "examples/gap/snippets/backup-camera.lyflow-snippet.json",
+    "examples/gap/snippets/flush-line-end.lyflow-snippet.json",
+    "examples/gap/snippets/flush-selected-point.lyflow-snippet.json",
+    "examples/gap/snippets/gap-circles.lyflow-snippet.json",
+    "examples/gap/snippets/measure-skeleton.lyflow-snippet.json",
+    "examples/gap/snippets/model-with-template-fallback.lyflow-snippet.json"
   ],
   "requiredRuntimeFiles": [
     "python/examples/profile_copy.py",
@@ -148,9 +157,9 @@
     "glue.color_runs",
     "gap.load_profile_pair",
     "gap.roi_from_labels",
-    "gap.fit_line",
+    "profile.fit_line_robust",
     "gap.fit_gap_circles",
-    "gap.flush",
+    "metrology.flush_point_line",
     "cloud.group_pack",
     "cloud.group_get",
     "cloud.group_subset",

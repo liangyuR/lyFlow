@@ -242,7 +242,7 @@ inline constexpr const char* kParamSemantics[] = {"roi"};
 struct RoiBackdrop {
   std::string dirParam;                // Path 参数（mode=dir）
   std::vector<std::string> fileParams; // String / Path 参数
-  /// PointCloud 输入端口名。编辑器沿边取上游那一次运行的结果当底图，所以要先跑过一次。
+  /// PointCloud/Profile输入或Bundle的一层字段路径。编辑器沿边取上游运行结果当底图。
   std::vector<std::string> inputPorts;
   /// 同一底图的一组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」；
   /// labelParam 给了就在后面接上那个参数的当前值（「模板 2 · f2」）。都是可选的。
@@ -292,6 +292,7 @@ struct Param {
   std::string tuningRole;
   /// 动态单位的来源，例如 bead.info.unit；空时用 unit。
   std::string unitSource;
+  bool allowEmptyPath = false;
 };
 
 struct Capabilities {

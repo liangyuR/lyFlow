@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "id": "gap.locate_model_template_fallback",
+  "label": "模型定位 + 模板回退",
+  "category": "间隙",
+  "doc": "模型与模板定位并联，ScanPair 与 RoiSet 经 Location 原子选择；模型分支失败才调度模板，保留真实物理来源，避免单独回退角色框与轮廓。连接 read_scan 的完整原槽场景，并配置模型和模板参数。",
+  "nodes": [
+    {
+      "id": "model",
+      "op": "gap.locate_model",
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "title": "模型定位"
+      },
+      "opVersion": "2.0.0"
+    },
+    {
+      "id": "template",
+      "op": "gap.locate_template",
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "title": "模板定位（备用）"
+      },
+      "opVersion": "3.0.0"
+    },
+    {
+      "id": "modelLocation",
+      "op": "gap.make_location",
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 0
+        },
+        "title": "模型定位结果"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "templateLocation",
+      "op": "gap.make_location",
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 200
+        },
+        "title": "模板定位结果"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "choice",
+      "op": "flow.fallback",
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 90
+        },
+        "title": "原子回退定位结果"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "selected",
+      "op": "gap.split_location",
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 90
+        },
+        "title": "选中的定位场景"
+      },
+      "opVersion": "1.0.0"
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "model",
+        "port": "scan"
+      },
+      "to": {
+        "node": "modelLocation",
+        "port": "scan"
+      }
+    },
+    {
+      "from": {
+        "node": "model",
+        "port": "rois"
+      },
+      "to": {
+        "node": "modelLocation",
+        "port": "rois"
+      }
+    },
+    {
+      "from": {
+        "node": "template",
+        "port": "scan"
+      },
+      "to": {
+        "node": "templateLocation",
+        "port": "scan"
+      }
+    },
+    {
+      "from": {
+        "node": "template",
+        "port": "rois"
+      },
+      "to": {
+        "node": "templateLocation",
+        "port": "rois"
+      }
+    },
+    {
+      "from": {
+        "node": "modelLocation",
+        "port": "location"
+      },
+      "to": {
+        "node": "choice",
+        "port": "a"
+      }
+    },
+    {
+      "from": {
+        "node": "templateLocation",
+        "port": "location"
+      },
+      "to": {
+        "node": "choice",
+        "port": "b"
+      }
+    },
+    {
+      "from": {
+        "node": "choice",
+        "port": "out"
+      },
+      "to": {
+        "node": "selected",
+        "port": "location"
+      }
+    }
+  ],
+  "ports": {
+    "inputs": [
+      {
+        "node": "model",
+        "port": "scan",
+        "hint": "gap.read_scan 的剖面对（原始槽）"
+      },
+      {
+        "node": "template",
+        "port": "scan",
+        "hint": "gap.read_scan 的剖面对"
+      }
+    ],
+    "outputs": [
+      {
+        "node": "selected",
+        "port": "rois",
+        "hint": "与轮廓同时选中的角色框"
+      },
+      {
+        "node": "selected",
+        "port": "scan",
+        "hint": "与角色框同时选中的定位轮廓"
+      },
+      {
+        "node": "choice",
+        "port": "choice",
+        "hint": "定位路径选择，接结果汇总的 fallback"
+      }
+    ]
+  }
+}

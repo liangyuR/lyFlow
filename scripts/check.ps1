@@ -104,7 +104,7 @@ if (Want "schema") {
   Step "片段文件 vs schema"
   # 包随附的片段（m8-plan L14）。算子与端口对不对由 core 的启动自检查（manifest --check），
   # 这里只查文件形状 —— 没编进本次构建的包，它的片段也照样要合格。
-  foreach ($snippet in Get-ChildItem (Join-Path $root "packs\*\snippets\*.lyflow-snippet.json")) {
+  foreach ($snippet in Get-ChildItem -Path @((Join-Path $root "packs\*\snippets\*.lyflow-snippet.json"), (Join-Path $root "solutions\*\snippets\*.lyflow-snippet.json"))) {
     python "$PSScriptRoot\validate_schema.py" $snippet.FullName (Join-Path $root "schema\snippet.schema.json")
     if ($LASTEXITCODE -ne 0) { throw "片段 $($snippet.Name) 不符合 schema" }
   }

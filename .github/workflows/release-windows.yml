@@ -384,12 +384,13 @@ jobs:
               if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
             }
             const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+            const runtimeContract = JSON.parse(fs.readFileSync('release/lyflow-runtime.json', 'utf8'));
             const body = [
               `Windows x64 运行库、SDK/CLI 与节点图编辑器 ${tag}。人工复核后正式发布。`,
               '',
               `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
               '',
-              '固定算子包：std-value、std-geometry、std-profile、std-metrology、std-pointcloud、std-image、std-ml、glue、gap。ONNX Runtime 使用 CPU 版；不含 dts、客户模型、桌面安装程序或调试符号。',
+              `固定算子包：${runtimeContract.packs.map(pack => pack.name).join('、')}。显式能力模块：${runtimeContract.modules.join('、')}。ONNX Runtime 使用 CPU 版；不含 solution-dts、客户模型、桌面安装程序或调试符号。`,
               '',
               `\`lyflow-editor-v${version}.tgz\` 是 \`@lyflow/editor\` 的 TypeScript 源码包（npm pack），宿主按 tarball 依赖安装、用自己的打包器编译。`,
               '',

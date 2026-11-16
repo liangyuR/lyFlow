@@ -63,7 +63,7 @@ if ($packs) { Write-Host "算子包: $packs" -ForegroundColor Cyan }
 $stdPacks = if ($env:LYFLOW_STD_PACKS) { $env:LYFLOW_STD_PACKS } else { "1" }
 if ($stdPacks -eq "0") { Write-Host "标准包: 关（纯平台构建）" -ForegroundColor Yellow }
 
-# 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔，例如 LYFLOW_PACKS=gap。
+# 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔，例如 LYFLOW_PACKS=solution-gap。
 $repoPacks = if ($env:LYFLOW_PACKS) { $env:LYFLOW_PACKS } else { "" }
 $modules = if ($env:LYFLOW_MODULES) { $env:LYFLOW_MODULES } else { "" }
 if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }

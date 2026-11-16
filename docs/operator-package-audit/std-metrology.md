@@ -79,7 +79,7 @@
 - 阶段验收边界：真实全包manifest描述核验；完整数值、SDK、CLI与图升级回归另由运行证据证明。
 - M3迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/profile_analysis.cpp:126` @ `36c969149e119614b7d221c8006d1a311d6d2995`；原目标包和依赖规划保留。
 
-## 124 · metrology.flush_point_line
+## 111 · metrology.flush_point_line
 
 - 当前：`std-metrology` / `1.0.0` / 点线面差测量。目标：`std-metrology`；保留并验边界；**M4**。
 - 源码：[packs/std-metrology/ops/profile_dimensions.cpp:260](../../packs/std-metrology/ops/profile_dimensions.cpp#L260)。
@@ -97,7 +97,7 @@
 - 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
 - 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
-## 125 · metrology.circle_gap
+## 114 · metrology.circle_gap
 
 - 当前：`std-metrology` / `1.0.0` / 圆边界间隙测量。目标：`std-metrology`；保留并验边界；**M4**。
 - 源码：[packs/std-metrology/ops/profile_dimensions.cpp:298](../../packs/std-metrology/ops/profile_dimensions.cpp#L298)。
@@ -115,7 +115,7 @@
 - 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
 - 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
-## 126 · metrology.point_offset
+## 117 · metrology.point_offset
 
 - 当前：`std-metrology` / `1.0.0` / 二维位移分量测量。目标：`std-metrology`；保留并验边界；**M4**。
 - 源码：[packs/std-metrology/ops/profile_dimensions.cpp:335](../../packs/std-metrology/ops/profile_dimensions.cpp#L335)。

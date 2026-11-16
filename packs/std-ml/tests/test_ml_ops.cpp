@@ -17,6 +17,8 @@
 #include <unordered_map>
 
 #include "../ops/session_cache.h"
+#include "../src/runtime_stats.h"
+#include "lyflow_ml/runtime.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -69,7 +71,7 @@ TEST_CASE("ml.onnx_run 注册了，且带 pack 标记") {
   CHECK(problems.empty());
   const OperatorDesc* op = ensureRegistry().find("ml.onnx_run");
   REQUIRE(op != nullptr);
-  CHECK(op->pack == "std-ml@0.3.0");
+  CHECK(op->pack == "std-ml@0.3.1");
   CHECK(op->inputs.at(0).type == "Tensor");
   CHECK(op->outputs.at(0).type == "Tensor");
   CHECK(op->externalKey != nullptr);
@@ -386,6 +388,122 @@ TEST_CASE("ONNX serial cancellation never publishes a partial batch") {
     CHECK(context.updates == 1);
     CHECK(outputs.empty());
     CHECK(inputs.at("input").asTensor()->data == input.data);
+  }
+}
+
+TEST_CASE("Typed ONNX runtime shares node sessions results diagnostics and cancellation") {
+  namespace fs = std::filesystem;
+  fs::path fixture;
+  REQUIRE(testModel(fixture));
+  const auto directory =
+      fs::temp_directory_path() /
+      ("lyflow-runtime-api-" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup {
+    fs::path directory;
+    ~Cleanup() {
+      std::error_code ec;
+      fs::remove_all(directory, ec);
+    }
+  } cleanup{directory};
+  fs::create_directories(directory);
+  const auto model = directory / "model.onnx";
+  fs::copy_file(fixture, model);
+  struct Context : ExecContext {
+    bool stop = false, stopAfterProgress = false;
+    int updates = 0;
+    fs::path base;
+    std::vector<std::string> messages;
+    bool cancelled() const override { return stop; }
+    void progress(float, std::string_view) override {
+      ++updates;
+      stop = stopAfterProgress;
+    }
+    void log(LogLevel, std::string message) override { messages.push_back(std::move(message)); }
+    const fs::path& baseDir() const override { return base; }
+    int threadBudget() const override { return 1; }
+  } context;
+  Tensor input;
+  input.shape = {2, 6, 1280};
+  for (int i = 0; i < 2 * 6 * 1280; ++i)
+    input.data.push_back(static_cast<float>((i % 23) - 11) * 0.125F);
+  const auto original = input;
+  ml::RuntimeOptions options;
+  options.modelPath = model;
+  options.intraOpThreads = 3;
+  const auto before = ml::detail::sessionCreationCount();
+  Tensor direct;
+  REQUIRE(ml::inferTensor(input, options, direct, context).ok);
+  REQUIRE(direct.consistent());
+  CHECK(ml::detail::sessionCreationCount() == before + 1);
+  CHECK(context.messages ==
+        std::vector<std::string>{input.shapeString() + " -> " + direct.shapeString()});
+  Call node;
+  node.inputs = {{"input", Data::tensor(input)}};
+  const std::unordered_map<std::string, Value> parameters{
+      {"modelPath", Value::text(model.u8string())}, {"intraOpThreads", Value::integer(3)}};
+  REQUIRE(node.run("ml.onnx_run", parameters).ok);
+  CHECK(ml::detail::sessionCreationCount() == before + 1);
+  CHECK(node.out("output").asTensor()->shape == direct.shape);
+  CHECK(node.out("output").asTensor()->data == direct.data);
+  const auto* descriptor = packRegistry().find("ml.onnx_run");
+  REQUIRE(descriptor);
+  const auto stamp = ml::modelFingerprint(model);
+  CHECK_FALSE(stamp.empty());
+  CHECK(descriptor->externalKey(ParamView(node.params, node.base)) == stamp);
+  fs::last_write_time(model, fs::last_write_time(model) + std::chrono::seconds(1));
+  CHECK(ml::modelFingerprint(model) != stamp);
+  REQUIRE(ml::inferTensor(input, options, direct, context).ok);
+  REQUIRE(node.run("ml.onnx_run", parameters).ok);
+  CHECK(ml::detail::sessionCreationCount() == before + 2);
+  const auto checkStatus = [](const Status& typed, const Status& adapted) {
+    CHECK_FALSE(typed.ok);
+    CHECK(static_cast<int>(typed.phase) == static_cast<int>(adapted.phase));
+    CHECK(typed.code == adapted.code);
+    CHECK(typed.message == adapted.message);
+    CHECK(typed.paramPath == adapted.paramPath);
+    CHECK(typed.portName == adapted.portName);
+  };
+  Tensor sentinel;
+  sentinel.shape = {1};
+  sentinel.data = {77};
+  options.inputName = "missing-port";
+  auto invalid = parameters;
+  invalid["inputName"] = Value::text(options.inputName);
+  checkStatus(ml::inferTensor(input, options, sentinel, context), node.run("ml.onnx_run", invalid));
+  CHECK(sentinel.shape == std::vector<std::int64_t>{1});
+  CHECK(sentinel.data == std::vector<float>{77});
+  CHECK(node.outputs.empty());
+  CHECK(input.shape == original.shape);
+  CHECK(input.data == original.data);
+  options.inputName.clear();
+  node.inputs.clear();
+  checkStatus(ml::inferTensor(nullptr, options, sentinel, context),
+              node.run("ml.onnx_run", parameters));
+  node.inputs["input"] = Data::tensor(input);
+  for (int batch : {0, 1, 3}) {
+    options.modelPath = fixture.parent_path() / "channels-6-to-8-static1.onnx";
+    options.batchMode = "serial";
+    input.shape[0] = batch;
+    input.data.assign(static_cast<std::size_t>(batch) * 6 * 1280, 1);
+    node.inputs["input"] = Data::tensor(input);
+    REQUIRE(ml::inferTensor(input, options, direct, context).ok);
+    REQUIRE(node.run("ml.onnx_run", {{"modelPath", Value::text(options.modelPath.u8string())},
+                                     {"batchMode", Value::text("serial")},
+                                     {"intraOpThreads", Value::integer(3)}})
+                .ok);
+    CHECK(node.out("output").asTensor()->shape == direct.shape);
+    CHECK(node.out("output").asTensor()->data == direct.data);
+    if (batch) {
+      Context cancelled;
+      cancelled.stopAfterProgress = true;
+      const auto status = ml::inferTensor(input, options, sentinel, cancelled);
+      CHECK_FALSE(status.ok);
+      CHECK(status.code == "cancelled");
+      CHECK(cancelled.updates == 1);
+      CHECK(sentinel.shape == std::vector<std::int64_t>{1});
+      CHECK(sentinel.data == std::vector<float>{77});
+    }
   }
 }
 

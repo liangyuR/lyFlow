@@ -37,7 +37,11 @@
       "required": ["kind", "fields"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "type": "string", "pattern": "^[^<> ]+$", "description": "全局唯一，用 . 分命名空间，例如 gap.ScanPair。" },
+        "kind": {
+          "type": "string",
+          "pattern": "^[^<> ]+$",
+          "description": "全局唯一，用 . 分命名空间，例如 gap.ScanPair。"
+        },
         "label": { "type": "string" },
         "doc": { "type": "string" },
         "pack": { "type": "string", "description": "声明它的算子包，与 operator.pack 同一口径。" },
@@ -50,8 +54,15 @@
             "required": ["name", "type"],
             "additionalProperties": false,
             "properties": {
-              "name": { "type": "string", "pattern": "^[^.]+$", "description": "不能含 '.'：<port>.<field> 靠它分隔。" },
-              "type": { "type": "string", "description": "types 表里的具体类型；不能是 Any、Error，也不能是另一个 Bundle（L1 不嵌套）。" },
+              "name": {
+                "type": "string",
+                "pattern": "^[^.]+$",
+                "description": "不能含 '.'：<port>.<field> 靠它分隔。"
+              },
+              "type": {
+                "type": "string",
+                "description": "types 表里的具体类型；不能是 Any、Error，也不能是另一个 Bundle（L1 不嵌套）。"
+              },
               "doc": { "type": "string" }
             }
           }
@@ -64,8 +75,15 @@
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string" },
-        "color": { "type": "string", "description": "端口与连线着色。零成本的可读性提升，M0 就做。" },
-        "castableTo": { "type": "array", "items": { "type": "string" }, "description": "可隐式转换到的类型。" },
+        "color": {
+          "type": "string",
+          "description": "端口与连线着色。零成本的可读性提升，M0 就做。"
+        },
+        "castableTo": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "可隐式转换到的类型。"
+        },
         "doc": { "type": "string" }
       }
     },
@@ -74,10 +92,20 @@
       "required": ["id", "version", "label", "category", "inputs", "outputs", "params"],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "description": "全局唯一，用 . 分命名空间，如 filter.voxel_grid" },
+        "id": {
+          "type": "string",
+          "description": "全局唯一，用 . 分命名空间，如 filter.voxel_grid"
+        },
         "version": { "$ref": "#/$defs/semver" },
-        "pack": { "type": "string", "description": "算子来自哪个算子包，「名字」或「名字@版本」。core 自带的算子没有这一项。前端不解释它（ADR-0014）。" },
-        "aliases": { "type": "array", "items": { "type": "string" }, "description": "旧 id，用于重命名后自动重定向。" },
+        "pack": {
+          "type": "string",
+          "description": "算子来自哪个算子包，「名字」或「名字@版本」。core 自带的算子没有这一项。前端不解释它（ADR-0014）。"
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "旧 id，用于重命名后自动重定向。"
+        },
         "label": { "type": "string" },
         "category": { "type": "string", "description": "用 / 分层，决定搜索面板的树形结构。" },
         "keywords": { "type": "array", "items": { "type": "string" } },
@@ -94,16 +122,21 @@
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string" },
-        "type": { "type": "string", "description": "必须出现在 types 表中，或写成 Bundle<kind>（kind 在 bundles 里声明；裸的 Bundle 不能当端口类型）。" },
+        "type": {
+          "type": "string",
+          "description": "必须出现在 types 表中，或写成 Bundle<kind>（kind 在 bundles 里声明；裸的 Bundle 不能当端口类型）。"
+        },
         "label": { "type": "string" },
         "doc": { "type": "string" },
         "required": { "type": "boolean", "default": true, "description": "仅对 inputs 有意义。" },
         "acceptsError": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "description": "仅对 inputs 有意义（ADR-0016）。上游失败时本节点不被连坐成 cancelled，而是在这个端口上收到一个 Error 值。"
         },
         "lazy": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "description": "仅对 inputs 有意义（ADR-0016）。这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。"
         },
         "contract": { "$ref": "#/$defs/portContract" },
@@ -178,17 +211,40 @@
         {
           "if": { "properties": { "type": { "const": "curve" } }, "required": ["type"] },
           "then": { "properties": { "default": { "$ref": "#/$defs/curveValue" } } }
+        },
+        {
+          "if": {
+            "properties": { "allowEmptyPath": { "const": true } },
+            "required": ["allowEmptyPath"]
+          },
+          "then": { "properties": { "type": { "const": "path" } }, "required": ["type"] }
         }
       ],
       "properties": {
         "type": {
-          "enum": ["bool", "int", "float", "vec2f", "vec3f", "vec4f", "enum", "flags",
-                   "string", "text", "path", "color", "transform", "curve"],
+          "enum": [
+            "bool",
+            "int",
+            "float",
+            "vec2f",
+            "vec3f",
+            "vec4f",
+            "enum",
+            "flags",
+            "string",
+            "text",
+            "path",
+            "color",
+            "transform",
+            "curve"
+          ],
           "description": "决定前端渲染哪个控件。新增类型 = 前端加一个 case。"
         },
         "label": { "type": "string" },
         "doc": { "type": "string" },
-        "default": { "description": "任意 JSON 值，需与 type 匹配。GraphDoc 稀疏存储时以此为基准。" },
+        "default": {
+          "description": "任意 JSON 值，需与 type 匹配。GraphDoc 稀疏存储时以此为基准。"
+        },
         "group": { "type": "string", "description": "参数分组标题。" },
         "advanced": { "type": "boolean", "default": false, "description": "默认收进折叠区。" },
         "min": { "type": "number" },
@@ -197,10 +253,24 @@
         "softMax": { "type": "number", "description": "滑块范围，可手输超出。" },
         "step": { "type": "number" },
         "unit": { "type": "string" },
-        "tuningRole": { "enum": ["input", "geometry", "detection", "acceptance"], "description": "调参角色；input/geometry/acceptance 默认固定，detection 可搜索。" },
-        "unitSource": { "type": "string", "description": "运行期单位来源；非空时不把 unit 当作固定单位。" },
-        "absolute": { "type": "boolean", "default": false, "description": "只对 unit = px 有意义：这是一个绝对的像素尺寸（例如输出图的宽高），不是输入图上的距离。预览缩小图像时不跟着换算；它生效（visibleWhen 成立）时，本算子输出的图像回到原图比例（ADR-0028）。" },
-        "componentLabels": { "type": "array", "items": { "type": "string" }, "description": "vecNf 的分量名，默认 X/Y/Z/W。" },
+        "tuningRole": {
+          "enum": ["input", "geometry", "detection", "acceptance"],
+          "description": "调参角色；input/geometry/acceptance 默认固定，detection 可搜索。"
+        },
+        "unitSource": {
+          "type": "string",
+          "description": "运行期单位来源；非空时不把 unit 当作固定单位。"
+        },
+        "absolute": {
+          "type": "boolean",
+          "default": false,
+          "description": "只对 unit = px 有意义：这是一个绝对的像素尺寸（例如输出图的宽高），不是输入图上的距离。预览缩小图像时不跟着换算；它生效（visibleWhen 成立）时，本算子输出的图像回到原图比例（ADR-0028）。"
+        },
+        "componentLabels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "vecNf 的分量名，默认 X/Y/Z/W。"
+        },
         "options": {
           "type": "array",
           "description": "enum / flags 的选项。",
@@ -232,6 +302,11 @@
           }
         },
         "mode": { "enum": ["open", "save", "dir"], "description": "path 的选择模式。" },
+        "allowEmptyPath": {
+          "type": "boolean",
+          "default": false,
+          "description": "仅用于 path：允许空路径；依赖输入连线的必填规则仍由算子校验。"
+        },
         "alpha": { "type": "boolean", "description": "color 是否带 alpha 通道。" },
         "visibleWhen": { "$ref": "#/$defs/condition" },
         "enabledWhen": { "$ref": "#/$defs/condition" },
@@ -246,10 +321,25 @@
           "additionalProperties": false,
           "properties": {
             "dir": { "type": "string", "description": "本算子一个 path 参数的名字。" },
-            "inputs": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "本算子 PointCloud 输入端口的名字：底图取自它们上游那一次运行的结果（要先跑过一次）。与 dir/files 二选一。" },
-            "files": { "type": "array", "items": { "type": "string" }, "description": "本算子 string / path 参数的名字。" },
-            "label": { "type": "string", "description": "同一底图的这组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」。" },
-            "labelParam": { "type": "string", "description": "本算子一个 string 参数的名字：切换条上的名字后面接上它的当前值（「模板 2 · f2」）。" }
+            "inputs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "本算子PointCloud/Profile输入端口或已声明Bundle的一层采样字段路径（如templates.left）：底图取实际上游运行结果。与dir/files二选一。"
+            },
+            "files": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "本算子 string / path 参数的名字。"
+            },
+            "label": {
+              "type": "string",
+              "description": "同一底图的这组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」。"
+            },
+            "labelParam": {
+              "type": "string",
+              "description": "本算子一个 string 参数的名字：切换条上的名字后面接上它的当前值（「模板 2 · f2」）。"
+            }
           }
         }
       }
@@ -272,10 +362,7 @@
           "minItems": 2,
           "items": {
             "type": "array",
-            "prefixItems": [
-              { "type": "number", "minimum": 0, "maximum": 1 },
-              { "type": "number" }
-            ],
+            "prefixItems": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "number" }],
             "minItems": 2,
             "maxItems": 2
           }
@@ -315,9 +402,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "cancellable": { "type": "boolean", "default": false, "description": "支持中途取消 → 可用于 live preview。协作式：算子要在自己的循环里轮询。PCL 之类第三方算法一旦进去就出不来，这类算子必须如实填 false，否则前端会承诺一个做不到的 Esc。" },
-        "previewable": { "type": "boolean", "default": false, "description": "支持降级质量的快速预览。" },
-        "deterministic": { "type": "boolean", "default": true, "description": "同输入同输出 → 可参与缓存。" }
+        "cancellable": {
+          "type": "boolean",
+          "default": false,
+          "description": "支持中途取消 → 可用于 live preview。协作式：算子要在自己的循环里轮询。PCL 之类第三方算法一旦进去就出不来，这类算子必须如实填 false，否则前端会承诺一个做不到的 Esc。"
+        },
+        "previewable": {
+          "type": "boolean",
+          "default": false,
+          "description": "支持降级质量的快速预览。"
+        },
+        "deterministic": {
+          "type": "boolean",
+          "default": true,
+          "description": "同输入同输出 → 可参与缓存。"
+        }
       }
     },
     "semver": { "type": "string", "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$" }

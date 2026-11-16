@@ -5,6 +5,7 @@
 
 #include "helpers.h"
 #include "lyflow_profile/context.h"
+#include "lyflow_profile/features.h"
 
 using namespace lyflow;
 
@@ -228,5 +229,37 @@ TEST_CASE(
     cancelled.stopAt = completed.calls;
     CHECK_FALSE(op->compute(inputs, ParamView(params, cancelled.base), outputs, cancelled).ok);
     CHECK(values.empty());
+  }
+}
+
+TEST_CASE(
+    "Typed nearest Profile API preserves node behavior and validates direct reference contracts") {
+  const auto source = fixture();
+  test::StubContext ctx;
+  for (const bool toLine : {false, true}) {
+    const auto reference = toLine ? Data::line2d(Line2D{}) : point(.004F, .003F);
+    const auto referenceContext = declared(source, reference);
+    test::OpCall call;
+    call.inputs = {{"profile", source},
+                   {toLine ? "line" : "anchor", reference},
+                   {toLine ? "lineContext" : "anchorContext", referenceContext}};
+    REQUIRE(call.run(toLine ? "profile.nearest_to_line" : "profile.nearest_sample").ok);
+    profile_contract::NearestInputs inputs{source, reference, referenceContext, {}};
+    profile_contract::NearestResult result;
+    const auto kind = toLine ? profile_contract::NearestReference::Line
+                             : profile_contract::NearestReference::Point;
+    REQUIRE(profile_contract::nearestSample(inputs, kind, result, ctx).ok);
+    CHECK(result.profile.profilePtr() == source.profilePtr());
+    CHECK(result.selection.asRecord()->data == call.out("selection").asRecord()->data);
+    CHECK(result.point.asPoint2D()->p[0] == call.out("point").asPoint2D()->p[0]);
+    CHECK(result.pointContext.asRecord()->data == call.out("pointContext").asRecord()->data);
+    result.selection = Data::record(Record{"sentinel", {}});
+    inputs.referenceContext = {};
+    CHECK_FALSE(profile_contract::nearestSample(inputs, kind, result, ctx).ok);
+    CHECK(result.selection.asRecord()->type == "sentinel");
+    CHECK_FALSE(profile_contract::nearestSample(
+                    inputs, static_cast<profile_contract::NearestReference>(99), result, ctx)
+                    .ok);
+    CHECK(result.selection.asRecord()->type == "sentinel");
   }
 }

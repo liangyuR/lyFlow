@@ -1,4 +1,5 @@
 #include "lyflow/graph_contract_upgrade.h"
+#include "graph_contract_upgrade_gap.h"
 
 #include <algorithm>
 #include <set>
@@ -276,14 +277,20 @@ bool upgradeGraphContracts(const Json& graph, const Json& request, Json& upgrade
             "契约升级需要完整的nodes/edges数组");
     const bool profileUpgrade =
         std::any_of(request["rules"].begin(), request["rules"].end(), [](const Json& r) {
-          return r.is_object() && r.value("kind", "") == "dtsProfile.v1";
+          return r.is_object() &&
+                 (r.value("kind", "") == "dtsProfile.v1" || r.value("kind", "") == "gapProfile.v1");
         });
     if (profileUpgrade) {
+      const bool gapApplied =
+          std::all_of(request["rules"].begin(), request["rules"].end(), [&](const Json& rule) {
+            return rule.value("kind", "") != "gapProfile.v1" ||
+                   gap_contract_upgrade::applied(graph, rule);
+          });
       if (!graph.contains("contractUpgrade") && graph.contains("meta") &&
           graph["meta"].is_object() && graph["meta"].contains("contractUpgradeHistory") &&
           graph["meta"]["contractUpgradeHistory"].is_array()) {
         for (const auto& entry : graph["meta"]["contractUpgradeHistory"])
-          if (entry.is_object() && entry.value("request", Json()) == request) {
+          if (gapApplied && entry.is_object() && entry.value("request", Json()) == request) {
             upgraded = graph;
             report = Json::array();
             error = {};
@@ -293,7 +300,7 @@ bool upgradeGraphContracts(const Json& graph, const Json& request, Json& upgrade
       Json candidate = graph;
       Json priorRules = Json::array();
       for (const auto& rule : request["rules"])
-        if (rule.value("kind", "") != "dtsProfile.v1")
+        if (rule.value("kind", "") != "dtsProfile.v1" && rule.value("kind", "") != "gapProfile.v1")
           priorRules.push_back(rule);
       if (!priorRules.empty()) {
         Json priorReport;
@@ -302,22 +309,42 @@ bool upgradeGraphContracts(const Json& graph, const Json& request, Json& upgrade
           return false;
       }
       for (const auto& rule : request["rules"])
-        if (rule.value("kind", "") == "dtsProfile.v1") {
+        if (rule.value("kind", "") == "dtsProfile.v1" ||
+            rule.value("kind", "") == "gapProfile.v1") {
+          const bool gap = rule.value("kind", "") == "gapProfile.v1";
           error.nodeId = rule.at("source").value("node", "");
+          if (gap && gap_contract_upgrade::applied(candidate, rule) && candidate.contains("meta") &&
+              candidate["meta"].is_object() &&
+              candidate["meta"].contains("contractUpgradeHistory") &&
+              candidate["meta"]["contractUpgradeHistory"].is_array()) {
+            const auto& history = candidate["meta"]["contractUpgradeHistory"];
+            if (std::any_of(history.begin(), history.end(), [&](const Json& entry) {
+                  return entry.is_object() && entry.value("request", Json()) == request;
+                }))
+              continue;
+          }
           if (rule.contains("scope")) {
             keys(rule["scope"], {"subgraph"});
             const auto scope = text(rule["scope"], "subgraph");
             require(candidate.contains("subgraphs") && candidate["subgraphs"].is_object() &&
                         candidate["subgraphs"].contains(scope) &&
                         candidate["subgraphs"][scope].is_object(),
-                    "显式DTS子图作用域不存在；库图请直接迁移原始图资产");
+                    gap ? "显式GAP子图作用域不存在；库图请直接迁移原始图资产"
+                        : "显式DTS子图作用域不存在；库图请直接迁移原始图资产");
             auto& level = candidate["subgraphs"][scope];
             require(level.contains("nodes") && level["nodes"].is_array() &&
                         level.contains("edges") && level["edges"].is_array(),
-                    "显式DTS子图必须包含完整nodes/edges");
-            upgradeDtsProfile(level, rule, &candidate);
+                    gap ? "显式GAP子图必须包含完整nodes/edges"
+                        : "显式DTS子图必须包含完整nodes/edges");
+            if (gap)
+              gap_contract_upgrade::upgrade(level, rule, &candidate);
+            else
+              upgradeDtsProfile(level, rule, &candidate);
           } else {
-            upgradeDtsProfile(candidate, rule);
+            if (gap)
+              gap_contract_upgrade::upgrade(candidate, rule);
+            else
+              upgradeDtsProfile(candidate, rule);
           }
         }
       require(!candidate.contains("meta") || candidate["meta"].is_object(),

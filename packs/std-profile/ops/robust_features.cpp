@@ -10,6 +10,8 @@
 #include "lyflow/profile.h"
 #include "lyflow/registry.h"
 #include "lyflow_profile/context.h"
+#include "lyflow_profile/features.h"
+#include "lyflow_profile/provenance.h"
 
 namespace lyflow::packs::std_profile {
 namespace {
@@ -174,7 +176,8 @@ Status lineParameters(const ParamView& params, features::LineOptions& options) {
   return Status::Ok();
 }
 
-Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                   ExecContext& ctx) {
   if (ctx.cancelled())
     return cancelled();
   const auto& source = inputs.get("profile");
@@ -187,14 +190,27 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return status;
   if (!inputs.get("box").asBox2D())
     return bad("需要米制拟合ROI", "box");
-  if (!inputs.get("toward").asPoint2D())
-    return bad("需要米制局部选择参考点", "toward");
+  if (!inputs.get("toward").asPoint2D() && !inputs.get("toward").asBox2D())
+    return bad("需要米制局部选择参考点或参考框", "toward");
+  if (inputs.get("toward").asBox2D()) {
+    const auto* record = inputs.get("towardContext").asRecord();
+    if (!record || record->type != "profile.Geometry.v2")
+      return bad("参考框必须绑定严格v2上下文", "towardContext");
+  }
   if (inputs.has("refLine") != inputs.has("refLineContext") ||
       (options.directionMode != features::DirectionMode::Free && !inputs.has("refLine")))
     return bad("方向约束需要成对连接refLine与refLineContext", "refLineContext");
   try {
     const auto context = profile_contract::context(source);
-    Json sources = Json::array({context});
+    const auto* provenance =
+        inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
+    if (inputs.has("provenance") && !provenance)
+      return bad("来源必须为Record", "provenance");
+    Json sources;
+    Record rebound;
+    if (!profile_contract::profileSources(source, provenance, sources, why) ||
+        !profile_contract::rebindProvenance(source, source, provenance, rebound, why))
+      return bad(why, "provenance");
     if (auto status = samePhysical(inputs, "box", "boxContext", input->descriptor, sources);
         !status.ok)
       return status;
@@ -214,8 +230,17 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
     const auto* box = inputs.get("box").asBox2D();
     options.roi = {{box->min[0], box->min[1]}, {box->max[0], box->max[1]}};
-    const auto* toward = inputs.get("toward").asPoint2D();
-    options.toward = {toward->p[0], toward->p[1]};
+    if (const auto* toward = inputs.get("toward").asPoint2D())
+      options.toward = {toward->p[0], toward->p[1]};
+    else {
+      const auto* towardBox = inputs.get("toward").asBox2D();
+      options.toward = {0.5 * (static_cast<double>(towardBox->min[0]) + towardBox->max[0]),
+                        0.5 * (static_cast<double>(towardBox->min[1]) + towardBox->max[1])};
+    }
+    Record extended;
+    if (!profile_contract::extendProvenanceSources(source, rebound, sources, extended, why))
+      return bad(why, "provenance");
+    rebound = std::move(extended);
     Working work;
     if (!working(*input, work, ctx, why))
       return ctx.cancelled() ? cancelled() : bad(why);
@@ -273,6 +298,7 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     outputs.set("weightedInliers", std::move(selected.samples));
     outputs.set("indexMap", std::move(selected.map));
     outputs.set("quality", quality);
+    outputs.set("provenance", Data::record(std::move(rebound)));
     return Status::Ok();
   } catch (const robust::Cancelled&) {
     return cancelled();
@@ -328,8 +354,8 @@ const char* outcome(robust::Circle2DRadiusOutcome value) {
     return "free";
   }
 }
-Status fitCircle(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                 ExecContext& ctx) {
+Status fitCircleCore(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                     ExecContext& ctx) {
   if (ctx.cancelled())
     return cancelled();
   const auto& source = inputs.get("profile");
@@ -340,6 +366,14 @@ Status fitCircle(const Inputs& inputs, const ParamView& params, Outputs& outputs
   robust::Circle2DFitOptions options;
   if (auto status = circleParameters(params, options); !status.ok)
     return status;
+  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
+  if (inputs.has("provenance") && !provenance)
+    return bad("来源必须为Record", "provenance");
+  Json sources;
+  Record rebound;
+  if (!profile_contract::profileSources(source, provenance, sources, why) ||
+      !profile_contract::rebindProvenance(source, source, provenance, rebound, why))
+    return bad(why, "provenance");
   try {
     Working work;
     if (!working(*input, work, ctx, why))
@@ -362,9 +396,8 @@ Status fitCircle(const Inputs& inputs, const ParamView& params, Outputs& outputs
     circle.radius = fit.coefficients[2];
     const auto geometry = Data::circle2d(circle);
     const auto context = profile_contract::context(source);
-    const auto geometryContext = Data::record(
-        Record{"profile.Geometry.v2",
-               profile_contract::geometryContextV2FromSources(geometry, Json::array({context}))});
+    const auto geometryContext = Data::record(Record{
+        "profile.Geometry.v2", profile_contract::geometryContextV2FromSources(geometry, sources)});
     auto selected = selection(source, context, fit.inliers, ctx);
     double sum = 0;
     double worst = 0;
@@ -405,12 +438,96 @@ Status fitCircle(const Inputs& inputs, const ParamView& params, Outputs& outputs
     outputs.set("weightedInliers", std::move(selected.samples));
     outputs.set("indexMap", std::move(selected.map));
     outputs.set("quality", quality);
+    outputs.set("provenance", Data::record(std::move(rebound)));
     return Status::Ok();
   } catch (const robust::Cancelled&) {
     return cancelled();
   } catch (const std::invalid_argument& error) {
     return bad(error.what());
   }
+}
+
+std::vector<Param> lineParameterDescriptions() {
+  std::vector<Param> params = {
+      scalar("distanceThreshold", "内点距离门限", 0.0001),
+      count("segmentPoints", "近端重拟合样本数", 500, 0),
+      count("minInliers", "最少最终内点权重", 0, 0),
+      choice("lineType", "初始方向", "fit",
+             {{"fit", "自由"}, {"horizontal", "水平"}, {"vertical", "竖直"}}),
+      choice("endpoints", "端点口径", "roi_intersection",
+             {{"roi_intersection", "ROI交点"}, {"inlier_ends", "内点端点"}}),
+      choice("dirMode", "方向约束", "free",
+             {{"free", "自由"}, {"band", "偏离带宽时固定"}, {"fixed", "固定相对方向"}}),
+      scalar("dirNominalDeg", "相对标称角", 0, "°"),
+      scalar("dirTolDeg", "方向带宽", 12, "°")};
+  params[1].doc = "0表示使用全部拟合内点，不进行近端选段。";
+  params[2].doc =
+      "0关闭附加内点计数门禁；底层直线拟合仍至少需要两个有效点。固定方向回退计数为拟合多重样本权重。";
+  return params;
+}
+std::vector<Param> circleParameterDescriptions() {
+  std::vector<Param> params = {
+      scalar("distanceThreshold", "内点距离门限", 0.00003),
+      scalar("minRadius", "最小半径", 0.0005),
+      scalar("maxRadius", "最大半径", 0.01),
+      choice("radiusMode", "半径模式", "free",
+             {{"free", "自由半径"}, {"fixed", "固定半径"}, {"prior", "软半径先验"}}),
+      scalar("fixedRadius", "固定半径", 0.003),
+      scalar("radiusPrior", "先验半径", 0.003),
+      scalar("radiusPriorSigma", "先验标准差", 0.0003),
+      count("minInliers", "最少内点数", 3, 3)};
+  params[4].visibleWhen.param = "radiusMode";
+  params[4].visibleWhen.eq = Value::text("fixed");
+  for (const auto index : {5, 6}) {
+    params[index].visibleWhen.param = "radiusMode";
+    params[index].visibleWhen.eq = Value::text("prior");
+  }
+  return params;
+}
+Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+  profile_contract::RobustLineInputs in;
+  in.profile = inputs.get("profile");
+  in.box = inputs.get("box");
+  in.boxContext = inputs.get("boxContext");
+  in.toward = inputs.get("toward");
+  in.towardContext = inputs.get("towardContext");
+  in.refLine = inputs.get("refLine");
+  in.refLineContext = inputs.get("refLineContext");
+  in.provenance = inputs.get("provenance");
+  profile_contract::RobustLineResult result;
+  if (auto status = profile_contract::fitRobustLine(in, params, result, ctx); !status.ok)
+    return status;
+  if (ctx.cancelled())
+    return cancelled();
+  outputs.set("profile", result.profile);
+  outputs.set("line", result.line);
+  outputs.set("lineContext", result.lineContext);
+  outputs.set("innerEnd", result.innerEnd);
+  outputs.set("pointContext", result.pointContext);
+  outputs.set("inliers", result.inliers);
+  outputs.set("weightedInliers", result.weightedInliers);
+  outputs.set("indexMap", result.indexMap);
+  outputs.set("quality", result.quality);
+  outputs.set("provenance", result.provenance);
+  return Status::Ok();
+}
+Status fitCircle(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                 ExecContext& ctx) {
+  profile_contract::RobustCircleInputs in{inputs.get("profile"), inputs.get("provenance")};
+  profile_contract::RobustCircleResult result;
+  if (auto status = profile_contract::fitRobustCircle(in, params, result, ctx); !status.ok)
+    return status;
+  if (ctx.cancelled())
+    return cancelled();
+  outputs.set("profile", result.profile);
+  outputs.set("circle", result.circle);
+  outputs.set("circleContext", result.circleContext);
+  outputs.set("inliers", result.inliers);
+  outputs.set("weightedInliers", result.weightedInliers);
+  outputs.set("indexMap", result.indexMap);
+  outputs.set("quality", result.quality);
+  outputs.set("provenance", result.provenance);
+  return Status::Ok();
 }
 std::vector<Port> commonOutputs() {
   return {{"profile", "Profile", "原轮廓", "共享只读输入轮廓，保留完整槽和sourceIndices。", true},
@@ -419,14 +536,15 @@ std::vector<Port> commonOutputs() {
            "原轮廓槽的最终内点与质量多重权重；不是RANSAC内部求解抽样轨迹。", true},
           {"indexMap", "Record", "索引来源声明",
            "profile.Selection.v1；完整映射读取profile.sourceIndices。", true},
-          {"quality", "Record", "拟合质量", "区分唯一观测内点数与最终内点/质量权重数。", true}};
+          {"quality", "Record", "拟合质量", "区分唯一观测内点数与最终内点/质量权重数。", true},
+          {"provenance", "Record", "轮廓来源", "严格绑定当前Profile的单源或复合来源。", true}};
 }
 } // namespace
 
 void registerRobustProfileFeatures(Registry& registry) {
   OperatorDesc op;
   op.id = "profile.fit_line_robust";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "轮廓鲁棒直线特征拟合";
   op.category = "轮廓/拟合";
   op.keywords = {"profile", "robust line", "RANSAC",   "direction",
@@ -438,33 +556,23 @@ void registerRobustProfileFeatures(Registry& registry) {
       "inliers唯一化只用于观察索引，不会重拟合模型。"
       "box/toward/refLine必须与Profile处于相同物理空间，并提供绑定几何内容的上下文。";
   op.capabilities = {true, false, true};
-  op.inputs = {{"profile", "Profile", "轮廓", "包含帧、轴、m/mm单位、有效性与原索引。", true},
-               {"box", "Box2D", "拟合ROI", "米制端点ROI。输入轮廓需已按需要选区。", true},
-               {"boxContext", "Record", "ROI坐标声明", "profile.Geometry.v2。", true},
-               {"toward", "Point2D", "局部选择参考点", "米制，按沿线投影选择邻近样本。", true},
-               {"towardContext", "Record", "参考点坐标声明", "profile.Geometry.v1或v2。", true},
-               {"refLine", "Line2D", "方向参考线", "band/fixed时必须提供。", false},
-               {"refLineContext", "Record", "参考线坐标声明", "必须与refLine成对连接。", false}};
+  op.inputs = {
+      {"profile", "Profile", "轮廓", "包含帧、轴、m/mm单位、有效性与原索引。", true},
+      {"box", "Box2D", "拟合ROI", "米制端点ROI。输入轮廓需已按需要选区。", true},
+      {"boxContext", "Record", "ROI坐标声明", "profile.Geometry.v2。", true},
+      {"toward", "Any", "局部选择参考点或框", "米制Point2D或Box2D；框中心保留double运算。", true},
+      {"towardContext", "Record", "参考点坐标声明", "profile.Geometry.v1或v2。", true},
+      {"refLine", "Line2D", "方向参考线", "band/fixed时必须提供。", false},
+      {"refLineContext", "Record", "参考线坐标声明", "必须与refLine成对连接。", false},
+      {"provenance", "Record", "轮廓来源", "可选CompositeSources.v1，严格绑定当前输入。", false}};
+  op.inputs[3].anyGroup = 1;
   op.outputs = commonOutputs();
   op.outputs.insert(op.outputs.end(),
                     {{"line", "Line2D", "拟合直线", "米制输出。", true},
                      {"lineContext", "Record", "直线坐标上下文", "profile.Geometry.v2。", true},
                      {"innerEnd", "Point2D", "局部参考端点", "选中原槽的米制分析平面坐标。", true},
                      {"pointContext", "Record", "端点坐标上下文", "profile.Geometry.v2。", true}});
-  op.params = {scalar("distanceThreshold", "内点距离门限", 0.0001),
-               count("segmentPoints", "近端重拟合样本数", 500, 0),
-               count("minInliers", "最少最终内点权重", 0, 0),
-               choice("lineType", "初始方向", "fit",
-                      {{"fit", "自由"}, {"horizontal", "水平"}, {"vertical", "竖直"}}),
-               choice("endpoints", "端点口径", "roi_intersection",
-                      {{"roi_intersection", "ROI交点"}, {"inlier_ends", "内点端点"}}),
-               choice("dirMode", "方向约束", "free",
-                      {{"free", "自由"}, {"band", "偏离带宽时固定"}, {"fixed", "固定相对方向"}}),
-               scalar("dirNominalDeg", "相对标称角", 0, "°"),
-               scalar("dirTolDeg", "方向带宽", 12, "°")};
-  op.params[1].doc = "0表示使用全部拟合内点，不进行近端选段。";
-  op.params[2].doc =
-      "0关闭附加内点计数门禁；底层直线拟合仍至少需要两个有效点。固定方向回退计数为拟合多重样本权重。";
+  op.params = profile_contract::robustLineParams();
   op.compute = &fitLine;
   op.validate = [](const ParamView& params, const std::set<std::string>& connected) {
     features::LineOptions options;
@@ -481,7 +589,7 @@ void registerRobustProfileFeatures(Registry& registry) {
   registry.addOperator(std::move(op));
   op = {};
   op.id = "profile.fit_circle_robust";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "轮廓鲁棒圆拟合";
   op.category = "轮廓/拟合";
   op.keywords = {"profile", "circle", "RANSAC",   "LM",      "radius prior",
@@ -490,26 +598,14 @@ void registerRobustProfileFeatures(Registry& registry) {
            "free、固定半径和软半径先验为显式独立模式；细化越界保留原半径边界钉住重定圆心策略。"
            "输入不排序、不改写；无效槽不参与计算。原轮廓和原槽索引共同提供完整来源映射。";
   op.capabilities = {true, false, true};
-  op.inputs = {{"profile", "Profile", "轮廓", "包含m/mm单位、分析轴、有效性与源槽映射。", true}};
+  op.inputs = {
+      {"profile", "Profile", "轮廓", "包含m/mm单位、分析轴、有效性与源槽映射。", true},
+      {"provenance", "Record", "轮廓来源", "可选CompositeSources.v1，严格绑定当前输入。", false}};
   op.outputs = commonOutputs();
   op.outputs.insert(op.outputs.end(),
                     {{"circle", "Circle2D", "拟合圆", "米制圆心与半径。", true},
                      {"circleContext", "Record", "圆坐标上下文", "profile.Geometry.v2。", true}});
-  op.params = {scalar("distanceThreshold", "内点距离门限", 0.00003),
-               scalar("minRadius", "最小半径", 0.0005),
-               scalar("maxRadius", "最大半径", 0.01),
-               choice("radiusMode", "半径模式", "free",
-                      {{"free", "自由半径"}, {"fixed", "固定半径"}, {"prior", "软半径先验"}}),
-               scalar("fixedRadius", "固定半径", 0.003),
-               scalar("radiusPrior", "先验半径", 0.003),
-               scalar("radiusPriorSigma", "先验标准差", 0.0003),
-               count("minInliers", "最少内点数", 3, 3)};
-  op.params[4].visibleWhen.param = "radiusMode";
-  op.params[4].visibleWhen.eq = Value::text("fixed");
-  for (const auto index : {5, 6}) {
-    op.params[index].visibleWhen.param = "radiusMode";
-    op.params[index].visibleWhen.eq = Value::text("prior");
-  }
+  op.params = profile_contract::robustCircleParams();
   op.compute = &fitCircle;
   op.validate = [](const ParamView& params, const std::set<std::string>&) {
     robust::Circle2DFitOptions options;
@@ -522,3 +618,104 @@ void registerRobustProfileFeatures(Registry& registry) {
   registry.addOperator(std::move(op));
 }
 } // namespace lyflow::packs::std_profile
+
+namespace lyflow::profile_contract {
+namespace {
+Status parameterTypes(const ParamView& parameters, const std::vector<Param>& descriptions) {
+  for (const auto& parameter : descriptions) {
+    const auto found = parameters.raw().find(parameter.name);
+    if (found == parameters.raw().end())
+      return Status::Error(Phase::Execute, "bad_param",
+                           "缺少公共拟合参数；请使用共享参数工厂补齐默认值", parameter.name);
+    const auto& value = found->second;
+    if ((parameter.type == ParamType::Enum && value.kind() != Value::Kind::String) ||
+        (parameter.type == ParamType::Float && value.kind() != Value::Kind::Float &&
+         value.kind() != Value::Kind::Int) ||
+        (parameter.type == ParamType::Int && value.kind() != Value::Kind::Float &&
+         value.kind() != Value::Kind::Int))
+      return Status::Error(Phase::Execute, "bad_param", "公共拟合参数类型不符", parameter.name);
+    if (parameter.type == ParamType::Int && value.kind() == Value::Kind::Float) {
+      const double count = value.floatValue();
+      if (!std::isfinite(count) || std::floor(count) != count ||
+          count >= static_cast<double>(std::numeric_limits<std::int64_t>::max()) ||
+          count < static_cast<double>(std::numeric_limits<std::int64_t>::min()))
+        return Status::Error(Phase::Execute, "bad_param", "拟合计数必须为int64范围内的整数",
+                             parameter.name);
+    }
+  }
+  return Status::Ok();
+}
+}
+std::vector<Param> robustLineParams() { return packs::std_profile::lineParameterDescriptions(); }
+std::vector<Param> robustCircleParams() {
+  return packs::std_profile::circleParameterDescriptions();
+}
+Status fitRobustLine(const RobustLineInputs& input, const ParamView& parameters,
+                     RobustLineResult& out, ExecContext& ctx) {
+  if (!input.profile.asProfile() || !input.box.asBox2D() || !input.boxContext.asRecord() ||
+      (!input.toward.asPoint2D() && !input.toward.asBox2D()) || !input.towardContext.asRecord())
+    return Status::Error(Phase::Execute, "bad_input",
+                         "直线拟合需要Profile、ROI、toward及其完整上下文");
+  if (auto status = parameterTypes(parameters, robustLineParams()); !status.ok)
+    return status;
+  std::unordered_map<std::string, Data> inputs{{"profile", input.profile},
+                                               {"box", input.box},
+                                               {"boxContext", input.boxContext},
+                                               {"toward", input.toward},
+                                               {"towardContext", input.towardContext}};
+  if (input.refLine.kind() != Data::Kind::None)
+    inputs.emplace("refLine", input.refLine);
+  if (input.refLineContext.kind() != Data::Kind::None)
+    inputs.emplace("refLineContext", input.refLineContext);
+  if (input.provenance.kind() != Data::Kind::None)
+    inputs.emplace("provenance", input.provenance);
+  std::unordered_map<std::string, Data> values;
+  Outputs outputs(values);
+  if (auto status = packs::std_profile::fitLineCore(Inputs(inputs), parameters, outputs, ctx);
+      !status.ok)
+    return status;
+  RobustLineResult result;
+  result.profile = values.at("profile");
+  result.line = values.at("line");
+  result.lineContext = values.at("lineContext");
+  result.innerEnd = values.at("innerEnd");
+  result.pointContext = values.at("pointContext");
+  result.inliers = values.at("inliers");
+  result.weightedInliers = values.at("weightedInliers");
+  result.indexMap = values.at("indexMap");
+  result.quality = values.at("quality");
+  result.provenance = values.at("provenance");
+  if (ctx.cancelled())
+    return Status::Error(Phase::Execute, "cancelled", "轮廓拟合已取消");
+  out = std::move(result);
+  return Status::Ok();
+}
+Status fitRobustCircle(const RobustCircleInputs& input, const ParamView& parameters,
+                       RobustCircleResult& out, ExecContext& ctx) {
+  if (!input.profile.asProfile())
+    return Status::Error(Phase::Execute, "bad_input", "圆拟合需要完整Profile");
+  if (auto status = parameterTypes(parameters, robustCircleParams()); !status.ok)
+    return status;
+  std::unordered_map<std::string, Data> inputs{{"profile", input.profile}};
+  if (input.provenance.kind() != Data::Kind::None)
+    inputs.emplace("provenance", input.provenance);
+  std::unordered_map<std::string, Data> values;
+  Outputs outputs(values);
+  if (auto status = packs::std_profile::fitCircleCore(Inputs(inputs), parameters, outputs, ctx);
+      !status.ok)
+    return status;
+  RobustCircleResult result;
+  result.profile = values.at("profile");
+  result.circle = values.at("circle");
+  result.circleContext = values.at("circleContext");
+  result.inliers = values.at("inliers");
+  result.weightedInliers = values.at("weightedInliers");
+  result.indexMap = values.at("indexMap");
+  result.quality = values.at("quality");
+  result.provenance = values.at("provenance");
+  if (ctx.cancelled())
+    return Status::Error(Phase::Execute, "cancelled", "轮廓拟合已取消");
+  out = std::move(result);
+  return Status::Ok();
+}
+}

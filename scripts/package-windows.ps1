@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'LYFLOW_P4_ASSETS', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_MODULES', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'LYFLOW_P4_ASSETS', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -36,6 +36,8 @@ try {
     $env:LYFLOW_STD_PACKS = '1'
     # 发布组合以 packaging/release.json 为准：std-* 随 LYFLOW_STD_PACKS 编入，其余（默认关的仓库内包）按名点开。
     $releasePacks = @($configuration.packs | Sort-Object)
+    $releaseModules = @($configuration.modules | Sort-Object)
+    $env:LYFLOW_MODULES = $releaseModules -join ';'
     $env:LYFLOW_PACKS = (@($releasePacks | Where-Object { $_ -notlike 'std-*' }) -join ';')
     $env:LYFLOW_OP_PACKS = ''
     $buildParent = Join-Path $root 'build'
@@ -267,7 +269,7 @@ try {
     $metadata = [ordered]@{
         schemaVersion = 1; engineVersion = $inspection.engineVersion; abiVersion = $inspection.abiVersion
         sourceRevision = $revision; architecture = 'x64'; buildConfiguration = 'RelWithDebInfo'
-        packs = $packs; operators = $operators; dependencies = @($dependencies | Sort-Object { $_.name } -Unique)
+        packs = $packs; modules = $releaseModules; operators = $operators; dependencies = @($dependencies | Sort-Object { $_.name } -Unique)
         files = @($fileNames | ForEach-Object { [ordered]@{ path = $_ } })
         localValidationOnly = [bool]($AllowDirty -or $SkipDependencySetup)
         licenseStatus = 'Project license not declared in source repository'

@@ -16,6 +16,7 @@ void registerGeometryTransforms(Registry&);
 void registerP5PoseGeometry(Registry&);
 void registerTransformMake(Registry&);
 void registerConstraints3D(Registry&);
+void registerBoxAnchor(Registry&);
 namespace {
 
 using Vec = kernel::Vec2;
@@ -305,6 +306,7 @@ void registerPackOps(Registry& r) {
   registerPoseOps(r);
   registerGeometryTransforms(r);
   registerConstructors(r);
+  registerBoxAnchor(r);
   OperatorDesc op = descriptor("geometry.distance_2d", "二维几何距离", "2D geometry distance");
   op.inputs = {geometryInput("a", 1), geometryInput("b", 2)};
   Param firstCenter;

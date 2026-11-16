@@ -43,6 +43,29 @@ try {
         if (-not $rejected) { throw "Expected rejection: $Name" }
         $script:tests++
     }
+    $releaseCombination = $original | ConvertFrom-Json -AsHashtable
+    $releaseCombination.engineVersion = $releaseCombination.abiVersion = '1.4.5'
+    $releaseCombination.modules = @($configuration.modules)
+    $releaseCombination.packs = @($configuration.packs | ForEach-Object { @{ name = $_; version = '1.0.0' } })
+    $releaseCombination | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
+    [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision)
+    $tests++
+    foreach ($case in @(
+        @{ modules = @(); name = 'missing capability modules' },
+        @{ modules = @('gap-template'); name = 'partial capability modules' },
+        @{ modules = @($configuration.modules) + @('profile-robust-kernel'); name = 'extra capability module' },
+        @{ modules = @($configuration.modules) + @('gap-model'); name = 'duplicate capability module' },
+        @{ modules = @($configuration.modules | ForEach-Object { $_.ToUpperInvariant() }); name = 'case-changed capability identities' }
+    )) {
+        $invalid = $releaseCombination.Clone()
+        $invalid.modules = $case.modules
+        $invalid | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
+        Expect-Rejected { [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision) } $case.name
+    }
+    $invalid = $releaseCombination.Clone()
+    $invalid.packs = @($configuration.packs | ForEach-Object { @{ name = $(if ($_ -eq 'solution-gap') { 'gap' } else { $_ }); version = '1.0.0' } })
+    $invalid | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
+    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision } 'retired pack identity'
     $current = $original | ConvertFrom-Json -AsHashtable
     $current.engineVersion = $current.abiVersion = '1.3.12'
     $current | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile

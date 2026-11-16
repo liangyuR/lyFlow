@@ -9,6 +9,7 @@ import {
   pickFrame,
   placeLabels,
   roiFramesOf,
+  resolveBackdropInputs,
 } from '../src/lib/roiFrames.ts';
 
 // locate_template 的参数形状，缩到两个槽、每槽两个框
@@ -55,6 +56,81 @@ const op = {
 const node = (params) => ({ id: 'n', op: 't.locate', params });
 
 test('ROI分组与选择生命周期：只列启用槽、保留选择或回退、检查器识别底图键', () => {
+  const bundles = [
+    {
+      kind: 'test.Template',
+      fields: [
+        { name: 'left', type: 'Profile' },
+        { name: 'right', type: 'PointCloud' },
+        { name: 'info', type: 'Record' },
+      ],
+    },
+  ];
+  const target = { id: 'target', op: 'align', params: {} };
+  const declared = {
+    inputs: [
+      { name: 'templates', type: 'Bundle<test.Template>' },
+      { name: 'profile', type: 'Profile' },
+      { name: 'cloud', type: 'PointCloud' },
+    ],
+  };
+  const doc = {
+    nodes: [{ id: 'source', op: 'load' }, target],
+    edges: [{ from: { node: 'source', port: 'pair' }, to: { node: 'target', port: 'templates' } }],
+  };
+  const resolved = resolveBackdropInputs(
+    doc,
+    [],
+    target,
+    declared,
+    ['templates.left', 'templates.right'],
+    bundles,
+  );
+  assert.equal(resolved.error, null);
+  assert.deepEqual(resolved.sources, [
+    { nodeId: 'source', port: 'pair.left', type: 'Profile' },
+    { nodeId: 'source', port: 'pair.right', type: 'PointCloud' },
+  ]);
+  assert.deepEqual(resolveBackdropInputs(doc, [], target, declared, ['profile'], bundles).sources, [
+    null,
+  ]);
+  for (const path of [
+    'templates',
+    'templates.info',
+    'templates.unknown',
+    'templates.left.nested',
+    'templates.',
+    'absent',
+  ])
+    assert.match(
+      resolveBackdropInputs(doc, [], target, declared, [path], bundles).error,
+      /底图声明/,
+    );
+  const subgraph = {
+    ...doc,
+    nodes: [{ id: 'instance', op: 'sub:pair' }, target],
+    edges: [{ from: { node: 'instance', port: 'out' }, to: { node: 'target', port: 'templates' } }],
+    subgraphs: {
+      pair: {
+        nodes: [{ id: 'inner', op: 'load' }],
+        edges: [],
+        inputs: [],
+        outputs: [
+          { name: 'out', type: 'Bundle<test.Template>', from: { node: 'inner', port: 'samples' } },
+        ],
+      },
+    },
+  };
+  assert.equal(
+    resolveBackdropInputs(subgraph, [], target, declared, ['templates.left'], bundles).sources[0]
+      .port,
+    'samples.left',
+  );
+  assert.equal(
+    resolveBackdropInputs(subgraph, [], target, declared, ['templates.left'], bundles).sources[0]
+      .nodeId,
+    'instance/inner',
+  );
   const one = roiFramesOf(op, node({ templateDir: 'D:/tpl' }));
   assert.equal(one.length, 1, '槽 2 没启用：只有槽 1 一组');
   assert.equal(one[0].label, '模板 1 · f1');

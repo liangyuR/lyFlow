@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { firstCloudPort } from '../src/lib/basecloud.ts';
 import { fetchCloudPayload } from '../src/lib/profileFetch.ts';
+import { roiBackdropPoints } from '../src/lib/roiFrames.ts';
 import { formatOutputValue } from '../src/lib/outputs.ts';
 import { defaultViewFor, viewerContentFor, viewsFor } from '../src/lib/viewRule.ts';
 import {
@@ -184,7 +185,32 @@ test('Profile Transport uses its explicit capability and never downsamples or co
   const cloud = await fetchCloudPayload(transport, 'Profile', 'run', 'node', 'profile', 1);
   assert.equal(cloud.pointCount, 3);
   assert.equal(cloud.sampleStride, 1);
-  assert.deepEqual(calls, [['run', 'node', 'profile']]);
+  const fieldCloud = await fetchCloudPayload(
+    transport,
+    'Profile',
+    'run',
+    'node',
+    'templates.left',
+    1,
+  );
+  assert.deepEqual(calls[1], ['run', 'node', 'templates.left']);
+  const projected = roiBackdropPoints(fieldCloud);
+  assert.equal(projected.length, 6);
+  assert.ok(Math.abs(projected[0] - 0.001) < 1e-9);
+  assert.ok(Math.abs(projected[1] - 0.003) < 1e-9);
+  assert.ok(Math.abs(projected[3] - 0.004) < 1e-9);
+  assert.ok(Math.abs(projected[4] - 0.006) < 1e-9);
+  assert.equal(fieldCloud.profile.sourceIndices[2], 7);
+  assert.equal(fieldCloud.xyz[3], NaN);
+  const yz = profileToCloudPayload(
+    decodeProfile(packet({ descriptor: { plane: 'YZ', unit: 'm' } })),
+  );
+  assert.deepEqual(Array.from(roiBackdropPoints(yz)), [2, 3, 0, 5, 6, 0]);
+
+  assert.deepEqual(calls, [
+    ['run', 'node', 'profile'],
+    ['run', 'node', 'templates.left'],
+  ]);
   await assert.rejects(
     fetchCloudPayload({ getOutputCloud: transport.getOutputCloud }, 'Profile', 'r', 'n', 'p', 1),
     /宿主不支持/,

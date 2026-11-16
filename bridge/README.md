@@ -39,7 +39,7 @@ M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
    指向这里，安装包里的 core 因此**就是这一次构建编出来的那一份**。release 每次整份换掉，
    debug 只在还没有时放一份（tauri-build 在 debug 下也按 resources 拷文件，glob 空了要报错）。
    以前 resources 指向 `build-core.ps1` 的 `build/core/bin`：另一棵构建树，
-   `LYFLOW_PACKS=gap;solution-dts pnpm tauri build` 打出来的包里没有 gap（2026-10-01 实测）。
+   启用业务包后打出的安装包仍可能包含另一棵构建树里的旧 core（2026-10-01 实测）。
 4. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
    （D9：`activeCodePage=UTF-8`），lyflow-app 再合并 `lyflow-app.manifest`（Common-Controls v6）。
 

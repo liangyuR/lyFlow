@@ -358,7 +358,7 @@ fn tauri_step() {}
 
 /// 安装包里的 core 运行时（`tauri.conf.json` 的 `bundle.resources` 指向这里）。
 /// 必须就是这一次构建编出来的那一份：以前指向 `build-core.ps1` 的 `build/core/bin`，那是另一棵构建树，
-/// 装进去的是那边最后一次编的 —— `LYFLOW_PACKS=gap;solution-dts pnpm tauri build` 打出来的包里没有 gap。
+/// 装进去的是那边最后一次编的，可能缺少本次启用的业务包。
 /// 也不能取 `target/<profile>/`：CLI（`--no-default-features`）的构建脚本也往那里拷，谁后拷谁说了算。
 ///
 /// release 每次都整份换掉（先删旧的 DLL：换了一组包时多出来的不该留在安装包里）；debug 只在还没有时放一份 ——

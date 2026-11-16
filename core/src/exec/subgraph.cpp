@@ -96,6 +96,9 @@ Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
   p.unit = text("unit");
   p.placeholder = text("placeholder");
   p.mode = text("mode");
+  const auto emptyPath = j.find("allowEmptyPath");
+  p.allowEmptyPath = p.type == ParamType::Path && emptyPath != j.end() && emptyPath->is_boolean() &&
+                     emptyPath->get<bool>();
   // 语义标记跟着提升走（框拖动照样可用）；roiBackdrop 指的是内部算子的参数名，
   // 到了子图这一层对不上，不带过来。
   if (text("semantic") == "roi" && p.type == ParamType::Vec4f) {

@@ -275,6 +275,19 @@ TEST_CASE("Profile Bundle frame binding validates fields and fingerprints full p
   const auto input = holeProfile();
   Session source(graph, {}, {}, false, 1, false, {{"p", "out", wrap(input)}});
   REQUIRE(source.wait().runStatus() == "ok");
+  lyflow_profile_view nativeView{};
+  REQUIRE(lyflow_output_profile(source.runId().c_str(), "q", "out.profile", 0, 0, &nativeView) ==
+          0);
+  CHECK(nativeView.point_count == input.pointCount());
+  CHECK(nativeView.cloud_id == input.cloud->id);
+  CHECK(nativeView.xyz == input.cloud->xyz.data());
+  CHECK(nativeView.validity[777] == 0);
+  CHECK(nativeView.source_indices[777] == input.sourceIndices[777]);
+  CHECK(Json::parse(nativeView.descriptor_json) == profileDescriptorJson(input.descriptor));
+  lyflow_profile_view_free(&nativeView);
+  CHECK(lyflow_output_profile(source.runId().c_str(), "q", "out.missing", 0, 0, &nativeView) == 1);
+  CHECK(lyflow_output_profile(source.runId().c_str(), "q", "out.profile.nested", 0, 0,
+                              &nativeView) == 1);
   lyflow_frame* rawFrame = nullptr;
   REQUIRE(owned(lyflow_frame_capture(
                     source.runId().c_str(),
