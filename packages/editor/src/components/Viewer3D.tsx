@@ -27,11 +27,19 @@ import { diffSides, type CompareSide } from '../lib/compareDiff';
 import { withBoundValues } from '../lib/graphParams';
 import { effectiveParams } from '../lib/params';
 import type { RampName } from '../lib/ramps';
-import { copyFrameWrites, pickFrame, roiFramesOf } from '../lib/roiFrames';
+import {
+  copyFrameWrites,
+  pickFrame,
+  roiFramesOf,
+  resolveBackdropInputs,
+  roiBackdropPoints,
+  type RoiBackdropSource,
+} from '../lib/roiFrames';
+import { fetchCloudPayload } from '../lib/profileFetch';
 import { rememberRoiBounds } from '../lib/roiThumbs';
 import { disposeOverlay, extentOf, shapesOf } from '../lib/shapes2d';
 import { countInRect, extentText } from '../lib/pick';
-import { fullId, levelOf, resolveOutput } from '../lib/subgraph';
+import { fullId, levelOf } from '../lib/subgraph';
 import { compareContentFor } from '../lib/viewRule';
 import { gridSpec, sameFrame } from '../lib/viewFit';
 import { exportCanvasPng } from '../lib/exportPng';
@@ -315,6 +323,7 @@ export function Viewer3D({
     }
   }, [display.nodeId, display.failed, cloud]);
   const typesByName = useManifestStore((s) => s.typesByName);
+  const backdropBundles = useManifestStore((s) => s.bundle?.bundles);
   const graphPath = useGraphStore((s) => s.filePath);
   // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数按底图分组；一次只画选中的那一组
   // （L20：locate_template 的一个模板槽），切换条列出全部组
@@ -354,13 +363,16 @@ export function Viewer3D({
   // 底图（L15）两种来源：roiBackdrop 指的文件，经宿主读；或者输入端口，沿边取上游那一次运行的结果
   // （gap.align_template 的模板是输入端口不是文件）。端口那种要带上 runId 与运行状态：跑完了要重取
   const portSources = useMemo(() => {
-    if (!roi || roi.inputs.length === 0 || !activeNode) return null;
-    const level = levelOf(doc, path);
-    return roi.inputs.map((name) => {
-      const e = level.edges.find((x) => x.to.node === activeNode.id && x.to.port === name);
-      return e ? resolveOutput(doc, path, e.from.node, e.from.port) : null;
-    });
-  }, [roi, activeNode, doc, path]);
+    if (!roi || roi.inputs.length === 0 || !activeNode || !activeOp) return null;
+    return resolveBackdropInputs(
+      doc,
+      path,
+      activeNode,
+      activeOp,
+      roi.inputs,
+      backdropBundles ?? [],
+    );
+  }, [roi, activeNode, activeOp, doc, path, backdropBundles]);
   // 对比模式下没有拖框，也就不要底图（C8）
   const backdropKey = compareOn
     ? ''
@@ -368,7 +380,8 @@ export function Viewer3D({
       ? JSON.stringify({ files: roi.files, graphPath })
       : roi && portSources
         ? JSON.stringify({
-            ports: portSources,
+            ports: portSources.sources,
+            error: portSources.error,
             inputs: roi.inputs,
             runId: runId ?? null,
             runStatus,
@@ -567,7 +580,8 @@ export function Viewer3D({
     const spec = JSON.parse(backdropKey) as {
       files?: string[];
       graphPath?: string | null;
-      ports?: ({ nodeId: string; port: string } | null)[];
+      ports?: (RoiBackdropSource | null)[];
+      error?: string | null;
       inputs?: string[];
       runId?: string | null;
     };
@@ -576,6 +590,7 @@ export function Viewer3D({
       return;
     }
     const load = (): Promise<CloudPayload[]> => {
+      if (spec.error) return Promise.reject(new Error(spec.error));
       if (spec.files) {
         return Promise.all(
           spec.files.map((f) =>
@@ -595,7 +610,7 @@ export function Viewer3D({
       }
       return Promise.all(
         (spec.ports ?? []).map((src) =>
-          transport.getOutputCloud(spec.runId!, src!.nodeId, src!.port, 200_000).then(decodeCloud),
+          fetchCloudPayload(transport, src!.type, spec.runId!, src!.nodeId, src!.port, 200_000),
         ),
       );
     };
@@ -607,12 +622,8 @@ export function Viewer3D({
         // 几片拼成一片；NaN 槽不画（包围盒会被它毒成 NaN）
         const xyz: number[] = [];
         for (const p of payloads) {
-          for (let i = 0; i < p.pointCount; i += 1) {
-            const x = p.xyz[i * 3]!;
-            const y = p.xyz[i * 3 + 1]!;
-            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-            xyz.push(x, y, 0);
-          }
+          const points = roiBackdropPoints(p);
+          for (const point of points) xyz.push(point);
         }
         const geometry = new THREE.BufferGeometry();
         const flat = new Float32Array(xyz);

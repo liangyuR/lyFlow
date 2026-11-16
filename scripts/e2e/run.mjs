@@ -564,7 +564,7 @@ async function main() {
     const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
     report.eq('onnxruntime 两个 DLL 都在干净目录里', present, ort);
     // 装进去的 core 就是这次构建的那一份：以前 bundle.resources 指向 build-core.ps1 的另一棵构建树，
-    // LYFLOW_PACKS=gap;solution-dts 打出来的包里没有 gap，这里的数照样对得上 —— 只看算子个数抓不到
+    // 启用业务包后打出来的安装包里仍没有对应算子，这里的数照样对得上 —— 只看算子个数抓不到
     const packs = await cdp.eval(`
       return [...new Set([...window.__lyflow.stores.manifest.getState().operatorsById.values()]
         .map((o) => (o.pack ?? '').split('@')[0]).filter(Boolean))].sort();

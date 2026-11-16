@@ -8,7 +8,11 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
-    "id": { "type": "string", "minLength": 1, "description": "全局唯一，用 . 分命名空间，例如 gap.measure_skeleton。" },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "全局唯一，用 . 分命名空间，例如 gap.measure_skeleton。"
+    },
     "label": { "type": "string", "minLength": 1, "description": "面板上显示的名字。" },
     "category": { "type": "string", "description": "面板里的分组。" },
     "doc": { "type": "string" },
@@ -22,6 +26,7 @@
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "op": { "type": "string", "minLength": 1 },
+          "opVersion": { "$ref": "operator-manifest.schema.json#/$defs/semver" },
           "params": { "type": "object", "description": "稀疏参数，与 GraphDoc 相同。" },
           "ui": {
             "type": "object",

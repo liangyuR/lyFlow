@@ -1,21 +1,21 @@
 # 算子边界迁移计划
 
-状态：实施中，M1–M3 与 M4a 已合并，当前推进 M4b 公共算子；M4c 场景与导入图迁移尚未完成。原始规划基线为 `9940c8c`；逐项清单保留原始注册快照与目标边界，不把文档完成记为算法迁移完成。
+状态：实施中，M1–M3、M4a 与 M4b 已合并；本轮 M4c 场景、导入图与交付迁移的实现及验收见 [PR67](https://github.com/liangyuR/lyFlow/pull/67) 与 [Gap 指南](gap-profile-migration.md)，M5–M7 未实施。原始规划基线为 `9940c8c`；逐项清单保留原始注册快照与目标边界，不把文档完成记为算法迁移完成。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
 ## 实施进度
 
-| 波次  | 当前状态                                                    | 证据入口                                                                                                                                    |
-| ----- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0    | 分包规划与完整清单已合并                                    | [PR61](https://github.com/liangyuR/lyFlow/pull/61)                                                                                          |
-| M1    | 已合并：原生Profile、版本化标定、显式图适配与跨宿主接口     | [PR62](https://github.com/liangyuR/lyFlow/pull/62)、[数据契约](profile-data-contract.md)、[宿主协议](profile-host-protocol.md)              |
-| M2    | 已合并：公共静态内核、声明式模块与三项算子归属调整          | [PR63](https://github.com/liangyuR/lyFlow/pull/63)、[公共内核](public-kernels.md)                                                           |
-| M3    | 已合并：公共Profile链、DTS场景v2、显式旧图升级、CLI/SDK交付 | [PR64](https://github.com/liangyuR/lyFlow/pull/64)、[图迁移](dts-profile-migration.md)、[原生Profile示例](../examples/m3-native-profile.md) |
-| M4a   | 已合并：稳健拟合公共核、可选模块及独立SDK消费               | [PR65](https://github.com/liangyuR/lyFlow/pull/65)，七项CI成功、对应提交Codex审查无问题                                                     |
-| M4b   | 实施及整体验证中：10项公共算子、原生来源绑定与旧Gap薄适配   | [公共算子契约](profile-public-operators.md)；完整manifest为271原生/8示例，尚不代替CI及审查                                                  |
-| M4c   | 待实施：Gap场景、模板/模型、Bundle及导入图切换              | 下表的完整M4波次验收门槛；不将M4a/M4b等同整个M4完成                                                                                         |
-| M5–M7 | 待实施；不将M3试点算作glue或最终退役完成                    | 下表的波次及验收门槛                                                                                                                        |
+| 波次  | 当前状态                                                    | 证据入口                                                                                                                                         |
+| ----- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M0    | 分包规划与完整清单已合并                                    | [PR61](https://github.com/liangyuR/lyFlow/pull/61)                                                                                               |
+| M1    | 已合并：原生Profile、版本化标定、显式图适配与跨宿主接口     | [PR62](https://github.com/liangyuR/lyFlow/pull/62)、[数据契约](profile-data-contract.md)、[宿主协议](profile-host-protocol.md)                   |
+| M2    | 已合并：公共静态内核、声明式模块与三项算子归属调整          | [PR63](https://github.com/liangyuR/lyFlow/pull/63)、[公共内核](public-kernels.md)                                                                |
+| M3    | 已合并：公共Profile链、DTS场景v2、显式旧图升级、CLI/SDK交付 | [PR64](https://github.com/liangyuR/lyFlow/pull/64)、[图迁移](dts-profile-migration.md)、[原生Profile示例](../examples/m3-native-profile.md)      |
+| M4a   | 已合并：稳健拟合公共核、可选模块及独立SDK消费               | [PR65](https://github.com/liangyuR/lyFlow/pull/65)，七项CI成功、对应提交Codex审查无问题                                                          |
+| M4b   | 已合并：10项公共算子、原生来源绑定与旧Gap薄适配             | [PR66](https://github.com/liangyuR/lyFlow/pull/66)、[公共算子契约](profile-public-operators.md)；七项CI通过、同head Codex无问题                  |
+| M4c   | Gap原生场景、模板/模型、Bundle及显式图升级                  | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移及验证](gap-profile-migration.md)；本地验收、远端CI、Codex审查与合并记录分别保留 |
+| M5–M7 | 待实施；不将M3试点算作glue或最终退役完成                    | 下表的波次及验收门槛                                                                                                                             |
 
 M1提升产品/ABI至1.4.0：`lyflow_run_options`扩展后与1.3系列二进制不兼容，所有客户端按1.4系列加载。`std-profile`仅包含三项数据适配；DTS、gap、glue的计算与归属暂未迁移。旧DTS几何的数值换算必须带已知v1来源声明，不推断未知外部节点的单位。
 
@@ -67,6 +67,8 @@ M4沿用上表第6、7项的边界分批交付。每个切片独立审查，38�
 | M4c  | `solution-gap`、模板/模型模块、Bundle、六种导入模式及六个片段         | 1280槽和双头六通道协议、相机源身份与逻辑角色、raw/processed阶段、惰性模型回退保留；注册依赖闭包与实际场景一致               |
 
 精简构建已暴露旧Gap图对`std-pointcloud`的`util.merge`、`filter.radius_outlier`、`filter.crop_box2d`以及`std-ml`的`ml.onnx_run`的隐式注册依赖。这些场景依赖必须在M4b/M4c实现中明确；仅链接点云算法库或导出39个Gap描述，不能证明积木图与细粒度图可独立运行。`flow.fallback`继续由core提供。
+
+M4b已按PR66合并修订`f48aa13199a55b29088d439b8a7dbe090734a6eb`验收；对应head为`2385c73565af625a3f355d0f74fefdf15bfc8449`，CI run 43859275468七项成功、Codex无问题、审查线程为空。M4c契约与当前验证边界见[Gap原生迁移](gap-profile-migration.md)，不将尚未完成的场景迁移计入已交付。
 
 M4a已按PR65合并修订`02e15806136df452bd575ff0e20610db7636918c`验收。M4b产品1.4.4保持1.4系列C ABI布局，std-profile/std-metrology为0.3.0、std-geometry为0.6.0、gap为0.2.1。旧`gap.fit_line`/`gap.flush`升级1.1.1，`gap.gap`/`gap.point_offset`升级1.0.1；NaN无效槽不参与直线计算，重合圆心/像素/溢出明确拒绝，不能宣称全部历史输入兼容。保留旧8项通用Gap ID至M4c完成消费者与图迁移；本轮不将其注册成公共节点别名，也不提前删除场景入口。完整接口、单位及错误边界见[公共Profile算子](profile-public-operators.md)。
 

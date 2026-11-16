@@ -4,10 +4,10 @@
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 223 · ml.onnx_run
+## 229 · ml.onnx_run
 
 - 当前：`std-ml` / `1.0.0` / ONNX 推理。目标：`std-ml`；保留并验边界；**M6**。
-- 源码：[packs/std-ml/ops/ml_onnx_run.cpp:376](../../packs/std-ml/ops/ml_onnx_run.cpp#L376)。
+- 源码：[packs/std-ml/ops/ml_onnx_run.cpp:43](../../packs/std-ml/ops/ml_onnx_run.cpp#L43)。
 - 端口：`input:Tensor` → `output:Tensor`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前：ONNX Runtime 1.32.0 CPU与core Tensor；目标：ml-runtime内部后端模块（可选），adapters-only不链接ORT

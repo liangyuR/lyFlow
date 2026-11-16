@@ -80,7 +80,7 @@ MCP 同时使用 HTTP 后端与本地 CLI；配置完成后，先调用 `get_env
 | [std-image](packs/std-image/README.md)           | 图像处理、标定、深度图与点云转换       | 启用         |
 | [std-ml](packs/std-ml/README.md)                 | ONNX Runtime 推理                      | 启用         |
 | [glue](packs/glue/README.md)                     | 胶路、胶宽、断胶、边距与判定           | 按需启用     |
-| [gap](packs/gap/README.md)                       | 间隙与段差测量                         | 按需启用     |
+| [solution-gap](solutions/gap/README.md)          | 间隙与段差测量                         | 按需启用     |
 | [solution-dts](solutions/dts/README.md)          | 车门胶条面差                           | 按需启用     |
 
 开发涂胶流程时，在构建或启动前指定：

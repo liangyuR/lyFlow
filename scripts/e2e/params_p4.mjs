@@ -98,7 +98,9 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
     `return window.__lyflow.stores.manifest.getState().operatorsById.has('gap.notch_width');`,
   );
   if (!hasGap) {
-    report.section(`${title}（未验：app 的 core 没有 gap 包，设 LYFLOW_PACKS=gap;solution-dts）`);
+    report.section(
+      `${title}（未验：app 的 core 没有 gap 包，设 LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import;gap-compat'）`,
+    );
     report.fail('app 里有 gap.notch_width', 'LYFLOW_PACKS 没带 gap');
     return;
   }

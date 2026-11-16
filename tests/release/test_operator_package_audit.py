@@ -21,10 +21,43 @@ class PackageAuditTests(unittest.TestCase):
     def setUpClass(cls):
         cls.baseline = json.loads((ROOT / 'docs/operator-package-audit.json').read_text(encoding='utf-8'))
 
-    def before_m4b(self):
+    def before_m4c(self):
         data = copy.deepcopy(self.baseline)
+        data['operators'] = [row for row in data['operators'] if row['id'] not in REFRESH.M4C_DEFINITIONS]
+        for row in data['operators']:
+            history = next((item for item in row.get('contractHistory', []) if item.get('stage') == 'M4c'), None)
+            if history:
+                row.update({key: copy.deepcopy(value) for key, value in history.items()
+                            if key not in {'stage', 'sourceRevision'}})
+            move = next((item for item in row.get('packageHistory', []) if item.get('stage') == 'M4c'), None)
+            if move:
+                row['currentPackVersion'] = move['fromPackVersion']
+            for key in ('packageHistory', 'contractHistory', 'stageAssessments'):
+                if key in row:
+                    row[key] = [item for item in row[key] if item.get('stage') != 'M4c']
+        for row in data.get('retiredOperators', []):
+            if row['retiredStage'] == 'M4c':
+                original = copy.deepcopy(row)
+                for key in ('retiredStage', 'replacedBy', 'sourceRevision', 'sourceFingerprint', 'migration'):
+                    original.pop(key, None)
+                data['operators'].append(original)
+        data['retiredOperators'] = [row for row in data.get('retiredOperators', []) if row['retiredStage'] != 'M4c']
+        data['stageLedger'] = [entry for entry in data['stageLedger'] if entry['stage'] != 'M4c']
+        if 'relatedAssetsBaseline' in data:
+            data['relatedAssets'] = data.pop('relatedAssetsBaseline')
+        return data
+
+    def before_m4b(self):
+        data = self.before_m4c()
         data['operators'] = [row for row in data['operators'] if row['id'] not in REFRESH.M4B_DEFINITIONS]
         data['stageLedger'] = [entry for entry in data['stageLedger'] if entry['stage'] != 'M4b']
+        for row in data['operators']:
+            history = next((item for item in row.get('contractHistory', []) if item.get('stage') == 'M4b'), None)
+            if history:
+                for previous, current in (('version', 'currentVersion'), ('pack', 'currentPackVersion'),
+                                          ('ports', 'currentPorts'), ('params', 'currentParams')):
+                    row[current] = copy.deepcopy(history[previous])
+                row['contractHistory'] = [item for item in row['contractHistory'] if item.get('stage') != 'M4b']
         data['registeredNativeIds'] = sorted(row['id'] for row in data['operators'])
         data['nativeCount'] = len(data['operators'])
         data['currentPackCounts'] = dict(collections.Counter(row['currentPack'] for row in data['operators']))
@@ -215,9 +248,15 @@ class PackageAuditTests(unittest.TestCase):
     def test_scene_contract_sources_are_tracked_without_heavy_backends(self):
         patterns = CHECKER.CONTRACT_SOURCES
         self.assertIn('solutions/*/ops/*.cpp', patterns)
-        self.assertIn('solutions/*/algo/*.cpp', patterns)
         self.assertIn('kernels/include/**/*.h', patterns)
         self.assertIn('packs/*/include/**/*.h', patterns)
+        sources = {path.relative_to(ROOT).as_posix() for pattern in patterns
+                   for path in ROOT.glob(pattern) if path.is_file()}
+        self.assertTrue({'solutions/gap/algo/gap_detection/GapUtils.cpp',
+                         'solutions/gap/algo/gap_core/MeasurementTypes.hpp',
+                         'solutions/gap/algo/std_bridge.hpp',
+                         'core/src/graph_contract_upgrade_gap.h',
+                         'solutions/gap/snippets/flush-line-end.lyflow-snippet.json'} <= sources)
 
     def test_m4a_requires_merged_m3_and_does_not_complete_the_whole_wave(self):
         before = copy.deepcopy(self.baseline)

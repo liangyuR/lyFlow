@@ -17,7 +17,7 @@
 的问题。
 
 **三、194 个测点的老配置怎么变成图。** 迁移脚本得能把 `StandardGap.yml` 转成
-`.lyflow.json`。Python 生成器（`packs/gap/tools/lyflow_graph_from_config.py`）已经能做，
+`.lyflow.json`。Python 生成器（`solutions/gap/tools/lyflow_graph_from_config.py`）已经能做，
 但业务的 `PrepareDatabase` 是 C++，不该为此绑一个 Python 运行时。
 
 ## 决定
@@ -98,12 +98,12 @@ CLI：`lyflow import <file> --kind <kind> [-o out.lyflow.json] [--base-dir dir]`
 
 一次加齐，之后阶段 B 期间冻结：
 
-| 新增 | 形态 |
-|---|---|
-| `lyflow_run_outputs` | `char* (const char* run_id)` |
-| `lyflow_import` | `char* (const char* kind, const char* text, const char* base_dir)` |
-| `lyflow_run_options.inputs` | `const lyflow_run_input*` |
-| `lyflow_run_options.input_count` | `size_t` |
+| 新增                             | 形态                                                               |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `lyflow_run_outputs`             | `char* (const char* run_id)`                                       |
+| `lyflow_import`                  | `char* (const char* kind, const char* text, const char* base_dir)` |
+| `lyflow_run_options.inputs`      | `const lyflow_run_input*`                                          |
+| `lyflow_run_options.input_count` | `size_t`                                                           |
 
 `lyflow_run_options` 尾部追加两个字段是**破坏性**的（结构体按值传，布局变了），
 所以版本号从 6 跳到 7，头文件里有 `LYFLOW_ABI_VERSION`，

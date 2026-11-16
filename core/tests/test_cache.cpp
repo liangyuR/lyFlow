@@ -13,6 +13,7 @@
 #include "exec/disk_cache.h"
 #include "exec/plan.h"
 #include "exec/result_store.h"
+#include "exec/subgraph.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
 #include "test_ops.h"
@@ -831,7 +832,7 @@ TEST_CASE(
     "visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 与 schema、编辑器同一套判据（param-recipe P1.6）") {
   ensureTestOps();
   // cond 决定 path 何时露出来：eq file（source = file 才可见）或 ne identity（source ≠ identity 才可见）
-  auto makeRegistry = [](const char* opId, bool useNe) {
+  auto makeRegistry = [](const char* opId, bool useNe, bool allowEmpty = false) {
     Registry r;
     r.addType(PortType{"Transform", "#a0d030", {}, ""});
 
@@ -858,6 +859,7 @@ TEST_CASE(
     path.type = ParamType::Path;
     path.label = "Path";
     path.def = Value::text("");
+    path.allowEmptyPath = allowEmpty;
     path.visibleWhen.param = "source";
     if (useNe) {
       path.visibleWhen.ne = Value::text("identity");
@@ -896,6 +898,22 @@ TEST_CASE(
     const Json wrongShape = diagnose(r, "test.hidden_path", Json{{"path", 42}});
     REQUIRE(wrongShape.size() == 1);
     CHECK(wrongShape[0]["code"] == "bad_param");
+  }
+
+  SUBCASE("explicitly optional path keeps type validation and publishes its contract") {
+    const Registry r = makeRegistry("test.optional_path", false, true);
+    REQUIRE(r.validate().empty());
+    CHECK(diagnose(r, "test.optional_path", Json{{"source", "file"}}).empty());
+    const Json malformed = diagnose(r, "test.optional_path", Json{{"path", 42}});
+    REQUIRE(malformed.size() == 1);
+    CHECK(malformed[0]["code"] == "bad_param");
+    const auto manifest = Json::parse(r.toManifestJson());
+    CHECK(manifest["operators"][0]["params"][1]["allowEmptyPath"] == true);
+    CHECK(exec::paramFromDecl("path", manifest["operators"][0]["params"][1]).allowEmptyPath);
+    CHECK_FALSE(
+        exec::paramFromDecl("x", Json{{"type", "float"}, {"allowEmptyPath", true}}).allowEmptyPath);
+    CHECK_FALSE(exec::paramFromDecl("path", Json{{"type", "path"}, {"allowEmptyPath", "true"}})
+                    .allowEmptyPath);
   }
 
   SUBCASE("ne") {

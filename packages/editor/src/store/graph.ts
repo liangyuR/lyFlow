@@ -906,8 +906,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
         nodes.push({
           id,
           op: op.id,
-          opVersion: op.version,
-          params: pruneUnknownParams(op, n.params),
+          opVersion: n.opVersion ?? op.version,
+          params:
+            n.opVersion && n.opVersion !== op.version
+              ? structuredClone(n.params ?? {})
+              : pruneUnknownParams(op, n.params),
           ui,
         });
       }

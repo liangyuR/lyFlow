@@ -744,7 +744,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 必填只对**可见**的参数成立（1.6）：被 visibleWhen 藏起来的 path 参数
     // 用户根本没机会选文件，为它标红只会让人找不到那个红框在哪。
     for (const Param& p : op->params) {
-      if (prepared[i].fullyProvided || p.type != ParamType::Path)
+      if (prepared[i].fullyProvided || p.type != ParamType::Path || p.allowEmptyPath)
         continue;
       if (!conditionHolds(p.visibleWhen, prepared[i].params))
         continue;

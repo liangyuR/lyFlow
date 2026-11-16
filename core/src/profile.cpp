@@ -171,4 +171,57 @@ bool convertProfileUnit(const Profile& input, const std::string& targetUnit, Pro
   why.clear();
   return true;
 }
+bool remapProfileAxes(const Profile& input, const std::string& order,
+                      const std::array<float, 3>& signs, const std::string& targetFrame,
+                      Profile& out, std::string& why, const std::function<bool()>& cancelled) {
+  if (cancelled && cancelled())
+    return fail(why, "Profile换轴已取消");
+  if (!validateProfile(input, why))
+    return false;
+  if (order.size() != 3 ||
+      std::set<char>(order.begin(), order.end()) != std::set<char>{'X', 'Y', 'Z'})
+    return fail(why, "轴映射必须为XYZ的完整排列");
+  for (float sign : signs)
+    if (sign != 1 && sign != -1)
+      return fail(why, "轴符号只能为+1或-1");
+  std::array<std::size_t, 3> axes{};
+  for (std::size_t i = 0; i < 3; ++i)
+    axes[i] = static_cast<std::size_t>(order[i] - 'X');
+  int parity = 1;
+  for (std::size_t i = 0; i < 3; ++i)
+    for (std::size_t j = i + 1; j < 3; ++j)
+      if (axes[i] > axes[j])
+        parity = -parity;
+  const bool reflected = parity * signs[0] * signs[1] * signs[2] < 0;
+  Profile result = input;
+  result.descriptor.frame = targetFrame;
+  if (reflected)
+    result.descriptor.handedness = input.descriptor.handedness == "right" ? "reflected" : "right";
+  result.descriptor.plane.clear();
+  for (std::size_t i = 0; i < 3; ++i)
+    if (input.descriptor.plane.find(order[i]) != std::string::npos)
+      result.descriptor.plane.push_back(static_cast<char>('X' + i));
+  if (!validateProfileDescriptor(result.descriptor, why))
+    return false;
+  PointCloud cloud = *input.cloud;
+  PointCloud identity;
+  cloud.id = identity.id;
+  for (std::size_t i = 0; i < input.pointCount(); ++i) {
+    if ((i & 4095) == 0 && cancelled && cancelled())
+      return fail(why, "Profile换轴已取消");
+    for (std::size_t j = 0; j < 3; ++j) {
+      cloud.xyz[3 * i + j] = signs[j] * input.cloud->xyz[3 * i + axes[j]];
+      if (cloud.hasNormals())
+        cloud.normals[3 * i + j] = signs[j] * input.cloud->normals[3 * i + axes[j]];
+    }
+  }
+  result.cloud = std::make_shared<const PointCloud>(std::move(cloud));
+  if (!validateProfile(result, why))
+    return false;
+  if (cancelled && cancelled())
+    return fail(why, "Profile换轴已取消");
+  out = std::move(result);
+  why.clear();
+  return true;
+}
 } // namespace lyflow

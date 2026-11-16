@@ -71,6 +71,16 @@ function Assert-RuntimeNuGetMetadata {
             if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $relative) -PathType Leaf)) { throw "Runtime missing $relative" }
         }
     }
+    if ([version]$ExpectedVersion -ge [version]'1.4.5') {
+        if ('modules' -notin $metadata.PSObject.Properties.Name -or 'packs' -notin $metadata.PSObject.Properties.Name) { throw 'Runtime metadata is missing the release pack/module combination.' }
+        $actualModules = @($metadata.modules | Sort-Object -Unique)
+        $actualPacks = @($metadata.packs | ForEach-Object name | Sort-Object -Unique)
+        if (@($metadata.modules).Count -ne $actualModules.Count -or @($metadata.packs).Count -ne $actualPacks.Count -or
+            @(Compare-Object -CaseSensitive -ReferenceObject @($configuration.modules | Sort-Object) -DifferenceObject $actualModules).Count -or
+            @(Compare-Object -CaseSensitive -ReferenceObject @($configuration.packs | Sort-Object) -DifferenceObject $actualPacks).Count) {
+            throw 'Runtime pack/module combination differs from the release contract.'
+        }
+    }
     foreach ($id in $configuration.requiredOperators) {
         if ($id -cnotin @($metadata.operators | ForEach-Object { $_.id })) { throw "Runtime metadata missing required operator: $id" }
     }

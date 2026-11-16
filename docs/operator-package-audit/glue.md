@@ -4,7 +4,7 @@
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
-## 127 · glue.locate
+## 133 · glue.locate
 
 - 当前：`glue` / `1.1.0` / 二维模板定位。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/locate.cpp:145](../../packs/glue/ops/locate.cpp#L145)。
@@ -18,7 +18,7 @@
 - 验收：半像素平移/小转角、angleRange<angleStep、模板pad/锚点、低分/护栏和pose_fail传播。
 - 说明：先比较现image NCC实现差异，不因已有同名匹配节点直接删除此算法。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 128 · glue.polyline
+## 134 · glue.polyline
 
 - 当前：`glue` / `1.0.0` / 折线胶路。目标：`std-geometry`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/polyline.cpp:97](../../packs/glue/ops/polyline.cpp#L97)。
@@ -32,7 +32,7 @@
 - 验收：重复点、末端zone=0、短折线拒绝、切向符号、站号和弧长一致。
 - 说明：像素是合法几何单位；不能为了轻量将大折线数组塞进不限长Record。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 129 · glue.color_model
+## 135 · glue.color_model
 
 - 当前：`glue` / `1.0.0` / 胶色建模。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/color_model.cpp:175](../../packs/glue/ops/color_model.cpp#L175)。
@@ -46,7 +46,7 @@
 - 验收：RGB顺序、累加交换顺序、确定性EM、无有效样本、饱和/暗区与重居中轮次基线。
 - 说明：不能换成HSV阈值后宣称只是分包。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 130 · glue.color_map
+## 136 · glue.color_map
 
 - 当前：`glue` / `1.0.0` / 胶色得分图。目标：`std-image`；迁移归属；**M5**。
 - 源码：[packs/glue/ops/color_map.cpp:94](../../packs/glue/ops/color_map.cpp#L94)。
@@ -60,7 +60,7 @@
 - 验收：高光/暗/背景三态、NaN不可改成0、超模型兼容范围拒绝和ROI块等值。
 - 说明：NaN影响unknown而0是观测到背景，不能合并。
 
-## 131 · glue.part_edges
+## 137 · glue.part_edges
 
 - 当前：`glue` / `1.0.0` / 找零件边。目标：`std-image`；迁移归属；**M5**。
 - 源码：[packs/glue/ops/part_edges.cpp:121](../../packs/glue/ops/part_edges.cpp#L121)。
@@ -74,7 +74,7 @@
 - 验收：所有候选保留、极性、图像边界、三点亚像素细化和首边/最强边区别。
 - 说明：可与现有image caliper共享采样/插值内核，但判据需逐项比对。
 
-## 132 · glue.response
+## 138 · glue.response
 
 - 当前：`glue` / `1.0.0` / 响应图。目标：`std-image`；迁移归属；**M5**。
 - 源码：[packs/glue/ops/response.cpp:50](../../packs/glue/ops/response.cpp#L50)。
@@ -88,7 +88,7 @@
 - 验收：明暗极性、ROI边界、结构元尺度、f32布局及块/整图逐位一致；不相交ROI仍报错。
 - 说明：不能仅提取response而遗漏gray/level，后续横向剖面依赖三者。
 
-## 133 · glue.fan_scan
+## 139 · glue.fan_scan
 
 - 当前：`glue` / `1.0.0` / 扇形扫描。目标：`std-image`；迁移归属；**M5**。
 - 源码：[packs/glue/ops/fan_scan.cpp:156](../../packs/glue/ops/fan_scan.cpp#L156)。
@@ -102,7 +102,7 @@
 - 验收：ROI块外、NaN、invalidMax等号、360度环绕、峰分离/平局与includeInvalid。
 - 说明：只给候选方向，不在通用层选择生产方向。
 
-## 134 · glue.color_fan
+## 140 · glue.color_fan
 
 - 当前：`glue` / `1.0.0` / 彩色扇形扫描。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/color_fan.cpp:20](../../packs/glue/ops/color_fan.cpp#L20)。
@@ -116,7 +116,7 @@
 - 验收：相同score场的灰/彩结果一致；全NaN、ROI块外和无峰行为一致。
 - 说明：合并实现不要求立刻删除旧算子id，id切换走统一图迁移计划。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 135 · glue.lateral_runs
+## 141 · glue.lateral_runs
 
 - 当前：`glue` / `1.0.0` / 横向卡尺。目标：`std-image`；迁移归属；**M5**。
 - 源码：[packs/glue/ops/lateral_runs.cpp:105](../../packs/glue/ops/lateral_runs.cpp#L105)。
@@ -130,7 +130,7 @@
 - 验收：双峰半高、窄缝合并、宽度上限、边缘不完整、锐度组成和站序；不新加presence门。
 - 说明：测量记录与业务Bead中选中的段需区分。
 
-## 136 · glue.color_runs
+## 142 · glue.color_runs
 
 - 当前：`glue` / `1.2.0` / 彩色横向卡尺。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/color_runs.cpp:317](../../packs/glue/ops/color_runs.cpp#L317)。
@@ -144,7 +144,7 @@
 - 验收：真实边/窗口端/高光/暗区/块外分类，可信邻站合并、明确背景不跨越及unknown宽度。
 - 说明：不能与lateral_runs的有限阈值分段无条件互换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 137 · glue.station_calipers
+## 143 · glue.station_calipers
 
 - 当前：`glue` / `1.0.0` / 胶路逐点卡尺测量。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/station_calipers.cpp:285](../../packs/glue/ops/station_calipers.cpp#L285)。
@@ -158,7 +158,7 @@
 - 验收：无效pose、胶边越窗、最近暗谷与其他暗结构、标定mm、跨帧缺测不算断胶/合格。
 - 说明：它不是完全通用的image.caliper_pair，需先抽内核再保留薄适配。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 138 · glue.taught_path
+## 144 · glue.taught_path
 
 - 当前：`glue` / `1.0.0` / 示教胶路。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/taught_path.cpp:150](../../packs/glue/ops/taught_path.cpp#L150)。
@@ -172,7 +172,7 @@
 - 验收：无图/无胶、折线端点、检测区裁剪和lineSource保留，不能把示教线存在判为OK。
 - 说明：与glue.polyline共享重采样，不共享所有场景参数。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 139 · glue.track_path
+## 145 · glue.track_path
 
 - 当前：`glue` / `1.0.0` / 粗跟踪与拟合。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/track_path.cpp:173](../../packs/glue/ops/track_path.cpp#L173)。
@@ -186,7 +186,7 @@
 - 验收：断口后重接、无峰、minPoints直线回退、锐度门及检测区端点/重采样步长。
 - 说明：不要与color_track强行合并默认策略，它们的无信息/回退规则不同。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 140 · glue.bead_path
+## 146 · glue.bead_path
 
 - 当前：`glue` / `1.0.0` / 胶路提取。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/bead_path.cpp:146](../../packs/glue/ops/bead_path.cpp#L146)。
@@ -200,7 +200,7 @@
 - 验收：直胶/螺旋、反光/背景暗带、无胶和路径长度不足，不生成虚构合格路径。
 - 说明：通用跟踪结果valid/unknown不直接等于有胶。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 141 · glue.bead_width
+## 147 · glue.bead_width
 
 - 当前：`glue` / `1.0.0` / 胶宽测量。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/bead_width.cpp:206](../../packs/glue/ops/bead_width.cpp#L206)。
@@ -214,7 +214,7 @@
 - 验收：直/螺旋、示教空胶、半高/外包络、标定前后宽度与有胶判据对照。
 - 说明：不能用通用两边缘间距直接替代presence判据。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 142 · glue.bead_breaks
+## 148 · glue.bead_breaks
 
 - 当前：`glue` / `1.0.0` / 断胶检测。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/bead_breaks.cpp:116](../../packs/glue/ops/bead_breaks.cpp#L116)。
@@ -228,7 +228,7 @@
 - 验收：半站距、minLength等号、区端忽略、弯曲标定弧长及无胶路整区行为。
 - 说明：unknown与无胶不能合并为同一状态。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 143 · glue.color_track
+## 149 · glue.color_track
 
 - 当前：`glue` / `1.2.0` / 彩色粗跟踪。目标：`std-image`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/color_track.cpp:180](../../packs/glue/ops/color_track.cpp#L180)。
@@ -242,7 +242,7 @@
 - 验收：高光遮挡、纯背景、宽度extent、半宽吸附、断口重接和unknown长度原子保留。
 - 说明：与灰度track_path共享内核前先将策略显式化，不改变既有默认。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 144 · glue.edge_distance
+## 150 · glue.edge_distance
 
 - 当前：`glue` / `1.0.0` / 胶路边距测量。目标：`solution-glue`；拆公共能力/适配；**M5**。
 - 源码：[packs/glue/ops/edge_distance.cpp:135](../../packs/glue/ops/edge_distance.cpp#L135)。
@@ -256,7 +256,7 @@
 - 验收：反光划痕、首个合格边/最强边差异、多数侧、MAD剔野与标定单位。
 - 说明：不能悄悄换成最大梯度位置。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 145 · glue.judge
+## 151 · glue.judge
 
 - 当前：`glue` / `1.0.0` / 涂胶质量判定。目标：`solution-glue`；保留场景职责；**M5**。
 - 源码：[packs/glue/ops/judge.cpp:311](../../packs/glue/ops/judge.cpp#L311)。
@@ -270,7 +270,7 @@
 - 验收：无胶唯一原因、宽窄胶/边距连续长度、关闭阈值、px/mm混用拒绝及断胶优先级。
 - 说明：保留业务verdict不等于所有后续宿主必须使用同套策略。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 146 · glue.synth_break
+## 152 · glue.synth_break
 
 - 当前：`glue` / `1.0.0` / 断胶缺陷合成。目标：`solution-glue`；保留场景职责；**M5**。
 - 源码：[packs/glue/ops/synth_break.cpp:93](../../packs/glue/ops/synth_break.cpp#L93)。

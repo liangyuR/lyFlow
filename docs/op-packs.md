@@ -9,12 +9,12 @@
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
-|          | 仓库内的包                                                                              | 外部包                                                 |
-| -------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 在哪     | 本仓库的 `packs/*`                                                                      | 任意目录                                               |
-| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                      | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
-| 注册顺序 | 紧跟 `gen.synthetic`                                                                    | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
-| 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`solutions/dts` | 任何自己写的包                                         |
+|          | 仓库内的包                                                                                  | 外部包                                                 |
+| -------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 在哪     | 本仓库的 `packs/*`                                                                          | 任意目录                                               |
+| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                          | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
+| 注册顺序 | 紧跟 `gen.synthetic`                                                                        | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`solutions/gap`、`solutions/dts` | 任何自己写的包                                         |
 
 core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
@@ -25,21 +25,22 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
-| `std-geometry`   | 0.6.0  | ON      | 38项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
+| `std-geometry`   | 0.7.0  | ON      | 39项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
 | `std-metrology`  | 0.3.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
-| `std-profile`    | 0.3.0  | ON      | 14项轻量能力，可选后端增加2项稳健拟合；[契约](profile-public-operators.md)                       | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
+| `std-profile`    | 0.4.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
 | `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
-| `std-ml`         | 0.3.0  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
+| `std-ml`         | 0.3.1  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
 | `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
 | `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                          |
-| `gap`            | 0.2.1  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
+| `solution-gap`   | 0.1.0  | **OFF** | 40项`gap.*`原生场景与临时兼容入口                                                                | 基础PCL；模板/模型/导入/兼容能力按模块启用                                          |
 | `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
 
 ```powershell
-$env:LYFLOW_PACKS = "gap"
+$env:LYFLOW_PACKS = "solution-gap"
+$env:LYFLOW_MODULES = "gap-template;gap-model;gap-import;gap-compat"
 pnpm check          # 或 pnpm check:gap
 ```
 
@@ -217,8 +218,8 @@ mypack/
   `ports.inputs` 列插入时要自动连线的输入（可以是可选输入，例如结果汇总的 `rois`），`ports.outputs` 只作说明。
 - **扫描**：构建时由包自己的 `lyflow_op_pack.cmake` 把 `snippets/*.lyflow-snippet.json` 按字节编进包
   （写成十六进制数组，不受 MSVC 字符串字面量长度限制，也不经过源文件编码；文件一改就重新 configure），
-  注册时逐份 `Registry::addSnippet(parseSnippet(text, source))`。写法照抄 `packs/gap/lyflow_op_pack.cmake`
-  与 `packs/gap/ops/snippets.cpp`。这样片段跟着包走：包没编进来，它的片段也不会出现在面板里。
+  注册时逐份 `Registry::addSnippet(parseSnippet(text, source))`。写法照抄 `solutions/gap/lyflow_op_pack.cmake`
+  与 `solutions/gap/ops/snippets.cpp`。这样片段跟着包走：包没编进来，它的片段也不会出现在面板里。
 - **自检**：启动自检与 `lyflow manifest --check` 查片段里的算子都注册了、参数名认得、边两端的端口存在
   且类型接得上、对外输入没在片段里接边；`pnpm check` 另把每个片段文件对着 schema 校验一遍。
 - **用户片段**不在包里：桌面宿主扫 app data 下的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`（分号分隔），
@@ -255,7 +256,7 @@ ADR-0005）与 `#include "lyflow_pcl/pcl_path.h"`（中文路径下喂给 PCL �
 ```
 
 这些函数都在 `lyflow::std_pc` 命名空间里，吃的是 `pcl::PointXYZRGB` 的云。
-领域包**不要再抄一份拟合**：`packs/gap` 就是靠它把 `GapUtils.cpp` 里的
+领域包**不要再抄一份拟合**：`solutions/gap` 就是靠它把 `GapUtils.cpp` 里的
 直线/圆拟合、ICP、盒裁剪整段删掉的。
 
 ### 注册入口
@@ -454,12 +455,12 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 
 ```powershell
 pnpm check                                      # 默认：core + 默认开的 packs/*
-$env:LYFLOW_PACKS="gap"; pnpm check             # 带仓库内默认关闭的包
+$env:LYFLOW_PACKS="solution-gap"; pnpm check             # 带仓库内默认关闭的包
 $env:LYFLOW_OP_PACKS="…\mypack"; pnpm check     # 带外部包
 ```
 
-`pnpm check:gap` 是 gap 包的门禁：`LYFLOW_PACKS=gap` 的 `pnpm check`。
-`packs/gap/tools/` 下的 A/B 是历史对拍工具，不是门禁，见 `packs/gap/README.md`。
+`pnpm check:gap` 按正式契约启用 `solution-gap` 与所需模块；完整运行库的包、模块集合由 `packaging/release.json` 统一声明。
+`solutions/gap/tools/` 下的 A/B 是历史对拍工具，不是门禁，见 `solutions/gap/README.md`。
 
 不带外部包那一遍是「包机制没有改变通用侧行为」的唯一证据。
 另有两条更强的，改了包机制本身时值得跑：

@@ -2,8 +2,10 @@
 // 在同一片底图的坐标系里（locate_template：一个模板槽的四个框 = 一组，底图是那个槽的左右模板）。
 // 视图一次只画一组，切换条列出所有组；Inspector 里所选组所在的参数组展开。纯逻辑，不碰 DOM。
 
-import type { GraphNode } from '../types/graph';
-import type { OperatorDesc, Param } from '../types/manifest';
+import type { GraphDoc, GraphNode } from '../types/graph';
+import type { CloudPayload } from '../types/execution';
+import { levelOf, resolveOutput, type SubPath } from './subgraph';
+import { bundleKindOf, type BundleDesc, type OperatorDesc, type Param } from '../types/manifest';
 import { effectiveParams, isVisible } from './params';
 
 export interface RoiFrame {
@@ -198,4 +200,64 @@ export function placeLabels(boxes: readonly LabelBox[]): LabelSpot[] {
     placed.push(rectOf(spot));
   }
   return spots;
+}
+
+export interface RoiBackdropSource {
+  nodeId: string;
+  port: string;
+  type: 'PointCloud' | 'Profile';
+}
+
+export function resolveBackdropInputs(
+  doc: GraphDoc,
+  path: SubPath,
+  node: GraphNode,
+  op: OperatorDesc,
+  selectors: readonly string[],
+  bundles: readonly BundleDesc[],
+): { sources: (RoiBackdropSource | null)[]; error: string | null } {
+  try {
+    const level = levelOf(doc, path);
+    const sources = selectors.map((selector): RoiBackdropSource | null => {
+      const [root, field, nested] = selector.split('.');
+      const input = op.inputs.find((port) => port.name === root);
+      const kind = input ? bundleKindOf(input.type) : null;
+      const type = field
+        ? bundles
+            .find((bundle) => bundle.kind === kind)
+            ?.fields.find((value) => value.name === field)?.type
+        : input?.type;
+      if (
+        !root ||
+        nested !== undefined ||
+        (selector.includes('.') && !field) ||
+        (type !== 'PointCloud' && type !== 'Profile')
+      )
+        throw new Error(
+          `底图声明 ${selector} 不是PointCloud/Profile输入或已声明Bundle的一层采样字段`,
+        );
+      const edge = level.edges.find((value) => value.to.node === node.id && value.to.port === root);
+      const resolved = edge ? resolveOutput(doc, path, edge.from.node, edge.from.port) : null;
+      if (!resolved) return null;
+      if (field && resolved.port.includes('.')) throw new Error('底图不支持嵌套Bundle字段');
+      return { ...resolved, port: field ? `${resolved.port}.${field}` : resolved.port, type };
+    });
+    return { sources, error: null };
+  } catch (error) {
+    return { sources: [], error: String(error) };
+  }
+}
+
+export function roiBackdropPoints(payload: CloudPayload): Float32Array {
+  const plane = payload.profile?.descriptor.plane ?? 'XY';
+  const a = plane === 'YZ' ? 1 : 0;
+  const b = plane === 'XY' ? 1 : 2;
+  const points: number[] = [];
+  for (let i = 0; i < payload.pointCount; i++) {
+    if (payload.profile && payload.profile.validity[i] !== 1) continue;
+    const x = payload.xyz[3 * i + a]!,
+      y = payload.xyz[3 * i + b]!;
+    if (Number.isFinite(x) && Number.isFinite(y)) points.push(x, y, 0);
+  }
+  return new Float32Array(points);
 }

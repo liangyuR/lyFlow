@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lyflow/data.h"
+#include <array>
 #include <functional>
 
 namespace lyflow {
@@ -13,4 +14,7 @@ bool makeProfile(std::shared_ptr<const PointCloud> cloud, ProfileDescriptor desc
                  Profile& out, std::string& why);
 bool convertProfileUnit(const Profile& input, const std::string& targetUnit, Profile& out,
                         std::string& why, const std::function<bool()>& cancelled = {});
+bool remapProfileAxes(const Profile& input, const std::string& axes,
+                      const std::array<float, 3>& signs, const std::string& targetFrame,
+                      Profile& out, std::string& why, const std::function<bool()>& cancelled = {});
 } // namespace lyflow

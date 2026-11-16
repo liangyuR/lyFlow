@@ -229,6 +229,8 @@ void writeParam(JsonWriter& w, const Param& p) {
   }
 
   w.fieldIfSet("mode", p.mode);
+  if (p.allowEmptyPath)
+    w.field("allowEmptyPath", true);
   if (p.alpha)
     w.field("alpha", *p.alpha);
 
@@ -696,6 +698,8 @@ std::vector<std::string> Registry::validate() const {
       }
       if (p.min && p.max && *p.min > *p.max)
         fail(pwhere + " has min > max");
+      if (p.allowEmptyPath && p.type != ParamType::Path)
+        fail(pwhere + " allowEmptyPath requires a path parameter");
       if (p.type == ParamType::Curve && p.def.kind() == Value::Kind::String) {
         const nlohmann::json j = nlohmann::json::parse(p.def.stringValue(), nullptr, false);
         std::string message;
@@ -757,15 +761,27 @@ std::vector<std::string> Registry::validate() const {
           fail(pwhere + " roiBackdrop 的 inputs 与 dir/files 只能二选一");
         }
         for (const std::string& name : p.roiBackdrop.inputPorts) {
+          const auto dot = name.find('.');
+          const auto root = name.substr(0, dot);
+          const auto field = dot == std::string::npos ? std::string() : name.substr(dot + 1);
           const Port* in = nullptr;
-          for (const Port& candidate : op.inputs) {
-            if (candidate.name == name)
+          for (const Port& candidate : op.inputs)
+            if (candidate.name == root)
               in = &candidate;
+          std::string type;
+          if (in && dot == std::string::npos)
+            type = in->type;
+          else if (in && !field.empty() && field.find('.') == std::string::npos) {
+            std::string kind;
+            if (parseBundleType(in->type, &kind))
+              if (const auto* bundle = findBundle(kind))
+                for (const auto& member : bundle->fields)
+                  if (member.name == field)
+                    type = member.type;
           }
-          if (!in || in->type != "PointCloud") {
+          if (type != "PointCloud" && type != "Profile")
             fail(pwhere + " roiBackdrop.inputs 里的 '" + name +
-                 "' 要指向本算子的一个 PointCloud 输入端口");
-          }
+                 "' 要指向本算子的PointCloud/Profile输入或其已声明Bundle的一层采样字段");
         }
       } else {
         const Param* dir = findParam(op, p.roiBackdrop.dirParam);

@@ -77,6 +77,26 @@ TEST_CASE("Profile adapters: explicit reflection round trip preserves source map
                        {{"targetFrame", Value::text("bad")}, {"signs", Value::vec({1, 2, 1})}})
                   .ok);
   CHECK(remap.outputs.empty());
+  Profile direct;
+  std::string why;
+  REQUIRE(remapProfileAxes(*original.asProfile(), "XZY", {-1, 1, -1}, "measurement", direct, why));
+  CHECK(direct.cloud->xyz == std::vector<float>{-1, 3, -2});
+  CHECK(direct.cloud->normals == std::vector<float>{0, 0, -1});
+  CHECK(direct.descriptor.plane == "XY");
+  CHECK(direct.descriptor.handedness == "reflected");
+  CHECK(direct.sourceIndices == original.asProfile()->sourceIndices);
+  const auto retained = direct.cloud;
+  for (const auto* axes : {"XXY", "XY", "xyz"}) {
+    CHECK_FALSE(
+        remapProfileAxes(*original.asProfile(), axes, {1, 1, 1}, "measurement", direct, why));
+    CHECK(direct.cloud == retained);
+  }
+  CHECK_FALSE(
+      remapProfileAxes(*original.asProfile(), "XYZ", {1, 0, 1}, "measurement", direct, why));
+  CHECK_FALSE(remapProfileAxes(*original.asProfile(), "XYZ", {1, 1, 1}, "", direct, why));
+  CHECK_FALSE(remapProfileAxes(*original.asProfile(), "XZY", {1, 1, 1}, "measurement", direct, why,
+                               [] { return true; }));
+  CHECK(direct.cloud == retained);
 }
 
 TEST_CASE(

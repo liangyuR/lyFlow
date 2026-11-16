@@ -639,9 +639,202 @@
                     }
                   }
                 }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "source",
+                  "profiles",
+                  "measurement",
+                  "alreadyAligned",
+                  "component",
+                  "adapterIdPrefix"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "gapProfile.v1"
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["node", "op", "opVersion", "port"],
+                        "properties": {
+                          "node": {
+                            "allOf": [
+                              {
+                                "$ref": "#/$defs/gapUpgradeText"
+                              },
+                              {
+                                "pattern": "^[^/]+$"
+                              }
+                            ]
+                          },
+                          "op": {
+                            "const": "gap.read_scan"
+                          },
+                          "opVersion": {
+                            "const": "1.1.0"
+                          },
+                          "port": {
+                            "const": "scan"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["node", "op", "opVersion", "port"],
+                        "properties": {
+                          "node": {
+                            "allOf": [
+                              {
+                                "$ref": "#/$defs/gapUpgradeText"
+                              },
+                              {
+                                "pattern": "^[^/]+$"
+                              }
+                            ]
+                          },
+                          "op": {
+                            "const": "gap.load_profile_pair"
+                          },
+                          "opVersion": {
+                            "const": "1.0.0"
+                          },
+                          "port": {
+                            "const": "primary"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "profiles": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["primary", "secondary"],
+                    "properties": {
+                      "primary": {
+                        "$ref": "#/$defs/gapUpgradeProfile"
+                      },
+                      "secondary": {
+                        "$ref": "#/$defs/gapUpgradeProfile"
+                      }
+                    }
+                  },
+                  "measurement": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["frame", "plane"],
+                    "properties": {
+                      "frame": {
+                        "$ref": "#/$defs/gapUpgradeText"
+                      },
+                      "plane": {
+                        "const": "XY"
+                      }
+                    }
+                  },
+                  "alreadyAligned": {
+                    "const": true
+                  },
+                  "component": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["style", "nodes"],
+                    "properties": {
+                      "style": {
+                        "enum": ["blocks", "fine"]
+                      },
+                      "nodes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4096,
+                        "uniqueItems": true,
+                        "items": {
+                          "allOf": [
+                            {
+                              "$ref": "#/$defs/gapUpgradeText"
+                            },
+                            {
+                              "pattern": "^[^/]+$"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "adapterIdPrefix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^/.\\u0000]+$"
+                  },
+                  "scope": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["subgraph"],
+                    "properties": {
+                      "subgraph": {
+                        "$ref": "#/$defs/gapUpgradeText"
+                      }
+                    }
+                  },
+                  "templates": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["unit", "fileFrame", "templateFrame", "handedness"],
+                    "properties": {
+                      "unit": {
+                        "const": "m"
+                      },
+                      "fileFrame": {
+                        "$ref": "#/$defs/gapUpgradeText"
+                      },
+                      "templateFrame": {
+                        "$ref": "#/$defs/gapUpgradeText"
+                      },
+                      "handedness": {
+                        "enum": ["right", "reflected"]
+                      }
+                    }
+                  }
+                },
+                "description": "GAP整图显式升级。两路共同声明、实际来源/组件闭包、layout绑定和最终手性由core结合原图继续校验。"
               }
             ]
           }
+        }
+      }
+    },
+    "gapUpgradeText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "gapUpgradeProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "unit", "fileFrame", "sensorFrame", "fileHandedness"],
+      "properties": {
+        "sourceId": {
+          "$ref": "#/$defs/gapUpgradeText"
+        },
+        "unit": {
+          "const": "m"
+        },
+        "fileFrame": {
+          "$ref": "#/$defs/gapUpgradeText"
+        },
+        "sensorFrame": {
+          "$ref": "#/$defs/gapUpgradeText"
+        },
+        "fileHandedness": {
+          "enum": ["right", "reflected"]
         }
       }
     }

@@ -128,6 +128,7 @@ export interface Param {
   rows?: number;
   filters?: FileFilter[];
   mode?: 'open' | 'save' | 'dir';
+  allowEmptyPath?: boolean;
   alpha?: boolean;
 
   visibleWhen?: Condition;
@@ -148,7 +149,7 @@ export interface Param {
 export interface RoiBackdrop {
   /** 本算子一个 path 参数的名字。与 inputs 二选一。 */
   dir?: string;
-  /** 本算子 PointCloud 输入端口的名字：底图取自它们上游那一次运行的结果（gap.align_template）。 */
+  /** 本算子PointCloud/Profile输入或Bundle的一层字段路径；底图取实际上游运行结果。 */
   inputs?: string[];
   /** 本算子 string / path 参数的名字。 */
   files?: string[];
@@ -162,6 +163,7 @@ export interface RoiBackdrop {
 export interface SnippetNode {
   id: string;
   op: string;
+  opVersion?: string;
   params?: Record<string, unknown>;
   ui?: { position?: { x: number; y: number }; title?: string };
 }

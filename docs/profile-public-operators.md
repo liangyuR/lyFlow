@@ -1,6 +1,16 @@
 # 公共 Profile 选择、稳健拟合与度量
 
-M4b 随产品 1.4.4 增加 10 项公共算子：6 项 Profile 能力、3 项度量及 1 项 Box2D 构造。C ABI 布局保持 1.4 系列兼容。`std-profile`、`std-metrology` 为 0.3.0，`std-geometry` 为 0.6.0；旧 Gap 适配包为 0.2.1。
+M4b 随产品 1.4.4 增加 10 项公共算子：6 项 Profile 能力、3 项度量及 1 项 Box2D 构造。M4c 随产品 1.4.5 增加下列五项公开图节点，并把 Gap 消费者切换到原生契约；C ABI 布局保持 1.4 系列兼容。当前 `std-profile` 为 0.4.0，`std-geometry` 为 0.7.0，`std-metrology` 为 0.3.0；场景边界见 [Gap 原生迁移](gap-profile-migration.md)。
+
+| M4c 新 ID                | 契约                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `geometry.box_anchor`    | 从明确的 Box2D 得到指定锚点，传递完整几何来源，不依赖工件角色。                             |
+| `profile.select_indices` | 按实际输入轮廓上的索引选择，保留原槽身份、通道和父来源，不把原始索引当作当前数组下标。      |
+| `profile.merge`          | 显式合并顺序与可选通道策略，输出新 Profile 和原始来源映射；不因物理来源相同而丢弃逻辑角色。 |
+| `profile.crop_box`       | 米制 ROI 与严格上下文成对输入，选择已有观测，输出实际索引及来源。                           |
+| `profile.radius_outlier` | 显式 PCL 半径滤波，复用标准点云数值实现并保持 Profile 采样来源；没有后端时不注册占位入口。  |
+
+M4c 中 `profile.bind_geometry`、`profile.nearest_sample`、`profile.nearest_to_line`、`profile.filter_validity`、`profile.fit_line_robust`、`profile.fit_circle_robust` 使用算子版本 1.1.0，支持完整组合来源的绑定和传递。未授权的父来源、失效的几何内容或原槽映射不能通过仅匹配 sourceId 绕过校验。
 
 ## 注册与依赖
 
@@ -24,7 +34,7 @@ python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
 cmake -S core -B build/profile-public -G Ninja -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=std-profile;std-metrology;std-geometry" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 ```
 
-上述配置启用 14 项 Profile 算子。另加 `-DLYFLOW_MODULES=profile-robust-kernel` 并提供已安装的 PCL 后端，才包含两项稳健拟合，共 16 项。当前完整审计组合包含所有场景包，共 271 项原生算子；不同构建的可用集合以实际 manifest 为准。`LYFLOW_MODULES` 不代替算子包选择，且不会隐式注册模型推理或场景节点。
+轻量配置不注册需要 PCL 的半径滤波及稳健拟合；显式选择相应模块并配置后端后才提供这些节点。M4b 的完整审计组合为 271 项原生算子，这是该阶段的历史快照；当前构建的可用集合以实际 manifest 为准。`LYFLOW_MODULES` 不代替算子包选择，且不会隐式注册模型推理或场景节点。
 
 ## 单位、坐标与来源
 
@@ -48,7 +58,7 @@ Profile 仍使用[完整原生契约](profile-data-contract.md)：m/mm、XY/XZ/Y
 
 ## 旧 Gap 行为与迁移边界
 
-旧节点保留现有端口和参数，并调用同一公开 C++ 核。以下算子 patch 版本使新的输入约束进入缓存身份：
+M4b 曾保留旧节点的端口和参数并改为调用同一公开 C++ 核；下表记录该阶段的缓存隔离版本，不能作为当前原生场景可直接使用旧节点的说明：
 
 | 原 ID              | 本轮版本 | 变化                                           |
 | ------------------ | -------- | ---------------------------------------------- |
@@ -59,7 +69,7 @@ Profile 仍使用[完整原生契约](profile-data-contract.md)：m/mm、XY/XZ/Y
 
 冻结旧运行库对照中，42 个已有定义直线场景的字段及浮点位一致；量测对照 293 个场景中，281 个已有定义场景一致，另有 12 个预期变化：8 个重合圆心、3 个像素单位、1 个 float 溢出。已有定义场景包含预期失败边界，不能把 281 解释为全部成功的测量，也不能宣称所有历史输入兼容。这些是软件数值与错误契约证据，不是现场精度或吞吐验收。
 
-M4b 不删除旧 8 个通用 Gap ID。`gap.fit_line`、`gap.selected_point`、`gap.nearest_to_line`、`gap.drop_non_finite`、`gap.to_measurement_frame`、`gap.flush`、`gap.gap`、`gap.point_offset` 的图、Bundle 和场景消费者切换放到 M4c；本轮不把历史图静默重标为新端口。`solution-gap`、双头 `[2,6,1280]` 槽协议、相机来源/逻辑角色、模板/模型模块、六种导入器和六个片段仍须独立迁移验收，见[完整计划](operator-package-migration-plan.md)。
+M4c 将旧 8 个通用 Gap ID 从正式注册中移除。历史图需要明确来源声明和 `gapProfile.v1` 整图升级，不能静默重标为新端口。双头 `[2,6,1280]` 槽协议、相机来源/逻辑角色、模板/模型模块、六种导入器和六个片段的验收状态见[完整计划](operator-package-migration-plan.md)。
 
 公开静态接口为 `profile_features.h`（`lyflow::profile_robust_kernel`）和 `profile_dimensions.h`（`lyflow::metrology_kernel`），无需 Registry、执行图或加载 core DLL；安装 SDK 用法和隔离消费门禁见[公共内核](public-kernels.md)。
 

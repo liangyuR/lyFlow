@@ -12,7 +12,8 @@ AUDIT = ROOT / 'docs/operator-package-audit.json'
 FIELDS = ('id', 'currentPack', 'targetPack', 'action', 'wave', 'source', 'dependencies',
           'currentContract', 'targetContract', 'migrationPrerequisites', 'acceptance', 'notes')
 CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/manifest.cpp',
-                    'core/src/profile*.cpp', 'core/src/profile*.h', 'core/src/graph_contract_upgrade.cpp',
+                    'core/src/profile*.cpp', 'core/src/profile*.h', 'core/src/graph_contract_upgrade*.cpp',
+                    'core/src/graph_contract_upgrade*.h',
                     'core/src/data.cpp', 'core/src/contract.cpp', 'core/src/python_runtime.cpp',
                     'core/src/runtime*.cpp', 'core/src/exec/disk_cache.cpp',
                     'core/src/exec/graph.cpp', 'core/src/status.cpp',
@@ -20,16 +21,48 @@ CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/man
                     'core/cmake/*.cmake', 'core/cmake/*.cmake.in',
                     'kernels/include/**/*.h', 'kernels/src/*.cpp',
                     'packs/*/ops/*.cpp', 'packs/*/ops/*.h', 'packs/*/include/**/*.h',
+                    'packs/*/src/**/*.cpp', 'packs/*/src/**/*.h',
                     'packs/std-pointcloud/algo/fit2d.cpp', 'packs/std-pointcloud/algo/fit2d.h',
                     'packs/*/include/**/*.hpp', 'packs/*/lyflow_op_pack.cmake',
                     'packs/*/lyflow_pack_dependencies.cmake',
-                    'solutions/*/ops/*.cpp', 'solutions/*/ops/*.h', 'solutions/*/algo/*.cpp',
-                    'solutions/*/algo/*.h', 'solutions/*/lyflow_op_pack.cmake',
+                    'solutions/*/ops/*.cpp', 'solutions/*/ops/*.h', 'solutions/*/algo/**/*.cpp',
+                    'solutions/*/algo/**/*.h', 'solutions/*/algo/**/*.hpp', 'solutions/*/snippets/**/*.json',
+                    'packs/*/snippets/**/*.json', 'solutions/*/lyflow_op_pack.cmake',
                     'solutions/*/lyflow_pack_dependencies.cmake',
                     'examples/public_kernels.cpp', 'examples/public-kernels/CMakeLists.txt',
                     'examples/profile-robust/CMakeLists.txt', 'examples/profile-robust/main.cpp',
                     'python/lyflow_python/*.py',
                     'python/examples/**/*.py', 'packaging/release.json')
+
+M4C_RETIREMENTS = {
+    'gap.fit_line': ['profile.fit_line_robust'],
+    'gap.selected_point': ['geometry.box_anchor', 'profile.bind_geometry', 'profile.nearest_sample'],
+    'gap.nearest_to_line': ['profile.nearest_to_line'],
+    'gap.drop_non_finite': ['profile.filter_validity'],
+    'gap.to_measurement_frame': ['profile.from_cloud', 'profile.remap_axes'],
+    'gap.flush': ['metrology.flush_point_line'],
+    'gap.gap': ['metrology.circle_gap'],
+    'gap.point_offset': ['metrology.point_offset'],
+}
+M4C_ADDITIONS = {'gap.infer_profile', 'geometry.box_anchor', 'profile.crop_box', 'profile.merge',
+                'profile.radius_outlier', 'profile.select_indices'} | {
+    f'gap.{action}_{kind}' for action in ('make', 'split')
+    for kind in ('line_feature', 'reference_feature', 'circle_pair', 'location')}
+M4C_SCENE_IDS = {'gap.' + name for name in (
+    'load_profile_pair', 'read_scan', 'camera_guard', 'overall_roi', 'datum_window',
+    'roll_anchored_crop', 'make_scan_pair', 'split_scan_pair', 'make_roi_set', 'split_roi_set',
+    'profile_tensor', 'labels_from_logits', 'roi_from_labels', 'labels_to_cloud', 'locate_model',
+    'load_template', 'align_template', 'select_alignment', 'business_rois', 'locate_template',
+    'fit_gap_circles', 'role_line', 'ref_point', 'datum_direction', 'seam_circles',
+    'corner_vertex', 'groove_joint', 'notch_width', 'judge', 'result_bundle', 'measure_reference')}
+M4C_CHANGED_IDS = M4C_SCENE_IDS | {'profile.' + name for name in (
+    'bind_geometry', 'nearest_sample', 'nearest_to_line', 'filter_validity', 'fit_line_robust',
+    'fit_circle_robust')} | {'filter.radius_outlier'}
+M4B_MERGE_PROOF = dict(pr=66, url='https://github.com/liangyuR/lyFlow/pull/66',
+    revision='f48aa13199a55b29088d439b8a7dbe090734a6eb',
+    reviewedHead='2385c73565af625a3f355d0f74fefdf15bfc8449', workflowRun=43859275468,
+    jobCount=7, conclusion='success', codexReview='completed_no_findings',
+    reviewReceipt='https://github.com/liangyuR/lyFlow/pull/66#issuecomment-6916034928')
 
 
 def source_hash(path):
@@ -79,10 +112,12 @@ def validate(data, manifests, generated_docs=None):
     retired_ids = [row.get('id') for row in retired]
     require(len(retired_ids) == len(set(retired_ids)) and not set(retired_ids) & set(registered),
             '退役ID重复或仍注册为活动计算')
-    approved_retirements = {'dts.profile_clean': 'profile.clean', 'dts.split_faces': 'profile.split_faces'}
+    m3_retirements = {'dts.profile_clean': ['profile.clean'], 'dts.split_faces': ['profile.split_faces']}
+    approved_retirements = {**m3_retirements, **M4C_RETIREMENTS}
     for row in retired:
-        require(row.get('retiredStage') == 'M3' and row.get('id') in approved_retirements and
-                row.get('replacedBy') == [approved_retirements.get(row.get('id'))] and
+        require(row.get('retiredStage') == ('M3' if row.get('id') in m3_retirements else 'M4c') and
+                row.get('id') in approved_retirements and
+                row.get('replacedBy') == approved_retirements.get(row.get('id')) and
                 bool(re.fullmatch(r'[0-9a-f]{40}', row.get('sourceRevision', ''))) and
                 bool(re.fullmatch(r'[0-9a-f]{64}', row.get('sourceFingerprint', ''))) and
                 all(row.get(key) for key in ('source', 'currentVersion', 'currentPorts', 'currentContract', 'migration')),
@@ -125,8 +160,9 @@ def validate(data, manifests, generated_docs=None):
     m3 = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M3'), None)
     if m3 and m3.get('status') in {'validated_manifest', 'complete'}:
         require(m3.get('expectedNativeCount') == 261 and len(m3.get('introducedNativeIds', [])) == 7 and
-                set(m3.get('retiredNativeIds', [])) == set(approved_retirements) and
-                set(retired_ids) == set(approved_retirements) and len(m3.get('scopeNativeIds', [])) == 11,
+                set(m3.get('retiredNativeIds', [])) == set(m3_retirements) and
+                {row['id'] for row in retired if row.get('retiredStage') == 'M3'} == set(m3_retirements) and
+                len(m3.get('scopeNativeIds', [])) == 11,
                 'M3新增/退役/原11项范围登记不完整')
         require(set(m3.get('scopeNativeIds', [])) <= set(registered) | set(retired_ids), 'M3原始范围丢失')
     targets = set(data.get('targetPackages', []))
@@ -170,9 +206,51 @@ def validate(data, manifests, generated_docs=None):
                 'M4b旧版本变更范围须精确为4项Gap适配节点')
         require(m4b.get('deferredRetirements', {}).get('stage') == 'M4c' and
                 set(m4b.get('deferredRetirements', {}).get('nativeIds', [])) == deferred and
-                deferred <= set(registered), 'M4b必须保留8项旧ID至M4c完成场景迁移')
+                deferred <= set(registered) | {row['id'] for row in retired if row.get('retiredStage') == 'M4c'},
+                'M4b的8项延后退役须保持活动或逐项登记M4c历史替代')
+        if m4b.get('status') == 'complete':
+            require(m4b.get('mergeEvidence') == M4B_MERGE_PROOF,
+                    'M4b完成状态缺少PR66精确合并、CI与同head审查证据')
         wave = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M4'), {})
         require(wave.get('status') != 'complete', 'M4b不能代替整个M4场景波次验收')
+    m4c = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M4c'), None)
+    if m4c:
+        require(m4b is not None and m4b.get('status') == 'complete' and
+                m4b.get('mergeEvidence') == M4B_MERGE_PROOF, 'M4c缺少PR66已合并的M4b前置证据')
+        require(m4c.get('expectedNativeCount') == 277 and m4c.get('expectedPythonExampleCount') == 8 and
+                m4c.get('targetProductVersion') == '1.4.5' and
+                set(m4c.get('introducedNativeIds', [])) == M4C_ADDITIONS and
+                len(m4c.get('introducedNativeIds', [])) == 14 and m4c.get('introducedPythonIds') == [] and
+                set(m4c.get('retiredNativeIds', [])) == set(M4C_RETIREMENTS) and
+                len(m4c.get('retiredNativeIds', [])) == 8, 'M4c新增14/退役8/产品版本范围不符')
+        require(len(m4c.get('scopeNativeIds', [])) == 39 and
+                set(m4c.get('scopeNativeIds', [])) == M4C_SCENE_IDS | set(M4C_RETIREMENTS),
+                'M4c必须精确保留原Gap39项审计范围')
+        require(len(m4c.get('changedNativeIds', [])) == len(M4C_CHANGED_IDS) and
+                set(m4c.get('changedNativeIds', [])) == M4C_CHANGED_IDS,
+                'M4c契约变更范围须精确为31场景/6公共minor/半径patch')
+        if m4c.get('status') in {'validated_manifest', 'complete'}:
+            require(len(native) == 277 and len(examples) == 8 and
+                    set(retired_ids) == set(m3_retirements) | set(M4C_RETIREMENTS), 'M4c活动/历史ID全集不符')
+            counts = data.get('currentPackCounts', {})
+            require('gap' not in counts and counts.get('solution-gap') == 40 and
+                    counts.get('std-geometry') == 39 and counts.get('std-profile') == 20,
+                    'M4c包边界数量须为solution-gap40/geometry39/profile20且旧gap不活动')
+            moves = m4c.get('packageMoves', [])
+            required_moves = set(m4c.get('scopeNativeIds', [])) - set(M4C_RETIREMENTS)
+            require(len(moves) == 31 and {item.get('id') for item in moves} == required_moves,
+                    'M4c必须逐项登记31个旧Gap迁包')
+            for move in moves:
+                row = by_id.get(move.get('id'), {})
+                require(move.get('fromPack') == 'gap' and move.get('toPack') == 'solution-gap' and
+                        row.get('currentPack') == row.get('targetPack') == 'solution-gap' and
+                        any(item.get('stage') == 'M4c' and item.get('fromPack') == 'gap' and
+                            item.get('toPack') == 'solution-gap' and
+                            item.get('sourceRevision') == M4B_MERGE_PROOF['revision']
+                            for item in row.get('packageHistory', [])),
+                        f"{move.get('id')}: M4c迁包缺少真实历史归属")
+    else:
+        require(not set(retired_ids) & set(M4C_RETIREMENTS), '不能绕过M4c ledger提前退役旧Gap ID')
     waves = set(data.get('migrationWaves', {}))
     for row in rows:
         identifier = row['id']
@@ -228,11 +306,29 @@ def validate(data, manifests, generated_docs=None):
     assets = data.get('relatedAssets', {})
     require(len(assets.get('importers', [])) == 6, '本基线的6种导入器登记不符')
     require(len(assets.get('snippets', [])) == 7, '本基线的7个片段登记不符')
-    require(len(assets.get('bundles', [])) == 6, '本基线的6种Bundle登记不符')
+    require(len(assets.get('bundles', [])) == (13 if m4c and m4c.get('status') in {'validated_manifest', 'complete'} else 6),
+            'Bundle当前快照数量与阶段不符')
+    if m4c and m4c.get('status') in {'validated_manifest', 'complete'}:
+        baseline_assets = data.get('relatedAssetsBaseline', {})
+        require(len(baseline_assets.get('bundles', [])) == 6 and
+                len(baseline_assets.get('snippets', [])) == 7 and len(baseline_assets.get('importers', [])) == 6,
+                'M4c不得覆盖原6/7/6附属资产基线')
+        kinds = {item.get('kind') for item in assets.get('bundles', [])}
+        require({'gap.ScanPair.v2', 'gap.RoiSet.v2', 'gap.LabelRows.v2', 'gap.LineFeature.v2',
+                 'gap.ReferenceFeature.v2', 'gap.CirclePair.v2', 'gap.Location.v2',
+                 'gap.TemplatePair.v2', 'gap.Alignment.v2'} <= kinds and
+                not {'gap.ScanPair', 'gap.RoiSet'} & kinds, 'M4c场景Bundle必须显式native v2')
     if manifests:
         exported = {}
         for path in manifests:
             document = json.loads(path.read_text(encoding='utf-8-sig'))
+            if m4c and m4c.get('status') in {'validated_manifest', 'complete'} and isinstance(document, dict):
+                for key, identifier in (('bundles', 'kind'), ('snippets', 'id'), ('importers', 'kind')):
+                    snapshot = assets.get(key, [])
+                    actual = document.get(key, [])
+                    require(len({item.get(identifier) for item in actual}) == len(actual) and
+                            sorted(snapshot, key=lambda item: item[identifier]) ==
+                            sorted(actual, key=lambda item: item[identifier]), f'M4c {key}真实描述与附属资产快照不一致')
             if data.get('status') != 'planned' and isinstance(document, dict) and document.get('generatedBy'):
                 require(document['generatedBy'] == data.get('evidence', {}).get('nativeManifestGeneratedBy'),
                         'manifest generatedBy与清单生成器证据不一致')

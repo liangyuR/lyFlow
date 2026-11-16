@@ -20,7 +20,7 @@
 
 具体四条：
 
-1. **`packs/gap/`** 收纳 `ops/`（21 个 `gap.*`）、`algo/`（从 gap-inspector 复制的算法源码，
+1. **`solutions/gap/`** 收纳 `ops/`（21 个 `gap.*`）、`algo/`（从 gap-inspector 复制的算法源码，
    命名空间不改）、`tools/`（图生成器与 A/B 脚本）、`tests/`、`README.md`。
    不再有 `GAP_BUILD_DIR`，不再链接任何预构建的 `.lib`。
 2. **通用 2D 几何进 `packs/std-pointcloud/`**：`fit.line_2d`、`fit.circle_2d`、
@@ -51,11 +51,11 @@ gap.labels_from_logits (Tensor → Record{GapLabels})
 
 `packs/*` 里每个包在 `lyflow_op_pack()` 里声明 `DEFAULT ON|OFF`：
 
-| 包 | DEFAULT | 理由 |
-|---|---|---|
-| `std-pointcloud` | ON | 平台的点云工具箱 |
-| `std-ml` | ON | 只多一个 onnxruntime，且 `fetch-onnxruntime.ps1` 一条命令备好 |
-| `gap` | OFF | 领域包不该拖累纯平台开发者，但它在同一仓库 |
+| 包               | DEFAULT | 理由                                                          |
+| ---------------- | ------- | ------------------------------------------------------------- |
+| `std-pointcloud` | ON      | 平台的点云工具箱                                              |
+| `std-ml`         | ON      | 只多一个 onnxruntime，且 `fetch-onnxruntime.ps1` 一条命令备好 |
+| `gap`            | OFF     | 领域包不该拖累纯平台开发者，但它在同一仓库                    |
 
 打开默认关闭的包：`LYFLOW_PACKS=gap`（分号分隔的**仓库内包名**，
 与 `LYFLOW_OP_PACKS` 的「外部目录列表」是两回事）。
@@ -67,10 +67,10 @@ DEFAULT 在 `lyflow_op_pack()` 里声明，而包的 cmake 往往要先找依赖
 
 ## 第三方依赖
 
-| 依赖 | 怎么来 |
-|---|---|
-| PCL | vcpkg（`C:\vcpkg`），只有 `packs/std-pointcloud` `find_package` |
-| yaml-cpp | vcpkg：`vcpkg install yaml-cpp:x64-windows`，只有 `packs/gap` 用 |
+| 依赖               | 怎么来                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| PCL                | vcpkg（`C:\vcpkg`），只有 `packs/std-pointcloud` `find_package`                                                  |
+| yaml-cpp           | vcpkg：`vcpkg install yaml-cpp:x64-windows`，只有 `solutions/gap` 用                                             |
 | onnxruntime 1.19.2 | `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（gitignore），`LYFLOW_ONNXRUNTIME_ROOT` 可以覆盖 |
 
 缺 onnxruntime 时 CMake 直接 FATAL 并打印那条命令。**不静默跳过** ——
@@ -80,7 +80,7 @@ DEFAULT 在 `lyflow_op_pack()` 里声明，而包的 cmake 往往要先找依赖
 
 算法源码迁入 `std-pointcloud` 之后，gap 包的正确性**不再以与原算法数值相同为标准**：
 M7 起一批算子的行为已有意偏离原算法（ROI 只搬中心、`fit_line` 的截取方向、
-固定半径在所有路径上生效、flush 默认带符号等，见 `packs/gap/README.md`）。
+固定半径在所有路径上生效、flush 默认带符号等，见 `solutions/gap/README.md`）。
 正确性由包内 doctest 与样本集上的读数评审来定，不由对拍来定。
 
 迁移时留下的几条做法仍然是现状，但不再是约束：
@@ -89,16 +89,16 @@ M7 起一批算子的行为已有意偏离原算法（ROI 只搬中心、`fit_li
 - `fitLine2D` / `fitCircle2D` 的 RANSAC 参数外露，默认值取自原算法（`random=false` 等）。
 - 推理线程数默认 1（intra 与 inter 都是），归约顺序固定，同输入可复现。
 
-`packs/gap/tools/` 下的 A/B 对拍脚本保留，作为**历史对拍工具**：用来看偏离了多少、
+`solutions/gap/tools/` 下的 A/B 对拍脚本保留，作为**历史对拍工具**：用来看偏离了多少、
 偏在哪几个样本上，不是验收门槛。
 
 ## 后果
 
 - ✅ 算法有主了：LyFlow 能改它、能给它写 doctest、能让别的领域复用。
-- ✅ `packs/gap/algo/` 里没有直线/圆拟合、ICP、盒裁剪的实现，只有领域逻辑
+- ✅ `solutions/gap/algo/` 里没有直线/圆拟合、ICP、盒裁剪的实现，只有领域逻辑
   （双迹线截取、端点、距离与求值、roll 裁剪窗、掩膜精修、框推导、`MeasurementEngine`）。
 - ✅ 纯平台开发者（`LYFLOW_STD_PACKS=0`）与只要点云的开发者都不受影响。
-- ❌ **同一份算法有两份拷贝**：LyFlow 的 `packs/gap/algo/` 与 gap-inspector 的
+- ❌ **同一份算法有两份拷贝**：LyFlow 的 `solutions/gap/algo/` 与 gap-inspector 的
   `src/`。两边已各自演进，行为不再相同；业务仓库接入 LyFlow 之后那一份才能删。
 - ❌ 图上多了两个节点（ONNX 三步），生成器与 e2e 断言跟着改了一处。
 - ❌ `packs/` 之间有了顺序依赖（谁定义 `lyflow_std_algo`、谁解析

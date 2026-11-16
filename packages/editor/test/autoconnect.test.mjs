@@ -147,8 +147,19 @@ test('片段插入生命周期：外部自动连接、内部连线、撤销与�
           id: 't.skeleton',
           label: '骨架',
           nodes: [
-            { id: 'line', op: 't.line', ui: { position: { x: 0, y: 0 }, title: '基准线' } },
-            { id: 'flush', op: 't.flush', ui: { position: { x: 200, y: 0 } } },
+            {
+              id: 'line',
+              op: 't.line',
+              opVersion: '0.9.0',
+              params: { historicalDistanceMm: 1 },
+              ui: { position: { x: 0, y: 0 }, title: '基准线' },
+            },
+            {
+              id: 'flush',
+              op: 't.flush',
+              params: { unknown: 42 },
+              ui: { position: { x: 200, y: 0 } },
+            },
             { id: 'judge', op: 't.judge', ui: { position: { x: 400, y: 0 } } },
             { id: 'ghost', op: 't.nope' },
           ],
@@ -170,6 +181,10 @@ test('片段插入生命周期：外部自动连接、内部连线、撤销与�
         assert.equal(r.wired, 2);
         assert.equal(doc().edges.length, before + 2 + 2);
         const line = doc().nodes.find((n) => n.op === 't.line');
+        assert.equal(line.opVersion, '0.9.0');
+        assert.deepEqual(line.params, { historicalDistanceMm: 1 });
+        assert.equal(doc().nodes.find((n) => n.op === 't.flush').opVersion, '1.0.0');
+        assert.deepEqual(doc().nodes.find((n) => n.op === 't.flush').params, {});
         assert.equal(line.ui.title, '基准线');
         assert.deepEqual(line.ui.position, { x: 500, y: 300 });
         for (const e of edgesInto(line.id)) assert.equal(e.from.node, locate);

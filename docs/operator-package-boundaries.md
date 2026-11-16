@@ -1,6 +1,6 @@
 # 算子包边界重整
 
-状态：目标边界保持；M1–M3已合并，当前推进M4的公共拟合核与Gap拆解。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
+状态：目标边界保持；M1–M3、M4a及M4b已合并；M4c的Gap原生场景已提交[PR67](https://github.com/liangyuR/lyFlow/pull/67)，各切片的验收与合并记录见迁移计划及对应PR。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
 
 本方案以实际注册和实现为依据，重划通用能力、测量语义、场景组合及内部后端的责任。当前构建方式以[算子包机制](op-packs.md)为准；`std-profile`、`std-metrology`及`solution-dts`已交付，Gap、Glue和其余可选后端拆分仍须按迁移计划验收。
 

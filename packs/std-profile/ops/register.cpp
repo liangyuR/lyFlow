@@ -14,6 +14,11 @@ void registerProfileInput(Registry&);
 void registerNativeProfileAnalysis(Registry&);
 void registerProfileAnalysis(Registry&);
 void registerProfileSelection(Registry&);
+void registerProfileMerge(Registry&);
+void registerProfileRegionSelection(Registry&);
+#ifdef LYFLOW_PROFILE_PCL_FILTER
+void registerProfileRadiusOutlier(Registry&);
+#endif
 #ifdef LYFLOW_PROFILE_ROBUST
 void registerRobustProfileFeatures(Registry&);
 #endif
@@ -131,39 +136,11 @@ Status remapAxes(const Inputs& in, const ParamView& p, Outputs& out, ExecContext
   for (float sign : signs)
     if (sign != 1 && sign != -1)
       return Status::Error(Phase::Execute, "bad_param", "轴符号只能为+1或-1", "signs");
-  std::array<std::size_t, 3> axes{};
-  for (std::size_t i = 0; i < 3; ++i)
-    axes[i] = static_cast<std::size_t>(order[i] - 'X');
-  int parity = 1;
-  for (std::size_t i = 0; i < 3; ++i)
-    for (std::size_t j = i + 1; j < 3; ++j)
-      if (axes[i] > axes[j])
-        parity = -parity;
-  const bool reflected = parity * signs[0] * signs[1] * signs[2] < 0;
-  Profile result = *input;
-  result.descriptor.frame = p.text("targetFrame");
-  if (reflected)
-    result.descriptor.handedness = input->descriptor.handedness == "right" ? "reflected" : "right";
-  std::string plane;
-  for (std::size_t i = 0; i < 3; ++i)
-    if (input->descriptor.plane.find(order[i]) != std::string::npos)
-      plane.push_back(static_cast<char>('X' + i));
-  result.descriptor.plane = plane;
-  PointCloud cloud = *input->cloud;
-  PointCloud identity;
-  cloud.id = identity.id;
-  for (std::size_t i = 0; i < input->pointCount(); ++i) {
-    if ((i & 4095) == 0 && ctx.cancelled())
-      return Status::Ok();
-    for (std::size_t j = 0; j < 3; ++j) {
-      cloud.xyz[3 * i + j] = signs[j] * input->cloud->xyz[3 * i + axes[j]];
-      if (cloud.hasNormals())
-        cloud.normals[3 * i + j] = signs[j] * input->cloud->normals[3 * i + axes[j]];
-    }
-  }
-  result.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  if (!validateProfile(result, why))
-    return Status::Error(Phase::Execute, "bad_param", why, "targetFrame");
+  Profile result;
+  if (!remapProfileAxes(*input, order, signs, p.text("targetFrame"), result, why,
+                        [&ctx] { return ctx.cancelled(); }))
+    return ctx.cancelled() ? Status::Ok()
+                           : Status::Error(Phase::Execute, "bad_param", why, "targetFrame");
   out.set("profile", Data::profile(std::move(result)));
   return Status::Ok();
 }
@@ -244,6 +221,11 @@ void registerPackOps(Registry& r) {
   registerProfileProcessing(r);
   registerNativeProfileAnalysis(r);
   registerProfileSelection(r);
+  registerProfileMerge(r);
+  registerProfileRegionSelection(r);
+#ifdef LYFLOW_PROFILE_PCL_FILTER
+  registerProfileRadiusOutlier(r);
+#endif
 #ifdef LYFLOW_PROFILE_ROBUST
   registerRobustProfileFeatures(r);
 #endif

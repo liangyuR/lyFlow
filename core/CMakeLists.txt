@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.4.4)
+project(lyflow_core LANGUAGES CXX VERSION 1.4.5)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -350,13 +350,15 @@ set(LYFLOW_E2E_OPS "${LYFLOW_TESTS}/e2e/register_e2e_ops.cpp")
 add_library(lyflow_core_obj OBJECT ${LYFLOW_CORE_SOURCES} "${LYFLOW_PACK_REGISTRAR}" "${LYFLOW_E2E_OPS}")
 lyflow_apply_common(lyflow_core_obj)
 target_precompile_headers(lyflow_core_obj PRIVATE <nlohmann/json.hpp>)
-set(_release_identity_packs "${LYFLOW_STD_PACK_NAMES}")
-list(SORT _release_identity_packs)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release-identity.cmake")
+set(_release_configuration "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/release.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_release_configuration}")
+lyflow_release_combination_matches(_release_combination_matches "${_release_configuration}"
+  "${LYFLOW_STD_PACK_NAMES}" "${LYFLOW_MODULES}")
 set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
 if(LYFLOW_RELEASE_BUILD AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
-   CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND NOT LYFLOW_MODULES AND
-   NOT LYFLOW_EXT_PACK_NAMES AND
-   _release_identity_packs STREQUAL "gap;glue;std-geometry;std-image;std-metrology;std-ml;std-pointcloud;std-profile;std-value")
+   CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND
+   NOT LYFLOW_EXT_PACK_NAMES AND _release_combination_matches)
   set(LYFLOW_RELEASE_IDENTITY_ALLOWED TRUE)
 endif()
 add_custom_target(lyflow-source-revision
@@ -790,4 +792,16 @@ if(TARGET lyflow_pack_solution_dts)
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/graphs/" DESTINATION examples/dts)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/README.md" DESTINATION examples/dts)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/dts-profile-migration.md" DESTINATION docs)
+endif()
+
+if(TARGET lyflow_pack_solution_gap)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/gap-profile-migration.md" DESTINATION docs)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/README.md" DESTINATION examples/gap)
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/snippets/"
+          DESTINATION examples/gap/snippets FILES_MATCHING PATTERN "*.lyflow-snippet.json"
+          PATTERN "model-with-template-fallback.lyflow-snippet.json" EXCLUDE)
+  if(TARGET lyflow_gap_model AND TARGET lyflow_gap_template)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/snippets/model-with-template-fallback.lyflow-snippet.json"
+            DESTINATION examples/gap/snippets)
+  endif()
 endif()

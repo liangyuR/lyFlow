@@ -243,4 +243,48 @@ TEST_CASE("Bundle：图输出可以指向字段，summary 与 lyflow_run_outputs
   CHECK(exec::validateGraphJson(notBundle.dump(), {}).find("不是 Bundle") != std::string::npos);
 }
 
+TEST_CASE("ROI backdrop accepts native Profile and declared Bundle sample fields only") {
+  auto make = [](const std::vector<std::string>& paths) {
+    Registry registry;
+    for (const auto& type : ensureRegistry().types())
+      registry.addType(type);
+    registry.addBundle(
+        BundleDesc{"test.RoiSamples",
+                   "",
+                   "",
+                   "",
+                   {{"left", "Profile", ""}, {"right", "PointCloud", ""}, {"info", "Record", ""}}});
+    OperatorDesc op;
+    op.id = "test.roi_samples";
+    op.version = "1.0.0";
+    op.label = "ROI";
+    op.category = "test";
+    op.inputs = {{"templates", "Bundle<test.RoiSamples>", "", "", true},
+                 {"cloud", "PointCloud", "", "", true},
+                 {"profile", "Profile", "", "", true}};
+    op.outputs = {{"out", "PointCloud", "", "", true}};
+    Param roi;
+    roi.name = "roi";
+    roi.type = ParamType::Vec4f;
+    roi.def = Value::vec({0, 0, 1, 1});
+    roi.unit = "mm";
+    roi.semantic = "roi";
+    roi.roiBackdrop.inputPorts = paths;
+    op.params = {roi};
+    op.compute = &ops::anyPassCompute;
+    registry.addOperator(std::move(op));
+    return registry;
+  };
+  CHECK(make({"cloud", "profile", "templates.left", "templates.right"}).validate().empty());
+  for (const auto* path : {"templates", "templates.info", "templates.missing", "missing.left",
+                           "templates.left.nested", "templates.", ".left"}) {
+    CAPTURE(path);
+    const auto failures = make({path}).validate();
+    REQUIRE_FALSE(failures.empty());
+    CHECK(std::any_of(failures.begin(), failures.end(), [](const std::string& message) {
+      return message.find("roiBackdrop.inputs") != std::string::npos;
+    }));
+  }
+}
+
 } // namespace lyflow::test

@@ -237,8 +237,8 @@ if (view.valid()) {
 
 `CloudView` 是 RAII，析构时把缓冲还给 core。
 
-端口是 Bundle（`Bundle<kind>`，例如 gap 包的 `gap.read_scan` 输出的 `scan`）时，按字段取：
-`client.cloud(runId, "n_scan", "scan.merged", 0)`。`lyflow_output_cloud / tensor / indices / save`
+端口是 Bundle（`Bundle<kind>`）时按字段取。原生 Gap v2 的 `scan.merged` 为 Profile，使用
+`client.profile(runId, "n_scan", "scan.merged")` 保留完整描述、有效性和原槽索引；PointCloud 字段则使用 `client.cloud()`。`lyflow_output_cloud / tensor / indices / save`
 都认 `<port>.<field>`，签名不变；`lyflow_output_info` 对 Bundle 端口在它后面逐个列出字段。
 
 **`RunResult` 必须还活着。** 它持有这次运行在结果仓里的索引
@@ -248,23 +248,26 @@ if (view.valid()) {
 生产路径上不取任何点云时，跳过这一段即可；`lyflow_run_outputs` 给的三个命名输出
 不涉及二进制通道。
 
-## 注入内存里的点云
+## 注入内存里的采样数据
 
-相机采到的两片云不必先落盘（[ADR-0017](adr/0017-graph-outputs-injection-importers.md)）：
+生产采集无需先写临时 PCD。原生 `gap.read_scan` v2 的两个输入为 `Profile`，按[Profile 宿主协议](profile-host-protocol.md)构造 `capturedPrimary`、`capturedSecondary`：显式声明单位、传感器帧、XZ 分析平面、手性、acquisition 采样顺序、物理来源和原始槽数，附带 validity/sourceIndices 及实际可选通道。工作流须使用原生契约，并明确量测帧；旧图先按[Gap 迁移指南](gap-profile-migration.md)升级。
 
 ```cpp
-lyflow::InputCloud primary;
-primary.nodeId = "n_scan";                 // 导入器产出的积木图里的 gap.read_scan
+lyflow::InputProfile primary = std::move(capturedPrimary);
+primary.nodeId = "n_scan";
 primary.port = "primary";
-primary.xyz = std::move(interleavedXyz);   // x0,y0,z0,x1,y1,z1,...（传感器帧，NaN 槽可以留着）
-lyflow::InputCloud secondary = /* 同上，port = "secondary" */;
-options.inputs = { std::move(primary), std::move(secondary) };
+lyflow::InputProfile secondary = std::move(capturedSecondary);
+secondary.nodeId = "n_scan";
+secondary.port = "secondary";
+options.profileInputs = { std::move(primary), std::move(secondary) };
 ```
+
+`InputCloud` / `options.inputs` 继续用于 PointCloud 端口；不能将裸 XYZ 直接注入 Profile 端口。完整可编译示例见 [embed_profile.cpp](../examples/embed_profile.cpp)。
 
 `port` 有两种意思，按算子声明区分：
 
 - **是这个算子的输出端口**：整节点注入（v7 起）。被注入的节点**整个 compute 都不会被调用**，
-  所以它声明的每个输出端口都要给一项 —— `gap.load_profile_pair` 有 `primary` 与 `secondary` 两个，就要给两项。
+  所以它声明的每个输出端口都要给一项，不能只注入其中一个输出。
 - **只是它的输入端口**：输入注入（M8b，m8-plan L18，加在 v10 里）。compute 照常调，这个输入端口的值就是
   注入的数据。`gap.read_scan` 的 `primary` / `secondary` 就是这样喂的：两个都给了就直接用它们，不读目录
   （图里原来的 `source` / `dir` 不用改；不想配目录时把 `source` 设成 `inputs`），宿主只看见一个「读剖面」节点，
@@ -276,12 +279,9 @@ options.inputs = { std::move(primary), std::move(secondary) };
 1. 缓冲只需活到 `run()` 返回，core 在内部拷一份。
 2. 注入数据的摘要进 cacheKey，换一片云一定重算。
 
-**gap 的强度在 rgb 的 R 上**（模型定位把它当特征）：注入 gap 的剖面时把 `rgb` 一起给，只给 xyz 的话
-模板路径读数不变、模型路径会变。
+**Gap 模型六通道使用 RGB.R/255**，不替换为独立 intensity；注入时保留原 RGB、NaN 槽、validity 与原槽索引，模型路径仍要求每头 1280 个原始槽。
 
-命令行的等价物是 `lyflow run <graph> --input n_scan.primary=<a.pcd> --input n_scan.secondary=<b.pcd>`：
-CLI 把 PCD 原样读出（`bridge/src/pcd.rs`，ascii / binary / binary_compressed；点序、NaN 槽、intensity、rgb 都在），
-再经同一个 `lyflow_run_options.inputs` 交给 core。被 `--input` 喂了的必填输入在运行前的校验里不算 `missing_input`。
+命令行的等价物是 `lyflow run <graph> --input n_scan.primary=a.lypr --input n_scan.secondary=b.lypr`，通过原生 Profile 运行输入交给 core。LYPR 保留完整描述与槽索引；PCD 的 `--input` 仍表示 PointCloud，不能替代 Profile。若从 PCD 文件读取原生 Gap 轮廓，使用 `gap.read_scan` 的 files/dir 模式并显式配置单位与坐标声明。已注入的必填输入在校验时不报 `missing_input`。
 
 ## 回调版
 

@@ -324,6 +324,84 @@ test('版本化契约升级夹具在编辑器迁移、保存及撤销后保留�
   g.loadDoc(staleBefore, 'changed.lyflow.json');
   assert.equal(g.applyMigrations([replacement]), 0, '验证后用户修改文档时拒绝过期CAS');
   assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), staleBefore);
+
+  const gapFixtures = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../core/tests/fixtures/contract-upgrade/gap-standard-v1.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  );
+  for (const [name, style] of [
+    ['template', 'blocks'],
+    ['template-fine', 'fine'],
+  ]) {
+    const legacy = structuredClone(gapFixtures[name]);
+    const declaration = {
+      sourceId: 'file-channel-A',
+      unit: 'm',
+      fileFrame: 'file-frame',
+      sensorFrame: 'sensor-frame',
+      fileHandedness: 'right',
+    };
+    const source =
+      style === 'fine'
+        ? { node: 'n_load', op: 'gap.load_profile_pair', opVersion: '1.0.0', port: 'primary' }
+        : { node: 'n_scan', op: 'gap.read_scan', opVersion: '1.1.0', port: 'scan' };
+    legacy.contractUpgrade = {
+      schemaVersion: 1,
+      rules: [
+        {
+          kind: 'gapProfile.v1',
+          source,
+          profiles: {
+            primary: declaration,
+            secondary: { ...declaration, sourceId: 'file-channel-B' },
+          },
+          measurement: { frame: 'measurement-frame', plane: 'XY' },
+          alreadyAligned: true,
+          component: { style, nodes: legacy.nodes.map((node) => node.id) },
+          adapterIdPrefix: 'native_gap',
+          templates: {
+            unit: 'm',
+            fileFrame: 'template-files',
+            templateFrame: 'template-frame',
+            handedness: 'reflected',
+          },
+        },
+      ],
+    };
+    g.loadDoc(legacy, `gap-${name}.lyflow.json`);
+    const gapBefore = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+    assert.deepEqual(gapBefore.contractUpgrade, legacy.contractUpgrade, 'GAP请求保存保留精确声明');
+    const request = structuredClone(gapBefore.contractUpgrade);
+    const gapAfter = structuredClone(gapBefore);
+    gapAfter.nodes.find((node) => node.id === source.node).opVersion = '2.0.0';
+    delete gapAfter.contractUpgrade;
+    gapAfter.meta = {
+      ...gapAfter.meta,
+      contractUpgradeHistory: [{ schemaVersion: 1, request, appliedSources: [source] }],
+    };
+    const gapReplacement = {
+      ...action,
+      nodeId: '',
+      edits: undefined,
+      graphUpdate: { contractUpgradeReplacement: { before: gapBefore, after: gapAfter } },
+    };
+    assert.equal(g.applyMigrations([gapReplacement]), 1, 'GAP整图替换保留请求历史');
+    const gapSaved = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+    assert.deepEqual(gapSaved, gapAfter);
+    assert.deepEqual(gapSaved.meta.contractUpgradeHistory[0].request, request);
+    g.loadDoc(gapSaved, `gap-${name}-saved.lyflow.json`);
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), gapSaved);
+    g.loadDoc(gapBefore, `gap-${name}.lyflow.json`);
+    assert.equal(g.applyMigrations([gapReplacement]), 1);
+    g.undo();
+    assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), gapBefore);
+    assert.deepEqual(useGraphStore.getState().doc.contractUpgrade, request);
+  }
 });
 
 test('edits：删两条旧边、插一个节点、加三条边，一次撤销全部回去；不带 edits 的只改版本与参数', () => {
