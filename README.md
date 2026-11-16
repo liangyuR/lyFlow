@@ -8,15 +8,15 @@ LyFlow 是面向点云与图像处理的视觉流程平台。用节点连接算�
 
 ## 用 LyFlow 做什么
 
-| 需求 | 能力 |
-|---|---|
-| 处理视觉数据 | 三维点云集合/配准、位姿、标定、NCC 定位与 YOLOv8/11/26 检测；[支持范围](docs/operator-coverage.md) |
-| 编排视觉流程 | 节点连线、端口类型检查、参数表单、撤销重做、子图与可复用库算子 |
-| 调试算法结果 | 点云 3D / 图像预览、连线内容查看、部分运行、运行日志与输出对比 |
-| 缩短调参循环 | 内容寻址缓存、只重算受影响的下游、并行执行、C++ 热重载 |
-| 管理不同工况 | 顶层图参数、参数配方、参数来源与失配诊断 |
-| 批量评估与 AI 调参 | CLI 样本评估、参数扫描、合成位移检查；MCP 冻结试验、预算搜索和候选比较 |
-| 接入现有产品 | C ABI DLL、C++ / Rust 客户端、可嵌入 React 编辑器、HTTP 传输契约 |
+| 需求               | 能力                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| 处理视觉数据       | 三维点云集合/配准、位姿、标定、NCC 定位与 YOLOv8/11/26 检测；[支持范围](docs/operator-coverage.md) |
+| 编排视觉流程       | 节点连线、端口类型检查、参数表单、撤销重做、子图与可复用库算子                                     |
+| 调试算法结果       | 点云 3D / 图像预览、连线内容查看、部分运行、运行日志与输出对比                                     |
+| 缩短调参循环       | 内容寻址缓存、只重算受影响的下游、并行执行、C++ 热重载                                             |
+| 管理不同工况       | 顶层图参数、参数配方、参数来源与失配诊断                                                           |
+| 批量评估与 AI 调参 | CLI 样本评估、参数扫描、合成位移检查；MCP 冻结试验、预算搜索和候选比较                             |
+| 接入现有产品       | C ABI DLL、C++ / Rust 客户端、可嵌入 React 编辑器、HTTP 传输契约                                   |
 
 ## 从编辑到交付
 
@@ -52,13 +52,13 @@ pnpm dev
 
 ## 选择使用方式
 
-| 方式 | 从哪里开始 |
-|---|---|
-| 桌面编辑与调试 | `pnpm dev` → [快速开始](docs/getting-started.md) |
-| 无界面执行与批量评估 | `pnpm cli:build` → [CLI 指南](docs/cli.md) |
-| AI Agent 读图、评估与调参 | [MCP 配置](docs/mcp.md) → [glue 调参流程](docs/mcp-glue-tuning.md) |
-| 在 C++ / Rust 中调用算法 | [嵌入指南](docs/embedding.md) → [Windows 运行库与 SDK](docs/deployment/packaging.md) |
-| 在 React / Tauri 中嵌入编辑器 | [编辑器包](packages/editor/README.md) → [HTTP 契约](docs/http-transport.md) |
+| 方式                          | 从哪里开始                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| 桌面编辑与调试                | `pnpm dev` → [快速开始](docs/getting-started.md)                                     |
+| 无界面执行与批量评估          | `pnpm cli:build` → [CLI 指南](docs/cli.md)                                           |
+| AI Agent 读图、评估与调参     | [MCP 配置](docs/mcp.md) → [glue 调参流程](docs/mcp-glue-tuning.md)                   |
+| 在 C++ / Rust 中调用算法      | [嵌入指南](docs/embedding.md) → [Windows 运行库与 SDK](docs/deployment/packaging.md) |
+| 在 React / Tauri 中嵌入编辑器 | [编辑器包](packages/editor/README.md) → [HTTP 契约](docs/http-transport.md)          |
 
 CLI 与桌面共用图校验和执行逻辑，CLI 不依赖 Tauri。构建后可直接检查引擎并运行自己的图：
 
@@ -74,14 +74,14 @@ MCP 同时使用 HTTP 后端与本地 CLI；配置完成后，先调用 `get_env
 
 ## 算子包
 
-| 包 | 处理领域 | 开发默认构建 |
-|---|---|---|
-| [std-pointcloud](packs/std-pointcloud/README.md) | 点云读写、滤波、分割、拟合、配准与量测 | 启用 |
-| [std-image](packs/std-image/README.md) | 图像处理、标定、深度图与点云转换 | 启用 |
-| [std-ml](packs/std-ml/README.md) | ONNX Runtime 推理 | 启用 |
-| [glue](packs/glue/README.md) | 胶路、胶宽、断胶、边距与判定 | 按需启用 |
-| [gap](packs/gap/README.md) | 间隙与段差测量 | 按需启用 |
-| [dts](packs/dts/README.md) | 车门胶条面差 | 按需启用 |
+| 包                                               | 处理领域                               | 开发默认构建 |
+| ------------------------------------------------ | -------------------------------------- | ------------ |
+| [std-pointcloud](packs/std-pointcloud/README.md) | 点云读写、滤波、分割、拟合、配准与量测 | 启用         |
+| [std-image](packs/std-image/README.md)           | 图像处理、标定、深度图与点云转换       | 启用         |
+| [std-ml](packs/std-ml/README.md)                 | ONNX Runtime 推理                      | 启用         |
+| [glue](packs/glue/README.md)                     | 胶路、胶宽、断胶、边距与判定           | 按需启用     |
+| [gap](packs/gap/README.md)                       | 间隙与段差测量                         | 按需启用     |
+| [solution-dts](solutions/dts/README.md)          | 车门胶条面差                           | 按需启用     |
 
 开发涂胶流程时，在构建或启动前指定：
 
@@ -91,19 +91,19 @@ pnpm core:build
 pnpm dev
 ```
 
-多个领域包用分号分隔，例如 `'gap;dts;glue'`。切换包配置后先停止开发进程、运行 `pnpm core:build` 重新配置，再启动 `pnpm dev`，使监视构建使用新的包组合。Windows 发布产物固定包含三个标准包、`glue` 与 `gap`，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
+多个领域包用分号分隔，例如 `'gap;solution-dts;glue'`。切换包配置后先停止开发进程、运行 `pnpm core:build` 重新配置，再启动 `pnpm dev`，使监视构建使用新的包组合。Windows 发布产物的标准包、`glue` 与 `gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
 
 ## 开发与验证
 
-| 命令 | 用途 |
-|---|---|
-| `pnpm core:build` | 构建 C++ core，运行 manifest 自检与 core 测试 |
-| `pnpm typecheck` | 检查编辑器和桌面前端类型 |
-| `pnpm check` | 运行 core、契约、Rust、CLI、SDK、前端与 MCP 门禁 |
-| `pnpm check:glue` / `pnpm check:gap` | 对应领域包的专项门禁 |
-| `pnpm e2e` | 启动真实桌面应用进行交互验收 |
-| `pnpm e2e:http` / `pnpm e2e:packaged` | 浏览器宿主 / 桌面构建产物验收 |
-| `pnpm run package` | 构建 Windows x64 运行库、SDK/CLI、编辑器 tarball 与正式运行库 NuGet 包 |
+| 命令                                  | 用途                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `pnpm core:build`                     | 构建 C++ core，运行 manifest 自检与 core 测试                          |
+| `pnpm typecheck`                      | 检查编辑器和桌面前端类型                                               |
+| `pnpm check`                          | 运行 core、契约、Rust、CLI、SDK、前端与 MCP 门禁                       |
+| `pnpm check:glue` / `pnpm check:gap`  | 对应领域包的专项门禁                                                   |
+| `pnpm e2e`                            | 启动真实桌面应用进行交互验收                                           |
+| `pnpm e2e:http` / `pnpm e2e:packaged` | 浏览器宿主 / 桌面构建产物验收                                          |
+| `pnpm run package`                    | 构建 Windows x64 运行库、SDK/CLI、编辑器 tarball 与正式运行库 NuGet 包 |
 
 测试范围与 CI 覆盖见 [测试地图](docs/testing.md)。发布条件、版本契约与下游验收边界见 [发包指南](docs/deployment/packaging.md)。历史验收结果记录在对应文档中，不代表任意新修订已经验证通过。
 

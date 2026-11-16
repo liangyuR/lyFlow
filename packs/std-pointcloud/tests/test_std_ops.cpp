@@ -67,9 +67,7 @@ TEST_CASE("点云包的完整 50 项算子集合与归属版本一致") {
       "io.load_cloud",
       "io.load_pcd",
       "io.save_pcd",
-      "profile.analyze",
-      "profile.gap_flush",
-      "profile.project_pair",
+
       "register.constrained_fit_3d",
       "register.global_3d",
       "register.icp_2d",
@@ -89,11 +87,11 @@ TEST_CASE("点云包的完整 50 项算子集合与归属版本一致") {
     CAPTURE(id);
     const OperatorDesc* op = ensureRegistry().find(id);
     REQUIRE(op != nullptr);
-    CHECK(op->pack == "std-pointcloud@0.5.0");
+    CHECK(op->pack == "std-pointcloud@0.6.0");
   }
   std::vector<std::string> actual;
   for (const auto& op : ensureRegistry().operators())
-    if (op.pack == "std-pointcloud@0.5.0")
+    if (op.pack == "std-pointcloud@0.6.0")
       actual.push_back(op.id);
   std::sort(actual.begin(), actual.end());
   CHECK(actual == expected);

@@ -41,7 +41,7 @@ class PackageAuditTests(unittest.TestCase):
 
     def test_contract_change_requires_review(self):
         data = copy.deepcopy(self.baseline)
-        data['sourceFingerprints']['packs/dts/ops/flush.cpp'] = '0' * 64
+        data['sourceFingerprints']['solutions/dts/ops/flush.cpp'] = '0' * 64
         self.assertTrue(any('契约源码已变化' in p for p in CHECKER.validate(data, [])))
         documents = {ROOT / 'docs/operator-package-audit' / f'{pack}.md': content
                      for pack, content in REFRESH.render_details(data).items()}
@@ -148,21 +148,62 @@ class PackageAuditTests(unittest.TestCase):
         before = copy.deepcopy(self.baseline)
         with patch.object(REFRESH, 'load', return_value={'operators': [{'id': 'flow.select'}]}):
             with self.assertRaisesRegex(ValueError, '真实全包manifest'):
-                REFRESH.refreshed(self.baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.0')
+                REFRESH.refreshed(self.baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
         self.assertEqual(self.baseline, before)
         for field in ('operators', 'pythonExamples'):
             with self.subTest(field=field):
                 damaged = copy.deepcopy(self.baseline)
                 damaged[field].pop(0)
                 with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
-                    with self.assertRaisesRegex(ValueError, '丢失原基线ID'):
-                        REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.0')
+                    with self.assertRaisesRegex(ValueError, '丢失已审ID'):
+                        REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
         for identifier in REFRESH.ADDITIONS:
             damaged = copy.deepcopy(self.baseline)
             damaged['operators'] = [row for row in damaged['operators'] if row['id'] != identifier]
             with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
-                with self.assertRaisesRegex(ValueError, '丢失原基线ID'):
-                    REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.1', 'M2')
+                with self.assertRaisesRegex(ValueError, '丢失已审ID'):
+                    REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
+
+    def test_m3_retirement_is_explicit_reversible_to_history_and_not_an_alias(self):
+        before = copy.deepcopy(self.baseline)
+        prepared = REFRESH.prepare(before, 'M3')
+        self.assertEqual(before, self.baseline)
+        ledger = next(item for item in prepared['stageLedger'] if item['stage'] == 'M3')
+        self.assertEqual(ledger['expectedNativeCount'], 261)
+        self.assertEqual(len(ledger['scopeNativeIds']), 11)
+        self.assertEqual(set(ledger['retiredNativeIds']), set(REFRESH.M3_RETIREMENTS))
+        REFRESH.retire_m3_rows(prepared)
+        active = {row['id']: row for row in prepared['operators']}
+        retired = {row['id']: row for row in prepared['retiredOperators']}
+        self.assertFalse(set(REFRESH.M3_RETIREMENTS) & set(active))
+        self.assertEqual(len(active), 261)
+        self.assertEqual(set(REFRESH.M3_DEFINITIONS), set(ledger['introducedNativeIds']))
+        for identifier, replacement in REFRESH.M3_RETIREMENTS.items():
+            original = next((row for row in before['operators'] if row['id'] == identifier), None)
+            self.assertEqual(retired[identifier]['replacedBy'], [replacement])
+            self.assertIn(replacement, active)
+            if original is not None:
+                for key, value in original.items():
+                    self.assertEqual(retired[identifier][key], value, (identifier, key))
+        snapshot = copy.deepcopy(prepared)
+        REFRESH.retire_m3_rows(prepared)
+        self.assertEqual(prepared, snapshot)
+        self.assertEqual(next(item for item in prepared['stageLedger'] if item['stage'] == 'M2')['mergeEvidence']['pr'], 63)
+
+    def test_retirement_cannot_hide_a_deleted_baseline_operator(self):
+        prepared = REFRESH.prepare(self.baseline, 'M3')
+        REFRESH.retire_m3_rows(prepared)
+        prepared['retiredOperators'][0]['replacedBy'] = ['missing.unreviewed']
+        self.assertTrue(any('退役' in problem for problem in CHECKER.validate(prepared, [])))
+        prepared['retiredOperators'].append(copy.deepcopy(prepared['retiredOperators'][0]))
+        self.assertTrue(any('退役ID重复' in problem for problem in CHECKER.validate(prepared, [])))
+
+    def test_scene_contract_sources_are_tracked_without_heavy_backends(self):
+        patterns = CHECKER.CONTRACT_SOURCES
+        self.assertIn('solutions/*/ops/*.cpp', patterns)
+        self.assertIn('solutions/*/algo/*.cpp', patterns)
+        self.assertIn('kernels/include/**/*.h', patterns)
+        self.assertIn('packs/*/include/**/*.h', patterns)
 
 
 if __name__ == '__main__':

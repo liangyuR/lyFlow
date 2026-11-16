@@ -1,5 +1,26 @@
 use super::*;
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfileEnvelope {
+    descriptor: WireDescriptor,
+    #[serde(rename = "cloudId")]
+    cloud_id: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireDescriptor {
+    schema_version: serde_json::Value,
+    frame: serde_json::Value,
+    unit: serde_json::Value,
+    plane: serde_json::Value,
+    handedness: serde_json::Value,
+    sample_order: serde_json::Value,
+    source_id: serde_json::Value,
+    source_count: serde_json::Value,
+}
+
 #[repr(C)]
 pub struct ProfileInputOpaque {
     _private: [u8; 0],
@@ -257,6 +278,141 @@ impl Drop for ProfileView {
 }
 
 impl Core {
+    pub fn load_profile_input(
+        self: &Arc<Self>,
+        path: &std::path::Path,
+        node_id: &str,
+        port: &str,
+        max_bytes: usize,
+    ) -> Result<RunProfileInput, CoreError> {
+        use std::io::Read;
+        let file = std::fs::File::open(path)
+            .map_err(|e| CoreError::Operation(format!("LYPR open: {e}")))?;
+        let mut bytes = Vec::new();
+        file.take((max_bytes as u64).saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|e| CoreError::Operation(format!("LYPR read: {e}")))?;
+        self.profile_input_from_lypr(&bytes, node_id, port, max_bytes)
+    }
+
+    pub fn profile_input_from_lypr(
+        self: &Arc<Self>,
+        bytes: &[u8],
+        node_id: &str,
+        port: &str,
+        max_bytes: usize,
+    ) -> Result<RunProfileInput, CoreError> {
+        let invalid = |why: &str| CoreError::Operation(format!("LYPR: {why}"));
+        if bytes.len() > max_bytes {
+            return Err(invalid("input exceeds byte budget"));
+        }
+        if bytes.len() < 32 {
+            return Err(invalid("truncated 32-byte header"));
+        }
+        let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
+        if word(0) != 0x5250594c || word(1) != 1 || word(7) != 0 {
+            return Err(invalid("unsupported magic, version or reserved header"));
+        }
+        let n = word(2) as usize;
+        let flags = word(5);
+        if flags & !7 != 0 {
+            return Err(invalid("unknown channel flags"));
+        }
+        if word(4) != 0 || word(3) != word(2) {
+            return Err(invalid(
+                "input requires the full profile: offset=0 and totalPoints=count",
+            ));
+        }
+        let metadata_size = word(6) as usize;
+        if metadata_size == 0 || metadata_size > 16384 || metadata_size > bytes.len() - 32 {
+            return Err(invalid("invalid metadata length (maximum 16384 bytes)"));
+        }
+        let metadata_end = 32 + metadata_size;
+        let aligned = |value: usize| value.checked_add(3).map(|v| v & !3);
+        let data_start = aligned(metadata_end).ok_or_else(|| invalid("size overflow"))?;
+        let float_width =
+            12 + if flags & 1 != 0 { 4 } else { 0 } + if flags & 2 != 0 { 12 } else { 0 };
+        let rgb_width = if flags & 4 != 0 { 3 } else { 0 };
+        let float_end = n
+            .checked_mul(float_width)
+            .and_then(|v| data_start.checked_add(v))
+            .ok_or_else(|| invalid("channel size overflow"))?;
+        let rgb_end = n
+            .checked_mul(rgb_width)
+            .and_then(|v| float_end.checked_add(v))
+            .ok_or_else(|| invalid("RGB size overflow"))?;
+        let validity_start = aligned(rgb_end).ok_or_else(|| invalid("size overflow"))?;
+        let validity_end = validity_start
+            .checked_add(n)
+            .ok_or_else(|| invalid("size overflow"))?;
+        let indices_start = aligned(validity_end).ok_or_else(|| invalid("size overflow"))?;
+        let end = n
+            .checked_mul(4)
+            .and_then(|v| indices_start.checked_add(v))
+            .ok_or_else(|| invalid("index size overflow"))?;
+        if end > max_bytes || end != bytes.len() {
+            return Err(invalid(
+                "channel lengths disagree, trailing data or byte budget exceeded",
+            ));
+        }
+        for (start, end) in [
+            (metadata_end, data_start),
+            (rgb_end, validity_start),
+            (validity_end, indices_start),
+        ] {
+            if bytes[start..end].iter().any(|v| *v != 0) {
+                return Err(invalid("padding must contain only zero bytes"));
+            }
+        }
+        let metadata: ProfileEnvelope = serde_json::from_slice(&bytes[32..metadata_end])
+            .map_err(|e| invalid(&format!("invalid UTF-8 JSON envelope/descriptor: {e}")))?;
+        let cloud_id = &metadata.cloud_id;
+        if cloud_id.is_empty()
+            || !cloud_id.bytes().all(|c| c.is_ascii_digit())
+            || cloud_id.parse::<u64>().is_err()
+        {
+            return Err(invalid("cloudId must be a decimal uint64 string"));
+        }
+        let mut position = data_start;
+        let mut floats = |width: usize| {
+            let end = position + n * width * 4;
+            let values = bytes[position..end]
+                .chunks_exact(4)
+                .map(|v| f32::from_le_bytes(v.try_into().unwrap()))
+                .collect::<Vec<_>>();
+            position = end;
+            values
+        };
+        let xyz = floats(3);
+        let intensity = if flags & 1 != 0 {
+            floats(1)
+        } else {
+            Vec::new()
+        };
+        let normals = if flags & 2 != 0 {
+            floats(3)
+        } else {
+            Vec::new()
+        };
+        let mut input = RunProfileInput {
+            node_id: node_id.into(),
+            port: port.into(),
+            xyz,
+            intensity,
+            normals,
+            rgb: bytes[float_end..rgb_end].to_vec(),
+            descriptor_json: serde_json::to_string(&metadata.descriptor)
+                .map_err(|e| invalid(&format!("invalid descriptor: {e}")))?,
+            validity: bytes[validity_start..validity_end].to_vec(),
+            source_indices: bytes[indices_start..]
+                .chunks_exact(4)
+                .map(|v| u32::from_le_bytes(v.try_into().unwrap()))
+                .collect(),
+            retained: None,
+        };
+        input.retained = Some(self.retain_profile_input(&input)?);
+        Ok(input)
+    }
     pub fn retain_profile_input(
         self: &Arc<Self>,
         input: &RunProfileInput,

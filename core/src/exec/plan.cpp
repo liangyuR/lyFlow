@@ -252,6 +252,7 @@ struct NodeMigration {
   bool migrated = false;
   /// 链断了或迁移函数抛了：报 version_mismatch。
   bool broken = false;
+  std::string failureReason;
   TopologyEdit edits;
 };
 
@@ -336,6 +337,10 @@ NodeMigration migrateNode(const Registry& registry, const RawGraph& graph, const
         }
         m.params = std::move(next);
       }
+    } catch (const std::exception& e) {
+      m.broken = true;
+      m.failureReason = e.what();
+      return m;
     } catch (...) {
       m.broken = true;
       return m;
@@ -555,6 +560,24 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   out.nodes.clear();
   out.outputs.clear();
   out.ok = false;
+  for (const auto& node : input.nodes) {
+    const auto* current = registry.find(node.op);
+    if (node.op == "dts.profile_clean" || node.op == "dts.split_faces") {
+      diags.error(
+          node.id, Phase::Validate, "migration_required",
+          "旧DTS轮廓须显式dtsProfile.v1全链升级；请使用lyflow migrate的--profile-source/--profile-frame/--profile-source-id参数，子图使用<定义ID>/<节点ID>，库图直接迁移图资产");
+      return false;
+    }
+    if (current && current->version == "2.0.0" &&
+        (node.opVersion == "1.0.0" || node.opVersion.empty()) &&
+        (node.op == "dts.seal_dome" || node.op == "dts.pick_metal" || node.op == "dts.seal_root" ||
+         node.op == "dts.flush" || node.op == "dts.profile_bundle")) {
+      diags.error(
+          node.id, Phase::Validate, "migration_required",
+          "DTS v1消费链须显式dtsProfile.v1全链升级，声明unit=mm、plane=XZ、sampleOrder=acquisition，禁止仅升级算子主版本；请使用lyflow migrate的--profile-source/--profile-frame/--profile-source-id参数");
+      return false;
+    }
+  }
 
   // -- 迁移链先整体跑一遍（ADR-0025）：拓扑改动落在副本上，插进来的节点和其他节点一样
   //    走下面的逐节点校验。拓扑迁移只看原图的入边，节点之间互不影响。
@@ -633,6 +656,9 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     nlohmann::json params = rn.params;
     const auto mig = migrations.find(rn.id);
     const Semver current = parseSemver(op->version);
+    if (rn.opVersion.empty() && mig != migrations.end() && mig->second.broken &&
+        !mig->second.failureReason.empty())
+      fail(i, "migration_required", mig->second.failureReason);
     if (!rn.opVersion.empty()) {
       const Semver saved = parseSemver(rn.opVersion);
       if (saved.valid && current.valid) {
@@ -644,7 +670,10 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
           if (mig == migrations.end() || mig->second.broken) {
             fail(i, "version_mismatch",
                  "此节点存于 " + op->id + " v" + rn.opVersion + "，当前是 v" + op->version +
-                     "（主版本不同，而算子没有提供完整的迁移链）");
+                     "（主版本不同，迁移未完成）" +
+                     (mig != migrations.end() && !mig->second.failureReason.empty()
+                          ? "：" + mig->second.failureReason
+                          : "：算子没有提供完整的迁移链"));
           }
         } else if (saved.minor != current.minor) {
           diags.warn(rn.id, Phase::Validate, "version_mismatch",

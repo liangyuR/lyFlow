@@ -9,6 +9,10 @@
 #include "lyflow/registry.h"
 
 namespace lyflow::packs::std_profile {
+void registerProfileProcessing(Registry&);
+void registerProfileInput(Registry&);
+void registerNativeProfileAnalysis(Registry&);
+void registerProfileAnalysis(Registry&);
 namespace {
 
 Param text(const char* name, const char* label) {
@@ -231,6 +235,10 @@ void registerPackOps(Registry& r) {
   op.capabilities.cancellable = true;
   op.compute = &remapAxes;
   r.addOperator(std::move(op));
+  registerProfileInput(r);
+  registerProfileAnalysis(r);
+  registerProfileProcessing(r);
+  registerNativeProfileAnalysis(r);
 }
 
 } // namespace lyflow::packs::std_profile

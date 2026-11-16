@@ -1,0 +1,10 @@
+# Synthetic fixture only; coordinates in explicitly declared mm.
+x,z,intensity
+0,0,10
+1,0,20
+NaN,NaN
+2,0,30
+4,2,40
+5,2,50
+6,2,60
+NaN,3

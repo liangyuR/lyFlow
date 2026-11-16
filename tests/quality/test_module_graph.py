@@ -190,6 +190,38 @@ lyflow_pack_dependencies(NAME repeated DEFAULT ON MODULES first)
 lyflow_pack_dependencies(NAME repeated DEFAULT OFF MODULES second)
 ''', 'Duplicate lyFlow pack dependency declaration: repeated')
 
+    def test_solution_identity_is_explicit_and_retired_names_are_not_aliases(self):
+        declaration = (ROOT / 'solutions/dts/lyflow_pack_dependencies.cmake').as_posix()
+        self.check_cmake(f'include("{declaration}")\n' + """
+lyflow_pack_dependencies(NAME std-profile DEFAULT ON)
+lyflow_pack_dependencies(NAME std-metrology DEFAULT ON)
+lyflow_pack_dependencies(NAME std-geometry DEFAULT ON)
+lyflow_resolve_packs(ordered solution-dts std-profile std-metrology std-geometry)
+if(NOT ordered STREQUAL "std-profile;std-metrology;std-geometry;solution-dts")
+  message(FATAL_ERROR "Scene dependency ordering is incorrect: ${ordered}")
+endif()
+get_property(replacement GLOBAL PROPERTY LYFLOW_REPLACED_PACK_dts)
+if(NOT replacement STREQUAL "solution-dts")
+  message(FATAL_ERROR "Retired identity has no actionable replacement")
+endif()
+""")
+        with self.subTest(kind='retired-name-does-not-select-solution'):
+            self.check_cmake(f'include("{declaration}")\nlyflow_resolve_packs(ordered dts)\n',
+                             'Missing lyFlow pack declaration: dts')
+        with self.subTest(kind='missing-explicit-public-pack'):
+            self.check_cmake(f'include("{declaration}")\n' +
+                             'lyflow_pack_dependencies(NAME std-profile DEFAULT ON)\n' +
+                             'lyflow_resolve_packs(ordered solution-dts)\n',
+                             'Missing enabled pack std-profile; required by solution-dts')
+        for declarations in (
+            'lyflow_pack_dependencies(NAME dts DEFAULT OFF)\nlyflow_pack_dependencies(NAME solution-dts DEFAULT OFF REPLACES dts)',
+            'lyflow_pack_dependencies(NAME solution-dts DEFAULT OFF REPLACES dts)\nlyflow_pack_dependencies(NAME dts DEFAULT OFF)',
+            'lyflow_pack_dependencies(NAME first DEFAULT OFF REPLACES dts)\nlyflow_pack_dependencies(NAME second DEFAULT OFF REPLACES dts)',
+            'lyflow_pack_dependencies(NAME solution-dts DEFAULT OFF REPLACES solution-dts)',
+        ):
+            with self.subTest(declarations=declarations):
+                self.check_cmake(declarations, 'retired')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

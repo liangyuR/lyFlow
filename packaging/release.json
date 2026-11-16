@@ -57,7 +57,19 @@
     "docs/p6-analysis-renderer.md",
     "docs/p6-analysis-visualization.md",
     "docs/p6-analysis-delivery.md",
-    "docs/adr/0032-native-frames-and-result-delivery.md"
+    "docs/adr/0032-native-frames-and-result-delivery.md",
+    "include/lyflow/hash.h",
+    "include/xxhash/xxhash.h",
+    "licenses/core/xxhash/LICENSE",
+    "include/lyflow/kernel/profile.h",
+    "include/lyflow/kernel/profile_analysis.h",
+    "lib/lyflow_profile_kernel.lib",
+    "lib/lyflow_profile_analysis_kernel.lib",
+    "licenses/profile/eigen/NOTICE",
+    "licenses/profile/eigen/source.json",
+    "examples/m3-native-profile.lyflow.json",
+    "examples/m3-native-profile.csv",
+    "examples/m3-native-profile.md"
   ],
   "requiredRuntimeFiles": [
     "python/examples/profile_copy.py",
@@ -232,7 +244,14 @@
     "pose.rigid_template",
     "pose.rigid_check",
     "pose.rigid_register",
-    "geometry.extend_2d"
+    "geometry.extend_2d",
+    "profile.input",
+    "profile.clean",
+    "profile.split_faces",
+    "profile.fit_line",
+    "profile.transform_pair",
+    "metrology.profile_gap_flush",
+    "metrology.signed_point_line"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

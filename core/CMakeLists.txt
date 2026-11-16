@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.4.1)
+project(lyflow_core LANGUAGES CXX VERSION 1.4.2)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -205,7 +205,7 @@ set(LYFLOW_EXT_PACK_DIRS "")
 set(_std_pack_names "")
 set(_selected_packs "")
 set(_legacy_external "")
-file(GLOB _std_candidates "${CMAKE_CURRENT_SOURCE_DIR}/../packs/*")
+file(GLOB _std_candidates "${CMAKE_CURRENT_SOURCE_DIR}/../packs/*" "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/*")
 list(SORT _std_candidates)
 foreach(_directory IN LISTS _std_candidates)
   get_filename_component(_directory "${_directory}" ABSOLUTE)
@@ -216,11 +216,16 @@ foreach(_directory IN LISTS _std_candidates)
   if(NOT EXISTS "${_directory}/lyflow_pack_dependencies.cmake")
     message(FATAL_ERROR "Pack ${_name} is missing lyflow_pack_dependencies.cmake")
   endif()
+  get_property(_before GLOBAL PROPERTY LYFLOW_DECLARED_PACKS)
   include("${_directory}/lyflow_pack_dependencies.cmake")
   get_property(_declared GLOBAL PROPERTY LYFLOW_DECLARED_PACKS)
-  if(NOT _name IN_LIST _declared)
-    message(FATAL_ERROR "Pack directory ${_name} does not declare its dependency identity")
+  set(_new "${_declared}")
+  list(REMOVE_ITEM _new ${_before})
+  list(LENGTH _new _count)
+  if(NOT _count EQUAL 1)
+    message(FATAL_ERROR "Pack directory ${_directory} must declare exactly one dependency identity")
   endif()
+  list(GET _new 0 _name)
   set_property(GLOBAL PROPERTY "LYFLOW_PACK_${_name}_DIRECTORY" "${_directory}")
   set_property(GLOBAL PROPERTY "LYFLOW_PACK_${_name}_STANDARD" TRUE)
   get_property(_default GLOBAL PROPERTY "LYFLOW_PACK_${_name}_DEFAULT")
@@ -232,6 +237,10 @@ foreach(_directory IN LISTS _std_candidates)
 endforeach()
 foreach(_want IN LISTS LYFLOW_PACKS)
   if(NOT _want IN_LIST _std_pack_names)
+    get_property(_replacement GLOBAL PROPERTY "LYFLOW_REPLACED_PACK_${_want}")
+    if(_replacement)
+      message(FATAL_ERROR "Pack ${_want} has migrated to ${_replacement}. Select the new pack and its declared PACKS dependencies explicitly; no compatibility alias is enabled.")
+    endif()
     message(FATAL_ERROR "Unknown pack in LYFLOW_PACKS: ${_want}")
   endif()
 endforeach()
@@ -493,6 +502,14 @@ if(BUILD_TESTING)
     list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_metrology.cpp")
     list(APPEND _kernel_libraries lyflow_metrology_kernel)
   endif()
+  if(TARGET lyflow_profile_kernel)
+    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_profile.cpp")
+    list(APPEND _kernel_libraries lyflow_profile_kernel)
+  endif()
+  if(TARGET lyflow_profile_analysis_kernel)
+    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_profile_analysis.cpp")
+    list(APPEND _kernel_libraries lyflow_profile_analysis_kernel)
+  endif()
   if(_kernel_tests)
     add_executable(lyflow-kernel-tests "${LYFLOW_TESTS}/doctest_main.cpp" ${_kernel_tests})
     target_link_libraries(lyflow-kernel-tests PRIVATE ${_kernel_libraries})
@@ -567,6 +584,8 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/json.hpp"
         DESTINATION include/nlohmann)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
         DESTINATION licenses/core/nlohmann)
+install(FILES "${LYFLOW_TP}/xxhash/xxhash.h" DESTINATION include/xxhash)
+install(FILES "${LYFLOW_TP}/xxhash/LICENSE" DESTINATION licenses/core/xxhash)
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lyflow-utf8.manifest"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
@@ -693,6 +712,9 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/profile-data-contract.md"
         DESTINATION docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m1-profile-adapters.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_profile.cpp"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m3-native-profile.lyflow.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m3-native-profile.csv"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m3-native-profile.md"
         DESTINATION examples)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-cloud.lyflow.json"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/p1-clusters.pcd"
@@ -730,8 +752,15 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/lyflow-config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config-version.cmake"
         DESTINATION ".")
 
-if(TARGET lyflow_geometry_kernel AND TARGET lyflow_metrology_kernel)
+if(TARGET lyflow_geometry_kernel AND TARGET lyflow_metrology_kernel AND
+   TARGET lyflow_profile_kernel AND TARGET lyflow_profile_analysis_kernel)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/public_kernels.cpp" DESTINATION examples)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/public-kernels/CMakeLists.txt" DESTINATION examples/public-kernels)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/public-kernels.md" DESTINATION docs)
+endif()
+
+if(TARGET lyflow_pack_solution_dts)
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/graphs/" DESTINATION examples/dts)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/README.md" DESTINATION examples/dts)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/dts-profile-migration.md" DESTINATION docs)
 endif()

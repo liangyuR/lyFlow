@@ -5,16 +5,16 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
-本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，轮廓算法与 `solution-*` 仍按后续波次迁移。
+本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，M3 提供原生Profile处理链与 `solutions/dts` 场景试点，见[DTS迁移指南](dts-profile-migration.md)。gap/glue仍待后续波次。
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
-|          | 仓库内的包                                                                          | 外部包                                                 |
-| -------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 在哪     | 本仓库的 `packs/*`                                                                  | 任意目录                                               |
-| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                  | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
-| 注册顺序 | 紧跟 `gen.synthetic`                                                                | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
-| 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`packs/dts` | 任何自己写的包                                         |
+|          | 仓库内的包                                                                              | 外部包                                                 |
+| -------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 在哪     | 本仓库的 `packs/*`                                                                      | 任意目录                                               |
+| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                      | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
+| 注册顺序 | 紧跟 `gen.synthetic`                                                                    | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`solutions/dts` | 任何自己写的包                                         |
 
 core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
@@ -26,14 +26,14 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
 | `std-geometry`   | 0.5.0  | ON      | 37项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
-| `std-metrology`  | 0.1.0  | ON      | 1项版本化平面标定距离；后续场景度量尚未迁入                                                     | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
-| `std-profile`    | 0.1.0  | ON      | 3项点云/轮廓、单位及轴映射显式适配；[数据契约](profile-data-contract.md)                         | core与标准库，无PCL/OpenCV/ORT                                                      |
-| `std-pointcloud` | 0.5.0  | ON      | 50项点云 / 拟合 / 配准 / 轮廓分析 / 编辑算子                                                     | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
+| `std-metrology`  | 0.2.0  | ON      | 4项平面标定、轮廓间隙面差与有符号点线度量                                                        | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
+| `std-profile`    | 0.2.0  | ON      | 10项原生输入/清洗/分面/拟合/变换及显式适配；[数据契约](profile-data-contract.md)                 | core与标准库，无PCL/OpenCV/ORT                                                      |
+| `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.3.0  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
 | `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
-| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                                                  |
+| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                          |
 | `gap`            | 0.2.0  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
-| `dts`            | 0.2.0  | **OFF** | 9项`dts.*`，含旧版毫米几何显式米制适配                                                           | 无（零第三方，不链 PCL）                                                            |
+| `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
@@ -55,24 +55,24 @@ $env:LYFLOW_OP_PACKS = "$HOME\project\xyz-gap-inspector\lyflow"
 pnpm check          # 或 pnpm core:build / pnpm dev
 ```
 
-不设这个变量就是默认构建：core + `packs/*`。
+不设这个变量就是默认构建：core + 默认开启的能力包。
 `scripts/build-core.ps1`、`bridge/build.rs`、`scripts/core-watch.ps1` 都读同一个变量。
 
 三个开关都按「CMake 缓存变量 → 同名环境变量 → 默认值」的顺序取值，
 **空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
 不该悄悄变成「关掉标准包」；要关就显式写 `0`。
 
-| 变量               | 值                 | 默认 | 语义                                                                                                                                                |
-| ------------------ | ------------------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LYFLOW_STD_PACKS` | `0` / `1`          | `1`  | `1`：自动扫 `packs/*`，`DEFAULT ON` 的全编。`0`：**纯平台构建**，`packs/*` 里只编被 `LYFLOW_PACKS` 点名的                                           |
-| `LYFLOW_PACKS`     | 分号分隔的**包名** | 空   | 点名编 `packs/*` 里的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
-| `LYFLOW_OP_PACKS`  | 分号分隔的**目录** | 空   | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编                                                                                              |
+| 变量               | 值                 | 默认 | 语义                                                                                                                                                 |
+| ------------------ | ------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LYFLOW_STD_PACKS` | `0` / `1`          | `1`  | `1`：扫描 `packs/*` 与 `solutions/*`，`DEFAULT ON` 的全编。`0`：**纯平台构建**，`packs/*` 里只编被 `LYFLOW_PACKS` 点名的                             |
+| `LYFLOW_PACKS`     | 分号分隔的**包名** | 空   | 按声明身份点名仓库内的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
+| `LYFLOW_OP_PACKS`  | 分号分隔的**目录** | 空   | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编                                                                                               |
 
 M2 先读取仓库内包的 `lyflow_pack_dependencies.cmake` 声明，再按选择计算模块依赖闭包；只有启用的包才加载 `lyflow_op_pack.cmake` 和创建对象库。第三方发现集中在模块 setup 中，未启用的 PCL/OpenCV/ORT 模块不会执行查找。缺模块、缺显式包依赖、重复声明和依赖环均在配置阶段拒绝，不依靠目录字母序猜测提供方。
 
 包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
 所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样；
-`packs/` 同样在这两条监视链里。
+`packs/`、`solutions/`、`kernels/` 都在这两条监视链里，包括关闭默认包后显式选择的组合。
 
 ### 纯平台构建
 
@@ -90,13 +90,13 @@ pnpm check
 纯平台构建之上再点名，就得到「core + 这一个包」：
 
 ```powershell
+python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
 cmake -S core -B build-dts -G Ninja `
-  -DLYFLOW_STD_PACKS=0 -DLYFLOW_PACKS=dts -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  -DLYFLOW_STD_PACKS=0 "-DLYFLOW_PACKS=solution-dts;std-profile;std-metrology;std-geometry" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build-dts --target lyflow_core lyflow-core-tests
 ```
 
-`packs/dts` 零第三方依赖，所以这一份 `lyflow_core.dll` 的导入表里同样只有
-KERNEL32 与 CRT —— 产线上带一个 DLL 就够，不用装 PCL、不用拷 onnxruntime。
+`solution-dts` 显式依赖三个公共能力包；Eigen只参与编译期，不引入PCL/OpenCV/ORT运行时。SDK携带静态内核与相应许可。旧包名 `dts` 已退役，配置时会提示新的选择，不作为隐藏别名继续启用。
 
 外部宿主（按 cargo **git 依赖**引 `bridge` crate 的那种）只能走这条路：
 git checkout 落在 `~/.cargo/git/checkouts/` 下且路径不可预知，宿主给不出
@@ -104,12 +104,11 @@ git checkout 落在 `~/.cargo/git/checkouts/` 下且路径不可预知，宿主�
 `LYFLOW_STD_PACKS` / `LYFLOW_PACKS` 原样 `-D` 转给 cmake：
 
 ```powershell
-$env:LYFLOW_STD_PACKS = "0"; $env:LYFLOW_PACKS = "dts"
+$env:LYFLOW_STD_PACKS = "0"; $env:LYFLOW_PACKS = "solution-dts;std-profile;std-metrology;std-geometry"
 cargo build -p lyflow-app --no-default-features --bin lyflow
 ```
 
-点名是「就编这个」，不看 `DEFAULT`：`LYFLOW_PACKS="std-pointcloud;dts"` 配
-`LYFLOW_STD_PACKS=0` 同样合法，得到 core + 这两个包（而 `std-ml`、`gap` 仍然不编）。
+点名是「就编这个」，不看 `DEFAULT`：`LYFLOW_PACKS="std-profile"` 配 `LYFLOW_STD_PACKS=0` 只启用轮廓能力及其模块；场景包声明的 `PACKS` 依赖必须显式一起选择。
 依赖后端目标无需同时注册提供方包的算子。例如 gap 声明所需 PCL/点云算法/ORT/YAML 模块，单独选择 gap 会创建这些后端，仍不注册 `std-pointcloud` 或 `std-ml` 的节点。只有声明 `PACKS` 的依赖才要求把对应算子包一同选入。glue 的 `glue.bead_inspect` 片段引用 `io.load_image`，因此显式声明 `PACKS std-image`；纯平台只选 glue 会在配置阶段提示缺包。该注册要求不表示 OpenCV 模块由 std-image 的注册过程提供。
 
 门禁的其余各步照跑，只有**要标准包算子的用例不跑，而且看得出没跑**：

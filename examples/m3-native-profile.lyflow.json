@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "id": "m3-native-profile",
+  "name": "原生轮廓源、清洗、拟合与米制量测",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "profile.input",
+      "params": {
+        "source": "file",
+        "path": "m3-native-profile.csv",
+        "frame": "fixture-sensor",
+        "unit": "mm",
+        "plane": "XZ",
+        "handedness": "right",
+        "sampleOrder": "acquisition",
+        "sourceId": "synthetic-m3-csv"
+      }
+    },
+    {
+      "id": "clean",
+      "op": "profile.clean",
+      "params": {
+        "mode": "preserve_slots",
+        "smoothPoints": 1,
+        "minIntensity": 0,
+        "minValidPoints": 3
+      }
+    },
+    {
+      "id": "left",
+      "op": "profile.fit_line",
+      "params": {
+        "invalidPolicy": "valid_only",
+        "rangeEnabled": true,
+        "range": [0, 0.0021]
+      }
+    },
+    {
+      "id": "right",
+      "op": "profile.fit_line",
+      "params": {
+        "invalidPolicy": "valid_only",
+        "rangeEnabled": true,
+        "range": [0.0039, 0.0061]
+      }
+    },
+    {
+      "id": "measure",
+      "op": "metrology.profile_gap_flush",
+      "params": {
+        "referenceX": 0.003,
+        "maxExtrapolation": 0.01
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "source",
+        "port": "profile"
+      },
+      "to": {
+        "node": "clean",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "left",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "right",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "left",
+        "port": "line"
+      },
+      "to": {
+        "node": "measure",
+        "port": "left"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "right",
+        "port": "line"
+      },
+      "to": {
+        "node": "measure",
+        "port": "right"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "left",
+        "port": "statistics"
+      },
+      "to": {
+        "node": "measure",
+        "port": "leftStatistics"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "right",
+        "port": "statistics"
+      },
+      "to": {
+        "node": "measure",
+        "port": "rightStatistics"
+      }
+    }
+  ],
+  "outputs": {
+    "clean": {
+      "node": "clean",
+      "port": "clean"
+    },
+    "gap": {
+      "node": "measure",
+      "port": "gap"
+    },
+    "flush": {
+      "node": "measure",
+      "port": "flush"
+    },
+    "quality": {
+      "node": "measure",
+      "port": "quality"
+    }
+  }
+}

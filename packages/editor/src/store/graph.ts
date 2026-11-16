@@ -625,8 +625,9 @@ function emitCommitted(change: CommittedChange): void {
 
 export const TOPOLOGY_LOCKED = '拓扑已锁定';
 
-/** 迁移动作要不要改连线（ADR-0025 的 edits）：拓扑锁着时这种整条不写回。 */
+/** 迁移动作是否替换整图或改连线：拓扑锁着时这种整条不写回。 */
 function migrationTouchesTopology(a: MigrationAction): boolean {
+  if (a.graphUpdate?.contractUpgradeReplacement) return true;
   const e = a.edits;
   return !!e && e.removeEdges.length + e.addNodes.length + e.addEdges.length > 0;
 }
@@ -1545,12 +1546,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
           }
         };
         for (const action of actions) {
+          const replacement = action.graphUpdate?.contractUpgradeReplacement;
+          if (replacement) {
+            if (valueEquals(d, replacement.before)) {
+              for (const key of Object.keys(d))
+                delete (d as unknown as Record<string, unknown>)[key];
+              Object.assign(d, plain(replacement.after));
+              graphChanged = true;
+            }
+            continue;
+          }
           const source = d.nodes.find((node) => node.id === action.nodeId);
           const pendingRules = d.contractUpgrade?.rules;
           if (
             source &&
             Array.isArray(pendingRules) &&
-            pendingRules.some((rule) => rule.source?.node === source.id) &&
+            pendingRules.some((rule) => !('scope' in rule) && rule.source?.node === source.id) &&
             (source.op !== action.op || source.opVersion !== action.opVersion)
           )
             continue;

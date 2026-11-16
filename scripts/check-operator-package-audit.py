@@ -22,6 +22,9 @@ CONTRACT_SOURCES = ('core/src/ops/*.cpp', 'core/src/registry.cpp', 'core/src/man
                     'packs/*/ops/*.cpp', 'packs/*/ops/*.h', 'packs/*/include/**/*.h',
                     'packs/*/include/**/*.hpp', 'packs/*/lyflow_op_pack.cmake',
                     'packs/*/lyflow_pack_dependencies.cmake',
+                    'solutions/*/ops/*.cpp', 'solutions/*/ops/*.h', 'solutions/*/algo/*.cpp',
+                    'solutions/*/algo/*.h', 'solutions/*/lyflow_op_pack.cmake',
+                    'solutions/*/lyflow_pack_dependencies.cmake',
                     'examples/public_kernels.cpp', 'examples/public-kernels/CMakeLists.txt',
                     'python/lyflow_python/*.py',
                     'python/examples/**/*.py', 'packaging/release.json')
@@ -70,13 +73,26 @@ def validate(data, manifests, generated_docs=None):
     require(bool(registered) and len(registered) == len(set(registered)), '缺少有效的独立注册ID快照')
     require({r['id'] for r in native} == set(registered), '原生清单与注册ID快照不一致')
     require(len(examples) == data.get('pythonExampleCount'), 'Python示例统计不符')
+    retired = data.get('retiredOperators', [])
+    retired_ids = [row.get('id') for row in retired]
+    require(len(retired_ids) == len(set(retired_ids)) and not set(retired_ids) & set(registered),
+            '退役ID重复或仍注册为活动计算')
+    approved_retirements = {'dts.profile_clean': 'profile.clean', 'dts.split_faces': 'profile.split_faces'}
+    for row in retired:
+        require(row.get('retiredStage') == 'M3' and row.get('id') in approved_retirements and
+                row.get('replacedBy') == [approved_retirements.get(row.get('id'))] and
+                bool(re.fullmatch(r'[0-9a-f]{40}', row.get('sourceRevision', ''))) and
+                bool(re.fullmatch(r'[0-9a-f]{64}', row.get('sourceFingerprint', ''))) and
+                all(row.get(key) for key in ('source', 'currentVersion', 'currentPorts', 'currentContract', 'migration')),
+                '退役记录缺少已审替代、原契约或Git来源')
+        require(all(identifier in registered for identifier in row.get('replacedBy', [])), '退役替代算子未注册')
     if data.get('baselineReference'):
         baseline = data['baselineReference']
-        require(set(baseline.get('registeredNativeIds', [])) <= {r['id'] for r in native}, '原生规划基线ID丢失')
+        require(set(baseline.get('registeredNativeIds', [])) <= {r['id'] for r in native} | set(retired_ids), '原生规划基线ID丢失')
         require(set(baseline.get('pythonExampleIds', [])) <= {r['id'] for r in examples}, 'Python规划基线ID丢失')
         for stage in data.get('stageLedger', []):
             if stage.get('status') in {'validated_manifest', 'complete'}:
-                require(set(stage.get('introducedNativeIds', [])) <= {r['id'] for r in native} and
+                require(set(stage.get('introducedNativeIds', [])) <= {r['id'] for r in native} | set(retired_ids) and
                         set(stage.get('introducedPythonIds', [])) <= {r['id'] for r in examples}, '阶段已验证但新增ID缺失')
     require(dict(collections.Counter(r['currentPack'] for r in native)) == data.get('currentPackCounts'), '当前包统计不符')
     require(dict(collections.Counter(r['targetPack'] for r in native)) == data.get('targetPackCounts'), '目标包统计不符')
@@ -104,6 +120,13 @@ def validate(data, manifests, generated_docs=None):
                     entry.get('stage') == 'M2' and entry.get('fromPack') == move.get('fromPack') and
                     entry.get('toPack') == move.get('toPack') and bool(entry.get('sourceRevision'))
                     for entry in row.get('packageHistory', [])), f"{move.get('id')}: M2迁包缺少原包/源码历史")
+    m3 = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M3'), None)
+    if m3 and m3.get('status') in {'validated_manifest', 'complete'}:
+        require(m3.get('expectedNativeCount') == 261 and len(m3.get('introducedNativeIds', [])) == 7 and
+                set(m3.get('retiredNativeIds', [])) == set(approved_retirements) and
+                set(retired_ids) == set(approved_retirements) and len(m3.get('scopeNativeIds', [])) == 11,
+                'M3新增/退役/原11项范围登记不完整')
+        require(set(m3.get('scopeNativeIds', [])) <= set(registered) | set(retired_ids), 'M3原始范围丢失')
     targets = set(data.get('targetPackages', []))
     waves = set(data.get('migrationWaves', {}))
     for row in rows:
@@ -121,6 +144,10 @@ def validate(data, manifests, generated_docs=None):
                 prior = by_id[dependency]
                 require(prior['migrationOrder'] < row['migrationOrder'], f'{identifier}: 算子前置顺序错误 {dependency}')
                 require(prior['wave'] <= row['wave'], f'{identifier}: 前置来自更晚波次 {dependency}')
+            elif dependency in retired_ids:
+                replacement = next(item['replacedBy'] for item in retired if item['id'] == dependency)
+                require(all(by_id[item]['migrationOrder'] < row['migrationOrder'] for item in replacement),
+                        f'{identifier}: 退役前置的替代算子顺序错误 {dependency}')
             elif re.fullmatch(r'M[0-7]', dependency):
                 require(dependency <= row['wave'], f'{identifier}: 波次前置顺序错误 {dependency}')
         match = re.fullmatch(r'(.+):(\d+)', row.get('source', ''))

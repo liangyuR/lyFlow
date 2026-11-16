@@ -31,8 +31,10 @@ $interesting = @(".cpp", ".h", ".hpp", ".txt", ".cmake")
 # 算子包目录也一起盯着（ADR-0013）：改包里的算子同样要触发增量构建 + 热重载。
 $watched = @($source)
 # 仓库内的标准包也在监视范围里（ADR-0014）
-$packsDir = Join-Path $root "packs"
-if ($env:LYFLOW_STD_PACKS -ne "0" -and (Test-Path $packsDir)) { $watched += $packsDir }
+foreach ($directory in @('kernels', 'packs', 'solutions')) {
+  $path = Join-Path $root $directory
+  if (Test-Path -LiteralPath $path -PathType Container) { $watched += $path }
+}
 if ($env:LYFLOW_OP_PACKS) {
   foreach ($p in $env:LYFLOW_OP_PACKS.Split(";")) {
     if ($p -and (Test-Path $p)) { $watched += (Resolve-Path $p).Path }
@@ -45,7 +47,7 @@ function Get-SourceFingerprint {
   $sum = 0.0
   $count = 0
   foreach ($dir in $watched) {
-    Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
       if ($interesting -contains $_.Extension.ToLowerInvariant()) {
         $sum += $_.LastWriteTimeUtc.ToFileTimeUtc() / 1e7
         $count += 1

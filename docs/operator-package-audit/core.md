@@ -46,7 +46,7 @@
 - 验收：各原生数据类型/Bundle透明透传，缓存和连线语义不变
 - 说明：注册归属调整与数据语义升级分开；当前算子ID用于跟踪，不要求按目标包统一改ID
 
-## 132 · gen.synthetic
+## 137 · gen.synthetic
 
 - 当前：`core` / `1.0.0` / 点云合成。目标：`std-pointcloud`；迁移归属；**M6**。
 - 源码：[core/src/ops/gen_synthetic.cpp:106](../../core/src/ops/gen_synthetic.cpp#L106)。

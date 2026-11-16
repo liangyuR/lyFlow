@@ -183,6 +183,20 @@ impl GraphDoc {
     /// op / opVersion / params 整份替换；edits 里删边、插节点、加边。插进来的节点摆在被迁移
     /// 节点的左下方，标题写进 ui.title。nodeId 不是顶层节点（子图里的路径）时什么都不做，返回 false。
     pub fn apply_migration(&mut self, m: &serde_json::Value) -> bool {
+        if let Some(replacement) = m["graphUpdate"].get("contractUpgradeReplacement") {
+            if serde_json::to_value(&*self).ok().as_ref() != Some(&replacement["before"]) {
+                return false;
+            }
+            let Ok(candidate) = serde_json::from_value::<GraphDoc>(replacement["after"].clone())
+            else {
+                return false;
+            };
+            if candidate.validate_structure().is_err() {
+                return false;
+            }
+            *self = candidate;
+            return true;
+        }
         let Some(node_id) = m["nodeId"].as_str() else {
             return false;
         };
@@ -194,9 +208,9 @@ impl GraphDoc {
             .as_ref()
             .and_then(|request| request["rules"].as_array())
             .is_some_and(|rules| {
-                rules
-                    .iter()
-                    .any(|rule| rule["source"]["node"].as_str() == Some(node_id))
+                rules.iter().any(|rule| {
+                    rule.get("scope").is_none() && rule["source"]["node"].as_str() == Some(node_id)
+                })
             });
         if pending_source
             && self.nodes.iter().any(|node| {
@@ -789,5 +803,28 @@ mod tests {
         resumed.edges.clear();
         resumed.validate_structure().unwrap();
         assert!(resumed.contract_upgrade.is_none());
+    }
+    #[test]
+    fn contract_upgrade_replacement_is_atomic_and_rejects_stale_documents() {
+        let mut d: GraphDoc = serde_json::from_str(include_str!(
+            "../../core/tests/fixtures/contract-upgrade/dts-profile-v1.lyflow.json"
+        ))
+        .unwrap();
+        let before = serde_json::to_value(&d).unwrap();
+        let mut after = before.clone();
+        after["nodes"][1]["op"] = serde_json::json!("profile.clean");
+        after["meta"]["contractUpgradeHistory"] = serde_json::json!([{"schemaVersion":1,"request":{"schemaVersion":1,"rules":[]},"appliedSources":[]}]);
+        let action = serde_json::json!({"nodeId":"","graphUpdate":{"contractUpgradeReplacement":{"before":before,"after":after}}});
+        let mut partial = d.clone();
+        partial.nodes[1].op = "profile.clean".into();
+        let snapshot = serde_json::to_value(&partial).unwrap();
+        assert!(!partial.apply_migration(&action));
+        assert_eq!(serde_json::to_value(&partial).unwrap(), snapshot);
+        assert!(d.apply_migration(&action));
+        assert_eq!(serde_json::to_value(&d).unwrap(), after);
+        assert!(!d.apply_migration(&action));
+        let saved = serde_json::to_string(&d).unwrap();
+        let loaded: GraphDoc = serde_json::from_str(&saved).unwrap();
+        assert_eq!(serde_json::to_value(loaded).unwrap(), after);
     }
 }

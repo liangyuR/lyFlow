@@ -154,7 +154,7 @@ fn invoke(
 }
 
 fn dts_default_graph() -> serde_json::Value {
-    let path = repo_root().join("packs/dts/graphs/default.lyflow.json");
+    let path = repo_root().join("solutions/dts/graphs/default.lyflow.json");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读不到 {}: {e}", path.display()));
     serde_json::from_str(&text).expect("default.lyflow.json 不是合法 JSON")
@@ -218,7 +218,10 @@ fn manifest_and_core_info_over_ipc() {
 /// 端到端：宿主注入一条轮廓 → 图跑完 → 图级命名输出里有 flush，
 /// 且 `dts.profile_in` 是被注入的（compute 整个没跑）。
 #[test]
-#[cfg_attr(not(dts_pack), ignore = "要 dts 包：LYFLOW_PACKS=dts")]
+#[cfg_attr(
+    not(dts_pack),
+    ignore = "要 dts 包：LYFLOW_PACKS=solution-dts;std-profile;std-metrology;std-geometry"
+)]
 fn run_graph_injects_the_host_profile() {
     let f = fixture();
     let view = webview(&f.app);
@@ -269,7 +272,10 @@ fn run_graph_injects_the_host_profile() {
 
 /// 换一片云，`n_in` 的 cacheKey 必须变 —— 不变的表现是「产线上两台车量出一模一样的值」。
 #[test]
-#[cfg_attr(not(dts_pack), ignore = "要 dts 包：LYFLOW_PACKS=dts")]
+#[cfg_attr(
+    not(dts_pack),
+    ignore = "要 dts 包：LYFLOW_PACKS=solution-dts;std-profile;std-metrology;std-geometry"
+)]
 fn injected_data_changes_the_cache_key() {
     let f = fixture();
     let view = webview(&f.app);

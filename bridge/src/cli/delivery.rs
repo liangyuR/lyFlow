@@ -222,29 +222,15 @@ fn record(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
     let core = core()?;
     let loaded = load_graph(parsed, path, err)?;
     let inputs = load_inputs(&core, parsed)?;
-    let diagnostics: Vec<_> = diagnostics_of(&core, &loaded)?
-        .into_iter()
-        .filter(|d| {
-            !(d["code"] == "missing_input"
-                && inputs
-                    .iter()
-                    .any(|input| d["nodeId"] == input.node_id && d["portName"] == input.port))
-        })
-        .collect();
+    let diagnostics = input_diagnostics(&core, &loaded, &inputs)?;
     if has_errors(&diagnostics) {
         return Err(format!("graph validation failed: {}", json!(diagnostics)));
     }
     let plan = parse_json(
-        core.plan_with_inputs(
-            &loaded.json,
-            &loaded.base_dir,
-            parsed.many("to"),
-            None,
-            &inputs,
-            &[],
-        )
-        .map_err(|e| e.to_string())?
-        .as_bytes(),
+        inputs
+            .plan(&core, &loaded, parsed.many("to"))
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
     )?;
     let sources: Vec<String> = plan
         .as_array()
@@ -264,7 +250,14 @@ fn record(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
         );
     }
     let effective = core
-        .effective_params_with_inputs(&loaded.json, &loaded.base_dir, None, &inputs, &[])
+        .effective_params_with_profiles(
+            &loaded.json,
+            &loaded.base_dir,
+            None,
+            &inputs.clouds,
+            &[],
+            &inputs.profiles,
+        )
         .map_err(|e| e.to_string())?;
     if parse_json(effective.as_bytes())?.is_array() {
         return Err(format!(
@@ -286,7 +279,7 @@ fn record(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
         if sequence > 0 {
             cancel.wait(Duration::from_millis(interval))?;
         }
-        let result = execute(
+        let result = execute_with_profiles(
             &core,
             RunRequest {
                 graph_json: &loaded.json,
@@ -298,10 +291,11 @@ fn record(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
                 no_cache: parsed.has("no-cache"),
                 stream: None,
                 params_json: None,
-                inputs: &inputs,
+                inputs: &inputs.clouds,
                 group: Some(&cancel.group),
                 on_event: None,
             },
+            &inputs.profiles,
         )?;
         cancel.check()?;
         if result.status != "ok" {
@@ -504,6 +498,9 @@ fn replay(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
     let core = core()?;
     let limit = max_bytes(parsed)?;
     let recompute = parsed.has("recompute") || parsed.one("graph").is_some();
+    if !recompute && !parsed.many("input").is_empty() {
+        return Err("--input requires replay --recompute or --graph".into());
+    }
     let loaded = if recompute {
         let path = if let Some(graph) = parsed.one("graph") {
             PathBuf::from(graph)
@@ -527,6 +524,7 @@ fn replay(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
     if parsed.one("graph").is_some() && parsed.many("bind").is_empty() {
         return Err("explicit --graph requires --bind sourceNode.sourcePort=nodeId.port".into());
     }
+    let inputs = load_inputs(&core, parsed)?;
     let first = decimal(&recording.rows[0]["metadata"]["timestampNs"], "timestampNs")?;
     let start = Instant::now();
     for row in &recording.rows {
@@ -560,11 +558,12 @@ fn replay(parsed: &Parsed, out: &Sink, err: &Sink, cancel: &Cancellation) -> Res
                     no_cache: parsed.has("no-cache"),
                     stream: None,
                     params_json: None,
-                    inputs: &[],
+                    inputs: &inputs.clouds,
                     group: Some(&cancel.group),
                     on_event: None,
                 },
                 Some((&frame, &bindings.to_string())),
+                &inputs.profiles,
             )?;
             json_line(
                 out,

@@ -90,19 +90,34 @@ export function subgraphIdOf(opId: string): string | null {
   return opId.startsWith(SUBGRAPH_OP_PREFIX) ? opId.slice(SUBGRAPH_OP_PREFIX.length) : null;
 }
 
-export type GraphContractUpgradeRule = {
-  source: { node: string; op: string; opVersion: '1.0.0'; port: string };
-  target: { node: string; port: string };
-  adapterId: string;
-} & (
+export type GraphContractUpgradeRule =
+  | ({
+      source: { node: string; op: string; opVersion: '1.0.0'; port: string };
+      target: { node: string; port: string };
+      adapterId: string;
+    } & (
+      | {
+          kind: 'planeCalib.v1';
+          missingUnit: 'm' | 'mm';
+          imageFrame: string;
+          planeFrame: string;
+        }
+      | { kind: 'dtsGeometry.v1' }
+    ))
   | {
-      kind: 'planeCalib.v1';
-      missingUnit: 'm' | 'mm';
-      imageFrame: string;
-      planeFrame: string;
-    }
-  | { kind: 'dtsGeometry.v1' }
-);
+      kind: 'dtsProfile.v1';
+      scope?: { subgraph: string };
+      source: { node: string; op: 'dts.profile_in'; opVersion: '1.0.0'; port: 'profile' };
+      adapterId: string;
+      profile: {
+        frame: string;
+        sourceId: string;
+        unit: 'mm';
+        plane: 'XZ';
+        handedness: 'right' | 'reflected';
+        sampleOrder: 'acquisition';
+      };
+    };
 
 export interface GraphDoc {
   schemaVersion: number;

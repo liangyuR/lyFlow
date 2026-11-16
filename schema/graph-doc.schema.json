@@ -25,7 +25,10 @@
         "contractUpgradeHistory": {
           "type": "array",
           "description": "已应用契约升级的被动历史证据，不参与执行或拓扑重放；保留未来版本记录。",
-          "items": { "type": "object", "additionalProperties": true }
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
         },
         "createdAt": {
           "type": "string",
@@ -565,6 +568,75 @@
                   },
                   "adapterId": {
                     "$ref": "#/$defs/localId"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "source", "profile", "adapterId"],
+                "properties": {
+                  "kind": {
+                    "const": "dtsProfile.v1"
+                  },
+                  "source": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/contractUpgradeSource"
+                      },
+                      {
+                        "properties": {
+                          "op": {
+                            "const": "dts.profile_in"
+                          },
+                          "port": {
+                            "const": "profile"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "adapterId": {
+                    "$ref": "#/$defs/localId"
+                  },
+                  "profile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["frame", "sourceId", "unit", "plane", "handedness", "sampleOrder"],
+                    "properties": {
+                      "frame": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      "sourceId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      "unit": {
+                        "const": "mm"
+                      },
+                      "plane": {
+                        "const": "XZ"
+                      },
+                      "handedness": {
+                        "enum": ["right", "reflected"]
+                      },
+                      "sampleOrder": {
+                        "const": "acquisition"
+                      }
+                    }
+                  },
+                  "scope": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["subgraph"],
+                    "properties": {
+                      "subgraph": {
+                        "$ref": "#/$defs/localId"
+                      }
+                    }
                   }
                 }
               }

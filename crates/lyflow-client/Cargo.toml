@@ -1,6 +1,6 @@
 [package]
 name = "lyflow-client"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 rust-version = "1.77"
 description = "LyFlow C ABI 的 Rust 客户端：加载 core DLL、跑图、取结果。`lyflow/client.hpp` 的对应物"
@@ -16,6 +16,7 @@ name = "lyflow_client"
 test-util = []
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 libloading = "0.8.9"
 thiserror = "2"
 serde_json = { version = "1", features = ["preserve_order"] }

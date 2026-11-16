@@ -1,3 +1,4 @@
+#include "lyflow/hash.h"
 #include "lyflow/graph_contract_upgrade.h"
 #include "lyflow/profile.h"
 
