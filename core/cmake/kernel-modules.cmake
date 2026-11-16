@@ -103,3 +103,43 @@ lyflow_declare_module(NAME profile-contract TARGET lyflow_profile_contract SETUP
   REQUIRES data-contract)
 lyflow_declare_module(NAME profile-analysis-kernel TARGET lyflow_profile_analysis_kernel SETUP lyflow_setup_profile_analysis_kernel
   REQUIRES data-contract eigen-headers)
+
+macro(lyflow_setup_profile_robust_kernel)
+  set(_components common filters sample_consensus segmentation)
+  find_package(PCL 1.15.1 REQUIRED COMPONENTS ${_components})
+  add_library(lyflow_profile_robust_kernel STATIC "${LYFLOW_KERNEL_ROOT}/src/profile_robust.cpp")
+  add_library(lyflow::profile_robust_kernel ALIAS lyflow_profile_robust_kernel)
+  set_target_properties(lyflow_profile_robust_kernel PROPERTIES
+    EXPORT_NAME profile_robust_kernel POSITION_INDEPENDENT_CODE ON LYFLOW_PROFILE_PCL_VERSION "${PCL_VERSION}")
+  target_compile_features(lyflow_profile_robust_kernel PUBLIC cxx_std_17)
+  target_link_libraries(lyflow_profile_robust_kernel PUBLIC lyflow_data_contract)
+  target_include_directories(lyflow_profile_robust_kernel PUBLIC
+    "$<BUILD_INTERFACE:${LYFLOW_KERNEL_ROOT}/include>" "$<INSTALL_INTERFACE:include>")
+  set(_libraries "")
+  foreach(_component IN LISTS _components)
+    if(TARGET PCL::${_component})
+      list(APPEND _libraries PCL::${_component})
+    elseif(TARGET pcl_${_component})
+      list(APPEND _libraries pcl_${_component})
+    else()
+      message(FATAL_ERROR "The robust profile SDK requires an imported PCL target for ${_component}")
+    endif()
+  endforeach()
+  if(_libraries)
+    target_link_libraries(lyflow_profile_robust_kernel PRIVATE ${_libraries})
+  else()
+    message(FATAL_ERROR "The robust profile SDK requires imported PCL component targets")
+  endif()
+  if(MSVC)
+    target_compile_options(lyflow_profile_robust_kernel PRIVATE /EHsc /W4 /permissive- /utf-8 /bigobj /wd4127 /wd4267 /wd4244 /wd4324)
+    target_compile_definitions(lyflow_profile_robust_kernel PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  else()
+    target_compile_options(lyflow_profile_robust_kernel PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  install(TARGETS lyflow_profile_robust_kernel EXPORT lyflow-profile-robust-targets ARCHIVE DESTINATION lib)
+  install(EXPORT lyflow-profile-robust-targets FILE lyflow-profile-robust-targets.cmake
+    NAMESPACE lyflow:: DESTINATION lib/cmake/lyflow)
+endmacro()
+
+lyflow_declare_module(NAME profile-robust-kernel TARGET lyflow_profile_robust_kernel SETUP lyflow_setup_profile_robust_kernel
+  REQUIRES data-contract)

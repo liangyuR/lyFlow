@@ -167,6 +167,8 @@ fn main() {
     // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
     let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
     println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
+    let modules = std::env::var("LYFLOW_MODULES").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_MODULES");
     // tests/host.rs 的注入测试要 dts 包（默认关，ADR-0015）。没点名时记 ignored，
     // 与 std_packs_off 同一个道理：汇总行里看得见，不会静默地「全绿」。
     println!("cargo:rustc-check-cfg=cfg(dts_pack)");
@@ -242,6 +244,7 @@ fn main() {
             .define("LYFLOW_OP_PACKS", &packs)
             .define("LYFLOW_STD_PACKS", &std_packs)
             .define("LYFLOW_PACKS", &repo_packs)
+            .define("LYFLOW_MODULES", &modules)
             .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
         let ninja = find_ninja();
         if let Some(ninja) = &ninja {

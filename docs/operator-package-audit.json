@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "36c969149e119614b7d221c8006d1a311d6d2995",
-  "productVersion": "1.4.2",
+  "sourceRevision": "a48b9f326d03ad44bff434632870a2c3b3ac2354",
+  "productVersion": "1.4.3",
   "nativeCount": 261,
   "pythonExampleCount": 8,
   "evidence": {
-    "nativeManifestGeneratedBy": "lyflow-core/1.4.2",
+    "nativeManifestGeneratedBy": "lyflow-core/1.4.3",
     "nativeManifestOperatorCount": 261,
-    "manifestSha256": "a3a6972600786c2adb2e7f8e81f76036223b67377897f4cf1247133275bf755f",
+    "manifestSha256": "82215e8bce4c0a080e72509dc84d7f824935451ee48eff8708e2538c9cebe425",
     "sourceState": "reviewed-working-tree",
     "note": "当前全包manifest与逐项元数据一致；构建/算法/现场验收按阶段ledger另行记录。"
   },
@@ -63,7 +63,7 @@
     "std-ml": 5
   },
   "sourceFingerprints": {
-    "core/CMakeLists.txt": "6737cec12ff728e5bfaafb98f71d57851ee05464a518d3f09146b21688b1bd8b",
+    "core/CMakeLists.txt": "2b76097e9b73579ec436d10078eadc47b1fbe1c72f0fe71ee8726db7b896165d",
     "core/cmake/barcode-deps.cmake": "073cd9b349394af5e05e3d714d352c04731cdd684951b3baae478d17a7d73e67",
     "core/cmake/matching-deps.cmake": "6ab7a4112fc1bc214b41e9ad3cc9ea98e5bcb93d19fa7eddfacbcafdd94248d8",
     "core/cmake/update-source-revision.cmake": "b7a25e4443cfe5007514d262ef9266739459f5ce7c7d2ffed5deb4522befa16d",
@@ -84,7 +84,7 @@
     "core/include/lyflow/registry.h": "350ba436c02278125bfead6b89c3f916e96c2ecf7afe56c9f088ccb65cf3b53a",
     "core/include/lyflow/status.h": "aa4117922093a3f54de7ba603f8e31e4b6eab68b8f3bd4314b534d3f64eabf3e",
     "core/include/lyflow/value.h": "59d6382371822cf4b4748bbc219b4212f4e3ac63bf6dbcb9e2f3066b732a1d35",
-    "core/include/lyflow/version.h": "3378783cab0d30fbc8806bfa75c5e546bfa9814bdb3447dfdcfa6f9f068e58cf",
+    "core/include/lyflow/version.h": "affa8976388c4f112d3e345ba9ee9ef34540296eb20ccbfd7ec89a8e23ce833b",
     "core/src/builtin_ops.cpp": "bdc13cb2bf694e29eb2d35d49336217dee88d88be0d2e19c33eaee64059ea84e",
     "core/src/c_api.cpp": "2dc783e905e011428de4350ea0bd8babd482c6682f28650a9cf1061230518b8b",
     "core/src/cloud_io.cpp": "4118b04d54f9420ff969b893ef0a45475993dc090fa759be1ada324c1c048c59",
@@ -162,7 +162,7 @@
     "core/third_party/xxhash/xxhash.h": "3dc8d161e867a62d3417f7885b55fdaded8b7b497e2f165d05c94f4fe24f2ca4",
     "core/tools/bench_tensor_metadata.cpp": "a28af1d9cf893931327100a053fc533f6648a615181213960584f6225f7ad9a3",
     "core/tools/dump_manifest.cpp": "9fc5b64d5d15059fc4cab03261d747cea567c86573d8b6b28c2022fa18180468",
-    "packaging/release.json": "1930444b7f683e38b1b4025b1f47bed2d8adf083453e6b99c19be459c14e72d4",
+    "packaging/release.json": "a6636426c13a5a205903a7b0b1485a8e82354682989cb3b3a954f80469c356ca",
     "packs/dts/algo/profile.cpp": "928b9c57e6b2f5f12cab8cbe5db6a608fdee5daffc9e86e77d4ae6c99da7a014",
     "packs/dts/algo/profile.h": "cbed0b9c45d6bf9ffd88f74762f1dc46ecfd8d1b988a8ac1e9a7a1e460c8d0a0",
     "packs/dts/lyflow_op_pack.cmake": "4c91be1ad2a686c89b4bc97e2cb1839371646f2ed8d92da84fefe98c3ad06481",
@@ -363,8 +363,8 @@
     "packs/std-pointcloud/algo/cloud2d.h": "2965aff40bb79a18fa5ce07ae7420347f848b6670120da74ec59810abe050cda",
     "packs/std-pointcloud/algo/crop2d.cpp": "1f2fb16197ff61c65eca7bf2f735fc729d0bbf7a4e112ae60eebec270823059c",
     "packs/std-pointcloud/algo/crop2d.h": "cfe4e7fc9edeb32112535ddfb55741bb8ac0b70fde18a7fc32188c79c95b4892",
-    "packs/std-pointcloud/algo/fit2d.cpp": "0d510d4cb3ff5d234bf2c7a2515a5d0a6d822036a0856574b9240ea19b296a63",
-    "packs/std-pointcloud/algo/fit2d.h": "12f8d05aa2389a887fd60e38cb4d2e7425384af2cae101c00be64aac5bc46b68",
+    "packs/std-pointcloud/algo/fit2d.cpp": "643c0b4392a17206f86493ce5cc1b0e45c2b6bc499fe6b4ee62bcc343b1a563d",
+    "packs/std-pointcloud/algo/fit2d.h": "d6cd946ce6dbd4b020fe26bc19a3046dcf6a3c1d174c14f6dd5ec3a3592bf0eb",
     "packs/std-pointcloud/algo/icp2d.cpp": "4d7c1d31817959161c715f79287a57ef71b647af71b8ee0f487d6588b822b4b0",
     "packs/std-pointcloud/algo/icp2d.h": "c4630db9891b83ee16658a7e4a6318ab8c0067d9c4bcf37e1221c749fd6333bd",
     "packs/std-pointcloud/algo/lyflow_matching_runtime.hpp": "f122a55fc5dcd3c3050eb4ffd0dc4aff3e43a51575dcaa5edccfc92b95ae8b69",
@@ -459,14 +459,14 @@
     "python/lyflow_python/winpipe.py": "3d63f14af585cc0b2cda2eb740f8cad1bceead3e42791160f0337531d2c36056",
     "packs/std-profile/ops/register.cpp": "89afaf3f2370706a3302b06b0018955e5996cb697b72159879dcdfa59fa4ac72",
     "packs/std-image/lyflow_pack_dependencies.cmake": "70823f86740444ac1266a8c3f7fcdae080ab83bcdba6a41c841f1400a281c4f7",
-    "core/cmake/backend-modules.cmake": "12b0e122ae4291bc0df143f14885bda03a252b23a23430eb5b993c4ae88db969",
+    "core/cmake/backend-modules.cmake": "fdb1dec68517d9268e9331a44a475f80f4bee0d6de08e01814d293c1a7407a66",
     "packs/std-profile/lyflow_pack_dependencies.cmake": "7d5dae2149015cd64b85186078f035cc160fe71b65f22710f1e55f6193f443e2",
     "kernels/src/geometry.cpp": "0c98804b62eda598ac6b35a2a512024541862b097c8b93d518a6640506d466b4",
     "packs/dts/lyflow_pack_dependencies.cmake": "24f7ac275a8dd64369da3ac729b3d1d601ec38de05ad9d597237a3691374b486",
     "packs/gap/lyflow_pack_dependencies.cmake": "2e44dc69ce1be25cc7c34d5886fd438bdc6e0686d2d090d2b6fd369b944755ed",
     "packs/std-metrology/lyflow_op_pack.cmake": "c8fd6c0cbf20eeeff93733356af10124a7cd704cab2118021d61476d11809244",
     "packs/std-geometry/ops/constraints_3d.cpp": "0ba2180fa3d7b5fb36b9fc387fdb1e63254fce8d7f02d6335a8b29b0c86d79d8",
-    "core/cmake/lyflow-config.cmake.in": "e077f0d84934851bfb625c347f95b1533fbb00cefad3849e95dceb59363a4d92",
+    "core/cmake/lyflow-config.cmake.in": "fce0253d05eee125db9df087f3d4ea5e066a2be590cbba47a67880e9f57294c9",
     "kernels/include/lyflow/kernel/constraints.h": "c34272c435e4c3ce5277f8cf7621d1b2a9f98a4719526a30fa488e0e86a32ccb",
     "kernels/include/lyflow/kernel/geometry.h": "b0a9d0f072db1a6bc02aef67477afa4cdd2b158dbb314074493c24ab8ade2631",
     "kernels/src/metrology.cpp": "0348824337877278b99f368286bf5475c109d61d56ed223734600f9684336a1f",
@@ -475,12 +475,12 @@
     "packs/std-pointcloud/lyflow_pack_dependencies.cmake": "9bde5bb7e06ec857321b4aabb1c67e61440c8550574e5c3c5ecfd8ca5f850bcd",
     "packs/std-metrology/lyflow_pack_dependencies.cmake": "64c8bbc28b3e727bb70e44d9ad3177e3cef332e7868b0992664c4250d61694f9",
     "packs/std-value/lyflow_pack_dependencies.cmake": "74fd183bc7945a3a4c4a80b98eb805499bd414fb8ea9d62e5ce7951e5d2c353e",
-    "core/cmake/module-graph.cmake": "b71368b0e59b05780581971eeec405c089c4b68cb609e134cceb31396c76531a",
+    "core/cmake/module-graph.cmake": "051de6226bfd25e7f3cbe0386a40f57a45a51d871ceaa3825e66eb78b4936d68",
     "packs/std-geometry/lyflow_pack_dependencies.cmake": "657a47b32c4cf5d05464be13b7bb3e84d613963f86216312921c4973fc59a4d9",
-    "core/cmake/kernel-modules.cmake": "b157e6f876b5c2298e86ebf5cf31e5c498edd121e58acddc4d830a7748847dab",
+    "core/cmake/kernel-modules.cmake": "ced922aca99bb47fb4a241b41089e885e25ae5f3a322d61c2ce1cf71a7178c75",
     "packs/glue/lyflow_pack_dependencies.cmake": "00c89f30a9ed9fcdb57ae0960cab49445765e6aca3ab2ca06491adca1dd1bd58",
     "packs/std-geometry/ops/transform_make.cpp": "5194bf2ff2cae28e495888ea56bc9c8aea5dfaf7fbd8cddd047a07734f2ccba4",
-    "examples/public-kernels/CMakeLists.txt": "40498dbf9f4cbe35c6877a6708789ce273b888d9b3b2406dfa04e0ba05c42853",
+    "examples/public-kernels/CMakeLists.txt": "e2829b6daf7af4b804dd7a5a0d8456aedddf5a07dbadc151daad35186bd0ff19",
     "kernels/include/lyflow/kernel/metrology.h": "c6389466664106a46cb76b9bc67a360865d290987a4aee7f1c155923f211ac3b",
     "kernels/src/constraints.cpp": "db961477a60a7f63b05d5cb79bb207f780073640ba7642cbca966f880797cc1e",
     "packs/std-metrology/ops/register.cpp": "8d9611d75fe7fafa9f46206610ec506c3019edcee47bc2df6b699170a53afad7",
@@ -511,7 +511,11 @@
     "solutions/dts/algo/profile.h": "bb028d7318aff0a94264dcd3034a2d647553dfebb3c8be8ae1d82546114db799",
     "core/include/lyflow/hash.h": "0e5188cd0ed8f9a9bb4984c1d94f52cb00f1c2fff9305aad79f0f2843a2d2ccb",
     "solutions/dts/ops/seal_root.cpp": "378d12cfa37fcebf8e556dd5517207bef5b493ed1f705aa0b76e8171d2d80e20",
-    "solutions/dts/lyflow_pack_dependencies.cmake": "5b98d59e7f7688bb06ebb60cb3accc7809d38b783ee684a366264f38c2290886"
+    "solutions/dts/lyflow_pack_dependencies.cmake": "5b98d59e7f7688bb06ebb60cb3accc7809d38b783ee684a366264f38c2290886",
+    "kernels/src/profile_robust.cpp": "96d1d81fdcbedf66fac9473ca34ac84218a0c479309ce488f283cfacc9de9409",
+    "examples/profile-robust/CMakeLists.txt": "2cca26c3df7c5b90ee73675cbad3f3cbe0a144ab1fc24b9766b5c519c0da4fe4",
+    "examples/profile-robust/main.cpp": "954199748b4c100030912c2e296a5d3b275e101289b4583ea54c12725805835b",
+    "kernels/include/lyflow/kernel/profile_robust.h": "3a8a819ef2cf516bf533dc331a2ad5cf7283e69264ebda3a68cec6ba8688aa81"
   },
   "operators": [
     {
@@ -573,7 +577,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 1
     },
     {
@@ -650,7 +654,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 2
     },
     {
@@ -697,7 +701,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 3
     },
     {
@@ -759,7 +763,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 4
     },
     {
@@ -840,7 +844,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 5
     },
     {
@@ -901,7 +905,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 6
     },
     {
@@ -964,7 +968,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 7
     },
     {
@@ -1049,7 +1053,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 8
     },
     {
@@ -1109,7 +1113,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 9
     },
     {
@@ -1200,7 +1204,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 10
     },
     {
@@ -1250,7 +1254,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 11
     },
     {
@@ -1359,7 +1363,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 12
     },
     {
@@ -1428,7 +1432,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 13
     },
     {
@@ -1561,7 +1565,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 14
     },
     {
@@ -1624,7 +1628,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 15
     },
     {
@@ -1674,7 +1678,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 16
     },
     {
@@ -1774,7 +1778,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 17
     },
     {
@@ -1830,7 +1834,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 18
     },
     {
@@ -1880,7 +1884,7 @@
       "migrationPrerequisites": [
         "M0"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 19
     },
     {
@@ -2020,7 +2024,7 @@
           "default": ""
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 20
     },
     {
@@ -2116,7 +2120,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 21
     },
     {
@@ -2192,7 +2196,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 22
     },
     {
@@ -2272,7 +2276,7 @@
           "default": ""
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 23
     },
     {
@@ -2364,7 +2368,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 24,
       "packageHistory": [
         {
@@ -2503,7 +2507,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 25,
       "stageAssessments": [
         {
@@ -2605,7 +2609,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 26,
       "stageAssessments": [
         {
@@ -2757,7 +2761,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 27,
       "stageAssessments": [
         {
@@ -2846,7 +2850,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 28,
       "stageAssessments": [
         {
@@ -3040,7 +3044,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 29,
       "stageAssessments": [
         {
@@ -3107,7 +3111,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 30,
       "stageAssessments": [
         {
@@ -3181,7 +3185,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 31,
       "stageAssessments": [
         {
@@ -3284,7 +3288,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 32,
       "stageAssessments": [
         {
@@ -3357,7 +3361,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 33,
       "stageAssessments": [
         {
@@ -3433,7 +3437,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 34,
       "stageAssessments": [
         {
@@ -3519,7 +3523,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 35,
       "stageAssessments": [
         {
@@ -3588,7 +3592,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 36,
       "stageAssessments": [
         {
@@ -3705,7 +3709,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 37,
       "stageAssessments": [
         {
@@ -3888,7 +3892,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 38,
       "stageAssessments": [
         {
@@ -3957,7 +3961,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 39,
       "stageAssessments": [
         {
@@ -4128,7 +4132,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 40,
       "stageAssessments": [
         {
@@ -4356,7 +4360,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 41,
       "stageAssessments": [
         {
@@ -4465,7 +4469,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 42,
       "stageAssessments": [
         {
@@ -4625,7 +4629,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 43,
       "stageAssessments": [
         {
@@ -4702,7 +4706,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 44,
       "stageAssessments": [
         {
@@ -4822,7 +4826,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 45,
       "stageAssessments": [
         {
@@ -4941,7 +4945,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 46,
       "stageAssessments": [
         {
@@ -5007,7 +5011,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 47,
       "stageAssessments": [
         {
@@ -5077,7 +5081,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 48,
       "stageAssessments": [
         {
@@ -5197,7 +5201,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 49,
       "stageAssessments": [
         {
@@ -5298,7 +5302,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 50,
       "stageAssessments": [
         {
@@ -5389,7 +5393,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 51,
       "stageAssessments": [
         {
@@ -5460,7 +5464,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 52,
       "stageAssessments": [
         {
@@ -5608,7 +5612,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 53,
       "stageAssessments": [
         {
@@ -5674,7 +5678,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 54,
       "stageAssessments": [
         {
@@ -5744,7 +5748,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 55,
       "stageAssessments": [
         {
@@ -5848,7 +5852,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 56,
       "contractUpdates": [
         {
@@ -5954,7 +5958,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 57,
       "stageAssessments": [
         {
@@ -6036,7 +6040,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 58,
       "stageAssessments": [
         {
@@ -6106,7 +6110,7 @@
         "M0",
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 59,
       "stageAssessments": [
         {
@@ -6197,7 +6201,7 @@
         "公共PlaneCalib验证与单应标量映射",
         "M1统一PlaneCalib单位及齐次矩阵验证，提供旧输入显式迁移"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 60,
       "contractUpdates": [
         {
@@ -6308,7 +6312,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 61,
       "stageAssessments": [
         {
@@ -6405,7 +6409,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 62,
       "stageAssessments": [
         {
@@ -6655,7 +6659,7 @@
           }
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -6761,7 +6765,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -6882,7 +6886,7 @@
           "unit": "mm"
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -7000,7 +7004,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -7154,7 +7158,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -7276,7 +7280,7 @@
           "unit": "m"
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -7374,7 +7378,7 @@
           ]
         }
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "stageAssessments": [
         {
           "stage": "M3",
@@ -7411,7 +7415,7 @@
       ],
       "currentContract": "输入 无 → 输出 profile:PointCloud。CSV 行为 x,z[,亮度]，坐标 mm，y=0；宿主注入时整个 compute 跳过。",
       "notes": "profile_in 不能只替换 id：宿主是按节点/端口注入，迁移包含宿主与保存图。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "激光轮廓输入",
       "currentPorts": {
@@ -7521,7 +7525,7 @@
       ],
       "currentContract": "输入 clean:PointCloud, faces:Record → 输出 dome:Record, apex:Line2D。输入 DtsFaces；按胶条宽高和圆半径挑主体凸起，apex 为圆心到顶点的轴；失败有胶条专用诊断。 历史不一致：旧Point2D/Line2D载荷数值为毫米，但Unit2D仅有Meter/Pixel且这些节点未覆盖默认Meter标签，不能按标签直接消费。",
       "notes": "胶条选择不是通用最大峰，不能用单个通用极值算子直接替换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.0.0",
       "label": "胶条主体提取",
       "currentPorts": {
@@ -7711,7 +7715,7 @@
       ],
       "currentContract": "输入 clean:PointCloud, faces:Record, dome:Record → 输出 metal:Line2D, pick:Record。按相对胶条顶点轴的角度/距离挑钣金面，只在朝胶条的一小段拟合；保留 rejected 候选。 历史不一致：旧Point2D/Line2D载荷数值为毫米，但Unit2D仅有Meter/Pixel且这些节点未覆盖默认Meter标签，不能按标签直接消费。",
       "notes": "不能用最近线段替代角度/胶条侧约束。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.0.0",
       "label": "钣金基准面提取",
       "currentPorts": {
@@ -7868,7 +7872,7 @@
       ],
       "currentContract": "输入 clean:PointCloud, faces:Record, dome:Record, pick:Record → 输出 root:Record, point:Point2D。搜索区锚在钣金面朝胶条端到胶条顶点；优先凹凸凹凸起，无凸起退谷底，输出 DtsRoot 和 Point2D。 历史不一致：旧Point2D/Line2D载荷数值为毫米，但Unit2D仅有Meter/Pixel且这些节点未覆盖默认Meter标签，不能按标签直接消费。",
       "notes": "不能把 DtsRoot 当任意 Point2D 丢掉来源/搜索质量。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.0.0",
       "label": "胶条根部定位",
       "currentPorts": {
@@ -8031,7 +8035,7 @@
       ],
       "currentContract": "输入 root:Record, metal:Line2D → 输出 flush:Measurement, foot:Point2D。DtsRoot Record + Line2D 均 mm；正号由 sealBulge 与 positiveDirection 决定；Measurement.unit=mm，不填写公差/verdict。 历史不一致：旧Point2D/Line2D载荷数值为毫米，但Unit2D仅有Meter/Pixel且这些节点未覆盖默认Meter标签，不能按标签直接消费。",
       "notes": "不得与 gap.flush 共用一个默认符号；先提炼内核，再迁参数。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.0.0",
       "label": "胶条面差测量",
       "currentPorts": {
@@ -8172,7 +8176,7 @@
       ],
       "currentContract": "输入 faces:Record, dome:Record, pick:Record, root:Record, metal:Line2D, flush:Measurement, foot:Point2D? → 输出 bundle:Record。汇总 DtsFaces/Dome/MetalPick/Root、metal、flush、foot 给宿主画图和落库；不是通用算法结果。",
       "notes": "保留场景汇总不等于未来通用 Profile 契约仍叫 DtsFaces。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.0.0",
       "label": "单剖面结果汇总",
       "currentPorts": {
@@ -8374,7 +8378,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 76,
       "packageHistory": [
         {
@@ -8552,7 +8556,7 @@
         "M2",
         "profile.analyze"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 77,
       "packageHistory": [
         {
@@ -8694,7 +8698,7 @@
         "M2",
         "transform.make"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 78,
       "packageHistory": [
         {
@@ -8744,7 +8748,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud, box:Box2D, toward:Box2D, refLine:Line2D? → 输出 line:Line2D, inliers:Indices, innerEnd:Point2D, quality:Record。米制云/Box2D/toward/refLine→Line2D/Indices/innerEnd/quality；参数mm；先拟合后取靠缝端内点再以1/3阈值重拟合。",
       "notes": "新轻量包默认不能强绑PCL；保留方法作为可选能力并声明依赖，算法替换另开任务。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "二维剖面直线拟合",
       "currentPorts": {
@@ -8971,7 +8975,7 @@
       ],
       "currentContract": "输入 merged:PointCloud, primary:PointCloud, secondary:PointCloud, boxLeft:Box2D, boxRight:Box2D, refLine:Line2D?, refLineRight:Line2D? → 输出 left:Circle2D, right:Circle2D, leftCloud:PointCloud, rightCloud:PointCloud, leftInliers:Indices, rightInliers:Indices, quality:Record。双头/合并米制云、左右ROI与可选参考线→圆/云/内点/quality；参数mm；含重试、固定半径、软先验、相切带和角域门。",
       "notes": "不能替换为一个默认 fit.circle_2d；业务quality字段与算法报告要分层。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.4.0",
       "label": "间隙双侧圆拟合",
       "currentPorts": {
@@ -9546,7 +9550,7 @@
       ],
       "currentContract": "输入 baseLine:Line2D, refPoint:Point2D → 输出 value:Measurement, segment:Line2D, baseLine:Line2D。米制Line2D+Point2D→毫米Measurement/米制segment/baseLine；canonical方向后上方为正，scale+offset；输出基准段会扩展到垂足。",
       "notes": "不能仅迁value而丢掉后续gap definition A使用的扩展baseLine。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "面差测量",
       "currentPorts": {
@@ -9639,7 +9643,7 @@
       ],
       "currentContract": "输入 left:Circle2D, right:Circle2D, baseLine:Line2D? → 输出 value:Measurement, segment:Line2D。米制两圆+[带端点基准线]→毫米Measurement+米制segment；A按基准方向切线间距，B按圆心连线圆边间距；交叉失败语义不同。",
       "notes": "不得把B误写成纯圆心距离或统一成绝对距离掩盖交叉。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "间隙测量",
       "currentPorts": {
@@ -9738,7 +9742,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud → 输出 gap:Measurement, flush:Measurement, baseLine:Line2D, refLine:Line2D, gapSegment:Line2D, flushSegment:Line2D, groove:Point2D, quality:Record, qualityBase:Record, qualityRef:Record。双头米制云→mm槽宽/面差+几何/quality；深槽中位找心，两台分开拟面后平均，在低面下gapDepth切片量宽。",
       "notes": "不是通用孔槽测宽；不能与notch_width自动互换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "槽形对接缝测量",
       "currentPorts": {
@@ -10071,7 +10075,7 @@
       ],
       "currentContract": "输入 value:Measurement → 输出 value:Measurement。毫米Measurement→带limits/verdict的Measurement；非有限或ok=false判fail；patrol把超差记margin，0外余量边界按现实现。",
       "notes": "不要把可计算值与业务OK/NG合成同一通用测量定义。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "间隙面差判定",
       "currentPorts": {
@@ -10166,7 +10170,7 @@
       ],
       "currentContract": "输入 无 → 输出 primary:PointCloud, secondary:PointCloud。双头 Master/Slave PCD→传感器 XZ 米；layout=profile 将 y 高度搬至 z；dropNonFinite 默认开，模型链必须关。",
       "notes": "只改包归属不能改变文件自动选择策略。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "双相机剖面加载",
       "currentPorts": {
@@ -10316,7 +10320,7 @@
       ],
       "currentContract": "输入 无 → 输出 left:PointCloud, right:PointCloud。左右模板PCD→PointCloud，模板已在测量 XY 米；与当前配置对应，不再换轴。",
       "notes": "模板身份并非仅文件路径。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "剖面模板加载",
       "currentPorts": {
@@ -10389,7 +10393,7 @@
       ],
       "currentContract": "输入 datum:Box2D, target:Box2D, seamLeft:Box2D, seamRight:Box2D, alignment:Record?, overall:Box2D?, cropStatus:Record? → 输出 rois:Bundle<gap.RoiSet>。四角色Box2D/seam加可选信息封装为Bundle<gap.RoiSet>；角色和datumSide为Gap业务约定。",
       "notes": "Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "角色 ROI 集组装",
       "currentPorts": {
@@ -10528,7 +10532,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud, merged:PointCloud → 输出 scan:Bundle<gap.ScanPair>。双头/合并云封装为 Bundle<gap.ScanPair>，primary/secondary/merged三者均米；可选参数不代表外部注入已校准。",
       "notes": "Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "剖面对组装",
       "currentPorts": {
@@ -10592,7 +10596,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud, line:Line2D → 输出 point:Point2D。米制云+Line2D→Point2D；按无限直线垂距，不限线段端点；平局取原点序靠前项。",
       "notes": "移动代码时保留无限线语义。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "直线最近点提取",
       "currentPorts": {
@@ -10651,7 +10655,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud → 输出 gap:Measurement, flush:Measurement, baseLine:Line2D, refLine:Line2D, gapSegment:Line2D, flushSegment:Line2D, anchor:Point2D, quality:Record, qualityBase:Record, qualityRef:Record。双头米制云→mm开口/面差及几何/quality；V缝在基准下levelDepth求穿出点，逐相机后平均；浅角报notch_too_shallow。",
       "notes": "不能把固有V角宽度当真实张开量或通用槽宽。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "V 形缝开口测量",
       "currentPorts": {
@@ -11079,7 +11083,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud → 输出 box:Box2D。双头米制云→Box2D；参数roi用mm；auto_center保持宽高，中心取两个稳健中心中点。",
       "notes": "不是任意云的通用自动 ROI 分割器。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "整体 ROI 构建",
       "currentPorts": {
@@ -11204,7 +11208,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud, tplLeft:PointCloud, tplRight:PointCloud → 输出 alignment:Record。合并米制云+双模板→GapAlignment；全局粗配+逐侧ICP；信赖域钳制不报错，低分仍返回候选。",
       "notes": "分包迁移不等于改用 KISS 或另一个 ICP。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。 关联的register.icp_2d在本波次使用既有接口；其M6隔离验收不是本项迁移前置，后续隔离须保持该接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "模板配准",
       "currentPorts": {
@@ -11604,7 +11608,7 @@
       ],
       "currentContract": "输入 lineLeft:Line2D, lineRight:Line2D, baseLine:Line2D?, alignment:Record? → 输出 vertex:Point2D, gap:Measurement, flush:Measurement, angle:Measurement, segment:Line2D, quality:Record。米制两翼线+基准/可选GapAlignment→虚拟顶点及mm间隙/面差、角度Measurement和quality；近90度时不可分别辨识。",
       "notes": "几何有数值不代表两项业务量都可判定；patrol语义留场景。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "夹角接缝间隙测量",
       "currentPorts": {
@@ -11792,7 +11796,7 @@
       ],
       "currentContract": "输入 a:Point2D, b:Point2D → 输出 dx:Measurement, dy:Measurement, distance:Measurement, segment:Line2D。米制Point2D a/b→mm dx/dy/distance及米制segment；沿测量帧x/y，不沿拟合面；各分量scale/offset。",
       "notes": "scaleDx/scaleDy现有参数单位标注需单独审计，比例因子不能因标mm就作长度换算。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "二维位移分解",
       "currentPorts": {
@@ -11915,7 +11919,7 @@
       ],
       "currentContract": "输入 gap:Measurement, flush:Measurement?, rois:Bundle<gap.RoiSet>?, scan:Bundle<gap.ScanPair>?, roiOverall:Box2D?, fits:Record?, fitBase:Record?, fitRef:Record?, cropStatus:Record?, alignment:Record?, fallback:Record? → 输出 bundle:Record。GapRoiSet/ScanPair与量值/质量→GapResultBundle；graphSha256由宿主传；未接记inactive，点数取定位后scan。",
       "notes": "left/right_point_count当前均按合并云统计，迁移不应无声纠正历史字段意义。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.1.0",
       "label": "间隙检测结果汇总",
       "currentPorts": {
@@ -12229,7 +12233,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair>, rois:Bundle<gap.RoiSet>, refLine:Line2D? → 输出 line:Line2D, innerEnd:Point2D, quality:Record。ScanPair+RoiSet+[refLine]→Line2D/innerEnd/quality；角色决定框，toward来自两缝框中点。",
       "notes": "不能只复用无toward的直线拟合。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "角色区域直线拟合",
       "currentPorts": {
@@ -12488,7 +12492,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair>, rois:Bundle<gap.RoiSet>, refLine:Line2D?, refLineRight:Line2D? → 输出 left:Circle2D, right:Circle2D, quality:Record。ScanPair+RoiSet+[左右refLine]→left/right Circle2D和quality；转发精细圆拟合参数及两边角色框。",
       "notes": "底层generic参数结构迁移必须覆盖此节点的paramOf拷贝。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.2.0",
       "label": "缝隙双侧圆拟合",
       "currentPorts": {
@@ -13040,7 +13044,7 @@
       ],
       "currentContract": "输入 a:Record, b:Record?, c:Record?, d:Record? → 输出 alignment:Record。最多4个 GapAlignment；先两侧门限，再min/mean降序、配置序/id升序；全不合格报 icp_score_low。",
       "notes": "这是领域决策，不进入 std-metrology。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "配准结果选择",
       "currentPorts": {
@@ -13214,7 +13218,7 @@
       ],
       "currentContract": "输入 alignment:Record → 输出 flushBase:Box2D, gapLeft:Box2D, flushRef:Box2D, gapRight:Box2D, seam:Box2D。GapAlignment→四个角色Box2D+seam，米；仅移动中心，保持宽高/轴对齐，左右可用不同配准。",
       "notes": "不能直接替换成旋转包围盒变换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.2.0",
       "label": "测量 ROI 映射",
       "currentPorts": {
@@ -13320,7 +13324,7 @@
       ],
       "currentContract": "输入 anchor:Box2D, heightAnchor:Box2D? → 输出 box:Box2D。Box2D 锚框+可选高度锚→轴对齐长窗，输入/输出米，startMm/lengthMm/heightMm 毫米，窗口避开锚框本身。",
       "notes": "领域默认不能提升为通用框构造默认。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "方向基准区域构建",
       "currentPorts": {
@@ -13429,7 +13433,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair>, rois:Bundle<gap.RoiSet> → 输出 line:Line2D, quality:Record。ScanPair+RoiSet→方向Line2D/quality；邻近长面窗口，开区间裁剪，不截取内点端，inlier_ends端点。",
       "notes": "必须和gap.datum_window、role_line方向约束一起迁。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "方向基准线提取",
       "currentPorts": {
@@ -13577,7 +13581,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud, box:Box2D → 输出 point:Point2D。米制PointCloud+Box2D→Point2D，取整片云距离框min角最近点，不先裁ROI；框尺寸不影响选择。",
       "notes": "不能把旧算子误迁为框内选点。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "区域锚点近邻提取",
       "currentPorts": {
@@ -13635,7 +13639,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair>, rois:Bundle<gap.RoiSet>, baseLine:Line2D? → 输出 point:Point2D, line:Line2D, quality:Record。ScanPair+RoiSet+[baseLine]→point/line/quality；line_end/selected_point/nearest_point模式不同。",
       "notes": "参考点不能一律抽成同一最近点算法。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "参考点提取",
       "currentPorts": {
@@ -13884,7 +13888,7 @@
       ],
       "currentContract": "输入 rois:Bundle<gap.RoiSet> → 输出 datum:Box2D, target:Box2D, seamLeft:Box2D, seamRight:Box2D, seam:Box2D, info:Record。Bundle<gap.RoiSet>拆四角色Box2D/seam与info，不移动框，不改变角色。",
       "notes": "Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "角色 ROI 集解包",
       "currentPorts": {
@@ -13965,7 +13969,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair> → 输出 primary:PointCloud, secondary:PointCloud, merged:PointCloud。Bundle<gap.ScanPair>拆成primary/secondary/merged三份PointCloud，不重算、不换轴。",
       "notes": "Bundle类型名称属于保存图/manifest/SDK契约，迁移包含引用它的全部积木。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "剖面对解包",
       "currentPorts": {
@@ -14029,7 +14033,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud → 输出 cloud:PointCloud。PointCloud 米的 y/z 互换，XZ→XY；这是 det=-1 的反射，保持槽序和其他通道。",
       "notes": "与 std-geometry 的 source→target 刚体必须区分。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "测量坐标系转换",
       "currentPorts": {
@@ -14084,7 +14088,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud → 输出 cloud:PointCloud。PointCloud→PointCloud，删非有限坐标后相对点序保留但1280槽号失效，禁止放在模型标签操作之前。",
       "notes": "该节点不能当离群点滤波。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "非有限点剔除",
       "currentPorts": {
@@ -14139,7 +14143,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud → 输出 tensor:Tensor。双头原始1280槽→float32 Tensor[2,6,1280]，通道 z_norm/x_diff/normal_angle/curvature/intensity_norm/valid，必须保留 NaN 槽。",
       "notes": "名字含 tensor 不代表通用推理能力。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "剖面特征张量构建",
       "currentPorts": {
@@ -14210,7 +14214,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud, box:Box2D? → 输出 primary:PointCloud, secondary:PointCloud, quality:Record。双头米制云+可选ROI→双头+quality；自动认y/z高度，重叠段差中位数门；keep策略复制可信云到两个端口供[2,6,1280]模型。",
       "notes": "不是三维配准器或自动相机校准。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "双相机一致性校验",
       "currentPorts": {
@@ -14351,7 +14355,7 @@
       ],
       "currentContract": "输入 tensor:Tensor → 输出 labels:Record。Tensor[2,C,1280]→GapLabels 两行1280项；并列留最小类id，不按置信度丢槽。",
       "notes": "不能给原流程悄悄增加置信度门限。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。 关联的ml.onnx_run在本波次使用既有接口；其M6隔离验收不是本项迁移前置，后续隔离须保持该接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "Logits 标签解码",
       "currentPorts": {
@@ -14445,7 +14449,7 @@
       ],
       "currentContract": "输入 cloud:PointCloud, labels:Record → 输出 cloud:PointCloud。测量 XY 米的1280槽 PointCloud+GapLabels→上色云；固定八类色表，intensity 写类id；槽数不符报 bad_input。",
       "notes": "这是可视化适配，不是模型预测。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "点云标签可视化",
       "currentPorts": {
@@ -14532,7 +14536,7 @@
       ],
       "currentContract": "输入 primary:PointCloud?, secondary:PointCloud? → 输出 scan:Bundle<gap.ScanPair>。目录/文件或宿主双头输入→ScanPair；原双头保1280槽，merged按secondary在前并可去噪；inputs模式不读盘。",
       "notes": "不能将一份压缩后merged回填原双头。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "双相机剖面读取",
       "currentPorts": {
@@ -14729,7 +14733,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair> → 输出 rois:Bundle<gap.RoiSet>, alignment:Record, scan:Bundle<gap.ScanPair>。ScanPair→RoiSet/alignment/ScanPair；最多四模板槽各带角色框；自动整体ROI、裁剪、对齐、选模、业务ROI。",
       "notes": "内部参数拷贝paramOf和Step节点id是迁移依赖，不只是顶层id改名。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "2.1.0",
       "label": "模板定位",
       "currentPorts": {
@@ -15898,7 +15902,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud, labels:Record, backdrop:PointCloud? → 输出 flushBase:Box2D, gapLeft:Box2D, flushRef:Box2D, gapRight:Box2D, seam:Box2D, refinements:Record, backdrop:PointCloud。原始双头1280槽+GapLabels→四角色 Box2D/seam/refinements；框转换为测量 XY 米；missing_segments 报 model_roi_failed。",
       "notes": "refinements 是小型诊断，不得携带完整图像/云数组。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.2.0",
       "label": "标签区域提取",
       "currentPorts": {
@@ -16102,7 +16106,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud, gapLeft:Box2D, gapRight:Box2D, merged:PointCloud? → 输出 primary:PointCloud, secondary:PointCloud, merged:PointCloud, window:Box2D, status:Record。XY 米云+两个框→裁后双头/可选合并云、Box2D/status；参数mm；五种失效透传，点数不足回退无界框。",
       "notes": "不能以简单 crop_box 节点取代整套保护。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "零件随动裁剪",
       "currentPorts": {
@@ -16292,7 +16296,7 @@
       ],
       "currentContract": "输入 scan:Bundle<gap.ScanPair> → 输出 rois:Bundle<gap.RoiSet>, scan:Bundle<gap.ScanPair>。ScanPair→RoiSet/ScanPair；原始双头保槽，内部张量/ONNX/argmax/精修ROI，之后剔NaN并跟随裁窗。",
       "notes": "模型能力必须可选，禁用模板模式不能仍隐式加载模型。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "分割模型定位",
       "currentPorts": {
@@ -16533,7 +16537,7 @@
       ],
       "currentContract": "输入 image:Image → 输出 pose:Record, score:Measurement, overlay:Record。Image→glue.Pose2D/score/overlay；模板带pad、anchor/teachCenter；受限转角NCC、抛物线亚像素峰与护栏。",
       "notes": "先比较现image NCC实现差异，不因已有同名匹配节点直接删除此算法。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.1.0",
       "label": "二维模板定位",
       "currentPorts": {
@@ -16707,7 +16711,7 @@
       ],
       "currentContract": "输入 无 → 输出 line:Record, overlay:Record。参数折线→Polyline/overlay；px、zone按弧长，重复相邻点跳过，2px重采样，长度至少8px；不读取图像。",
       "notes": "像素是合法几何单位；不能为了轻量将大折线数组塞进不限长Record。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "折线胶路",
       "currentPorts": {
@@ -16788,7 +16792,7 @@
       ],
       "currentContract": "输入 image:Image, line:Record, prior:Record? → 输出 model:Record, overlay:Record。RGB Image+Polyline+[ColorModel prior]→ColorModel/overlay；沿线胶/背景取样，排高光暗区；统计可相加、与累计顺序无关。",
       "notes": "不能换成HSV阈值后宣称只是分包。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶色建模",
       "currentPorts": {
@@ -17054,7 +17058,7 @@
       ],
       "currentContract": "输入 image:Image, model:Record? → 输出 maps:Bundle<glue.ColorMaps>。RGB Image+ColorModel→ColorMaps；score f32[0,1]、state图；高光/无信息为NaN，明确暗背景为0；ROI块与整图一致。",
       "notes": "NaN影响unknown而0是观测到背景，不能合并。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶色得分图",
       "currentPorts": {
@@ -17148,7 +17152,7 @@
       ],
       "currentContract": "输入 image:Image, line:Record → 输出 edges:Record, overlay:Record。Image+Polyline→PartEdges/overlay；px；输出两侧所有合格跳变，基于极性、局部最大下降率和远侧持续暗区，不选侧。",
       "notes": "可与现有image caliper共享采样/插值内核，但判据需逐项比对。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "找零件边",
       "currentPorts": {
@@ -17348,7 +17352,7 @@
       ],
       "currentContract": "输入 image:Image → 输出 maps:Bundle<glue.ResponseMaps>。Image→Bundle<glue.ResponseMaps>含response/gray/level三张单通道f32及frame；ROI块数值与整图逐位相同，极性归一化。",
       "notes": "不能仅提取response而遗漏gray/level，后续横向剖面依赖三者。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "响应图",
       "currentPorts": {
@@ -17485,7 +17489,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ResponseMaps> → 输出 scan:Record, overlay:Record。ResponseMaps→FanScan/overlay；px径向、deg角度；得分=有效值和/总采样数，无效比例达门限为null，含无效峰策略可配。",
       "notes": "只给候选方向，不在通用层选择生产方向。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "扇形扫描",
       "currentPorts": {
@@ -17661,7 +17665,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ColorMaps> → 输出 scan:Record, overlay:Record。ColorMaps→与fan_scan相同FanScan；高光/暗区NaN和块外均无效，scores规则完全相同。",
       "notes": "合并实现不要求立刻删除旧算子id，id切换走统一图迁移计划。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "彩色扇形扫描",
       "currentPorts": {
@@ -17839,7 +17843,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ResponseMaps>, line:Record → 输出 runs:Record, overlay:Record。ResponseMaps+Polyline→LateralRuns/overlay；每0.5px采样，connected/half_max规则；给出所有暗段，不筛宽、不判有无胶。",
       "notes": "测量记录与业务Bead中选中的段需区分。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "横向卡尺",
       "currentPorts": {
@@ -18042,7 +18046,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ColorMaps>, line:Record → 输出 runs:Record, overlay:Record。ColorMaps+Polyline→LateralRuns；每0.5px，含infoFraction、unknownSpans、边缘cause、unknownWidth；合并不跨明确背景。",
       "notes": "不能与lateral_runs的有限阈值分段无条件互换。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.2.0",
       "label": "彩色横向卡尺",
       "currentPorts": {
@@ -18243,7 +18247,7 @@
       ],
       "currentContract": "输入 image:Image, pose:Record?, calib:Record? → 输出 measure:Record, coverage:Measurement, distanceMean:Measurement, overlay:Record。Image+[glue.Pose2D]+[calib]→StationMeasure/coverage/distance；名义站点上的内边/胶边专用选择；pose_fail/incomplete_bead是无效量测。",
       "notes": "它不是完全通用的image.caliper_pair，需先抽内核再保留薄适配。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶路逐点卡尺测量",
       "currentPorts": {
@@ -18490,7 +18494,7 @@
       ],
       "currentContract": "输入 无 → 输出 path:Bundle<glue.Path>, overlay:Record。示教折线/可选当前图像→与bead_path同形Path，info.lineSource=taught；路径存在不等于沿线有胶。",
       "notes": "与glue.polyline共享重采样，不共享所有场景参数。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "示教胶路",
       "currentPorts": {
@@ -18622,7 +18626,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ResponseMaps>, fan:Record? → 输出 line:Record, track:Record, overlay:Record。ResponseMaps+[FanScan]→Polyline/Track/overlay；px和deg；连续性门选最近段，跟丢可退射线，点数不足输出直线而非OK。",
       "notes": "不要与color_track强行合并默认策略，它们的无信息/回退规则不同。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "粗跟踪与拟合",
       "currentPorts": {
@@ -19107,7 +19111,7 @@
       ],
       "currentContract": "输入 image:Image → 输出 path:Bundle<glue.Path>, overlay:Record。Image→Bundle<glue.Path>/info/overlay；图像像素路径，自动寻找直胶/螺旋胶及胶路可信度。",
       "notes": "通用跟踪结果valid/unknown不直接等于有胶。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶路提取",
       "currentPorts": {
@@ -19342,7 +19346,7 @@
       ],
       "currentContract": "输入 image:Image, path:Bundle<glue.Path>, calib:Record? → 输出 bead:Bundle<glue.Bead>, widthMean:Measurement, widthMin:Measurement, widthMax:Measurement, coverage:Measurement, overlay:Record。Image+Path+[平面标定]→Bead/宽度Measurement；无标定px、有标定mm；直胶/螺旋的有胶判据不同。",
       "notes": "不能用通用两边缘间距直接替代presence判据。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶宽测量",
       "currentPorts": {
@@ -19571,7 +19575,7 @@
       ],
       "currentContract": "输入 bead:Bundle<glue.Bead> → 输出 breaks:Record, count:Measurement, longest:Measurement, overlay:Record。Bead→断胶Record/count/longest/overlay；半站距补边，px或标定mm；无胶路整区断胶，区端是否计数可配。",
       "notes": "unknown与无胶不能合并为同一状态。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "断胶检测",
       "currentPorts": {
@@ -19664,7 +19668,7 @@
       ],
       "currentContract": "输入 maps:Bundle<glue.ColorMaps>, fan:Record? → 输出 line:Record, track:Record, overlay:Record。ColorMaps+[FanScan]→Polyline/Track；无锐度门、不回射线；无信息不计maxGap；extent允许超widthMax完整宽度，歧义/不完整计unknown。",
       "notes": "与灰度track_path共享内核前先将策略显式化，不改变既有默认。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.2.0",
       "label": "彩色粗跟踪",
       "currentPorts": {
@@ -20118,7 +20122,7 @@
       ],
       "currentContract": "输入 image:Image, bead:Bundle<glue.Bead>, calib:Record? → 输出 edge:Record, distanceMean:Measurement, distanceMin:Measurement, distanceMax:Measurement, overlay:Record。Image+Bead+[calib]→逐站Edge和距离Measurement；多数侧判零件边，沿法向找首个合格强边；无标定px/有标定mm。",
       "notes": "不能悄悄换成最大梯度位置。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "胶路边距测量",
       "currentPorts": {
@@ -20284,7 +20288,7 @@
       ],
       "currentContract": "输入 bead:Bundle<glue.Bead>, breaks:Record, edge:Record? → 输出 verdict:Record, ok:Measurement, overlay:Record。Bead/Breaks/Edge→业务verdict/ok/overlay；连续缺陷长度、无胶优先理由、宽/边距0关闭阈值；限值同bead单位。",
       "notes": "保留业务verdict不等于所有后续宿主必须使用同套策略。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "涂胶质量判定",
       "currentPorts": {
@@ -20428,7 +20432,7 @@
       ],
       "currentContract": "输入 image:Image, bead:Bundle<glue.Bead> → 输出 image:Image, info:Record, overlay:Record。Image+Bead→人造断胶图/info/overlay；取干净背景平移覆盖，两侧均脏时原图透传info.ok=false；坐标px。",
       "notes": "不是通用修图/inpaint，也不能将合成验证当现场召回率。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "断胶缺陷合成",
       "currentPorts": {
@@ -20642,7 +20646,7 @@
         "M2",
         "纯平台测试与预设去除对core生成器的假设"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 137
     },
     {
@@ -20825,7 +20829,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 138
     },
     {
@@ -20964,7 +20968,7 @@
         "M1",
         "公共轻量针孔投影核，不修改无畸变针孔算法"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 139
     },
     {
@@ -21181,7 +21185,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 140
     },
     {
@@ -21293,7 +21297,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 141
     },
     {
@@ -21539,7 +21543,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 142
     },
     {
@@ -21702,7 +21706,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 143
     },
     {
@@ -21833,7 +21837,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 144
     },
     {
@@ -22113,7 +22117,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 145
     },
     {
@@ -22255,7 +22259,7 @@
         "M1",
         "公共轻量针孔投影核，不修改无畸变针孔算法"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 146
     },
     {
@@ -22538,7 +22542,7 @@
         "M1映射组/父索引/观测状态/坐标帧契约",
         "M2物理长度/面积/体积测量核"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 147
     },
     {
@@ -22926,7 +22930,7 @@
         "M3有序截面链/特征接口",
         "M2物理属性测量接口"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 148
     },
     {
@@ -23002,7 +23006,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 149
     },
     {
@@ -23232,7 +23236,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 150
     },
     {
@@ -23328,7 +23332,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 151
     },
     {
@@ -23420,7 +23424,7 @@
         "M1",
         "M1统一PlaneCalib单位及齐次矩阵验证，提供旧输入显式迁移"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 152
     },
     {
@@ -23575,7 +23579,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 153
     },
     {
@@ -23696,7 +23700,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 154
     },
     {
@@ -23940,7 +23944,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 155
     },
     {
@@ -24045,7 +24049,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 156
     },
     {
@@ -24218,7 +24222,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 157
     },
     {
@@ -24297,7 +24301,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 158
     },
     {
@@ -24367,7 +24371,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 159
     },
     {
@@ -24445,7 +24449,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 160
     },
     {
@@ -24755,7 +24759,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 161
     },
     {
@@ -24931,7 +24935,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 162
     },
     {
@@ -25108,7 +25112,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 163
     },
     {
@@ -25217,7 +25221,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 164
     },
     {
@@ -25439,7 +25443,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 165
     },
     {
@@ -25725,7 +25729,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 166
     },
     {
@@ -25929,7 +25933,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 167
     },
     {
@@ -26033,7 +26037,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 168
     },
     {
@@ -26171,7 +26175,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 169
     },
     {
@@ -26374,7 +26378,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 170
     },
     {
@@ -26532,7 +26536,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 171
     },
     {
@@ -26600,7 +26604,7 @@
         "M1",
         "M1统一PlaneCalib单位及齐次矩阵验证，提供旧输入显式迁移"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 172
     },
     {
@@ -26661,7 +26665,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 173
     },
     {
@@ -26902,7 +26906,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 174
     },
     {
@@ -27019,7 +27023,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 175
     },
     {
@@ -27122,7 +27126,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 176
     },
     {
@@ -27246,7 +27250,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 177
     },
     {
@@ -27429,7 +27433,7 @@
         "M1",
         "公共YOLO/OCR预处理映射与结果schema从图像实现头提取"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 178
     },
     {
@@ -27561,7 +27565,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 179
     },
     {
@@ -27645,7 +27649,7 @@
         "M1",
         "公共YOLO/OCR预处理映射与结果schema从图像实现头提取"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 180
     },
     {
@@ -27772,7 +27776,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 181
     },
     {
@@ -27944,7 +27948,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 182
     },
     {
@@ -28042,7 +28046,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 183
     },
     {
@@ -28120,7 +28124,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 184
     },
     {
@@ -28265,7 +28269,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 185
     },
     {
@@ -28405,7 +28409,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 186
     },
     {
@@ -28609,7 +28613,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 187
     },
     {
@@ -28790,7 +28794,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 188
     },
     {
@@ -28989,7 +28993,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 189
     },
     {
@@ -29192,7 +29196,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 190
     },
     {
@@ -29288,7 +29292,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 191
     },
     {
@@ -29557,7 +29561,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 192
     },
     {
@@ -29697,7 +29701,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 193
     },
     {
@@ -29773,7 +29777,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 194
     },
     {
@@ -29838,7 +29842,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 195
     },
     {
@@ -29984,7 +29988,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 196
     },
     {
@@ -30118,7 +30122,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 197
     },
     {
@@ -30167,7 +30171,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 198
     },
     {
@@ -30285,7 +30289,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 199
     },
     {
@@ -30358,7 +30362,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 200
     },
     {
@@ -30493,7 +30497,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 201
     },
     {
@@ -30688,7 +30692,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 202
     },
     {
@@ -30791,7 +30795,7 @@
         "M1",
         "公共YOLO/OCR预处理映射与结果schema从图像实现头提取"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 203
     },
     {
@@ -30937,7 +30941,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 204
     },
     {
@@ -31040,7 +31044,7 @@
         "M1",
         "公共YOLO/OCR预处理映射与结果schema从图像实现头提取"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 205
     },
     {
@@ -31114,7 +31118,7 @@
         "M1",
         "公共模型映射/批次/掩膜/文本结果schema"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 206
     },
     {
@@ -31239,7 +31243,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 207
     },
     {
@@ -31318,7 +31322,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 208
     },
     {
@@ -31497,7 +31501,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 209
     },
     {
@@ -31681,7 +31685,7 @@
         "M1",
         "M1映射组/父索引/观测状态/坐标帧契约"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 210
     },
     {
@@ -31793,7 +31797,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 211
     },
     {
@@ -31945,7 +31949,7 @@
         "几何schema与帧树验证器成为公共接口",
         "M0显式能力与依赖声明"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 212
     },
     {
@@ -32103,7 +32107,7 @@
         "M5",
         "共享Tensor/检测/OCR协议公开化"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 213
     },
     {
@@ -32172,7 +32176,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "registrationEvidence": {
         "kind": "generated",
         "tokens": [
@@ -32373,7 +32377,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 215
     },
     {
@@ -32613,7 +32617,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 216
     },
     {
@@ -32819,7 +32823,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 217
     },
     {
@@ -32941,7 +32945,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 218
     },
     {
@@ -33045,7 +33049,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 219
     },
     {
@@ -33123,7 +33127,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 220
     },
     {
@@ -33186,7 +33190,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 221
     },
     {
@@ -33256,7 +33260,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 222
     },
     {
@@ -33319,7 +33323,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 223
     },
     {
@@ -33404,7 +33408,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 224
     },
     {
@@ -33713,7 +33717,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 225
     },
     {
@@ -33782,7 +33786,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "registrationEvidence": {
         "kind": "generated",
         "tokens": [
@@ -34050,7 +34054,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 227
     },
     {
@@ -34336,7 +34340,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 228
     },
     {
@@ -34405,7 +34409,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "registrationEvidence": {
         "kind": "generated",
         "tokens": [
@@ -34496,7 +34500,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 230
     },
     {
@@ -34690,7 +34694,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 231
     },
     {
@@ -34828,7 +34832,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 232
     },
     {
@@ -34976,7 +34980,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 233
     },
     {
@@ -35097,7 +35101,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 234
     },
     {
@@ -35186,7 +35190,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 235
     },
     {
@@ -35262,7 +35266,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 236
     },
     {
@@ -35386,7 +35390,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 237
     },
     {
@@ -35463,7 +35467,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 238
     },
     {
@@ -35565,7 +35569,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 239
     },
     {
@@ -35641,7 +35645,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 240
     },
     {
@@ -35735,7 +35739,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 241
     },
     {
@@ -35840,7 +35844,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 242
     },
     {
@@ -35930,7 +35934,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 243
     },
     {
@@ -36049,7 +36053,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 244
     },
     {
@@ -36122,7 +36126,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 245
     },
     {
@@ -36205,7 +36209,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 246
     },
     {
@@ -36367,7 +36371,7 @@
         "M2",
         "register.constraints_3d"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 247
     },
     {
@@ -36713,7 +36717,7 @@
         "M2",
         "cloud.template_3d"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 248
     },
     {
@@ -36940,7 +36944,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 249
     },
     {
@@ -37094,7 +37098,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 250
     },
     {
@@ -37267,7 +37271,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 251
     },
     {
@@ -37528,7 +37532,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 252
     },
     {
@@ -37626,7 +37630,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 253
     },
     {
@@ -37729,7 +37733,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 254
     },
     {
@@ -37789,7 +37793,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 255
     },
     {
@@ -37906,7 +37910,7 @@
         "M1",
         "M2"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 256
     },
     {
@@ -38025,7 +38029,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 257
     },
     {
@@ -38148,7 +38152,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 258
     },
     {
@@ -38208,7 +38212,7 @@
         "M2",
         "transform.make"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 259
     },
     {
@@ -38262,7 +38266,7 @@
       "migrationPrerequisites": [
         "M1"
       ],
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "migrationOrder": 260
     },
     {
@@ -38285,7 +38289,7 @@
       ],
       "currentContract": "输入 primary:PointCloud, secondary:PointCloud → 输出 gap:Measurement, flush:Measurement。双头PointCloud→mm gap/flush，黑盒MeasurementEngine对照路径；模型模式内部执行ROI模型。",
       "notes": "当前gap算法已主动偏离旧基线，不能用数值完全相等作全部迁移的唯一正确性标准。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。",
-      "descriptionEvidence": "M3真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
+      "descriptionEvidence": "M4a真实全包manifest核对；目标/依赖/约束保留原规划，阶段验收另行登记。",
       "currentVersion": "1.0.0",
       "label": "参考基线测量",
       "currentPorts": {
@@ -40562,6 +40566,8 @@
     "core/src/registry.cpp",
     "core/src/runtime_frames.cpp",
     "core/src/status.cpp",
+    "examples/profile-robust/CMakeLists.txt",
+    "examples/profile-robust/main.cpp",
     "examples/public-kernels/CMakeLists.txt",
     "examples/public_kernels.cpp",
     "kernels/include/lyflow/kernel/constraints.h",
@@ -40569,12 +40575,14 @@
     "kernels/include/lyflow/kernel/metrology.h",
     "kernels/include/lyflow/kernel/profile.h",
     "kernels/include/lyflow/kernel/profile_analysis.h",
+    "kernels/include/lyflow/kernel/profile_robust.h",
     "kernels/include/lyflow/kernel/rigid.h",
     "kernels/src/constraints.cpp",
     "kernels/src/geometry.cpp",
     "kernels/src/metrology.cpp",
     "kernels/src/profile.cpp",
     "kernels/src/profile_analysis.cpp",
+    "kernels/src/profile_robust.cpp",
     "kernels/src/rigid.cpp",
     "packaging/release.json",
     "packs/gap/lyflow_op_pack.cmake",
@@ -40696,6 +40704,8 @@
     "packs/std-ml/ops/ops.h",
     "packs/std-ml/ops/register.cpp",
     "packs/std-ml/ops/session_cache.h",
+    "packs/std-pointcloud/algo/fit2d.cpp",
+    "packs/std-pointcloud/algo/fit2d.h",
     "packs/std-pointcloud/include/lyflow_pcl/adapter.h",
     "packs/std-pointcloud/include/lyflow_pcl/pcd_ascii.h",
     "packs/std-pointcloud/include/lyflow_pcl/pcl_path.h",
@@ -42014,7 +42024,7 @@
     },
     {
       "stage": "M3",
-      "status": "validated_manifest",
+      "status": "complete",
       "expectedNativeCount": 261,
       "expectedPythonExampleCount": 8,
       "targetProductVersion": "1.4.2",
@@ -42045,7 +42055,7 @@
         "profile.gap_flush",
         "profile.project_pair"
       ],
-      "note": "公共轮廓/度量、DTS场景v2及显式图迁移；待整体验证/SDK交付/CI及审查，不以manifest代替运行验收。",
+      "note": "公共轮廓/度量、DTS场景v2、显式图迁移及独立CLI/SDK交付已验收；PR64七项CI成功且对应提交Codex审查完成无问题，已合并。M4–M7不计入本阶段完成。",
       "reviewedChange": "复核最终安装门槛、静态SDK样例及格式化后的公共契约来源；未改变原数值或来源声明边界。",
       "reviewedSourceChanges": [
         {
@@ -42431,6 +42441,255 @@
         "sha256": "a3a6972600786c2adb2e7f8e81f76036223b67377897f4cf1247133275bf755f",
         "operatorCount": 261,
         "path": "build/m3-full/manifest.json"
+      },
+      "mergeEvidence": {
+        "pr": 64,
+        "url": "https://github.com/liangyuR/lyFlow/pull/64",
+        "revision": "b22fde7fad01b7aea67886b6fe3345e92a5fe8bb",
+        "reviewedHead": "1912840ef43cb167cd561f83e7913c6ac4fbf4ee",
+        "workflowRun": 43759339539,
+        "jobCount": 7,
+        "conclusion": "success",
+        "codexReview": "completed_no_findings",
+        "reviewReceipt": "https://github.com/liangyuR/lyFlow/pull/64#issuecomment-6901057445"
+      },
+      "acceptanceEvidence": {
+        "nativeFull": {
+          "tests": 763,
+          "assertions": 377878,
+          "skipped": 0
+        },
+        "portableKernels": {
+          "tests": 25,
+          "assertions": 664,
+          "skipped": 0
+        },
+        "editor": {
+          "tests": 97,
+          "skipped": 0
+        },
+        "host": {
+          "tests": 13,
+          "ignored": 0
+        },
+        "profiles": {
+          "tests": 6,
+          "ignored": 0
+        },
+        "rustLibraryAndCli": {
+          "tests": 167,
+          "ignored": 0
+        },
+        "isolatedStaticSdk": "four public kernels linked and executed without the core DLL; PE imports contain only CRT and Windows system libraries",
+        "installedProfileSdk": "native Profile injection, LYPR CLI and independent C++/Rust consumers passed"
+      }
+    },
+    {
+      "stage": "M4",
+      "status": "planned",
+      "scopeNativeIds": [
+        "gap.align_template",
+        "gap.business_rois",
+        "gap.camera_guard",
+        "gap.corner_vertex",
+        "gap.datum_direction",
+        "gap.datum_window",
+        "gap.drop_non_finite",
+        "gap.fit_gap_circles",
+        "gap.fit_line",
+        "gap.flush",
+        "gap.gap",
+        "gap.groove_joint",
+        "gap.judge",
+        "gap.labels_from_logits",
+        "gap.labels_to_cloud",
+        "gap.load_profile_pair",
+        "gap.load_template",
+        "gap.locate_model",
+        "gap.locate_template",
+        "gap.make_roi_set",
+        "gap.make_scan_pair",
+        "gap.nearest_to_line",
+        "gap.notch_width",
+        "gap.overall_roi",
+        "gap.point_offset",
+        "gap.profile_tensor",
+        "gap.read_scan",
+        "gap.ref_point",
+        "gap.result_bundle",
+        "gap.roi_from_labels",
+        "gap.role_line",
+        "gap.roll_anchored_crop",
+        "gap.seam_circles",
+        "gap.select_alignment",
+        "gap.selected_point",
+        "gap.split_roi_set",
+        "gap.split_scan_pair",
+        "gap.to_measurement_frame"
+      ],
+      "prerequisites": [
+        "M3"
+      ],
+      "note": "38项Gap公共/场景边界分切片实施；先公开保方法的RANSAC/LM数值核与可选后端，再迁节点、双头槽/来源契约及导入器。公共核抽取不等于整个M4完成。"
+    },
+    {
+      "stage": "M4a",
+      "status": "validated_manifest",
+      "expectedNativeCount": 261,
+      "expectedPythonExampleCount": 8,
+      "targetProductVersion": "1.4.3",
+      "introducedNativeIds": [],
+      "introducedPythonIds": [],
+      "retiredNativeIds": [],
+      "note": "M4首个切片：单一RANSAC/LM实现的公共静态核与可选后端声明；注册ID/版本/端口/参数保持，整个M4的38项迁移尚未完成。",
+      "reviewedChange": "复核SDK可选鲁棒组件依赖降级：可选PCL缺失不阻断轻量组件，必需PCL缺失明确失败；独立消费者实际验证。",
+      "reviewedSourceChanges": [
+        {
+          "path": "core/CMakeLists.txt",
+          "previousSha256": "6737cec12ff728e5bfaafb98f71d57851ee05464a518d3f09146b21688b1bd8b",
+          "sha256": "2b76097e9b73579ec436d10078eadc47b1fbe1c72f0fe71ee8726db7b896165d",
+          "kind": "modified"
+        },
+        {
+          "path": "core/cmake/backend-modules.cmake",
+          "previousSha256": "12b0e122ae4291bc0df143f14885bda03a252b23a23430eb5b993c4ae88db969",
+          "sha256": "fdb1dec68517d9268e9331a44a475f80f4bee0d6de08e01814d293c1a7407a66",
+          "kind": "modified"
+        },
+        {
+          "path": "core/cmake/kernel-modules.cmake",
+          "previousSha256": "b157e6f876b5c2298e86ebf5cf31e5c498edd121e58acddc4d830a7748847dab",
+          "sha256": "ced922aca99bb47fb4a241b41089e885e25ae5f3a322d61c2ce1cf71a7178c75",
+          "kind": "modified"
+        },
+        {
+          "path": "core/cmake/lyflow-config.cmake.in",
+          "previousSha256": "e077f0d84934851bfb625c347f95b1533fbb00cefad3849e95dceb59363a4d92",
+          "sha256": "5f0eee3ea52a790334e3e0c2668e54d16d7f90e520a584f46a277df5016011a9",
+          "kind": "modified"
+        },
+        {
+          "path": "core/cmake/module-graph.cmake",
+          "previousSha256": "b71368b0e59b05780581971eeec405c089c4b68cb609e134cceb31396c76531a",
+          "sha256": "051de6226bfd25e7f3cbe0386a40f57a45a51d871ceaa3825e66eb78b4936d68",
+          "kind": "modified"
+        },
+        {
+          "path": "core/include/lyflow/version.h",
+          "previousSha256": "3378783cab0d30fbc8806bfa75c5e546bfa9814bdb3447dfdcfa6f9f068e58cf",
+          "sha256": "affa8976388c4f112d3e345ba9ee9ef34540296eb20ccbfd7ec89a8e23ce833b",
+          "kind": "modified"
+        },
+        {
+          "path": "examples/profile-robust/CMakeLists.txt",
+          "previousSha256": null,
+          "sha256": "2cca26c3df7c5b90ee73675cbad3f3cbe0a144ab1fc24b9766b5c519c0da4fe4",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "examples/profile-robust/main.cpp",
+          "previousSha256": null,
+          "sha256": "954199748b4c100030912c2e296a5d3b275e101289b4583ea54c12725805835b",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "examples/public-kernels/CMakeLists.txt",
+          "previousSha256": "40498dbf9f4cbe35c6877a6708789ce273b888d9b3b2406dfa04e0ba05c42853",
+          "sha256": "e2829b6daf7af4b804dd7a5a0d8456aedddf5a07dbadc151daad35186bd0ff19",
+          "kind": "modified"
+        },
+        {
+          "path": "kernels/include/lyflow/kernel/profile_robust.h",
+          "previousSha256": null,
+          "sha256": "3a8a819ef2cf516bf533dc331a2ad5cf7283e69264ebda3a68cec6ba8688aa81",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "kernels/src/profile_robust.cpp",
+          "previousSha256": null,
+          "sha256": "96d1d81fdcbedf66fac9473ca34ac84218a0c479309ce488f283cfacc9de9409",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "packaging/release.json",
+          "previousSha256": "1930444b7f683e38b1b4025b1f47bed2d8adf083453e6b99c19be459c14e72d4",
+          "sha256": "a6636426c13a5a205903a7b0b1485a8e82354682989cb3b3a954f80469c356ca",
+          "kind": "modified"
+        },
+        {
+          "path": "packs/std-pointcloud/algo/fit2d.cpp",
+          "previousSha256": "0d510d4cb3ff5d234bf2c7a2515a5d0a6d822036a0856574b9240ea19b296a63",
+          "sha256": "643c0b4392a17206f86493ce5cc1b0e45c2b6bc499fe6b4ee62bcc343b1a563d",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "packs/std-pointcloud/algo/fit2d.h",
+          "previousSha256": "12f8d05aa2389a887fd60e38cb4d2e7425384af2cae101c00be64aac5bc46b68",
+          "sha256": "d6cd946ce6dbd4b020fe26bc19a3046dcf6a3c1d174c14f6dd5ec3a3592bf0eb",
+          "kind": "tracking_added"
+        },
+        {
+          "path": "core/cmake/lyflow-config.cmake.in",
+          "previousSha256": "5f0eee3ea52a790334e3e0c2668e54d16d7f90e520a584f46a277df5016011a9",
+          "sha256": "fce0253d05eee125db9df087f3d4ea5e066a2be590cbba47a67880e9f57294c9",
+          "kind": "modified"
+        }
+      ],
+      "manifestEvidence": {
+        "sha256": "82215e8bce4c0a080e72509dc84d7f824935451ee48eff8708e2538c9cebe425",
+        "operatorCount": 261,
+        "path": "build/m4-gap/manifest-final.json"
+      },
+      "localAcceptance": {
+        "native": {
+          "passed": 763,
+          "assertions": 377886,
+          "skipped": 0,
+          "log": "build/m4-gap/core-frozen.log"
+        },
+        "kernels": {
+          "passed": 33,
+          "assertions": 914,
+          "skipped": 0,
+          "log": "build/m4-gap/kernels-frozen.log"
+        },
+        "lightweight": {
+          "passed": 25,
+          "assertions": 664,
+          "skipped": 0,
+          "disabledPackages": [
+            "PCL",
+            "OpenCV",
+            "Boost"
+          ],
+          "log": "build/m4-light/kernel-final.log"
+        },
+        "frozenAlgorithmParity": {
+          "fixtures": 17,
+          "bitwiseEqual": true,
+          "baselineRevision": "b22fde7fad01b7aea67886b6fe3345e92a5fe8bb",
+          "report": "build/m4-baseline/compare-final-report.json"
+        },
+        "installedSdk": {
+          "robustConsumerPassed": true,
+          "temporaryWorkspaceRemoved": true,
+          "lightweightConsumerPassed": true,
+          "robustEvidence": "build/m4-robust-sdk-optional-fix/evidence.json",
+          "lightweightEvidence": "build/m4-light-sdk-acceptance/evidence.json",
+          "optionalBackendFallbackPassed": true,
+          "requiredBackendRejected": true,
+          "optionalEvidence": "build/m4-optional-sdk-acceptance/evidence.json"
+        },
+        "moduleOrders": {
+          "pclSupportFirst": true,
+          "robustFirst": true,
+          "reverseLog": "build/m4-pcl-order.log"
+        },
+        "quality": {
+          "moduleTests": 11,
+          "auditTests": 14
+        },
+        "pending": "PR CI及Codex审查后合并；本地回归不代替完整M4或现场验收"
       }
     }
   ],

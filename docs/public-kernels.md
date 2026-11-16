@@ -6,13 +6,14 @@ M2 将已有几何、位姿、约束校验和度量算法抽到可独立链接�
 
 ## 目标和边界
 
-| 安装目标                          | 公开头                                                      | 能力与依赖                                                                                     |
-| --------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `lyflow::data_contract`           | `lyflow/data.h`、`lyflow/pose.h`、`lyflow/calibration.h` 等 | 原生结构及有界 JSON 契约；头文件接口，不提供执行器                                             |
-| `lyflow::geometry_kernel`         | `lyflow/kernel/geometry.h`、`rigid.h`、`constraints.h`      | 二维几何关系、刚体/相似变换、位姿与三维约束校验；依赖标准库及原生契约，无 Eigen/PCL/OpenCV/ORT |
-| `lyflow::metrology_kernel`        | `lyflow/kernel/metrology.h`                                 | 平面标定距离、采样边缘间隙/同横坐标面差、有符号点线距离与残差统计；无视觉后端                  |
-| `lyflow::profile_kernel`          | `lyflow/kernel/profile.h`                                   | 原采样序中值、分片、稳定排序视图、TLS/圆拟合与面分割；标准库，显式毫米工作坐标                 |
-| `lyflow::profile_analysis_kernel` | `lyflow/kernel/profile_analysis.h`                          | 原TLS分析与刚体投影；Eigen5.0.1仅在库编译时使用，公开接口和安装后消费者无需Eigen               |
+| 安装目标                          | 公开头                                                      | 能力与依赖                                                                                          |
+| --------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `lyflow::data_contract`           | `lyflow/data.h`、`lyflow/pose.h`、`lyflow/calibration.h` 等 | 原生结构及有界 JSON 契约；头文件接口，不提供执行器                                                  |
+| `lyflow::geometry_kernel`         | `lyflow/kernel/geometry.h`、`rigid.h`、`constraints.h`      | 二维几何关系、刚体/相似变换、位姿与三维约束校验；依赖标准库及原生契约，无 Eigen/PCL/OpenCV/ORT      |
+| `lyflow::metrology_kernel`        | `lyflow/kernel/metrology.h`                                 | 平面标定距离、采样边缘间隙/同横坐标面差、有符号点线距离与残差统计；无视觉后端                       |
+| `lyflow::profile_kernel`          | `lyflow/kernel/profile.h`                                   | 原采样序中值、分片、稳定排序视图、TLS/圆拟合与面分割；标准库，显式毫米工作坐标                      |
+| `lyflow::profile_analysis_kernel` | `lyflow/kernel/profile_analysis.h`                          | 原TLS分析与刚体投影；Eigen5.0.1仅在库编译时使用，公开接口和安装后消费者无需Eigen                    |
+| `lyflow::profile_robust_kernel`   | `lyflow/kernel/profile_robust.h`                            | PCL双迹线RANSAC、轴向重试、圆LM/固定半径/软先验；公开头不含PCL/Eigen，独立静态消费需要同版本PCL后端 |
 
 这些目标不链接 Registry、ComputeFn、Data 运行时分派或 core 执行器。公开 API 使用原生几何结构、`std::array`、`std::variant` 和有界 JSON；包含原生结构头不等于需要链接执行器。使用这些头中的其他运行时方法，例如构造 `Data` 或访问 Frame，仍须按[嵌入协议](embedding.md)接入运行库。
 
@@ -23,7 +24,7 @@ M2 将已有几何、位姿、约束校验和度量算法抽到可独立链接�
 SDK 中的 [CMake 示例](../examples/public-kernels/CMakeLists.txt)和[完整源码](../examples/public_kernels.cpp)使用精确产品版本及组件检查：
 
 ```cmake
-find_package(lyflow 1.4.2 EXACT REQUIRED COMPONENTS geometry_kernel metrology_kernel profile_kernel profile_analysis_kernel)
+find_package(lyflow 1.4.3 EXACT REQUIRED COMPONENTS geometry_kernel metrology_kernel profile_kernel profile_analysis_kernel)
 add_executable(my-kernel-host main.cpp)
 target_compile_features(my-kernel-host PRIVATE cxx_std_17)
 target_link_libraries(my-kernel-host PRIVATE lyflow::geometry_kernel lyflow::metrology_kernel
@@ -48,7 +49,7 @@ SDK 只导出本次构建实际启用的内核目标；四核完整示例仅在�
 
 `mixed` 保留混合点线面；`weighted_321` 要求带 datum=0/1/2 的 axis/plane，每组至少 3/2/1 条、组内平行且组间正交。字段白名单、浮点有限性、安全整数及 JSON 深度/体积限制继续生效。构造结果保留原始 items 的权重和方向，归一值只存在于解析后的计算结构中。
 
-后端模块与算子注册也分开：`pointcloud-algorithms` 保留当前 PCL 拟合/轮廓实现，`matching-pointcloud` 单独承载匹配适配并依赖 `matching-cpu`，gap 选择点云算法模块不会顺带注册或引入全局匹配能力。
+后端模块与算子注册也分开：`pointcloud-algorithms` 保留当前 PCL 拟合/轮廓实现，`matching-pointcloud` 单独承载匹配适配并依赖 `matching-cpu`，单选点云算法模块不会自动引入匹配模块。当前Gap积木还调用`std-pointcloud`与`std-ml`的注册节点；完整工作流必须启用这些包，而当前整包`std-pointcloud`仍携带匹配依赖。后续M4切片须消除这类隐式注册依赖，不能由模块链接隔离推断Gap工作流已经可独立运行。
 
 Eigen 投影矩阵留在点云拟合器适配层；公共内核只存 `std::array<double,3>`，不暴露后端矩阵类型。`ResidualAccumulator` 只累计调用方按原顺序提供的残差范数与权重，不改变残差、稳健损失或业务合格判据。
 
@@ -67,3 +68,22 @@ M2 将 `transform.make`、`register.constraints_3d` 移入 `std-geometry`，将 
 `signedPointLine`要求各输入使用相同的明确单位；`Normalize`用于一般几何，`DeclaredUnit`要求已归一方向且保留旧float方向的数值路径。法向正方向由调用者指定。`sampledGapFlush`计算实际样本左右边缘间隙，以及同一横坐标上右减左的面差；这与点到线的法向距离是不同业务定义。
 
 轻量构建仅需固定Eigen头文件，不需PCL/OpenCV/ORT。运行`python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps`准备并校验，或提供精确5.0.1的`Eigen3_DIR`。安装SDK带`licenses/profile/eigen/NOTICE`及来源清单；导出静态目标不携带源码树或Eigen查找依赖。独立消费门禁显式禁用Eigen发现，运行全部四个内核的数值调用并检查PE导入。
+
+## 可选的稳健拟合后端
+
+M4a公开原点云及Gap使用的RANSAC/LM实现；DTS的TLS与工作毫米算法仍使用原轻量目标。`profile_robust_kernel`不注册节点、不调用执行器，也不把旧`gap.*`节点变成新ID别名。
+
+单独使用后端时，构建选择`LYFLOW_STD_PACKS=OFF`和`LYFLOW_MODULES=profile-robust-kernel`；需要默认轻量Profile链的构建无需选择该模块。安装SDK后显式请求后端组件：
+
+```cmake
+find_package(lyflow 1.4.3 EXACT REQUIRED COMPONENTS profile_robust_kernel)
+add_executable(my-robust-host main.cpp)
+target_compile_features(my-robust-host PRIVATE cxx_std_17)
+target_link_libraries(my-robust-host PRIVATE lyflow::profile_robust_kernel)
+```
+
+该组件使用独立导出文件，仅在请求时查找与SDK编译版本一致的PCL。完整SDK中的四个轻量组件仍可在禁用PCL发现的环境独立使用。PCL后端消费需要其运行依赖，不需要`lyflow_core.dll`、OpenCV或ONNX Runtime。
+
+`profile_robust::Samples`借用调用方的`Point`数组，单位由调用方明确统一；M4中的Gap路径使用米。调用方先显式映射到分析平面XY（z=0）；旧线拟合仍消费XYZ、圆拟合只消费XY，不会替调用方猜测或更换原坐标轴。结果保留输入槽索引，不以排序或压缩后的序号冒充来源。线与圆保持原RANSAC阈值、迭代、系数优化和重收内点顺序；固定半径、软先验和越界夹限是不同路径，不改写为TLS或代数圆拟合。场景的ROI、toward选择、几何方向限制及业务度量继续由后续M4切片迁移。
+
+`CancelCheck`在输入复制、自有细化循环和PCL调用返回后检查；PCL内部的RANSAC调用期间无法抢占。失败或取消不替换调用方已有结果，非法借用缓冲或选项抛出`std::invalid_argument`。

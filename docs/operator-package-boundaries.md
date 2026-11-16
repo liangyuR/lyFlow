@@ -1,12 +1,12 @@
 # 算子包边界重整
 
-状态：目标边界保持；M1公共契约已合并，M2公共核与依赖整理正在验收。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
+状态：目标边界保持；M1–M3已合并，当前推进M4的公共拟合核与Gap拆解。原始规划源码基线为 `9940c8c45ef301910add57e48186fce0b543e341`（LyFlow 1.3.12）；当前实施进度见[迁移计划](operator-package-migration-plan.md)。
 
-本方案以实际注册和实现为依据，重划通用能力、测量语义、场景组合及内部后端的责任。当前构建方式以[算子包机制](op-packs.md)为准；`std-profile`目前已提供M1显式适配，本页其余新包、模块和依赖声明仍为后续目标，不能据此启用尚未交付的构建选项。
+本方案以实际注册和实现为依据，重划通用能力、测量语义、场景组合及内部后端的责任。当前构建方式以[算子包机制](op-packs.md)为准；`std-profile`、`std-metrology`及`solution-dts`已交付，Gap、Glue和其余可选后端拆分仍须按迁移计划验收。
 
 逐项结论见[算子迁移清单](operator-package-audit.md)，机器可读数据见[完整清单 JSON](operator-package-audit.json)，实施顺序见[迁移计划](operator-package-migration-plan.md)。原[外部能力补齐计划](operator-completion-plan.md)解决能力缺失，本计划解决已有能力归属，两者不互相代替。
 
-## 清点范围与证据
+## 原始规划清点范围与证据
 
 | 当前归属       | 原生算子数 |
 | -------------- | ---------: |
@@ -21,7 +21,7 @@
 | glue           |         20 |
 | 合计           |        251 |
 
-当前正式组合导出 243 项，DTS 不在 `packaging/release.json` 的正式组合内。243 项描述来自本机已验证的 1.3.12 原生 manifest；对应构建源码 `6feaca4` 与本基线的原生实现一致，差异仅为两个 Python 工具脚本。DTS 的 8 项端口描述参考旧 1.1.0 manifest，并逐项核对当前注册、参数和计算源码；它不构成本轮重新构建完整 DTS 运行库的证据。
+原始规划时正式组合导出243项，DTS未在`packaging/release.json`的正式组合内。243项描述来自本机已验证的1.3.12原生manifest；对应构建源码`6feaca4`与规划基线的原生实现一致，差异仅为两个Python工具脚本。原始DTS的8项端口描述参考旧1.1.0 manifest并核对注册源码。M3之后的完整组合为261项原生算子、8个Python示例；最新描述与退役历史以[机器清单](operator-package-audit.json)及各阶段实际manifest证据为准。
 
 另逐项记录仓库随附的 7 个 Python 示例节点。用户运行时导入的 `py.*`、用户组合库 `lib.*`、外部目录包及测试专用节点没有固定封闭集合，不计入原生 251 项。它们的扩展接口、缺依赖行为及随运行库交付的示例仍必须参加迁移验收。附属资产另清点 6 种 StandardGap 导入器、7 个随包片段、6 种 Bundle；不把这些误计为算子。
 

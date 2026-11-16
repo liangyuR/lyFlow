@@ -177,6 +177,68 @@ if(NOT ordered STREQUAL "std-image;glue")
 endif()
 ''')
 
+    def test_optional_backends_require_selection_and_are_shared_across_packs(self):
+        declarations = '''
+lyflow_declare_module(NAME portable TARGET portable SETUP setup_portable)
+lyflow_declare_module(NAME backend TARGET backend SETUP setup_backend REQUIRES portable)
+lyflow_declare_module(NAME dependent TARGET dependent SETUP setup_dependent REQUIRES backend)
+lyflow_pack_dependencies(NAME public DEFAULT ON MODULES portable OPTIONAL_MODULES backend)
+lyflow_pack_dependencies(NAME scene DEFAULT OFF MODULES backend)
+'''
+        self.check_cmake(declarations + '''
+lyflow_resolve_pack_modules(ordered PACKS public)
+get_property(active GLOBAL PROPERTY LYFLOW_PACK_public_ACTIVE_MODULES)
+if(NOT ordered STREQUAL "portable" OR NOT active STREQUAL "portable")
+  message(FATAL_ERROR "Unselected optional backend became required: ${ordered}/${active}")
+endif()
+lyflow_resolve_pack_modules(ordered PACKS public MODULES dependent)
+get_property(active GLOBAL PROPERTY LYFLOW_PACK_public_ACTIVE_MODULES)
+if(NOT ordered STREQUAL "portable;backend;dependent" OR NOT active STREQUAL "portable;backend")
+  message(FATAL_ERROR "Transitive backend was not selected: ${ordered}/${active}")
+endif()
+lyflow_resolve_pack_modules(ordered PACKS public MODULES backend)
+get_property(active GLOBAL PROPERTY LYFLOW_PACK_public_ACTIVE_MODULES)
+if(NOT ordered STREQUAL "portable;backend" OR NOT active STREQUAL "portable;backend")
+  message(FATAL_ERROR "Explicit public backend selection was lost: ${ordered}/${active}")
+endif()
+lyflow_resolve_pack_modules(ordered PACKS public scene)
+get_property(active GLOBAL PROPERTY LYFLOW_PACK_public_ACTIVE_MODULES)
+if(NOT ordered STREQUAL "portable;backend" OR NOT active STREQUAL "portable;backend")
+  message(FATAL_ERROR "Scene-required backend was not shared: ${ordered}/${active}")
+endif()
+lyflow_resolve_pack_modules(ordered PACKS public)
+get_property(active GLOBAL PROPERTY LYFLOW_PACK_public_ACTIVE_MODULES)
+if(NOT ordered STREQUAL "portable" OR NOT active STREQUAL "portable")
+  message(FATAL_ERROR "Backend selection leaked between resolutions: ${ordered}/${active}")
+endif()
+''')
+        self.check_cmake(declarations +
+                         'lyflow_resolve_pack_modules(ordered PACKS public MODULES absent)\n',
+                         'Missing lyFlow module: absent')
+        self.check_cmake(declarations +
+                         'lyflow_resolve_pack_modules(ordered PACKS absent)\n',
+                         'Missing lyFlow pack declaration: absent')
+        self.check_cmake(declarations + '''
+lyflow_pack_dependencies(NAME broken DEFAULT ON OPTIONAL_MODULES absent)
+lyflow_resolve_pack_modules(ordered PACKS broken)
+''', 'Missing lyFlow module: absent')
+        self.check_cmake('''
+function(setup_portable)
+  add_library(portable INTERFACE)
+endfunction()
+function(setup_heavy)
+  message(FATAL_ERROR "Unselected backend setup was invoked")
+endfunction()
+lyflow_declare_module(NAME portable TARGET portable SETUP setup_portable)
+lyflow_declare_module(NAME heavy TARGET heavy SETUP setup_heavy REQUIRES portable)
+lyflow_pack_dependencies(NAME public DEFAULT ON MODULES portable OPTIONAL_MODULES heavy)
+lyflow_resolve_pack_modules(ordered PACKS public)
+lyflow_configure_modules(${ordered})
+if(NOT TARGET portable OR TARGET heavy)
+  message(FATAL_ERROR "Optional backend changed the portable target closure")
+endif()
+''', configure=True)
+
     def test_pack_cycles_are_rejected_before_configuration(self):
         self.check_cmake('''
 lyflow_pack_dependencies(NAME first DEFAULT ON PACKS second)
