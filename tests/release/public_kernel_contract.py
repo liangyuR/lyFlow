@@ -35,6 +35,36 @@ def imports(path):
     return dependencies
 
 
+def optional_backend(sdk, workspace, cmake):
+    source = workspace / 'component-contract'
+    source.mkdir()
+    (source / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.20)
+project(lyflow_optional_backend LANGUAGES NONE)
+if(REQUIRE_ROBUST)
+  find_package(lyflow ${CONSUMER_VERSION} EXACT REQUIRED COMPONENTS geometry_kernel profile_robust_kernel)
+else()
+  find_package(lyflow ${CONSUMER_VERSION} EXACT REQUIRED COMPONENTS geometry_kernel OPTIONAL_COMPONENTS profile_robust_kernel)
+  if(NOT lyflow_FOUND OR NOT TARGET lyflow::geometry_kernel OR
+     lyflow_profile_robust_kernel_FOUND OR TARGET lyflow::profile_robust_kernel)
+    message(FATAL_ERROR "Optional unavailable PCL backend must preserve the lightweight SDK")
+  endif()
+endif()
+''', encoding='utf-8')
+    version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
+    common = [cmake, '-S', str(source), '-G', 'Ninja', '-DCMAKE_TOOLCHAIN_FILE=',
+              f'-Dlyflow_DIR={sdk}', f'-DCONSUMER_VERSION={version}',
+              '-DCMAKE_DISABLE_FIND_PACKAGE_PCL=ON']
+    run(common + ['-B', str(workspace / 'optional-backend')], workspace)
+    if (sdk / 'lib/cmake/lyflow/lyflow-profile-robust-targets.cmake').is_file():
+        result = subprocess.run(common + ['-B', str(workspace / 'required-backend'),
+                                         '-DREQUIRE_ROBUST=ON'], cwd=workspace, text=True,
+                                encoding='utf-8', errors='replace', stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, check=False)
+        (workspace.parent / 'required-backend-rejected.log').write_text(result.stdout, encoding='utf-8')
+        if result.returncode == 0 or 'CMAKE_DISABLE_FIND_PACKAGE_PCL' not in result.stdout:
+            raise RuntimeError('A required unavailable robust backend must fail explicitly')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sdk', type=Path, required=True)
@@ -64,6 +94,7 @@ def main():
         cmake = shutil.which('cmake')
         if not cmake:
             raise RuntimeError('cmake is required')
+        optional_backend(isolated, workspace, cmake)
         run([cmake, '-S', str(isolated / 'examples/public-kernels'), '-B', str(build),
              '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_TOOLCHAIN_FILE=',
              f'-Dlyflow_DIR={isolated}', '-DCMAKE_DISABLE_FIND_PACKAGE_PCL=ON',
@@ -74,7 +105,8 @@ def main():
         if os.name == 'nt':
             evidence['consumerImports'] = imports(consumer)
         run([str(consumer)], workspace)
-        evidence.update(sdk=str(sdk), isolatedRuntimeDllCount=0, consumerPassed=True)
+        evidence.update(sdk=str(sdk), isolatedRuntimeDllCount=0, consumerPassed=True,
+                        optionalBackendFallbackPassed=True)
     (output / 'evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + '\n',
                                         encoding='utf-8')
 

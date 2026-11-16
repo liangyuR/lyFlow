@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "b22fde7fad01b7aea67886b6fe3345e92a5fe8bb",
+  "sourceRevision": "a48b9f326d03ad44bff434632870a2c3b3ac2354",
   "productVersion": "1.4.3",
   "nativeCount": 261,
   "pythonExampleCount": 8,
@@ -466,7 +466,7 @@
     "packs/gap/lyflow_pack_dependencies.cmake": "2e44dc69ce1be25cc7c34d5886fd438bdc6e0686d2d090d2b6fd369b944755ed",
     "packs/std-metrology/lyflow_op_pack.cmake": "c8fd6c0cbf20eeeff93733356af10124a7cd704cab2118021d61476d11809244",
     "packs/std-geometry/ops/constraints_3d.cpp": "0ba2180fa3d7b5fb36b9fc387fdb1e63254fce8d7f02d6335a8b29b0c86d79d8",
-    "core/cmake/lyflow-config.cmake.in": "5f0eee3ea52a790334e3e0c2668e54d16d7f90e520a584f46a277df5016011a9",
+    "core/cmake/lyflow-config.cmake.in": "fce0253d05eee125db9df087f3d4ea5e066a2be590cbba47a67880e9f57294c9",
     "kernels/include/lyflow/kernel/constraints.h": "c34272c435e4c3ce5277f8cf7621d1b2a9f98a4719526a30fa488e0e86a32ccb",
     "kernels/include/lyflow/kernel/geometry.h": "b0a9d0f072db1a6bc02aef67477afa4cdd2b158dbb314074493c24ab8ade2631",
     "kernels/src/metrology.cpp": "0348824337877278b99f368286bf5475c109d61d56ed223734600f9684336a1f",
@@ -42542,7 +42542,7 @@
       "introducedPythonIds": [],
       "retiredNativeIds": [],
       "note": "M4首个切片：单一RANSAC/LM实现的公共静态核与可选后端声明；注册ID/版本/端口/参数保持，整个M4的38项迁移尚未完成。",
-      "reviewedChange": "公开PCL稳健轮廓核、奇异数值原子拒绝、旧点云接口纯适配、可选模块闭包与独立SDK导出；261项注册契约与抽取前逐结构一致，M4b/M4c继续独立验收。",
+      "reviewedChange": "复核SDK可选鲁棒组件依赖降级：可选PCL缺失不阻断轻量组件，必需PCL缺失明确失败；独立消费者实际验证。",
       "reviewedSourceChanges": [
         {
           "path": "core/CMakeLists.txt",
@@ -42627,6 +42627,12 @@
           "previousSha256": "12f8d05aa2389a887fd60e38cb4d2e7425384af2cae101c00be64aac5bc46b68",
           "sha256": "d6cd946ce6dbd4b020fe26bc19a3046dcf6a3c1d174c14f6dd5ec3a3592bf0eb",
           "kind": "tracking_added"
+        },
+        {
+          "path": "core/cmake/lyflow-config.cmake.in",
+          "previousSha256": "5f0eee3ea52a790334e3e0c2668e54d16d7f90e520a584f46a277df5016011a9",
+          "sha256": "fce0253d05eee125db9df087f3d4ea5e066a2be590cbba47a67880e9f57294c9",
+          "kind": "modified"
         }
       ],
       "manifestEvidence": {
@@ -42668,8 +42674,11 @@
           "robustConsumerPassed": true,
           "temporaryWorkspaceRemoved": true,
           "lightweightConsumerPassed": true,
-          "robustEvidence": "build/m4-robust-sdk-final/evidence.json",
-          "lightweightEvidence": "build/m4-light-sdk-acceptance/evidence.json"
+          "robustEvidence": "build/m4-robust-sdk-optional-fix/evidence.json",
+          "lightweightEvidence": "build/m4-light-sdk-acceptance/evidence.json",
+          "optionalBackendFallbackPassed": true,
+          "requiredBackendRejected": true,
+          "optionalEvidence": "build/m4-optional-sdk-acceptance/evidence.json"
         },
         "moduleOrders": {
           "pclSupportFirst": true,
