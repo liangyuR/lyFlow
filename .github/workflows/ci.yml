@@ -540,7 +540,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 安装失败' }
           python tests/release/public_kernel_contract.py --sdk "$sdk" --output-dir build/m2-kernel-full
           if ($LASTEXITCODE -ne 0) { throw 'M2完整SDK公共核隔离消费失败' }
-          python tests/release/public_robust_kernel_contract.py --sdk "$sdk" --output-dir build/m4-robust-kernel-sdk
+          python tests/release/public_robust_kernel_contract.py --sdk "$sdk" --output-dir build/m4-robust-kernel-sdk --toolchain "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" --installed-dir "$env:VCPKG_INSTALLED_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'M4独立PCL拟合核SDK消费失败' }
           cmake -S tests/release/p5_sdk_consumer -B build/p5-sdk-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= "-Dlyflow_DIR=$sdk" "-DLYFLOW_CONSUMER_VERSION=$version"
           if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 配置失败' }

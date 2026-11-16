@@ -107,6 +107,7 @@ def main():
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--toolchain', type=Path)
+    parser.add_argument('--installed-dir', type=Path)
     arguments = parser.parse_args()
     if os.name != 'nt':
         raise RuntimeError('This PE-import and runtime isolation acceptance gate requires Windows')
@@ -123,6 +124,8 @@ def main():
         default = Path('C:/vcpkg/scripts/buildsystems/vcpkg.cmake')
         configured_toolchain = default if default.is_file() else None
     toolchain = Path(configured_toolchain).resolve(strict=True) if configured_toolchain else None
+    configured_install = arguments.installed_dir or os.environ.get('VCPKG_INSTALLED_DIR')
+    installed = Path(configured_install).resolve(strict=True) if configured_install else None
     with isolated_workspace(output) as workspace:
         isolated = workspace / 'sdk'
         isolated.mkdir()
@@ -140,6 +143,8 @@ def main():
                      '-DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON',
                      '-DCMAKE_DISABLE_FIND_PACKAGE_onnxruntime=ON',
                      f'-DCMAKE_TOOLCHAIN_FILE={toolchain or ""}']
+        if installed:
+            configure.append(f'-DVCPKG_INSTALLED_DIR={installed.as_posix()}')
         run(configure, workspace, output / 'configure.log')
         run([cmake, '--build', str(build), '--parallel', '2'], workspace, output / 'build.log')
         binary_dirs = [sdk / 'bin']
@@ -161,6 +166,7 @@ def main():
             if report.get(name) is not True:
                 raise RuntimeError(f'Robust kernel acceptance failed: {name}')
         evidence = {'sdk': str(sdk), 'toolchain': str(toolchain) if toolchain else None,
+                    'installedDir': str(installed) if installed else None,
                     'isolatedSdkRuntimeDllCount': 0, 'runtimePath': 'System32 only',
                     'runtimeImports': imports, 'consumer': report, 'consumerPassed': True}
     if workspace.exists():
