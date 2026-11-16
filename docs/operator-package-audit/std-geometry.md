@@ -1,13 +1,13 @@
 # std-geometry 逐算子迁移清单
 
-状态：实施中；当前 37 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 38 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
 ## 025 · geometry.circle_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维圆构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:219](../../packs/std-geometry/ops/geometry.cpp#L219)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:241](../../packs/std-geometry/ops/geometry.cpp#L241)。
 - 端口：`x:Record?`, `y:Record?`, `radius:Record?` → `circle:Circle2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -25,7 +25,7 @@
 ## 026 · geometry.distance_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何距离。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:286](../../packs/std-geometry/ops/geometry.cpp#L286)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:308](../../packs/std-geometry/ops/geometry.cpp#L308)。
 - 端口：`a:Any`, `b:Any` → `distance:Measurement`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -61,7 +61,7 @@
 ## 028 · geometry.intersect_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维几何求交。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:328](../../packs/std-geometry/ops/geometry.cpp#L328)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:350](../../packs/std-geometry/ops/geometry.cpp#L350)。
 - 端口：`a:Any`, `b:Any` → `intersections:Record`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -79,7 +79,7 @@
 ## 029 · geometry.line_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维直线与线段构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:150](../../packs/std-geometry/ops/geometry.cpp#L150)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:172](../../packs/std-geometry/ops/geometry.cpp#L172)。
 - 端口：`x:Record?`, `y:Record?`, `angle:Record?` → `line:Line2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -97,7 +97,7 @@
 ## 030 · geometry.midpoint_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点中点。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:366](../../packs/std-geometry/ops/geometry.cpp#L366)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:388](../../packs/std-geometry/ops/geometry.cpp#L388)。
 - 端口：`a:Point2D`, `b:Point2D` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -115,7 +115,7 @@
 ## 031 · geometry.plane
 
 - 当前：`std-geometry` / `1.0.0` / 三维平面构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:248](../../packs/std-geometry/ops/geometry.cpp#L248)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:270](../../packs/std-geometry/ops/geometry.cpp#L270)。
 - 端口：无 → `plane:Plane`。
 - 参数单位标注：offset=m。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -133,7 +133,7 @@
 ## 032 · geometry.point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点构造。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:131](../../packs/std-geometry/ops/geometry.cpp#L131)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:153](../../packs/std-geometry/ops/geometry.cpp#L153)。
 - 端口：`x:Record?`, `y:Record?` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -151,7 +151,7 @@
 ## 033 · geometry.point_at
 
 - 当前：`std-geometry` / `1.0.0` / 交点索引提取。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:418](../../packs/std-geometry/ops/geometry.cpp#L418)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:440](../../packs/std-geometry/ops/geometry.cpp#L440)。
 - 端口：`intersections:Record` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -169,7 +169,7 @@
 ## 034 · geometry.project_point_2d
 
 - 当前：`std-geometry` / `1.0.0` / 二维点正交投影。目标：`std-geometry`；保留并验边界；**M2**。
-- 源码：[packs/std-geometry/ops/geometry.cpp:385](../../packs/std-geometry/ops/geometry.cpp#L385)。
+- 源码：[packs/std-geometry/ops/geometry.cpp:407](../../packs/std-geometry/ops/geometry.cpp#L407)。
 - 端口：`point:Point2D`, `line:Line2D` → `point:Point2D`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core数据/Record/几何校验与C++标准库；当前及目标均不引PCL/OpenCV/ORT
@@ -672,3 +672,21 @@
 - 公开接口：kernels/include/lyflow/kernel/geometry.h；kernels/include/lyflow/kernel/rigid.h；core/include/lyflow/pose.h
 - 阶段验收边界：当前描述已与真实全包manifest核验；独立静态核、无重后端、既有算子与安装SDK数值回归由阶段验证证据记录，不代表M3场景算法迁移。
 - M2迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/transform_make.cpp:56` @ `f0c043c6341755e8f254ac499a1593df087b6d94`；原目标包和依赖规划保留。
+
+## 117 · geometry.box_2d
+
+- 当前：`std-geometry` / `1.0.0` / 二维包围框构造。目标：`std-geometry`；保留并验边界；**M4**。
+- 源码：[packs/std-geometry/ops/geometry.cpp:132](../../packs/std-geometry/ops/geometry.cpp#L132)。
+- 端口：无 → `box:Box2D`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：显式构造米制或像素Box2D；两轴边界须有限、在float32范围且min<=max，不自动交换边界。
+- 目标契约：显式构造米制或像素Box2D；两轴边界须有限、在float32范围且min<=max，不自动交换边界。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：m/px、相等边界、逆序/非有限/溢出边界拒绝；作为外部物理ROI时须另外显式绑定Profile坐标上下文。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "lyflow/kernel/profile_robust.h"
+#include "lyflow/kernel/profile_features.h"
 
 namespace robust = lyflow::kernel::profile_robust;
 
@@ -123,9 +124,53 @@ int main() {
     require(cancelled && line.coefficients == unchanged.coefficients &&
                 line.inliers == unchanged.inliers,
             "Cancellation changed the output or was ignored");
+    namespace features = lyflow::kernel::profile_features;
+    features::LineOptions featureOptions;
+    featureOptions.fit.distThresh = 0.00001F;
+    featureOptions.segmentPoints = 12;
+    featureOptions.toward = {0.1, 0.035};
+    featureOptions.endpoints = features::Endpoints::InlierEnds;
+    features::LineFeature feature;
+    require(features::fitLine(samples(linePoints), featureOptions, feature),
+            "Complete public line feature workflow failed");
+    require(feature.segmentApplied && feature.inliers.size() == 12 && feature.innerSlot == 96 &&
+                feature.start[0] < feature.end[0] &&
+                feature.quality.pointCount == linePoints.size(),
+            "Line feature segment/endpoint/original-slot contract changed");
+    std::vector<robust::Point> weightedPoints;
+    for (int i = 0; i < 6; ++i)
+      weightedPoints.push_back({i * 0.01F, i * 0.001F, 0});
+    featureOptions.segmentPoints = 0;
+    featureOptions.fit.distThresh = 1e-8F;
+    featureOptions.directionMode = features::DirectionMode::Fixed;
+    featureOptions.hasReference = true;
+    featureOptions.referenceDirection = {1, 0};
+    require(features::fitLine(samples(weightedPoints), featureOptions, feature),
+            "Fixed direction feature workflow failed");
+    require(feature.inliers == std::vector<int>{2, 3, 3, 4} &&
+                feature.coefficients[1] == weightedPoints[3].y && feature.quality.inlierCount == 4,
+            "Final quality weights must retain the legacy fixed-direction multiplicity");
+    const auto preservedFeature = feature;
+    featureOptions.minInliers = 100;
+    require(!features::fitLine(samples(weightedPoints), featureOptions, feature) &&
+                feature.coefficients == preservedFeature.coefficients &&
+                feature.inliers == preservedFeature.inliers,
+            "Rejected feature quality gate changed caller-owned output");
+    cancelled = false;
+    try {
+      features::fitLine(samples(weightedPoints), featureOptions, feature, nullptr,
+                        [] { return true; });
+    } catch (const robust::Cancelled&) {
+      cancelled = true;
+    }
+    require(cancelled && feature.coefficients == preservedFeature.coefficients &&
+                feature.inliers == preservedFeature.inliers,
+            "Cancelled line feature workflow changed caller-owned output");
     std::cout << "{\"type\":\"lyflow.ProfileRobustSdkAcceptance.v1\",\"fitMethods\":4,"
                  "\"radiusPrior\":true,\"inputSlotsPreserved\":true,\"arraysReadonly\":true,"
-                 "\"invalidOutputAtomic\":true,\"cancelOutputAtomic\":true,\"lineInliers\":"
+                 "\"invalidOutputAtomic\":true,\"cancelOutputAtomic\":true,"
+                 "\"profileFeatures\":true,\"weightedInliersPreserved\":true,"
+                 "\"featureOutputAtomic\":true,\"lineInliers\":"
               << line.inliers.size() << ",\"circleInliers\":" << circle.inliers.size() << "}\n";
     return 0;
   } catch (const std::exception& error) {

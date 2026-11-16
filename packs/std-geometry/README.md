@@ -1,20 +1,23 @@
 # std-geometry
 
-无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.3.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI。
+无 PCL、OpenCV 等额外依赖的基础几何算子包，版本 0.6.0。默认随标准包编入，也可通过外部包路径单独启用。复用已有原生二维几何和 Plane 数据类型，不增加 Data::Kind 或 C ABI；完整38项见[审计清单](../../docs/operator-package-audit/std-geometry.md)。
 
-| ID | 名称 | 输入 → 输出 |
-|---|---|---|
-| `geometry.point_2d` | 二维点构造 | 参数 / 可选 x,y → Point2D |
-| `geometry.line_2d` | 二维直线与线段构造 | 参数 / 可选 x,y,angle → Line2D |
-| `geometry.circle_2d` | 二维圆构造 | 参数 / 可选 x,y,radius → Circle2D |
-| `geometry.plane` | 三维平面构造 | 参数 → Plane |
-| `geometry.distance_2d` | 二维几何距离 | a, b → Measurement |
-| `geometry.intersect_2d` | 二维几何求交 | a, b → Record |
-| `geometry.midpoint_2d` | 二维点中点 | Point2D a, b → Point2D |
-| `geometry.project_point_2d` | 二维点正交投影 | Point2D, Line2D → Point2D |
-| `geometry.point_at` | 交点索引提取 | Record → Point2D |
+| ID                          | 名称               | 输入 → 输出                       |
+| --------------------------- | ------------------ | --------------------------------- |
+| `geometry.box_2d`           | 二维包围框构造     | min/max、unit 参数 → Box2D        |
+| `geometry.point_2d`         | 二维点构造         | 参数 / 可选 x,y → Point2D         |
+| `geometry.line_2d`          | 二维直线与线段构造 | 参数 / 可选 x,y,angle → Line2D    |
+| `geometry.circle_2d`        | 二维圆构造         | 参数 / 可选 x,y,radius → Circle2D |
+| `geometry.plane`            | 三维平面构造       | 参数 → Plane                      |
+| `geometry.distance_2d`      | 二维几何距离       | a, b → Measurement                |
+| `geometry.intersect_2d`     | 二维几何求交       | a, b → Record                     |
+| `geometry.midpoint_2d`      | 二维点中点         | Point2D a, b → Point2D            |
+| `geometry.project_point_2d` | 二维点正交投影     | Point2D, Line2D → Point2D         |
+| `geometry.point_at`         | 交点索引提取       | Record → Point2D                  |
 
 二维坐标使用显式 `unit=m|px`。两个输入单位必须一致，不把毫米显示值混入米制几何。构造器的可选标量端口读取经过校验的 `std.Value.v1` number，x/y/radius 的单位必须精确匹配坐标 unit，覆盖对应参数；不隐式转换 mm 或无单位数。角度输入显式声明 deg 或 rad，覆盖方向向量/方向角参数。没有角度输入时，直线的 representation 选择方向向量或显式单位的角度参数。
+
+Box2D两轴边界必须有限且在float32范围内，min≤max，不自动调换。把米制框作为原生Profile拟合ROI时，还须用`profile.bind_geometry`明确frame/plane与来源；像素框不能直接参与物理拟合，见[公共Profile契约](../../docs/profile-public-operators.md)。
 
 几何值要求有限；圆半径为正，负值不静默截断为零；直线方向非零；线段端点不重合。线段模式的 start/end 为权威端点，不接受角度输入；无限线使用经过点和方向。平面使用 `n·p+d=0`，坐标为米，法向和 d 同除以法向长度。宿主可绑定顶层图参数、按次覆盖法向和 d，不在包中引入外部 request 单例状态。现有公开 C ABI 不支持直接注入 Plane，不能把原生内部数据类型误认为宿主注入接口已经具备该能力。
 
@@ -44,7 +47,10 @@
   "data": {
     "unit": "m",
     "relation": "finite",
-    "points": [[-1, 0], [1, 0]]
+    "points": [
+      [-1, 0],
+      [1, 0]
+    ]
   }
 }
 ```
@@ -67,22 +73,22 @@
 
 P1 在不增加核心种类或 ABI 的前提下，提供以下节点。外部20项源码/脚本属性逐项分析及保留边界见[实现取舍](../../docs/p1-analysis-pose.md)。
 
-| ID | 契约 |
-|---|---|
-| `pose.construct_2d` / `pose.construct_3d` | 带稳定ID、参考帧、尺寸及元数据的单个工件；动态位置与旋转标量显式单位。 |
-| `pose.concat` / `pose.get` | 同维、同帧、同单位集合，保留顺序；重复ID和越界报错。 |
-| `pose.filter` | 置信度、类别、名称、pickable、XY面积、位置、最小间距或数值字段范围；同时输出 matched/rejected。 |
-| `pose.update` | 替换名称、分类、置信度、pickable、size或attributes，不修改身份和位姿。 |
-| `pose.transform_2d` / `pose.transform_3d` | 显式 source→target 左乘；二维为无镜像相似变换，三维为右手刚体。 |
-| `pose.offset_3d` | 局部或父参考帧下的米制位置偏移，不改变旋转和尺寸。 |
-| `pose.flip_axis_2d` | 用户明确声明n重旋转对称等价，选最靠近给定方向的等价角度。 |
-| `pose.frame_from_points` | 按序两/三点构造右手正交帧；三点输入优先，两点模式将up正交化，拒绝重合/共线。 |
-| `pose.decompose_2d` / `pose.compare_2d` | 显式索引分解带单位数值；同帧同单位比较位置与显式周期角度。 |
-| `pose.to_text` / `pose.from_text` | 完整type/data的版本化JSON往返，不丢ID、帧、单位、属性和列表项；文本最多64KiB。 |
-| `pose.to_transform` | 显式提取所选米制工件局部→父参考帧的原生float32刚体矩阵。 |
-| `pose.to_world_plane` | H映射像素中心，局部雅可比映射朝向，再乘已知plane→world；必须配置已知米制size3D，不猜透视框的物理尺寸。 |
-| `geometry.transform_2d` | 点/线/圆保持类型的相似变换，方向只乘线性部分，线段端点同步更新。 |
-| `geometry.transform_plane` | 可逆仿射的逆转置法向与平移d，拒绝归一化矩阵相对行列式≤1e-12的近奇异变换。 |
+| ID                                        | 契约                                                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pose.construct_2d` / `pose.construct_3d` | 带稳定ID、参考帧、尺寸及元数据的单个工件；动态位置与旋转标量显式单位。                                 |
+| `pose.concat` / `pose.get`                | 同维、同帧、同单位集合，保留顺序；重复ID和越界报错。                                                   |
+| `pose.filter`                             | 置信度、类别、名称、pickable、XY面积、位置、最小间距或数值字段范围；同时输出 matched/rejected。        |
+| `pose.update`                             | 替换名称、分类、置信度、pickable、size或attributes，不修改身份和位姿。                                 |
+| `pose.transform_2d` / `pose.transform_3d` | 显式 source→target 左乘；二维为无镜像相似变换，三维为右手刚体。                                        |
+| `pose.offset_3d`                          | 局部或父参考帧下的米制位置偏移，不改变旋转和尺寸。                                                     |
+| `pose.flip_axis_2d`                       | 用户明确声明n重旋转对称等价，选最靠近给定方向的等价角度。                                              |
+| `pose.frame_from_points`                  | 按序两/三点构造右手正交帧；三点输入优先，两点模式将up正交化，拒绝重合/共线。                           |
+| `pose.decompose_2d` / `pose.compare_2d`   | 显式索引分解带单位数值；同帧同单位比较位置与显式周期角度。                                             |
+| `pose.to_text` / `pose.from_text`         | 完整type/data的版本化JSON往返，不丢ID、帧、单位、属性和列表项；文本最多64KiB。                         |
+| `pose.to_transform`                       | 显式提取所选米制工件局部→父参考帧的原生float32刚体矩阵。                                               |
+| `pose.to_world_plane`                     | H映射像素中心，局部雅可比映射朝向，再乘已知plane→world；必须配置已知米制size3D，不猜透视框的物理尺寸。 |
+| `geometry.transform_2d`                   | 点/线/圆保持类型的相似变换，方向只乘线性部分，线段端点同步更新。                                       |
+| `geometry.transform_plane`                | 可逆仿射的逆转置法向与平移d，拒绝归一化矩阵相对行列式≤1e-12的近奇异变换。                              |
 
 工件数据使用 `vision.Pose2D.v1` / `vision.Pose3D.v1`，集合使用 `vision.Poses2D.v1` / `vision.Poses3D.v1`。单体 `data` 的必需字段为非空 `id`、`frame`、`unit`、中心 `position`、正尺寸 `size`，以及二维弧度 `angle` 或三维xyzw单位四元数 `rotation`。二维单位为 `px` 或 `m`，三维仅为 `m`；不隐式换单位或变更帧。可选字段为字符串 `name/classId/classLabel`、`confidence∈[0,1]`、布尔 `pickable` 和有界对象 `attributes`。缺失可选字段没有默认业务判定；构造器的 `pickable` 默认false。
 
@@ -104,8 +110,8 @@ LyFlow 1.3.11 / std-geometry 0.3.0 增加七个无PCL/OpenCV依赖的节点。�
 | `pose.rotate_axis_3d` | 显式continuousSymmetry，保持固定局部轴，Point/Direction、reverse/useZ；零向量/重合点/平行退化拒绝。                                            |
 | `pose.compare_3d`     | ID/index批次配对、bToA、父/局部平移差、三轴夹角和geodesic角，有限/连续对称，alarm超差原子失败。轴差用稳定atan2计算，不放宽公差。               |
 | `pose.rigid_template` | 2..256个带ID参考点的位置、逐点及点对公差；小Record可由GraphDoc参数/宿主持久化，不隐式修改全局文件。                                            |
-| `pose.rigid_check`    | 全部点对距离差或proper SO(3)对应点配准残差检查；始终交付result和accepted，退化observable=false，无伪造变换。 |
-| `pose.rigid_register` | 要求定位点可观测，交付实际float32原生Transform、result和accepted；按该实际变换重评残差，可观超差保留候选，退化明确失败。 |
+| `pose.rigid_check`    | 全部点对距离差或proper SO(3)对应点配准残差检查；始终交付result和accepted，退化observable=false，无伪造变换。                                   |
+| `pose.rigid_register` | 要求定位点可观测，交付实际float32原生Transform、result和accepted；按该实际变换重评残差，可观超差保留候选，退化明确失败。                       |
 | `geometry.extend_2d`  | 互斥消费Point2D/Line2D/Circle2D、Features2D集合或Poses2D，嵌入指定X/Y/Z平面、显式px→m比例和可选刚体；保留线段端点、圆法向/半径及已知工件厚度。 |
 
 三维位置/尺寸/平移统一m，角度rad、xyzw单位四元数，跨帧须显式source→target刚体。工件ID/名称/类别/置信度/属性保留，计算结果pickable=false。模板距离模式不判绝对姿态且不能区分镜像；registration要求非共线及唯一可观旋转，float32交付误差必须满足原门限。二维升维是已知平面嵌入，不是未知深度恢复。

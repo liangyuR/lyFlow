@@ -169,7 +169,8 @@ def main():
         if report.get('type') != 'lyflow.ProfileRobustSdkAcceptance.v1' or report.get('fitMethods') != 4:
             raise RuntimeError('Unexpected robust kernel acceptance report')
         for name in ('radiusPrior', 'inputSlotsPreserved', 'arraysReadonly',
-                     'invalidOutputAtomic', 'cancelOutputAtomic'):
+                     'invalidOutputAtomic', 'cancelOutputAtomic', 'profileFeatures',
+                     'weightedInliersPreserved', 'featureOutputAtomic'):
             if report.get(name) is not True:
                 raise RuntimeError(f'Robust kernel acceptance failed: {name}')
         evidence = {'sdk': str(sdk), 'toolchain': str(toolchain) if toolchain else None,

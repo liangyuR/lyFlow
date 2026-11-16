@@ -140,6 +140,39 @@ def validate(data, manifests, generated_docs=None):
                 m4a.get('introducedNativeIds') == [] and m4a.get('introducedPythonIds') == [] and
                 m4a.get('retiredNativeIds') == [],
                 'M4a只能抽公共核，不得隐式新增/退役算子')
+        if m4a.get('status') == 'complete':
+            proof = m4a.get('mergeEvidence', {})
+            require(proof.get('pr') == 65 and
+                    proof.get('revision') == '02e15806136df452bd575ff0e20610db7636918c' and
+                    proof.get('reviewedHead') == '2f2e99141b39ee94a105a01adf2dff40ce125337' and
+                    proof.get('workflowRun') == 43824076118 and proof.get('jobCount') == 7 and
+                    proof.get('conclusion') == 'success' and proof.get('codexReview') == 'completed_no_findings',
+                    'M4a完成状态缺少PR65精确合并、CI或审查证据')
+    m4b = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M4b'), None)
+    if m4b:
+        additions = {'geometry.box_2d', 'profile.bind_geometry', 'profile.nearest_sample',
+                     'profile.nearest_to_line', 'profile.filter_validity', 'profile.fit_line_robust',
+                     'profile.fit_circle_robust', 'metrology.flush_point_line', 'metrology.circle_gap',
+                     'metrology.point_offset'}
+        deferred = {'gap.fit_line', 'gap.selected_point', 'gap.nearest_to_line',
+                    'gap.drop_non_finite', 'gap.to_measurement_frame', 'gap.flush', 'gap.gap',
+                    'gap.point_offset'}
+        require(m4a is not None and m4a.get('status') == 'complete', 'M4b缺少已完成M4a前置证据')
+        require(m4b.get('expectedNativeCount') == 271 and m4b.get('expectedPythonExampleCount') == 8 and
+                m4b.get('targetProductVersion') == '1.4.4' and
+                set(m4b.get('introducedNativeIds', [])) == additions and
+                len(m4b.get('introducedNativeIds', [])) == len(additions) and
+                m4b.get('introducedPythonIds') == [] and m4b.get('retiredNativeIds') == [],
+                'M4b新增范围须精确为10项公共节点且不能提前退役旧ID')
+        require(set(m4b.get('changedNativeIds', [])) ==
+                {'gap.fit_line', 'gap.flush', 'gap.gap', 'gap.point_offset'} and
+                len(m4b.get('changedNativeIds', [])) == 4,
+                'M4b旧版本变更范围须精确为4项Gap适配节点')
+        require(m4b.get('deferredRetirements', {}).get('stage') == 'M4c' and
+                set(m4b.get('deferredRetirements', {}).get('nativeIds', [])) == deferred and
+                deferred <= set(registered), 'M4b必须保留8项旧ID至M4c完成场景迁移')
+        wave = next((stage for stage in data.get('stageLedger', []) if stage.get('stage') == 'M4'), {})
+        require(wave.get('status') != 'complete', 'M4b不能代替整个M4场景波次验收')
     waves = set(data.get('migrationWaves', {}))
     for row in rows:
         identifier = row['id']

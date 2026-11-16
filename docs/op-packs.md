@@ -5,7 +5,7 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
-本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，M3 提供原生Profile处理链与 `solutions/dts` 场景试点，见[DTS迁移指南](dts-profile-migration.md)。gap/glue仍待后续波次。
+本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，M3 提供原生Profile处理链与 `solutions/dts` 场景试点，见[DTS迁移指南](dts-profile-migration.md)。M4b新增公共选择/稳健拟合/度量与来源绑定，见[公共Profile契约](profile-public-operators.md)；Gap场景/Bundle/导入图留M4c，glue留M5。
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
@@ -25,14 +25,14 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
-| `std-geometry`   | 0.5.0  | ON      | 37项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
-| `std-metrology`  | 0.2.0  | ON      | 4项平面标定、轮廓间隙面差与有符号点线度量                                                        | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
-| `std-profile`    | 0.2.0  | ON      | 10项原生输入/清洗/分面/拟合/变换及显式适配；[数据契约](profile-data-contract.md)                 | core与标准库，无PCL/OpenCV/ORT                                                      |
+| `std-geometry`   | 0.6.0  | ON      | 38项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
+| `std-metrology`  | 0.3.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
+| `std-profile`    | 0.3.0  | ON      | 14项轻量能力，可选后端增加2项稳健拟合；[契约](profile-public-operators.md)                       | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
 | `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.3.0  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
 | `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
 | `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                          |
-| `gap`            | 0.2.0  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
+| `gap`            | 0.2.1  | **OFF** | `gap.*`                                                                                          | PCL、yaml-cpp、onnxruntime                                                          |
 | `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，

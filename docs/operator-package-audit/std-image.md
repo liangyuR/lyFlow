@@ -18,7 +18,7 @@
 - 验收：缺单位/错误单位/版本/奇异H拒绝；m/mm映射一致、齐次尺度不敏感、幂等升级、帧冲突失败且输入输出原子。
 - 说明：M1新增显式契约适配；不替代M3轮廓与DTS场景算法迁移。
 
-## 138 · cloud.fill_holes
+## 148 · cloud.fill_holes
 
 - 当前：`std-image` / `1.0.0` / 组织点云孔洞填补。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_inspection.cpp:1185](../../packs/std-image/ops/p5_inspection.cpp#L1185)。
@@ -32,7 +32,7 @@
 - 验收：验证不跨大深度、边界开关、仅用原观测、追加点索引与mapping重绑。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 139 · cloud.from_depth
+## 149 · cloud.from_depth
 
 - 当前：`std-image` / `1.0.0` / 深度图转点云。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/image_cloud.cpp:221](../../packs/std-image/ops/image_cloud.cpp#L221)。
@@ -46,7 +46,7 @@
 - 验收：验证内参、u16 depthScale、零/非有限剔除、RGB对齐和XYZ米制。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 140 · cloud.height_map
+## 150 · cloud.height_map
 
 - 当前：`std-image` / `1.0.0` / 点云正交高度图。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_projection.cpp:1222](../../packs/std-image/ops/p5_projection.cpp#L1222)。
@@ -60,7 +60,7 @@
 - 验收：验证零/负高度、最近/最高观测、可见/遮挡状态、父点和compact索引身份。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 141 · cloud.image_roi
+## 151 · cloud.image_roi
 
 - 当前：`std-image` / `1.0.0` / 图像区域选择点云。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p2_model_projection.cpp:388](../../packs/std-image/ops/p2_model_projection.cpp#L388)。
@@ -74,7 +74,7 @@
 - 验收：验证跨帧外参、零mask、z-buffer遮挡、通道保留及索引父身份。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 142 · cloud.orthographic_map
+## 152 · cloud.orthographic_map
 
 - 当前：`std-image` / `1.0.0` / 点云正交多特征图。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_projection.cpp:1222](../../packs/std-image/ops/p5_projection.cpp#L1222)。
@@ -88,7 +88,7 @@
 - 验收：验证法线旋转/缺失、normalValid、伪彩及与height_map共有映射一致。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 143 · cloud.project_camera
+## 153 · cloud.project_camera
 
 - 当前：`std-image` / `1.0.0` / 点云相机栅格对齐。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_projection.cpp:1265](../../packs/std-image/ops/p5_projection.cpp#L1265)。
@@ -102,7 +102,7 @@
 - 验收：验证畸变、正深度、遮挡、父云状态、相机法线和颜色来源。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 144 · cloud.remove_mask_primitives
+## 154 · cloud.remove_mask_primitives
 
 - 当前：`std-image` / `1.0.0` / 按三维工件关联像素掩膜移除云。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_pose_projection.cpp:1065](../../packs/std-image/ops/p5_pose_projection.cpp#L1065)。
@@ -116,7 +116,7 @@
 - 验收：验证原图绑定、topExpand、不同父云拒绝、不可见unknown及输入云不变。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 145 · cloud.roi_extract
+## 155 · cloud.roi_extract
 
 - 当前：`std-image` / `1.0.0` / 二维实例关联点云提取。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_projection.cpp:1336](../../packs/std-image/ops/p5_projection.cpp#L1336)。
@@ -130,7 +130,7 @@
 - 验收：验证K/D未组织路径、映射组路径、重叠稳定ID、空ROI和sourceIndices父身份。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 146 · cloud.to_depth_image
+## 156 · cloud.to_depth_image
 
 - 当前：`std-image` / `1.0.0` / 点云转深度图。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/image_cloud.cpp:271](../../packs/std-image/ops/image_cloud.cpp#L271)。
@@ -144,7 +144,7 @@
 - 验收：验证同像素最近点、相机背面、u16上下限及from_depth往返。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 147 · depth.defects
+## 157 · depth.defects
 
 - 当前：`std-image` / `1.0.0` / 深度平面缺陷检测。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/p5_inspection.cpp:1211](../../packs/std-image/ops/p5_inspection.cpp#L1211)。
@@ -158,7 +158,7 @@
 - 验收：验证defect/clear/unknown三态、缺观测good=null、补值选择、物理面积体积与平移不变性。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。 缺陷提取/覆盖证据留此适配器；通用量测核下沉std-metrology，最终工位OK/NG归宿主。
 
-## 148 · depth.profile_slices
+## 158 · depth.profile_slices
 
 - 当前：`std-image` / `1.0.0` / 组织深度轮廓截面。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/p5_inspection.cpp:1243](../../packs/std-image/ops/p5_inspection.cpp#L1243)。
@@ -172,7 +172,7 @@
 - 验收：验证真实三角交线、断链不跨孔洞、[M,4]/[M,3]对齐、零基slice与未知属性valid。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。 这是有源三角网格支持的组织截面，不能直接等同单条激光轮廓；采样适配与profile算法拆开。
 
-## 149 · image.arithmetic
+## 159 · image.arithmetic
 
 - 当前：`std-image` / `1.0.0` / 图像算术运算。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:612](../../packs/std-image/ops/image_analysis.cpp#L612)。
@@ -186,7 +186,7 @@
 - 验收：验证饱和加减、绝对差、f32 NaN和形状不匹配。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 150 · image.barcode_decode
+## 160 · image.barcode_decode
 
 - 当前：`std-image` / `1.0.0` / 条码定位解码。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_barcodes.cpp:468](../../packs/std-image/ops/p4_barcodes.cpp#L468)。
@@ -200,7 +200,7 @@
 - 验收：验证真实多格式、空内容有效码、UTF-8与原始hex、四角及取消。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 151 · image.blur
+## 161 · image.blur
 
 - 当前：`std-image` / `1.0.0` / 图像平滑滤波。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_basic.cpp:237](../../packs/std-image/ops/image_basic.cpp#L237)。
@@ -214,7 +214,7 @@
 - 验收：验证不同核、奇数约束、通道及边界像素。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 152 · image.board_calib
+## 162 · image.board_calib
 
 - 当前：`std-image` / `1.0.0` / 棋盘格平面标定。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/board_calib.cpp:114](../../packs/std-image/ops/board_calib.cpp#L114)。
@@ -229,7 +229,7 @@
 - 验收：验证棋盘全分辨率u8、px到mm单应、RMS及未检测到板的诊断。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。 现有PlaneCalib有两套验证器：lyflow_cv/plane_calib.h默认mm且允许非空unit，core/calibration.h要求显式m/mm并归一化H。统一校验属于契约变更，不能在搬包时静默替换。
 
-## 153 · image.board_pose
+## 163 · image.board_pose
 
 - 当前：`std-image` / `1.0.0` / 棋盘格三维位姿估计。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_calib.cpp:420](../../packs/std-image/ops/image_p1_calib.cpp#L420)。
@@ -243,7 +243,7 @@
 - 验收：验证完整棋盘、显式角点、正深度、平面PnP双解质量和歧义拒绝。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 154 · image.change_stats
+## 164 · image.change_stats
 
 - 当前：`std-image` / `1.0.0` / 图像变化统计。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:625](../../packs/std-image/ops/image_analysis.cpp#L625)。
@@ -257,7 +257,7 @@
 - 验收：验证alpha忽略、非有限像素、十字去噪及最小变化面积边界。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 155 · image.circle_caliper
+## 165 · image.circle_caliper
 
 - 当前：`std-image` / `1.0.0` / 圆弧边缘卡尺。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_circle.cpp:385](../../packs/std-image/ops/image_p1_circle.cpp#L385)。
@@ -271,7 +271,7 @@
 - 验收：验证弧覆盖、边缘极性、抛物线亚像素、退化/质量不足诊断。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 156 · image.color_adjust
+## 166 · image.color_adjust
 
 - 当前：`std-image` / `1.0.0` / 图像颜色调整。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_basic.cpp:315](../../packs/std-image/ops/image_p1_basic.cpp#L315)。
@@ -285,7 +285,7 @@
 - 验收：验证u8/u16/f32、灰度、RGB/RGBA、裁剪与alpha不变。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 157 · image.components
+## 167 · image.components
 
 - 当前：`std-image` / `1.0.0` / 连通域分析。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:722](../../packs/std-image/ops/image_analysis.cpp#L722)。
@@ -299,7 +299,7 @@
 - 验收：验证4/8连接、空集合、稳定顺序、轮廓及预算失败原子性。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 158 · image.concat
+## 168 · image.concat
 
 - 当前：`std-image` / `1.0.0` / 图像排布拼接。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_basic.cpp:304](../../packs/std-image/ops/image_p1_basic.cpp#L304)。
@@ -313,7 +313,7 @@
 - 验收：验证横纵拼接、不等尺寸填充、通道/位深/scale不匹配。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 159 · image.convert_channels
+## 169 · image.convert_channels
 
 - 当前：`std-image` / `1.0.0` / 图像通道转换。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:601](../../packs/std-image/ops/image_analysis.cpp#L601)。
@@ -327,7 +327,7 @@
 - 验收：验证六种通道变换、u8/u16/f32及alpha满量程。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 160 · image.crop
+## 170 · image.crop
 
 - 当前：`std-image` / `1.0.0` / 图像裁剪。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_basic.cpp:208](../../packs/std-image/ops/image_basic.cpp#L208)。
@@ -341,7 +341,7 @@
 - 验收：验证部分越界、空交集、输入box单位错误及预览坐标。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 161 · image.depth_filter
+## 171 · image.depth_filter
 
 - 当前：`std-image` / `1.0.0` / 物理深度感知滤波。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p5_projection.cpp:1288](../../packs/std-image/ops/p5_projection.cpp#L1288)。
@@ -355,7 +355,7 @@
 - 验收：验证五模式、maxDepthJump=0、observed/interpolated、原XYZ保留与新索引绑定。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 162 · image.difference_mask
+## 172 · image.difference_mask
 
 - 当前：`std-image` / `1.0.0` / 抗边缘图像差分。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_difference.cpp:142](../../packs/std-image/ops/image_difference.cpp#L142)。
@@ -369,7 +369,7 @@
 - 验收：验证已知平移、低置信拒绝、共同边缘和不支持旋转/尺度的边界。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 163 · image.edge_positions
+## 173 · image.edge_positions
 
 - 当前：`std-image` / `1.0.0` / 投影边缘定位。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_caliper.cpp:481](../../packs/std-image/ops/image_caliper.cpp#L481)。
@@ -383,7 +383,7 @@
 - 验收：验证方向/极性、单双多边、峰顺序及成功空结果。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 164 · image.find_circle
+## 174 · image.find_circle
 
 - 当前：`std-image` / `1.0.0` / 霍夫圆检测。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_segment.cpp:291](../../packs/std-image/ops/image_segment.cpp#L291)。
@@ -397,7 +397,7 @@
 - 验收：验证霍夫正反例、最佳圆选择、空图和像素单位。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 165 · image.find_circles_3d
+## 175 · image.find_circles_3d
 
 - 当前：`std-image` / `1.0.0` / 空间圆孔检测。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/p5_inspection.cpp:1155](../../packs/std-image/ops/p5_inspection.cpp#L1155)。
@@ -411,7 +411,7 @@
 - 验收：验证Canny弧支持、K/D、已知半径数量、稳定排序及双歧义圆同时保留。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 166 · image.height_extract
+## 176 · image.height_extract
 
 - 当前：`std-image` / `1.0.0` / 正交深度高度提取。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p2_height_extraction.cpp:199](../../packs/std-image/ops/p2_height_extraction.cpp#L199)。
@@ -425,7 +425,7 @@
 - 验收：验证正/负高度、法向距离与轴向差区别、both零点128和mask无效性。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 167 · image.highlights
+## 177 · image.highlights
 
 - 当前：`std-image` / `1.0.0` / 高光直线检测。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_highlights.cpp:665](../../packs/std-image/ops/image_highlights.cpp#L665)。
@@ -439,7 +439,7 @@
 - 验收：验证真实支持点、双轴、多组线、像素ROI与只读源图叠画。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 168 · image.instances_mask
+## 178 · image.instances_mask
 
 - 当前：`std-image` / `1.0.0` / 工件实例掩膜生成。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_basic.cpp:342](../../packs/std-image/ops/image_p1_basic.cpp#L342)。
@@ -453,7 +453,7 @@
 - 验收：验证稳定ID标签、重叠策略、u16容量及不是学习实例分割。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 169 · image.instances_morphology
+## 179 · image.instances_morphology
 
 - 当前：`std-image` / `1.0.0` / 逐实例形态学。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_basic.cpp:353](../../packs/std-image/ops/image_p1_basic.cpp#L353)。
@@ -467,7 +467,7 @@
 - 验收：验证逐实例操作、重叠优先级、preserveOriginal与孤立标签。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 170 · image.line_caliper
+## 180 · image.line_caliper
 
 - 当前：`std-image` / `1.0.0` / 直线卡尺。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_caliper.cpp:413](../../packs/std-image/ops/image_caliper.cpp#L413)。
@@ -481,7 +481,7 @@
 - 验收：验证极性、亚像素、鲁棒外点和edge_not_found而非假直线。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 171 · image.load_annotations
+## 181 · image.load_annotations
 
 - 当前：`std-image` / `1.0.0` / 数据集标注加载。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_annotations.cpp:506](../../packs/std-image/ops/p4_annotations.cpp#L506)。
@@ -495,7 +495,7 @@
 - 验收：验证显式时间戳、多polygon/洞、缺mask不补bbox及源pickable不授权抓取。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 172 · image.load_calib
+## 182 · image.load_calib
 
 - 当前：`std-image` / `1.0.0` / 平面标定读取。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/load_calib.cpp:60](../../packs/std-image/ops/load_calib.cpp#L60)。
@@ -509,7 +509,7 @@
 - 验收：验证完整Record/data两种JSON、退化H、单位错误和文件重读。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。 现有PlaneCalib有两套验证器：lyflow_cv/plane_calib.h默认mm且允许非空unit，core/calibration.h要求显式m/mm并归一化H。统一校验属于契约变更，不能在搬包时静默替换。
 
-## 173 · image.load_camera_calib
+## 183 · image.load_camera_calib
 
 - 当前：`std-image` / `1.0.0` / 相机内参读取。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_calib.cpp:383](../../packs/std-image/ops/image_p1_calib.cpp#L383)。
@@ -523,7 +523,7 @@
 - 验收：验证JSON类型、K/D长度、原图大小、退化内参与坏文件。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 174 · image.marker_pose
+## 184 · image.marker_pose
 
 - 当前：`std-image` / `1.0.0` / 识别码相机位姿。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p3_markers.cpp:285](../../packs/std-image/ops/p3_markers.cpp#L285)。
@@ -537,7 +537,7 @@
 - 验收：验证ArUco/AprilTag/STag实码、角点顺序、米制边长和无目标/质量拒绝。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 175 · image.morphology
+## 185 · image.morphology
 
 - 当前：`std-image` / `1.0.0` / 形态学运算。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_segment.cpp:248](../../packs/std-image/ops/image_segment.cpp#L248)。
@@ -551,7 +551,7 @@
 - 验收：验证核形状、开闭次序和边界处理。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 176 · image.normalize
+## 186 · image.normalize
 
 - 当前：`std-image` / `1.0.0` / 位深转换与拉伸。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_basic.cpp:267](../../packs/std-image/ops/image_basic.cpp#L267)。
@@ -565,7 +565,7 @@
 - 验收：验证u8/u16/f32、常量通道及拉伸与线性转换差异。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 177 · image.ocr_crops
+## 187 · image.ocr_crops
 
 - 当前：`std-image` / `1.0.0` / 文字透视裁切。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_ocr.cpp:567](../../packs/std-image/ops/p4_ocr.cpp#L567)。
@@ -579,7 +579,7 @@
 - 验收：验证旋转文本、48高等比右填零、方向48×192和空批次。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 178 · image.ocr_ctc_decode
+## 188 · image.ocr_ctc_decode
 
 - 当前：`std-image` / `1.0.0` / 文字CTC解码。目标：`std-ml`；迁移归属；**M6**。
 - 源码：[packs/std-image/ops/p4_ocr.cpp:592](../../packs/std-image/ops/p4_ocr.cpp#L592)。
@@ -593,7 +593,7 @@
 - 验收：验证NTC/TNC、blank=0、重复折叠、Unicode字典类数、置信过滤和空文本。
 - 说明：算子ID的image前缀不决定目标包；Image输入预处理留std-image，纯张量模型解码在std-ml，ORT会话仅由推理模块提供。
 
-## 179 · image.ocr_db_decode
+## 189 · image.ocr_db_decode
 
 - 当前：`std-image` / `1.0.0` / 文字区域检测解码。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_ocr.cpp:553](../../packs/std-image/ops/p4_ocr.cpp#L553)。
@@ -607,7 +607,7 @@
 - 验收：验证单头概率、框扩张边界、稳定行序、原图四角和不是任意多边形offset。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 180 · image.ocr_orient
+## 190 · image.ocr_orient
 
 - 当前：`std-image` / `1.0.0` / 文字方向校正。目标：`std-ml`；迁移归属；**M6**。
 - 源码：[packs/std-image/ops/p4_ocr.cpp:582](../../packs/std-image/ops/p4_ocr.cpp#L582)。
@@ -621,7 +621,7 @@
 - 验收：验证[N,2]归一化概率、180度翻转、padding位置、空批次及重复应用拒绝。
 - 说明：算子ID的image前缀不决定目标包；Image输入预处理留std-image，纯张量模型解码在std-ml，ORT会话仅由推理模块提供。
 
-## 181 · image.ocr_preprocess
+## 191 · image.ocr_preprocess
 
 - 当前：`std-image` / `1.0.0` / 文字检测预处理。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_ocr.cpp:538](../../packs/std-image/ops/p4_ocr.cpp#L538)。
@@ -635,7 +635,7 @@
 - 验收：验证PP-OCRv6 BGR、32对齐、ROI/scale、源图只读与归一化。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 182 · image.qr_refine
+## 192 · image.qr_refine
 
 - 当前：`std-image` / `1.0.0` / 二维码模块增强。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_barcodes.cpp:496](../../packs/std-image/ops/p4_barcodes.cpp#L496)。
@@ -649,7 +649,7 @@
 - 验收：验证相同before/after几何、四角/symbolId、已裁图模式和模块格数拒绝。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 183 · image.range_mask
+## 193 · image.range_mask
 
 - 当前：`std-image` / `1.0.0` / 颜色范围分割。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:646](../../packs/std-image/ops/image_analysis.cpp#L646)。
@@ -663,7 +663,7 @@
 - 验收：验证RGB/灰度原值区间、H跨零和无效范围。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 184 · image.region_stats
+## 194 · image.region_stats
 
 - 当前：`std-image` / `1.0.0` / 区域统计。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_segment.cpp:338](../../packs/std-image/ops/image_segment.cpp#L338)。
@@ -677,7 +677,7 @@
 - 验收：验证mask交集、通道均值、像素面积和包围框，禁止把像素面积标m2。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 185 · image.render_model_3d
+## 195 · image.render_model_3d
 
 - 当前：`std-image` / `1.1.0` / 三维模板投影叠图。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p2_model_projection.cpp:412](../../packs/std-image/ops/p2_model_projection.cpp#L412)。
@@ -691,7 +691,7 @@
 - 验收：验证遮挡、F32米制Z、单位法线缺失拒绝、源位深/alpha保留。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 186 · image.resize
+## 196 · image.resize
 
 - 当前：`std-image` / `1.0.0` / 图像缩放。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_basic.cpp:166](../../packs/std-image/ops/image_basic.cpp#L166)。
@@ -705,7 +705,7 @@
 - 验收：验证缩小/放大插值、预览scale和整数尺寸舍入。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 187 · image.ring_width
+## 197 · image.ring_width
 
 - 当前：`std-image` / `1.0.0` / 圆环周向宽度量测。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_circle.cpp:417](../../packs/std-image/ops/image_p1_circle.cpp#L417)。
@@ -719,7 +719,7 @@
 - 验收：验证内外边配对、min/max/mean、有效比例及不伪造零宽。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 188 · image.roi_mask
+## 198 · image.roi_mask
 
 - 当前：`std-image` / `1.0.0` / 几何区域掩膜。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:662](../../packs/std-image/ops/image_analysis.cpp#L662)。
@@ -733,7 +733,7 @@
 - 验收：验证各形状边界、旋转矩形、多边形、输入mask尺寸和scale。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 189 · image.segmentation_decode
+## 199 · image.segmentation_decode
 
 - 当前：`std-image` / `1.0.0` / 语义分割解码。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_segmentation.cpp:858](../../packs/std-image/ops/p4_segmentation.cpp#L858)。
@@ -747,7 +747,7 @@
 - 验收：验证回贴后argmax、65535未知、重叠NHW绑定、稳定ID、空ROI和非抓取语义。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 190 · image.segmentation_preprocess
+## 200 · image.segmentation_preprocess
 
 - 当前：`std-image` / `1.0.0` / 语义分割预处理。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p4_segmentation.cpp:825](../../packs/std-image/ops/p4_segmentation.cpp#L825)。
@@ -761,7 +761,7 @@
 - 验收：验证u8灰度/RGB/RGBA、64ROI预算、N=0及PPHumanSeg192和归一化。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 191 · image.shading_correct
+## 201 · image.shading_correct
 
 - 当前：`std-image` / `1.0.0` / 空间光照校正。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_basic.cpp:330](../../packs/std-image/ops/image_p1_basic.cpp#L330)。
@@ -775,7 +775,7 @@
 - 验收：验证参考图匹配、无参考背景、非正分母错误和输出值域。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 192 · image.shape_match
+## 202 · image.shape_match
 
 - 当前：`std-image` / `1.0.0` / 梯度形状匹配。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p3_shape_matching.cpp:916](../../packs/std-image/ops/p3_shape_matching.cpp#L916)。
@@ -789,7 +789,7 @@
 - 验收：验证遮挡、多角尺度、完整特征质量门控、旋转NMS及先去畸变约定。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 193 · image.shape_template
+## 203 · image.shape_template
 
 - 当前：`std-image` / `1.0.0` / 梯度形状建模。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/p3_shape_matching.cpp:894](../../packs/std-image/ops/p3_shape_matching.cpp#L894)。
@@ -803,7 +803,7 @@
 - 验收：验证特征Tensor/metadata绑定、mask与ROI、图像重建确定性。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 194 · image.statistics
+## 204 · image.statistics
 
 - 当前：`std-image` / `1.0.0` / 灰度统计。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_analysis.cpp:709](../../packs/std-image/ops/image_analysis.cpp#L709)。
@@ -817,7 +817,7 @@
 - 验收：验证空样本诊断、NaN/Inf、median及mode并列规则。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 195 · image.template_build
+## 205 · image.template_build
 
 - 当前：`std-image` / `1.0.0` / NCC模板构建。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_match.cpp:269](../../packs/std-image/ops/image_p1_match.cpp#L269)。
@@ -831,7 +831,7 @@
 - 验收：验证常量模板拒绝、mask、模板复用和原生像素身份。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 196 · image.template_match
+## 206 · image.template_match
 
 - 当前：`std-image` / `1.0.0` / 多目标NCC模板定位。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_match.cpp:278](../../packs/std-image/ops/image_p1_match.cpp#L278)。
@@ -845,7 +845,7 @@
 - 验收：验证旋转padding不计分、mask NCC、稳定多目标NMS和空结果。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 197 · image.threshold
+## 207 · image.threshold
 
 - 当前：`std-image` / `1.0.0` / 图像二值化。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_segment.cpp:203](../../packs/std-image/ops/image_segment.cpp#L203)。
@@ -859,7 +859,7 @@
 - 验收：验证三种方法、位深拒绝与二值mask集合一致。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 198 · image.to_gray
+## 208 · image.to_gray
 
 - 当前：`std-image` / `1.0.0` / 灰度转换。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_basic.cpp:150](../../packs/std-image/ops/image_basic.cpp#L150)。
@@ -873,7 +873,7 @@
 - 验收：验证RGB已知色块权重、RGBA的alpha处理、灰度透传和位深。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 199 · image.to_tensor
+## 209 · image.to_tensor
 
 - 当前：`std-image` / `1.0.0` / 图像转张量。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_tensor.cpp:233](../../packs/std-image/ops/image_tensor.cpp#L233)。
@@ -887,7 +887,7 @@
 - 验收：验证HWC/NCHW、RGB顺序、各位深以及mean/std无隐式默认替换。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 200 · image.undistort
+## 210 · image.undistort
 
 - 当前：`std-image` / `1.0.0` / 相机图像去畸变。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_calib.cpp:391](../../packs/std-image/ops/image_p1_calib.cpp#L391)。
@@ -901,7 +901,7 @@
 - 验收：验证畸变恢复、全分辨率大小匹配、填零边界及有效mask。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 201 · image.warp_perspective
+## 211 · image.warp_perspective
 
 - 当前：`std-image` / `1.0.0` / 平面透视重采样。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_p1_calib.cpp:400](../../packs/std-image/ops/image_p1_calib.cpp#L400)。
@@ -915,7 +915,7 @@
 - 验收：验证mm/m等价、输出网格密度、边界valid和非有限H拒绝。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 202 · image.width_range
+## 212 · image.width_range
 
 - 当前：`std-image` / `1.0.0` / 平行卡尺宽度。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_caliper.cpp:446](../../packs/std-image/ops/image_caliper.cpp#L446)。
@@ -929,7 +929,7 @@
 - 验收：验证内外尺寸边对、ROI中心规则、少边无目标和px输出。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 203 · image.yolo_decode
+## 213 · image.yolo_decode
 
 - 当前：`std-image` / `1.0.0` / YOLO 检测结果解码。目标：`std-ml`；迁移归属；**M6**。
 - 源码：[packs/std-image/ops/image_yolo.cpp:374](../../packs/std-image/ops/image_yolo.cpp#L374)。
@@ -943,7 +943,7 @@
 - 验收：分别验证[1,4+C,N]和[1,N,6]、类别表、score与稳定NMS、原图ROI坐标。
 - 说明：算子ID的image前缀不决定目标包；Image输入预处理留std-image，纯张量模型解码在std-ml，ORT会话仅由推理模块提供。
 
-## 204 · image.yolo_preprocess
+## 214 · image.yolo_preprocess
 
 - 当前：`std-image` / `1.0.0` / YOLO 图像预处理。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_yolo.cpp:343](../../packs/std-image/ops/image_yolo.cpp#L343)。
@@ -957,7 +957,7 @@
 - 验收：验证8/11/26输入配置、奇数padding舍入、ROI/预览坐标及RGB归一化。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 205 · image.yolox_decode
+## 215 · image.yolox_decode
 
 - 当前：`std-image` / `1.0.0` / YOLOX 检测结果解码。目标：`std-ml`；迁移归属；**M6**。
 - 源码：[packs/std-image/ops/image_detection.cpp:284](../../packs/std-image/ops/image_detection.cpp#L284)。
@@ -971,7 +971,7 @@
 - 验收：验证[1,3549,85]、网格/步长、稳定候选截断、类别NMS和空目标。
 - 说明：算子ID的image前缀不决定目标包；Image输入预处理留std-image，纯张量模型解码在std-ml，ORT会话仅由推理模块提供。
 
-## 206 · image.yolox_preprocess
+## 216 · image.yolox_preprocess
 
 - 当前：`std-image` / `1.0.0` / YOLOX 图像预处理。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_detection.cpp:267](../../packs/std-image/ops/image_detection.cpp#L267)。
@@ -985,7 +985,7 @@
 - 验收：验证416输入、BGR与0..255、ROI边缘以及decode原图回映。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 207 · io.load_image
+## 217 · io.load_image
 
 - 当前：`std-image` / `1.0.0` / 加载图像。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/io_image.cpp:153](../../packs/std-image/ops/io_image.cpp#L153)。
@@ -999,7 +999,7 @@
 - 验收：验证PNG/TIFF位深及RGB顺序、宿主输入绕过文件、损坏文件诊断。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 208 · io.save_image
+## 218 · io.save_image
 
 - 当前：`std-image` / `1.0.0` / 保存图像。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/io_image.cpp:204](../../packs/std-image/ops/io_image.cpp#L204)。
@@ -1013,7 +1013,7 @@
 - 验收：验证位深往返、格式不支持报错和输出路径错误不伪造成功。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 209 · pose.project_3d
+## 219 · pose.project_3d
 
 - 当前：`std-image` / `1.0.0` / 三维有限工件原图掩膜投影。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/p5_pose_projection.cpp:1027](../../packs/std-image/ops/p5_pose_projection.cpp#L1027)。
@@ -1027,7 +1027,7 @@
 - 验收：验证有限体/圆盘轮廓、full/top、independent/nearest、NHW绑定和米/px分离。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 210 · pose.project_to_plane
+## 220 · pose.project_to_plane
 
 - 当前：`std-image` / `1.0.0` / 二维实例任意平面反投影及实体尺寸。目标：`std-image`；拆公共能力/适配；**M6**。
 - 源码：[packs/std-image/ops/p5_pose_projection.cpp:1043](../../packs/std-image/ops/p5_pose_projection.cpp#L1043)。
@@ -1041,7 +1041,7 @@
 - 验收：验证跨帧外参、平行射线、workspace顶底面、中心/尺寸模式与实际掩膜支持。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 211 · tensor.to_image
+## 221 · tensor.to_image
 
 - 当前：`std-image` / `1.0.0` / 张量转图像。目标：`std-image`；保留并验边界；**M6**。
 - 源码：[packs/std-image/ops/image_tensor.cpp:282](../../packs/std-image/ops/image_tensor.cpp#L282)。
@@ -1055,7 +1055,7 @@
 - 验收：验证批次边界、通道拒绝、常量张量与f32不重归一化。
 - 说明：当前std-image整包还传递链接yaml-cpp、条码和Marker资源；本项算法依赖与整包链接负担分开记录。
 
-## 212 · workspace.load
+## 222 · workspace.load
 
 - 当前：`std-image` / `1.0.0` / 三维工作空间加载。目标：`std-geometry`；迁移归属；**M6**。
 - 源码：[packs/std-image/ops/p3_workspace.cpp:591](../../packs/std-image/ops/p3_workspace.cpp#L591)。

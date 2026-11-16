@@ -30,6 +30,7 @@
     "examples/public_kernels.cpp",
     "examples/public-kernels/CMakeLists.txt",
     "docs/public-kernels.md",
+    "docs/profile-public-operators.md",
     "include/lyflow/profile.h",
     "include/nlohmann/json.hpp",
     "include/lyflow/graph_contract_upgrade.h",
@@ -71,11 +72,17 @@
     "examples/m3-native-profile.csv",
     "examples/m3-native-profile.md",
     "include/lyflow/kernel/profile_robust.h",
+    "include/lyflow/kernel/profile_features.h",
+    "include/lyflow/kernel/profile_dimensions.h",
     "lib/lyflow_profile_robust_kernel.lib",
     "lib/cmake/lyflow/lyflow-profile-robust-targets.cmake",
     "examples/profile-robust/CMakeLists.txt",
     "examples/profile-robust/main.cpp",
-    "examples/profile-robust/README.md"
+    "examples/profile-robust/README.md",
+    "examples/m4-native-profile.lyflow.json",
+    "examples/m4-native-profile.csv",
+    "examples/m4-native-profile.md",
+    "examples/embed_profile_workflow.cpp"
   ],
   "requiredRuntimeFiles": [
     "python/examples/profile_copy.py",

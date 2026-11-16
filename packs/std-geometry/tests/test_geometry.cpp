@@ -120,6 +120,30 @@ TEST_CASE("geometry constructors normalize geometry without changing plane equat
   CHECK(transform->m[11] == 3);
 }
 
+TEST_CASE("geometry box construction preserves explicit bounds and rejects invalid regions") {
+  test::OpCall c;
+  for (const auto* u : {"m", "px"}) {
+    REQUIRE(
+        c.run("geometry.box_2d",
+              {{"min", Value::vec({-2, 3})}, {"max", Value::vec({4, 3})}, {"unit", Value::text(u)}})
+            .ok);
+    const auto* box = c.outputs.at("box").asBox2D();
+    REQUIRE(box != nullptr);
+    CHECK(box->min[0] == -2);
+    CHECK(box->min[1] == 3);
+    CHECK(box->max[0] == 4);
+    CHECK(box->max[1] == 3);
+    CHECK(box->unit == (std::string(u) == "m" ? Unit2D::Meter : Unit2D::Pixel));
+  }
+  for (const auto value :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::max()}) {
+    CHECK_FALSE(c.run("geometry.box_2d", {{"max", Value::vec({value, 1})}}).ok);
+  }
+  CHECK_FALSE(c.run("geometry.box_2d", {{"min", Value::vec({2, 0})}}).ok);
+  CHECK_FALSE(c.run("geometry.box_2d", {{"max", Value::vec({1, -1})}}).ok);
+}
+
 TEST_CASE("geometry plane normalization preserves extreme finite normal directions") {
   test::OpCall c;
   for (float scale :

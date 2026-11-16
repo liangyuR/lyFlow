@@ -36,7 +36,8 @@ function(lyflow_setup_geometry_kernel)
 endfunction()
 
 function(lyflow_setup_metrology_kernel)
-  lyflow_kernel_target(lyflow_metrology_kernel metrology_kernel "${LYFLOW_KERNEL_ROOT}/src/metrology.cpp")
+  lyflow_kernel_target(lyflow_metrology_kernel metrology_kernel "${LYFLOW_KERNEL_ROOT}/src/metrology.cpp"
+    "${LYFLOW_KERNEL_ROOT}/src/profile_dimensions.cpp")
 endfunction()
 
 function(lyflow_setup_eigen_headers)
@@ -107,7 +108,8 @@ lyflow_declare_module(NAME profile-analysis-kernel TARGET lyflow_profile_analysi
 macro(lyflow_setup_profile_robust_kernel)
   set(_components common filters sample_consensus segmentation)
   find_package(PCL 1.15.1 REQUIRED COMPONENTS ${_components})
-  add_library(lyflow_profile_robust_kernel STATIC "${LYFLOW_KERNEL_ROOT}/src/profile_robust.cpp")
+  add_library(lyflow_profile_robust_kernel STATIC "${LYFLOW_KERNEL_ROOT}/src/profile_robust.cpp"
+    "${LYFLOW_KERNEL_ROOT}/src/profile_features.cpp")
   add_library(lyflow::profile_robust_kernel ALIAS lyflow_profile_robust_kernel)
   set_target_properties(lyflow_profile_robust_kernel PROPERTIES
     EXPORT_NAME profile_robust_kernel POSITION_INDEPENDENT_CODE ON LYFLOW_PROFILE_PCL_VERSION "${PCL_VERSION}")

@@ -8,6 +8,7 @@
 #include "gap_detection/GapUtils.hpp"
 #include "gap_fine.h"
 #include "std_bridge.hpp"
+#include "lyflow/kernel/profile_features.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -16,64 +17,6 @@ namespace utils = ::detection::utils;
 
 nlohmann::json numberOrNull(double v) {
   return std::isfinite(v) ? nlohmann::json(v) : nlohmann::json();
-}
-
-nlohmann::json lineQualityJson(const GapCloud& cloud, const Eigen::VectorXf& line,
-                               const pcl::Indices& inliers) {
-  nlohmann::json q;
-  q["model"] = "line";
-  q["pointCount"] = cloud.size();
-  q["inlierCount"] = inliers.size();
-  q["inlierRatio"] = cloud.empty()
-                         ? nlohmann::json()
-                         : nlohmann::json(static_cast<double>(inliers.size()) / cloud.size());
-  double pointX = std::numeric_limits<double>::quiet_NaN();
-  double pointY = std::numeric_limits<double>::quiet_NaN();
-  double dirX = std::numeric_limits<double>::quiet_NaN();
-  double dirY = std::numeric_limits<double>::quiet_NaN();
-  if (line.size() >= 5) {
-    pointX = line[0] * kScale;
-    pointY = line[1] * kScale;
-    const double norm = std::hypot(line[3], line[4]);
-    if (norm > 0) {
-      dirX = line[3] / norm;
-      dirY = line[4] / norm;
-    }
-  }
-  q["linePointXMm"] = numberOrNull(pointX);
-  q["linePointYMm"] = numberOrNull(pointY);
-  q["lineDirX"] = numberOrNull(dirX);
-  q["lineDirY"] = numberOrNull(dirY);
-
-  double rms = std::numeric_limits<double>::quiet_NaN();
-  double maximum = std::numeric_limits<double>::quiet_NaN();
-  if (line.size() >= 5 && !inliers.empty()) {
-    const double dx = line[3];
-    const double dy = line[4];
-    const double norm = std::hypot(dx, dy);
-    double squareSum = 0;
-    double worst = 0;
-    std::size_t valid = 0;
-    if (norm > 0) {
-      for (const auto index : inliers) {
-        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size())
-          continue;
-        const auto& point = cloud[index];
-        const double residual =
-            std::fabs((point.x - line[0]) * dy - (point.y - line[1]) * dx) / norm * kScale;
-        squareSum += residual * residual;
-        worst = std::max(worst, residual);
-        ++valid;
-      }
-    }
-    if (valid > 0) {
-      rms = std::sqrt(squareSum / static_cast<double>(valid));
-      maximum = worst;
-    }
-  }
-  q["rmsResidualMm"] = numberOrNull(rms);
-  q["maxResidualMm"] = numberOrNull(maximum);
-  return q;
 }
 
 /// 内点相对圆心的**方位角**（度，圆周均值）。0° = +x，90° = 正上方（测量帧里 y 越小越高），
@@ -174,273 +117,112 @@ nlohmann::json circleQualityJson(const GapCloud& cloud, const Eigen::VectorXf& c
   return q;
 }
 
-/// 系数 → Line2D。方向按 canonicalLineDir 统一朝向，与拟合给出的正反无关。
-lyflow::Line2D lineFromCoefficients(const Eigen::VectorXf& c) {
-  lyflow::Line2D line;
-  line.point[0] = c[0];
-  line.point[1] = c[1];
-  const Eigen::Vector2d u = canonicalLineDir(c[3], c[4]);
-  line.dir[0] = static_cast<float>(u.x());
-  line.dir[1] = static_cast<float>(u.y());
-  return line;
-}
-
-/// 直线方向 a 相对 b 的夹角，折进 (-90, 90]：直线没有正反，差 180° 是同一条线。
-double lineAngleDeltaDeg(double ax, double ay, double bx, double by) {
-  const double d = (std::atan2(ay, ax) - std::atan2(by, bx)) * 180.0 / M_PI;
-  double r = std::fmod(d, 180.0);
-  if (r > 90.0)
-    r -= 180.0;
-  if (r <= -90.0)
-    r += 180.0;
-  return r;
-}
-
-/// 方向钉死之后，直线只剩法向偏移一个自由度。取全部点投影的中位定位置（中位对
-/// 「一半点落在台阶另一侧」这种情形免疫），再用内点的中位收一次。
-/// coefficients 仍按 PCL 的 6 维直线模型写回，下游的端点/质量逻辑零改动。
-bool fitFixedDirection(const GapCloud& cloud, double dirX, double dirY, float dist,
-                       Eigen::VectorXf* coefficients, pcl::Indices* indices) {
-  const std::size_t n = cloud.size();
-  if (n < 2)
-    return false;
-  if (!(std::hypot(dirX, dirY) > 0))
-    return false;
-  // 先统一朝向：法向跟着 dir 的正反翻，而偶数个点的中位取的是「上中位」，
-  // 不统一的话 refLine 的 dir 取反会让位置差出一个点距。
-  const Eigen::Vector2d canon = canonicalLineDir(dirX, dirY);
-  const double ux = canon.x();
-  const double uy = canon.y();
-  const double nx = -uy; // 法向
-  const double ny = ux;
-  std::vector<double> proj;
-  proj.reserve(n);
-  for (const auto& q : cloud)
-    proj.push_back(q.x * nx + q.y * ny);
-  const auto median = [](std::vector<double> v) {
-    std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2), v.end());
-    return v[v.size() / 2];
-  };
-  double t = median(proj);
-  std::vector<double> kept;
-  pcl::Indices inliers;
-  for (int pass = 0; pass < 2; ++pass) {
-    kept.clear();
-    inliers.clear();
-    for (std::size_t i = 0; i < n; ++i) {
-      if (std::fabs(proj[i] - t) <= dist) {
-        inliers.push_back(static_cast<int>(i));
-        kept.push_back(proj[i]);
-      }
-    }
-    // 方向被钉住之后，点沿法向的散布 ≈ ROI 宽度 × 两条线的夹角；窄 ROI 上这个量能
-    // 直接超过 distThresh，按内点收就一个都收不到。那时退而取最近的一半点 ——
-    // 位置本来就只由中位定，收不到内点不该让整帧算不出来。
-    if (kept.size() < 2) {
-      std::vector<std::size_t> order(n);
-      for (std::size_t i = 0; i < n; ++i)
-        order[i] = i;
-      const std::size_t half = std::max<std::size_t>(2, n / 2);
-      std::partial_sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(half),
-                        order.end(), [&](std::size_t a, std::size_t b) {
-                          return std::fabs(proj[a] - t) < std::fabs(proj[b] - t);
-                        });
-      order.resize(half);
-      std::sort(order.begin(), order.end());
-      for (std::size_t i : order) {
-        inliers.push_back(static_cast<int>(i));
-        kept.push_back(proj[i]);
-      }
-    }
-    t = median(kept);
-  }
-  coefficients->resize(6);
-  (*coefficients)[0] = static_cast<float>(t * nx);
-  (*coefficients)[1] = static_cast<float>(t * ny);
-  (*coefficients)[2] = 0.0f;
-  (*coefficients)[3] = static_cast<float>(ux);
-  (*coefficients)[4] = static_cast<float>(uy);
-  (*coefficients)[5] = 0.0f;
-  *indices = std::move(inliers);
-  return true;
-}
-
-/// 沿直线方向的单位向量，与输出 Line2D.dir 同一约定。首尾端点与 toward 投影都按它算。
-Eigen::Vector2d lineAxis(const Eigen::VectorXf& coefficients) {
-  return canonicalLineDir(coefficients[3], coefficients[4]);
-}
-
-double projectOnAxis(const GapPoint& p, const Eigen::Vector2d& u) {
-  return p.x * u.x() + p.y * u.y();
-}
-
 } // namespace
 
 namespace fine {
 
 Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+  namespace features = kernel::profile_features;
   const lyflow::PointCloud& in = *inputs.get("cloud").asCloud();
   const lyflow::Box2D& box = *inputs.get("box").asBox2D();
   const lyflow::Box2D& toward = *inputs.get("toward").asBox2D();
-  const GapCloud cloud = toPcl(in);
-  if (cloud.size() < 2) {
-    return Status::Error(Phase::Execute, "insufficient_points", "点太少，拟合不了直线", {},
-                         "cloud");
+  std::vector<kernel::profile_robust::Point> points;
+  points.reserve(in.pointCount());
+  for (std::size_t i = 0; i < in.pointCount(); ++i) {
+    if ((i & 1023U) == 0 && ctx.cancelled())
+      return Status::Ok();
+    points.push_back({in.xyz[3 * i], in.xyz[3 * i + 1], in.xyz[3 * i + 2]});
   }
-  const float dist = mmToM(params.number("distThresh"));
-  const auto segmentPoints = static_cast<std::size_t>(params.integer("segmentPoints"));
-  const std::string lineType = params.choice("lineType");
-  // 「靠缝那一头」由 toward 框的中心定：内点沿直线方向投影，离它的投影近的那一头就是。
-  const double towardX = 0.5 * (static_cast<double>(toward.min[0]) + toward.max[0]);
-  const double towardY = 0.5 * (static_cast<double>(toward.min[1]) + toward.max[1]);
-
-  // 方向约束：把方向锚到另一条线上（通常是 gap.datum_window 在旁边长面上拟的基准线）。
-  // dirMode 不是 free 时 refLine 一定接着 —— validate 已经挡过。
-  const std::string dirMode = params.choice("dirMode");
-  const lyflow::Line2D* refLine =
-      inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
-  const double nominal = params.number("dirNominalDeg");
-  const double tol = params.number("dirTolDeg");
-  double pinX = 1.0;
-  double pinY = 0.0;
-  if (refLine != nullptr) {
-    const double a = std::atan2(refLine->dir[1], refLine->dir[0]) + nominal * M_PI / 180.0;
-    pinX = std::cos(a);
-    pinY = std::sin(a);
+  features::LineOptions options;
+  options.fit.distThresh = mmToM(params.number("distThresh"));
+  options.segmentPoints = static_cast<std::size_t>(params.integer("segmentPoints"));
+  options.minInliers = static_cast<std::size_t>(params.integer("minInliers"));
+  const auto lineType = params.choice("lineType");
+  options.type = lineType == "fit"        ? features::LineType::Free
+                 : lineType == "vertical" ? features::LineType::Vertical
+                                          : features::LineType::Horizontal;
+  const auto dirMode = params.choice("dirMode");
+  options.directionMode = dirMode == "free"   ? features::DirectionMode::Free
+                          : dirMode == "band" ? features::DirectionMode::Band
+                                              : features::DirectionMode::Fixed;
+  if (inputs.has("refLine")) {
+    const auto& reference = *inputs.get("refLine").asLine2D();
+    options.hasReference = true;
+    options.referenceDirection = {reference.dir[0], reference.dir[1]};
   }
-
-  Eigen::VectorXf coefficients;
-  pcl::Indices indices;
-  bool fitted =
-      lineType == "fit"
-          ? gap_std::lineFit2D(cloud, &coefficients, &indices, dist)
-          : gap_std::lineFit2D(cloud, &coefficients, &indices,
-                               lineType == "vertical" ? "vertical line" : "horizontal line", dist);
-  if (!fitted && dirMode == "free") {
-    return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
-  }
-
-  // 截取靠缝那一端再拟合一次：按沿直线方向的投影，留下离 toward 最近的 segmentPoints 个内点。
-  // 不看点序 —— 点在文件里朝哪个方向排，与缝在哪一侧无关。
-  bool segmentApplied = false;
-  if (fitted && segmentPoints > 0 && segmentPoints < indices.size()) {
-    const Eigen::Vector2d u = lineAxis(coefficients);
-    const double target = towardX * u.x() + towardY * u.y();
-    std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
-      return std::fabs(projectOnAxis(cloud[a], u) - target) <
-             std::fabs(projectOnAxis(cloud[b], u) - target);
-    });
-    indices.resize(segmentPoints);
-    std::sort(indices.begin(), indices.end());
-    segmentApplied = true;
-    const GapCloud segment(cloud, indices);
-    pcl::Indices second;
-    if (!gap_std::lineFit2D(segment, &coefficients, &second, dist / 3)) {
-      if (dirMode == "free") {
+  options.nominalDeg = params.number("dirNominalDeg");
+  options.toleranceDeg = params.number("dirTolDeg");
+  options.toward = {0.5 * (static_cast<double>(toward.min[0]) + toward.max[0]),
+                    0.5 * (static_cast<double>(toward.min[1]) + toward.max[1])};
+  options.roi = {{box.min[0], box.min[1]}, {box.max[0], box.max[1]}};
+  options.endpoints = params.choice("endpoints") == "inlier_ends"
+                          ? features::Endpoints::InlierEnds
+                          : features::Endpoints::RoiIntersection;
+  features::LineFeature result;
+  features::LineFailure failure;
+  try {
+    if (!features::fitLine({points.data(), points.size(), false}, options, result, &failure,
+                           [&ctx] { return ctx.cancelled(); })) {
+      switch (failure.stage) {
+      case features::LineFailureStage::InsufficientSamples:
+        return Status::Error(Phase::Execute, "insufficient_points", "点太少，拟合不了直线", {},
+                             "cloud");
+      case features::LineFailureStage::SegmentRefit:
         return Status::Error(Phase::Execute, "line_fit_failed", "截取之后的第二次直线拟合失败", {},
                              "cloud");
+      case features::LineFailureStage::EmptyInliers:
+        return Status::Error(Phase::Execute, "line_fit_failed", "拟合之后一个内点都没有", {},
+                             "cloud");
+      case features::LineFailureStage::FixedFit:
+        return Status::Error(Phase::Execute, "line_fit_failed",
+                             "方向钉死之后仍然拟不出直线（内点不足）", {}, "cloud");
+      case features::LineFailureStage::MinInliers:
+        return Status::Error(Phase::Execute, "insufficient_points",
+                             "内点只有 " + std::to_string(failure.inlierCount) +
+                                 " 个，少于 minInliers " + std::to_string(options.minInliers),
+                             "minInliers", "cloud");
+      default:
+        return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
       }
-      fitted = false;
-    } else {
-      std::size_t j = 0;
-      for (auto i : second)
-        indices[j++] = indices[static_cast<std::size_t>(i)];
-      indices.resize(second.size());
     }
-  } else if (fitted && segmentPoints > 0) {
-    ctx.log(LogLevel::Warn, "内点 " + std::to_string(indices.size()) +
-                                " 个，不多于 segmentPoints " + std::to_string(segmentPoints) +
-                                "，没有截取靠缝那一端");
+  } catch (const kernel::profile_robust::Cancelled&) {
+    return Status::Ok();
   }
-  if (fitted && indices.empty()) {
-    if (dirMode == "free") {
-      return Status::Error(Phase::Execute, "line_fit_failed", "拟合之后一个内点都没有", {},
-                           "cloud");
-    }
-    fitted = false;
-  }
-
-  // fixed 一律钉死；band 只在自由拟合失败、或方向出了带宽时才钉 —— 合规帧照旧。
-  bool pinned = dirMode == "fixed";
-  if (dirMode == "band" && !pinned) {
-    pinned =
-        !fitted || std::fabs(lineAngleDeltaDeg(coefficients[3], coefficients[4], pinX, pinY)) > tol;
-  }
-  if (pinned && !fitFixedDirection(cloud, pinX, pinY, dist, &coefficients, &indices)) {
-    return Status::Error(Phase::Execute, "line_fit_failed",
-                         "方向钉死之后仍然拟不出直线（内点不足）", {}, "cloud");
-  }
-  if (!pinned && !fitted) {
-    return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
-  }
-  // 内点太少时宁可报失败：ROI 跑偏、窗口落到没点的地方时，拟合照样"成功"，
-  // 只是拟出一条没意义的线，下游拿它当基准就是把错误往前传。
-  const auto minInliers = static_cast<std::size_t>(params.integer("minInliers"));
-  if (indices.size() < minInliers) {
-    return Status::Error(Phase::Execute, "insufficient_points",
-                         "内点只有 " + std::to_string(indices.size()) + " 个，少于 minInliers " +
-                             std::to_string(minInliers),
-                         "minInliers", "cloud");
-  }
-  std::sort(indices.begin(), indices.end());
-
-  // 端点、innerEnd 都按最终那条线的方向投影来挑，与点序无关。
-  const Eigen::Vector2d u = lineAxis(coefficients);
-  const double target = towardX * u.x() + towardY * u.y();
-  std::size_t first = 0, last = 0, inner = 0;
-  for (std::size_t k = 1; k < indices.size(); ++k) {
-    const double sk = projectOnAxis(cloud[indices[k]], u);
-    if (sk < projectOnAxis(cloud[indices[first]], u))
-      first = k;
-    if (sk > projectOnAxis(cloud[indices[last]], u))
-      last = k;
-    if (std::fabs(sk - target) < std::fabs(projectOnAxis(cloud[indices[inner]], u) - target)) {
-      inner = k;
-    }
-  }
-
-  lyflow::Line2D line = lineFromCoefficients(coefficients);
-  // 端点两种口径：ROI 框交点，或内点里沿直线方向最靠两头的那两个真实云点。
-  // gap definition A 的方向 u 就取自这两个端点。
-  if (params.choice("endpoints") == "inlier_ends") {
-    const GapPoint& a = cloud[indices[first]];
-    const GapPoint& b = cloud[indices[last]];
-    line.hasSegment = true;
-    line.start[0] = a.x;
-    line.start[1] = a.y;
-    line.end[0] = b.x;
-    line.end[1] = b.y;
-  } else {
-    const Eigen::Matrix2f ends = utils::getIntersectionRL(toRoiMatrix(box), coefficients);
-    if (std::isfinite(ends(0, 0)) && std::isfinite(ends(0, 1))) {
-      line.hasSegment = true;
-      line.start[0] = ends(0, 0);
-      line.start[1] = ends(1, 0);
-      line.end[0] = ends(0, 1);
-      line.end[1] = ends(1, 1);
-    } else {
-      ctx.log(LogLevel::Warn, "拟合出的直线与 ROI 框没有两个交点，line 只带方程不带端点");
-    }
-  }
-  outputs.set("line", Data::line2d(line));
-
-  const GapPoint& innerPoint = cloud[indices[inner]];
-  lyflow::Point2D end;
-  end.p[0] = innerPoint.x;
-  end.p[1] = innerPoint.y;
-  outputs.set("innerEnd", Data::point2d(end));
-
-  lyflow::Indices out;
-  out.sourceCloudId = in.id;
-  out.values.reserve(indices.size());
-  for (auto i : indices)
-    out.values.push_back(static_cast<std::int32_t>(i));
-  outputs.set("inliers", Data::indices(std::move(out)));
-
+  if (result.segmentSkipped)
+    ctx.log(LogLevel::Warn, "内点 " + std::to_string(result.initialInlierCount) +
+                                " 个，不多于 segmentPoints " +
+                                std::to_string(options.segmentPoints) + "，没有截取靠缝那一端");
+  if (result.roiIntersectionMissing)
+    ctx.log(LogLevel::Warn, "拟合出的直线与 ROI 框没有两个交点，line 只带方程不带端点");
+  lyflow::Line2D line;
+  std::copy(result.point.begin(), result.point.end(), line.point);
+  std::copy(result.direction.begin(), result.direction.end(), line.dir);
+  line.hasSegment = result.hasSegment;
+  std::copy(result.start.begin(), result.start.end(), line.start);
+  std::copy(result.end.begin(), result.end.end(), line.end);
+  lyflow::Point2D inner;
+  inner.p[0] = in.xyz[static_cast<std::size_t>(result.innerSlot) * 3];
+  inner.p[1] = in.xyz[static_cast<std::size_t>(result.innerSlot) * 3 + 1];
+  lyflow::Indices inliers;
+  inliers.sourceCloudId = in.id;
+  inliers.values.assign(result.inliers.begin(), result.inliers.end());
+  const auto& q = result.quality;
   lyflow::Record quality;
   quality.type = "GapFitQuality";
-  quality.data = lineQualityJson(cloud, coefficients, indices);
-  quality.data["segmentApplied"] = segmentApplied;
+  quality.data = {{"model", "line"},
+                  {"pointCount", q.pointCount},
+                  {"inlierCount", q.inlierCount},
+                  {"inlierRatio", numberOrNull(q.inlierRatio)},
+                  {"linePointXMm", numberOrNull(q.linePointMm[0])},
+                  {"linePointYMm", numberOrNull(q.linePointMm[1])},
+                  {"lineDirX", numberOrNull(q.lineDirection[0])},
+                  {"lineDirY", numberOrNull(q.lineDirection[1])},
+                  {"rmsResidualMm", numberOrNull(q.rmsResidualMm)},
+                  {"maxResidualMm", numberOrNull(q.maxResidualMm)},
+                  {"segmentApplied", result.segmentApplied}};
+  outputs.set("line", Data::line2d(line));
+  outputs.set("innerEnd", Data::point2d(inner));
+  outputs.set("inliers", Data::indices(std::move(inliers)));
   outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
 }
@@ -1230,7 +1012,7 @@ Param sideCameraParam(const char* name, const char* label, const char* group) {
 void registerFitLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_line";
-  op.version = "1.1.0";
+  op.version = "1.1.1";
   op.label = "二维剖面直线拟合";
   op.category = "间隙/拟合";
   op.keywords = {"2D profile line fitting",

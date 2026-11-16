@@ -128,7 +128,29 @@ OperatorDesc descriptor(const char* id, const char* label, const char* english) 
 }
 
 void registerConstructors(Registry& r) {
-  OperatorDesc op = descriptor("geometry.point_2d", "二维点构造", "construct 2D point");
+  OperatorDesc op =
+      descriptor("geometry.box_2d", "二维包围框构造", "construct 2D bounding box rectangle ROI");
+  op.params = {vector2("min", "最小坐标"), vector2("max", "最大坐标", 1, 1), unitParam()};
+  op.outputs = {Port{"box", "Box2D", "包围框", "显式单位的轴对齐二维包围框。", true}};
+  op.doc = "两个坐标分量均须有限且最小值不大于最大值；保留显式米制或像素单位，不自动交换边界。";
+  op.compute = [](const Inputs&, const ParamView& p, Outputs& out, ExecContext&) {
+    const auto lo = p.vec2("min"), hi = p.vec2("max");
+    Box2D box;
+    for (int axis = 0; axis < 2; ++axis) {
+      if (!std::isfinite(lo[axis]) || !std::isfinite(hi[axis]) ||
+          std::abs(lo[axis]) > std::numeric_limits<float>::max() ||
+          std::abs(hi[axis]) > std::numeric_limits<float>::max() || lo[axis] > hi[axis])
+        return badParam("包围框边界必须有限且最小值不大于最大值", "min");
+      box.min[axis] = static_cast<float>(lo[axis]);
+      box.max[axis] = static_cast<float>(hi[axis]);
+    }
+    box.unit = unit(p);
+    out.set("box", Data::box2d(box));
+    return Status::Ok();
+  };
+  r.addOperator(std::move(op));
+
+  op = descriptor("geometry.point_2d", "二维点构造", "construct 2D point");
   op.inputs = {scalarInput("x", "可选 x 坐标，单位必须与 unit 一致；覆盖参数。"),
                scalarInput("y", "可选 y 坐标，单位必须与 unit 一致；覆盖参数。")};
   op.params = {vector2("position", "坐标"), unitParam()};
