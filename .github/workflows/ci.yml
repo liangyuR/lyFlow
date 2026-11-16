@@ -512,6 +512,11 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: '2'
         run: |
           ./scripts/prepare-release-deps.ps1 -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
+          foreach ($name in @('VCPKG_ROOT', 'VCPKG_INSTALLED_DIR')) {
+            $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "Missing verified dependency path: $name" }
+            "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
           ./tests/release/test-build-vision-deps.ps1
           $env:LYFLOW_STD_PACKS = '1'
           $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'

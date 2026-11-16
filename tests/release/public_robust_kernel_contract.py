@@ -146,6 +146,13 @@ def main():
         if installed:
             configure.append(f'-DVCPKG_INSTALLED_DIR={installed.as_posix()}')
         run(configure, workspace, output / 'configure.log')
+        cache = (build / 'CMakeCache.txt').read_text(encoding='utf-8')
+        provider = re.search(r'^PCL_DIR:[^=]+=(.+)$', cache, re.M)
+        if not provider:
+            raise RuntimeError('Configured consumer did not record its PCL provider')
+        pcl_directory = Path(provider.group(1).strip()).resolve(strict=True)
+        if installed and not pcl_directory.is_relative_to(installed):
+            raise RuntimeError('PCL was resolved outside the selected verified installation')
         run([cmake, '--build', str(build), '--parallel', '2'], workspace, output / 'build.log')
         binary_dirs = [sdk / 'bin']
         binary_dirs.extend(Path(line) for line in
@@ -167,6 +174,7 @@ def main():
                 raise RuntimeError(f'Robust kernel acceptance failed: {name}')
         evidence = {'sdk': str(sdk), 'toolchain': str(toolchain) if toolchain else None,
                     'installedDir': str(installed) if installed else None,
+                    'pclConfigDirectory': str(pcl_directory),
                     'isolatedSdkRuntimeDllCount': 0, 'runtimePath': 'System32 only',
                     'runtimeImports': imports, 'consumer': report, 'consumerPassed': True}
     if workspace.exists():
