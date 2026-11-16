@@ -54,8 +54,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--capture-output node:port] [--capture-max-bytes <n>]
                           [--input <nodeId>.<port>=<file.pcd|file.lypr>]...
         --input：把点云或完整 LYPR Profile 注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
-                 整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.pcd
-                 --input n_scan.secondary=b.pcd 直接喂 gap.read_scan（m8-plan L18）。
+                 整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.lypr
+                 --input n_scan.secondary=b.lypr 直接喂原生 gap.read_scan。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。

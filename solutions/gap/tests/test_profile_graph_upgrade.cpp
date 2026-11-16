@@ -137,6 +137,11 @@ TEST_CASE(
                              {"type", "float"},
                              {"default", 0.0},
                              {"binds", Json::array({{{"node", "n_flush"}, {"param", "offset"}}})}});
+  gapNode(inner, "n_flush")["params"].erase("signed");
+  inner["params"].push_back({{"name", "signedDistance"},
+                             {"type", "bool"},
+                             {"default", true},
+                             {"binds", Json::array({{{"node", "n_flush"}, {"param", "signed"}}})}});
   auto request = gapRequest(inner);
   request["rules"][0]["scope"] = {{"subgraph", "inside"}};
   Json graph{{"schemaVersion", 1},
@@ -153,7 +158,11 @@ TEST_CASE(
               {{"offset",
                 {{"type", "float"},
                  {"default", 2.0},
-                 {"binds", {"a.flushCompensation", "b.flushCompensation"}}}}}}};
+                 {"binds", {"a.flushCompensation", "b.flushCompensation"}}}},
+               {"signedDistance",
+                {{"type", "bool"},
+                 {"default", false},
+                 {"binds", {"a.signedDistance", "b.signedDistance"}}}}}}};
   Json upgraded, report;
   GraphContractUpgradeError error;
   REQUIRE_MESSAGE(upgradeGraphContracts(graph, request, upgraded, report, error), error.message);
@@ -161,6 +170,7 @@ TEST_CASE(
   CHECK(upgraded["subgraphs"]["inside"]["outputs"] == inner["outputs"]);
   CHECK(upgraded["outputs"]["aLine"]["node"] != "a/n_fb_line");
   CHECK(upgraded["outputs"]["aLine"]["port"] == "line");
+  CHECK_FALSE(gapNode(upgraded["subgraphs"]["inside"], "n_flush")["params"].contains("signed"));
   validPlan(upgraded, fixture);
   test::Session session(upgraded, fixture.root, {}, false, 1, true);
   const auto& log = session.wait();
@@ -176,5 +186,33 @@ TEST_CASE(
   REQUIRE(upgradeGraphContracts(upgraded, request, repeated, repeatReport, error));
   CHECK(repeated == upgraded);
   CHECK(repeatReport.empty());
+}
+TEST_CASE("GAP migrated signed graph bindings compile and execute without default conflicts") {
+  RuntimeFixture fixture;
+  const auto legacy = legacyRuntime().at("cases").at("template");
+  for (bool signedDistance : {false, true}) {
+    auto graph = legacy.at("graph");
+    gapNode(graph, "n_flush")["params"].erase("signed");
+    graph["params"]["signedDistance"] = {
+        {"type", "bool"}, {"default", signedDistance}, {"binds", {"n_flush.signed"}}};
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    REQUIRE_MESSAGE(upgradeGraphContracts(graph, gapRequest(graph), upgraded, report, error),
+                    error.message);
+    validPlan(upgraded, fixture);
+    test::Session session(upgraded, fixture.root, {}, false, 1, true);
+    const auto& log = session.wait();
+    requireRun(log);
+    REQUIRE(log.runStatus() == "ok");
+    const auto boundValue = result(session, "n_flush", "value").valueJson();
+    auto explicitGraph = upgraded;
+    explicitGraph["params"].erase("signedDistance");
+    gapNode(explicitGraph, "n_flush")["params"]["signed"] = signedDistance;
+    test::Session explicitSession(explicitGraph, fixture.root, {}, false, 1, true);
+    const auto& explicitLog = explicitSession.wait();
+    requireRun(explicitLog);
+    REQUIRE(explicitLog.runStatus() == "ok");
+    CHECK(boundValue == result(explicitSession, "n_flush", "value").valueJson());
+  }
 }
 #endif

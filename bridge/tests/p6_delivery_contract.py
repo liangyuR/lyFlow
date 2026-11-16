@@ -173,10 +173,13 @@ def queued_recording(core, recording, destination):
 def bundle_source_contract(cli, examples, output):
     profile = (examples / "p5-scene.pcd").as_posix()
     graph = {"schemaVersion": 1, "id": "p6-bundle-source", "name": "P6 Bundle source replay", "nodes": [
-        {"id": "scan", "op": "gap.read_scan", "params": {"source": "files", "primaryFile": profile,
-         "secondaryFile": profile, "removeOutliers": False}}], "edges": [], "outputs": {
+        {"id": "scan", "op": "gap.read_scan", "opVersion": "2.0.0", "params": {
+         "source": "files", "primaryFile": profile, "secondaryFile": profile, "removeOutliers": False,
+         "unit": "m", "layout": "sensor", "fileFrame": "p6.fixture.file", "sensorFrame": "p6.fixture.sensor",
+         "measurementFrame": "p6.measurement", "handedness": "right"}}], "edges": [], "outputs": {
         "scan": {"node": "scan", "port": "scan"},
-        **{name: {"node": "scan", "port": f"scan.{name}"} for name in ("primary", "secondary", "merged")}}}
+        **{name: {"node": "scan", "port": f"scan.{name}"} for name in (
+            "sensorPrimary", "sensorSecondary", "primary", "secondary", "merged")}}}
     path = output / "bundle-source.lyflow.json"
     path.write_text(json.dumps(graph), encoding="utf-8")
     recording = output / "bundle-recording"
@@ -184,23 +187,57 @@ def bundle_source_contract(cli, examples, output):
     original = execute(cli, "replay", recording)[0]
     restored = execute(cli, "replay", recording, "--recompute", "--no-cache")[0]
     require(restored["status"] == "ok", "Bundle source recompute injected virtual fields as target ports")
-    require(original["outputs"]["scan"]["type"] == "Bundle<gap.ScanPair>", "real Bundle source was not recorded")
-    for name in ("primary", "secondary", "merged"):
-        require(original["outputs"][name]["type"] == restored["outputs"][name]["type"] == "PointCloud", "Bundle field native type changed")
-        require(original["outputs"][name]["elementCount"] == restored["outputs"][name]["elementCount"] > 0, "Bundle field payload lost")
+    require(original["outputs"]["scan"]["type"] == restored["outputs"]["scan"]["type"] == "Bundle<gap.ScanPair.v2>",
+            "real versioned native Bundle source was not recorded")
+    fields = ("sensorPrimary", "sensorSecondary", "primary", "secondary", "merged")
+    for name in fields:
+        before, after = original["outputs"][name], restored["outputs"][name]
+        require(before["type"] == after["type"] == "Profile", "Bundle field native type changed")
+        require(before["elementCount"] == after["elementCount"] > 0, "Bundle field payload lost")
+        require(before["value"]["descriptor"] == after["value"]["descriptor"], "Profile declaration changed during replay")
+        require(before["value"]["validCount"] == after["value"]["validCount"] > 0, "Profile validity was lost")
+        descriptor = before["value"]["descriptor"]
+        require(descriptor["unit"] == "m" and descriptor["sourceCount"] >= before["elementCount"],
+                "Profile lost physical units or source slot count")
+        require(descriptor["plane"] == ("XZ" if name.startswith("sensor") else "XY") and
+                descriptor["frame"] == ("p6.fixture.sensor" if name.startswith("sensor") else "p6.measurement"),
+                "Profile lost its explicit sensor/measurement frame or analysis plane")
     virtual = [entry for entry in original["metadata"]["entries"] if entry.get("virtual") is True]
-    require({entry["port"] for entry in virtual} == {"scan.primary", "scan.secondary", "scan.merged"}, "Bundle virtual-port identity missing")
-    target = {"schemaVersion": 1, "id": "p6-bundle-field-binding", "name": "P6 explicit Bundle source", "nodes": [
-        {"id": "source", "op": "gen.synthetic", "params": {"pointCount": 1}},
-        {"id": "stats", "op": "cloud.statistics", "params": {"frame": "measurement"}}],
-        "edges": [{"id": "cloud-stats", "from": {"node": "source", "port": "cloud"}, "to": {"node": "stats", "port": "cloud"}}],
-        "outputs": {"statistics": {"node": "stats", "port": "statistics"}}}
+    require({entry["port"] for entry in virtual} ==
+            {f"scan.{name}" for name in (*fields, "mergedProvenance", "info")}, "Bundle virtual-port identity missing")
+    target = {"schemaVersion": 1, "id": "p6-bundle-field-binding", "name": "P6 explicit native Bundle source", "nodes": [
+        {"id": "source", "op": "profile.input", "opVersion": "1.0.0", "params": {"source": "injected"}},
+        {"id": "cloud", "op": "profile.to_cloud", "opVersion": "1.0.0", "params": {"unit": "m"}},
+        {"id": "stats", "op": "cloud.statistics", "params": {"frame": "p6.measurement"}}],
+        "edges": [
+            {"id": "profile-cloud", "from": {"node": "source", "port": "profile"}, "to": {"node": "cloud", "port": "profile"}},
+            {"id": "cloud-stats", "from": {"node": "cloud", "port": "cloud"}, "to": {"node": "stats", "port": "cloud"}}],
+        "outputs": {"statistics": {"node": "stats", "port": "statistics"},
+                    "profile": {"node": "source", "port": "profile"},
+                    "cloud": {"node": "cloud", "port": "cloud"}}}
     target_path = output / "bundle-target.lyflow.json"
     target_path.write_text(json.dumps(target), encoding="utf-8")
-    explicit = execute(cli, "replay", recording, "--graph", target_path, "--bind", "scan.scan.merged=source.cloud", "--no-cache")[0]
-    require(explicit["status"] == "ok", "explicit Bundle field source binding rejected")
+    explicit = execute(cli, "replay", recording, "--graph", target_path, "--bind", "scan.scan.merged=source.profile", "--no-cache")[0]
+    require(explicit["status"] == "ok", "explicit native Bundle field source binding rejected")
+    require(explicit["outputs"]["profile"]["type"] == "Profile" and explicit["outputs"]["cloud"]["type"] == "PointCloud",
+            "explicit Profile-to-PointCloud boundary was not preserved")
+    require(explicit["outputs"]["profile"]["value"]["descriptor"] == original["outputs"]["merged"]["value"]["descriptor"],
+            "explicit replay discarded the actual Profile descriptor")
     require(explicit["outputs"]["statistics"]["value"]["data"]["count"] == original["outputs"]["merged"]["elementCount"],
             "explicit Bundle field binding did not feed the real target port")
+    wrong = json.loads(json.dumps(target))
+    wrong["nodes"][0] = {"id": "source", "op": "gen.synthetic", "params": {"pointCount": 1}}
+    wrong["nodes"] = [node for node in wrong["nodes"] if node["id"] != "cloud"]
+    wrong["edges"] = [{"id": "wrong-cloud-stats", "from": {"node": "source", "port": "cloud"},
+                       "to": {"node": "stats", "port": "cloud"}}]
+    wrong["outputs"] = {"statistics": {"node": "stats", "port": "statistics"}}
+    wrong_path = output / "bundle-wrong-target.lyflow.json"
+    wrong_path.write_text(json.dumps(wrong), encoding="utf-8")
+    execute(cli, "replay", recording, "--graph", wrong_path, "--bind", "scan.scan.merged=source.cloud", "--no-cache", success=False)
+    return {"bundleType": "Bundle<gap.ScanPair.v2>", "nativeFieldType": "Profile", "profileFields": list(fields),
+            "mergedSlots": original["outputs"]["merged"]["elementCount"], "recomputePassed": True,
+            "explicitProfileToCloudPassed": True, "mismatchedBindingRejected": True}
+
 
 
 def main():
@@ -327,10 +364,11 @@ def main():
     require(restored_match["status"] == "ok", "loaded Template3D/model rejected by real global matching consumer")
     require(restored_match["outputs"]["nativeIdentity"]["value"]["data"]["value"] is True,
             "loaded ViewSampling.cloudId disagrees with actual downstream cloud.statistics/value.field/value.compare")
-    bundle_source_contract(args.cli, examples, output)
+    bundle_contract = bundle_source_contract(args.cli, examples, output)
     execute(args.cli, "run", fixture)
     print(json.dumps({"ok": True, "type": "lyflow.P6DeliveryAcceptance.v1", "output": str(output),
-                      "frames": 2, "nativePayloads": list(expected), "receipts": len(receipts), "noSkipped": True}))
+                      "frames": 2, "nativePayloads": list(expected), "receipts": len(receipts),
+                      "bundleSource": bundle_contract, "noSkipped": True}))
 
 
 if __name__ == "__main__":

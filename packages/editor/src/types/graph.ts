@@ -90,7 +90,35 @@ export function subgraphIdOf(opId: string): string | null {
   return opId.startsWith(SUBGRAPH_OP_PREFIX) ? opId.slice(SUBGRAPH_OP_PREFIX.length) : null;
 }
 
+export interface GapProfileUpgradeDeclaration {
+  sourceId: string;
+  unit: 'm';
+  fileFrame: string;
+  sensorFrame: string;
+  fileHandedness: 'right' | 'reflected';
+}
+
+export interface GapProfileContractUpgradeRule {
+  kind: 'gapProfile.v1';
+  scope?: { subgraph: string };
+  source:
+    | { node: string; op: 'gap.read_scan'; opVersion: '1.1.0'; port: 'scan' }
+    | { node: string; op: 'gap.load_profile_pair'; opVersion: '1.0.0'; port: 'primary' };
+  profiles: { primary: GapProfileUpgradeDeclaration; secondary: GapProfileUpgradeDeclaration };
+  measurement: { frame: string; plane: 'XY' };
+  alreadyAligned: true;
+  component: { style: 'blocks' | 'fine'; nodes: string[] };
+  adapterIdPrefix: string;
+  templates?: {
+    unit: 'm';
+    fileFrame: string;
+    templateFrame: string;
+    handedness: 'right' | 'reflected';
+  };
+}
+
 export type GraphContractUpgradeRule =
+  | GapProfileContractUpgradeRule
   | ({
       source: { node: string; op: string; opVersion: '1.0.0'; port: string };
       target: { node: string; port: string };

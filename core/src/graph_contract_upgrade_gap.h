@@ -84,22 +84,34 @@ inline void enabled(const Json& node) {
           "GAP升级组件节点必须启用，不支持旁路或未知旁路状态");
 }
 inline bool bound(const Json& owner, const std::string& node, const char* field,
-                  bool nested = false) {
+                  const std::string& scope = {}) {
   if (!owner.contains("params") || (!owner["params"].is_object() && !owner["params"].is_array()))
     return false;
   const auto direct = node + "." + field;
   const auto suffix = "/" + direct;
+  auto matches = [&](const std::string& value) {
+    if (scope.empty())
+      return value == direct;
+    if (value.size() <= suffix.size() ||
+        value.compare(value.size() - suffix.size(), suffix.size(), suffix) != 0)
+      return false;
+    const auto instance = value.substr(0, value.size() - suffix.size());
+    if (instance.find('/') != std::string::npos || !owner.contains("nodes"))
+      return false;
+    for (const auto& candidate : owner.at("nodes"))
+      if (candidate.value("id", "") == instance)
+        return candidate.value("op", "") == "sub:" + scope;
+    return false;
+  };
   for (const auto& parameter : owner["params"])
     if (parameter.is_object() && parameter.contains("binds") && parameter["binds"].is_array())
       for (const auto& binding : parameter["binds"]) {
         if (binding.is_string()) {
           const auto& text = binding.get_ref<const std::string&>();
-          if (text == direct ||
-              (nested && text.size() > suffix.size() &&
-               text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0))
+          if (matches(text))
             return true;
-        } else if (binding.is_object() && binding.value("node", "") == node &&
-                   binding.value("param", "") == field)
+        } else if (binding.is_object() &&
+                   matches(binding.value("node", "") + "." + binding.value("param", "")))
           return true;
       }
   return false;
@@ -195,7 +207,9 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
           "GAP旧裸云注入无法证明原槽；请先提供完整Profile或重新读取原始文件");
   const auto layout = params.value("layout", std::string("sensor"));
   require(layout == "sensor" || layout == "profile", "GAP文件布局必须为已知sensor/profile声明");
-  require(!bound(graph, sourceId, "layout") && !(outer && bound(*outer, sourceId, "layout", true)),
+  const auto scope =
+      rule.contains("scope") ? rule.at("scope").at("subgraph").get<std::string>() : "";
+  require(!bound(graph, sourceId, "layout") && !(outer && bound(*outer, sourceId, "layout", scope)),
           "GAP来源布局不能由未固定的动态参数改变，须先固定已声明文件布局");
   const auto sourceHand = a.at("fileHandedness").get<std::string>();
   const auto measurementHand = layout == "profile"     ? sourceHand
@@ -220,9 +234,9 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
   }
   if (mode == "files") {
     for (const auto* field : {"primaryFile", "secondaryFile"})
-      if (!bound(graph, sourceId, field) && !(outer && bound(*outer, sourceId, field, true)))
+      if (!bound(graph, sourceId, field) && !(outer && bound(*outer, sourceId, field, scope)))
         text(params, field);
-  } else if (!bound(graph, sourceId, "dir") && !(outer && bound(*outer, sourceId, "dir", true)))
+  } else if (!bound(graph, sourceId, "dir") && !(outer && bound(*outer, sourceId, "dir", scope)))
     text(params, "dir");
   std::set<std::string> edgeIds, links;
   for (const auto& edge : graph["edges"]) {

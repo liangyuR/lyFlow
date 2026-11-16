@@ -157,6 +157,34 @@ TEST_CASE(
   invalid["params"]["offset"]["binds"] = {"a/n_flush.offset"};
   CHECK_FALSE(upgradeGraphContracts(invalid, request, again, repeated, error));
   CHECK(error.message.find("提升参数") != std::string::npos);
+  auto outsideBinding = graph;
+  outsideBinding["nodes"].push_back(
+      {{"id", "n_flush"}, {"op", "value.boolean"}, {"params", Json::object()}});
+  outsideBinding["params"]["external"] = {
+      {"type", "bool"},
+      {"default", false},
+      {"binds", Json::array({{{"node", "n_flush"}, {"param", "signed"}}})}};
+  REQUIRE_MESSAGE(upgradeGraphContracts(outsideBinding, request, again, repeated, error),
+                  error.message);
+  CHECK(again["params"] == outsideBinding["params"]);
+  auto projectedObject = graph;
+  projectedObject["params"]["offset"]["binds"] =
+      Json::array({{{"node", "a/n_flush"}, {"param", "offset"}}});
+  CHECK_FALSE(upgradeGraphContracts(projectedObject, request, again, repeated, error));
+  CHECK(error.message.find("提升参数") != std::string::npos);
+  for (bool objectBinding : {false, true}) {
+    auto shadowed = graph;
+    shadowed["nodes"].push_back(
+        {{"id", "n_scan"}, {"op", "value.string"}, {"params", Json::object()}});
+    shadowed["params"]["layout"] = {
+        {"type", "string"},
+        {"default", "profile"},
+        {"binds", Json::array({objectBinding ? Json{{"node", "n_scan"}, {"param", "layout"}}
+                                             : Json("n_scan.layout")})}};
+    REQUIRE_MESSAGE(upgradeGraphContracts(shadowed, request, again, repeated, error),
+                    error.message);
+    CHECK(again["params"] == shadowed["params"]);
+  }
 }
 
 TEST_CASE(
@@ -294,5 +322,156 @@ TEST_CASE("GAP legacy template migration retains explicitly saved initial pose m
     gapNode(graph, "n_locate")["opVersion"] = "2.1.1";
     CHECK_FALSE(upgradeGraphContracts(graph, request, upgraded, report, error));
     CHECK(error.message.find("精确版本白名单") != std::string::npos);
+  }
+}
+
+TEST_CASE("GAP migration reconciles preserved boolean and aliased graph parameter bindings") {
+  for (bool objectBinding : {false, true}) {
+    auto graph = legacyGaps().at("template");
+    auto& flush = gapNode(graph, "n_flush");
+    for (const auto* field : {"signed", "scale", "offset"})
+      flush["params"].erase(field);
+    graph["params"] = Json::object();
+    for (const auto& entry : {std::make_pair("signed", "signed"), std::make_pair("scale", "gain"),
+                              std::make_pair("offset", "offsetMm")}) {
+      const Json bind = objectBinding ? Json{{"node", "n_flush"}, {"param", entry.first}}
+                                      : Json(std::string("n_flush.") + entry.first);
+      graph["params"][entry.first] = {
+          {"type", std::string(entry.first) == "signed" ? "bool" : "float"},
+          {"default", std::string(entry.first) == "signed" ? Json(false) : Json(1.0)},
+          {"binds", Json::array({bind})}};
+    }
+    const auto request = gapRequest(graph);
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    REQUIRE_MESSAGE(upgradeGraphContracts(graph, request, upgraded, report, error), error.message);
+    for (const auto* field : {"signed", "gain", "offsetMm"})
+      CHECK_FALSE(gapNode(upgraded, "n_flush")["params"].contains(field));
+    CHECK(upgraded["params"]["signed"] == graph["params"]["signed"]);
+    auto conflicting = graph;
+    gapNode(conflicting, "n_flush")["params"]["signed"] = true;
+    const auto previous = upgraded;
+    CHECK_FALSE(upgradeGraphContracts(conflicting, request, upgraded, report, error));
+    CHECK(upgraded == previous);
+    CHECK(error.message.find("param_conflict") != std::string::npos);
+  }
+}
+
+TEST_CASE(
+    "GAP binding reconciliation covers unchanged aliases generated defaults and unsafe conversions") {
+  struct BindingCase {
+    const char* fixture;
+    const char* node;
+    const char* field;
+    const char* target;
+    Json value;
+    bool supported;
+  };
+  for (const auto& entry : std::vector<BindingCase>{
+           {"template", "n_ref_point", "method", "method", "line_end", true},
+           {"template-fine", "n_crop_p", "bounds", "bounds", "open", true},
+           {"template-fine", "n_filter", "radius", "radius", .0004, true},
+           {"template-fine", "n_fit_base", "minInliers", "minInliers", 2, true},
+           {"template-fine", "n_fit_base", "distThresh", "distanceThreshold", .1, false},
+           {"template-fine", "n_filter", "keepOrganized", "keepOrganized", false, false},
+           {"template-fine", "n_crop_p", "invert", "invert", false, false},
+           {"template-fine", "n_load", "dropNonFinite", "dropNonFinite", true, false},
+           {"model-only-fine", "n_labels_p", "row", "row", "secondary", false},
+           {"template-fine", "n_tpl_f1", "layout", "layout", "sensor", false},
+           {"template", "n_gap", "definition", "definition", "B", false}}) {
+    CAPTURE(entry.fixture);
+    CAPTURE(entry.node);
+    CAPTURE(entry.field);
+    auto graph = legacyGaps().at(entry.fixture);
+    gapNode(graph, entry.node)["params"].erase(entry.field);
+    graph["params"]["bindingMatrix"] = {{"type", entry.value.is_boolean()  ? "bool"
+                                                 : entry.value.is_string() ? "string"
+                                                                           : "float"},
+                                        {"default", entry.value},
+                                        {"binds", {std::string(entry.node) + "." + entry.field}}};
+    const auto request =
+        gapRequest(graph, std::string(entry.fixture) == "template" ? "blocks" : "fine");
+    const auto boundGraph = graph;
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    const auto accepted = upgradeGraphContracts(graph, request, upgraded, report, error);
+    REQUIRE_MESSAGE(accepted == entry.supported, error.message);
+    if (accepted) {
+      CHECK_FALSE(gapNode(upgraded, entry.node)["params"].contains(entry.target));
+      CHECK(upgraded["params"]["bindingMatrix"] == graph["params"]["bindingMatrix"]);
+      gapNode(graph, entry.node)["params"][entry.field] = entry.value;
+      CHECK_FALSE(upgradeGraphContracts(graph, request, upgraded, report, error));
+      CHECK(error.message.find("param_conflict") != std::string::npos);
+    } else
+      CHECK(error.message.find("动态参数") != std::string::npos);
+    Json scoped{{"schemaVersion", 1},
+                {"nodes", Json::array({{{"id", "instance"}, {"op", "sub:inside"}}})},
+                {"edges", Json::array()},
+                {"subgraphs", {{"inside", gapSubgraph(boundGraph)}}}};
+    auto scopedRequest = request;
+    scopedRequest["rules"][0]["scope"] = {{"subgraph", "inside"}};
+    CHECK_MESSAGE(upgradeGraphContracts(scoped, scopedRequest, upgraded, report, error) ==
+                      entry.supported,
+                  error.message);
+    if (entry.supported)
+      CHECK_FALSE(
+          gapNode(upgraded["subgraphs"]["inside"], entry.node)["params"].contains(entry.target));
+  }
+  auto graph = legacyGaps().at("template");
+  graph["nodes"].push_back({{"id", "point_offset"},
+                            {"op", "gap.point_offset"},
+                            {"opVersion", "1.0.1"},
+                            {"params", Json::object()}});
+  for (const auto* port : {"a", "b"})
+    graph["edges"].push_back({{"id", std::string("offset_") + port},
+                              {"from", {{"node", "n_ref_point"}, {"port", "point"}}},
+                              {"to", {{"node", "point_offset"}, {"port", port}}}});
+  for (const auto& fields :
+       {std::make_pair("absDx", "absDx"), std::make_pair("absDy", "absDy"),
+        std::make_pair("scaleDx", "gainDx"), std::make_pair("scaleDy", "gainDy"),
+        std::make_pair("dxOffset", "dxOffsetMm"), std::make_pair("dyOffset", "dyOffsetMm")})
+    graph["params"][fields.first] = {
+        {"type", std::string(fields.first).rfind("abs", 0) == 0 ? "bool" : "float"},
+        {"default", std::string(fields.first).rfind("abs", 0) == 0 ? Json(true) : Json(1.0)},
+        {"binds", {std::string("point_offset.") + fields.first}}};
+  Json upgraded, report;
+  GraphContractUpgradeError error;
+  REQUIRE_MESSAGE(upgradeGraphContracts(graph, gapRequest(graph), upgraded, report, error),
+                  error.message);
+  for (const auto* field : {"absDx", "absDy", "gainDx", "gainDy", "dxOffsetMm", "dyOffsetMm"})
+    CHECK_FALSE(gapNode(upgraded, "point_offset")["params"].contains(field));
+  for (const auto* field : {"absDx", "absDy"}) {
+    auto conflicting = graph;
+    gapNode(conflicting, "point_offset")["params"][field] = false;
+    CHECK_FALSE(upgradeGraphContracts(conflicting, gapRequest(graph), upgraded, report, error));
+    CHECK(error.message.find("param_conflict") != std::string::npos);
+  }
+}
+
+TEST_CASE(
+    "GAP fine model migration requires uncompressed source slots and matching diagnostic cloud role and frame") {
+  const auto graph = legacyGaps().at("model-only-fine");
+  const auto request = gapRequest(graph, "fine");
+  for (const auto* producer : {"n_load", "n_frame_s", "n_crop_p"}) {
+    auto changed = graph;
+    for (auto& edge : changed["edges"])
+      if (edge["to"]["node"] == "n_labels_p" && edge["to"]["port"] == "cloud")
+        edge["from"] = {{"node", producer},
+                        {"port", std::string(producer) == "n_load" ? "primary" : "cloud"}};
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    CHECK_FALSE(upgradeGraphContracts(changed, request, upgraded, report, error));
+    CHECK_FALSE(error.message.empty());
+  }
+  for (bool omit : {false, true}) {
+    auto changed = graph;
+    if (omit)
+      gapNode(changed, "n_load")["params"].erase("dropNonFinite");
+    else
+      gapNode(changed, "n_load")["params"]["dropNonFinite"] = true;
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    CHECK_FALSE(upgradeGraphContracts(changed, request, upgraded, report, error));
+    CHECK(error.message.find("原始槽") != std::string::npos);
   }
 }

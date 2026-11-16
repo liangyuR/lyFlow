@@ -21,7 +21,7 @@ lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]..
                                   [--recipe r.lyflow-recipe.json] [--param name=<json>]...
                                   [--base-dir d] [--parallel n] [--no-cache] [--cache-dir d]
                                   [--preview] [--preview-points n] [--outputs] [--summary]
-                                  [--input nodeId.port=file.pcd]...
+                                  [--input nodeId.port=file.pcd|file.lypr]...
 lyflow cache    info|clear --cache-dir d [--stale]
 lyflow import   file --kind kind [--fine] [-o out.lyflow.json] [--base-dir d]
 lyflow validate graph.lyflow.json [--base-dir d] [--set ...] [--recipe ...] [--param ...]
@@ -34,7 +34,7 @@ lyflow manifest [--check]
 lyflow info
 lyflow samples  [<样本集>]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
-lyflow dump     graph.lyflow.json nodeId:profile out.lypr [--format profile] [--input nodeId.port=file.pcd]
+lyflow dump     graph.lyflow.json nodeId:profile out.lypr [--format profile] [--input nodeId.port=file.pcd|file.lypr]
                                   # 图像输出写 out.lyim（LYIM 载荷原样落盘）
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount|byteSize|durationMs

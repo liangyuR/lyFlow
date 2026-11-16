@@ -28,7 +28,8 @@ def make_validator(schema, schema_path):
     for name in sorted(os.listdir(folder)):
         if not name.endswith(".schema.json"):
             continue
-        other = json.load(io.open(os.path.join(folder, name), encoding="utf-8"))
+        with io.open(os.path.join(folder, name), encoding="utf-8") as source:
+            other = json.load(source)
         if "$id" in other:
             registry = registry.with_resource(other["$id"], Resource.from_contents(other))
     cls = jsonschema.validators.validator_for(schema)

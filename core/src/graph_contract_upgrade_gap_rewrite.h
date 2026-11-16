@@ -210,40 +210,46 @@ private:
         require(parameter["binds"].is_array(), "GAP参数binds必须是数组");
         for (auto& binding : parameter["binds"]) {
           std::string key, head;
-          if (binding.is_string()) {
+          if (binding.is_string())
             key = binding.get<std::string>();
-            if (nested) {
-              const auto slash = key.rfind('/');
-              if (slash == std::string::npos)
-                continue;
-              head = key.substr(0, slash + 1);
-              const auto instance = head.substr(0, head.size() - 1);
-              require(instance.find('/') == std::string::npos,
-                      "GAP外层绑定暂只支持直接共享子图实例，拒绝猜测多层实例路径");
-              bool belongs = false;
-              for (const auto& node : owner.at("nodes"))
-                if (node.at("id") == instance)
-                  belongs = node.value("op", "") ==
-                            "sub:" + rule_.at("scope").at("subgraph").get<std::string>();
-              if (!belongs)
-                continue;
-              throw std::invalid_argument(
-                  "GAP图级参数不能直接绑定子图内部投影；请先声明并绑定子图提升参数: " + key);
-            }
-          } else if (binding.is_object() && binding.contains("node") && binding.contains("param")) {
+          else if (binding.is_object() && binding.contains("node") && binding.contains("param"))
             key = text(binding, "node") + "." + text(binding, "param");
-          } else
+          else
             throw std::invalid_argument("GAP不支持未知参数绑定表示");
-          const auto found = params_.find(key);
-          if (found == params_.end())
-            continue;
-          require(!found->second.second, "GAP动态参数涉及单位/枚举转换，须显式重建绑定: " + key);
-          const auto oldDot = key.rfind('.'), newDot = found->second.first.rfind('.');
+          if (nested) {
+            const auto slash = key.rfind('/');
+            if (slash == std::string::npos)
+              continue;
+            head = key.substr(0, slash + 1);
+            const auto instance = head.substr(0, head.size() - 1);
+            require(instance.find('/') == std::string::npos,
+                    "GAP外层绑定暂只支持直接共享子图实例，拒绝猜测多层实例路径");
+            bool belongs = false;
+            for (const auto& node : owner.at("nodes"))
+              if (node.at("id") == instance)
+                belongs = node.value("op", "") ==
+                          "sub:" + rule_.at("scope").at("subgraph").get<std::string>();
+            if (!belongs)
+              continue;
+            throw std::invalid_argument(
+                "GAP图级参数不能直接绑定子图内部投影；请先声明并绑定子图提升参数: " + key);
+          }
+          const auto oldDot = key.rfind('.');
           const auto oldId = key.substr(0, oldDot), oldField = key.substr(oldDot + 1);
-          const auto targetId = found->second.first.substr(0, newDot),
-                     targetField = found->second.first.substr(newDot + 1);
+          if (!selected_.count(oldId))
+            continue;
           require(!originals_.at(oldId).value("params", Json::object()).contains(oldField),
                   "GAP原节点参数同时存在显式值和图级绑定，须先解决param_conflict: " + key);
+          const auto found = params_.find(key);
+          if (found == params_.end()) {
+            require(!replacements_.at(oldId).value("params", Json::object()).contains(oldField),
+                    "GAP转换器新增声明不能由旧图参数覆盖，须显式重建绑定: " + key);
+            continue;
+          }
+          require(!found->second.second, "GAP动态参数涉及单位/枚举转换，须显式重建绑定: " + key);
+          const auto newDot = found->second.first.rfind('.');
+          const auto targetId = found->second.first.substr(0, newDot),
+                     targetField = found->second.first.substr(newDot + 1);
           replacements_.at(targetId)["params"].erase(targetField);
           if (binding.is_string())
             binding = head + found->second.first;
@@ -483,6 +489,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     allowed(p, {"source", "dir", "primaryFile", "secondaryFile", "primaryPrefix", "secondaryPrefix",
                 "layout", "dropNonFinite"});
     replace(old, op, "2.0.0", fileParameters(p));
+    rename(id, "dropNonFinite", "dropNonFinite", true);
     for (const auto* role : {"primary", "secondary"})
       output(id, role, role, "sensor");
     output(id, "sourceInfo", "sourceInfo", "record");
@@ -553,6 +560,7 @@ inline void GapRewrite::rewrite(const Json& old) {
       allowed(p, {"radius", "minNeighbors", "keepOrganized"});
     require(!p.value("keepOrganized", false), "GAP细粒度旧半径去噪只支持压缩原槽语义");
     p.erase("keepOrganized");
+    rename(id, "keepOrganized", "keepOrganized", true);
     replace(old, op == "gap.drop_non_finite" ? "profile.filter_validity" : "profile.radius_outlier",
             "1.0.0", op == "gap.drop_non_finite" ? Json{{"mode", "compact"}} : p);
     profileInput(id, "cloud", "profile");
@@ -599,6 +607,8 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "filter.crop_box2d") {
     allowed(p, {"bounds", "invert"});
     require(!p.value("invert", false), "GAP已知场景不支持反向裁剪模板");
+    rename(id, "invert", "invert", true);
+    rename(id, "bounds", "bounds");
     replace(
         old, "profile.crop_box", "1.0.0",
         {{"bounds", p.value("bounds", "closed")}, {"mode", "compact"}, {"emptyPolicy", "allow"}});
@@ -634,6 +644,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "gap.load_template") {
     allowed(p, {"dir", "left", "right", "layout"});
+    rename(id, "layout", "layout", true);
     if (rule_.contains("templates"))
       for (const auto* name : {"unit", "fileFrame", "templateFrame", "handedness"})
         p[name] = rule_.at("templates").at(name);
@@ -720,7 +731,8 @@ inline void GapRewrite::rewrite(const Json& old) {
     require((side == "auto" || side == "left" || side == "right") && side == producerSide,
             "GAP旧区域datumSide覆盖无法证明与实际生产者一致，须显式整理侧声明");
     require(!fromTemplate || (!bound(graph_, producer, "datumSide") &&
-                              !(outer_ && bound(*outer_, producer, "datumSide", true))),
+                              !(outer_ && bound(*outer_, producer, "datumSide",
+                                                rule_.at("scope").at("subgraph")))),
             "GAP区域侧的动态生产者覆盖不能与旧make_roi_set静态声明混用");
     require(!fromTemplate || has(id, "alignment"),
             "GAP模板区域缺少旧make_roi_set实际配准来源，无法证明source/自动侧声明等价");
@@ -746,6 +758,9 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "gap.profile_tensor") {
     allowed(p, {});
+    fineSources();
+    require(!originals_.at(loadId_).value("params", Json::object()).value("dropNonFinite", true),
+            "GAP模型需要明确保留原始槽，拒绝已启用或未声明dropNonFinite=false的旧来源");
     replace(old, op, "2.0.0", p);
     require(pass(id, "primary").kind == "sensor" && pass(id, "secondary").kind == "sensor",
             "GAP模型张量只能使用原始sensor槽");
@@ -780,6 +795,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "gap.labels_to_cloud") {
     allowed(p, {"row"});
+    rename(id, "row", "row", true);
     replace(old, op, "2.0.0", p);
     input(id, "cloud");
     fineSources();
@@ -982,6 +998,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     boundInput(id, "refPoint");
     rename(id, "scale", "gain");
     rename(id, "offset", "offsetMm");
+    rename(id, "signed", "signed");
     for (const auto* name : {"value", "foot", "segment", "baseLine"})
       output(id, name, name,
              std::string(name) == "value"  ? "measurement"
@@ -1023,6 +1040,8 @@ inline void GapRewrite::rewrite(const Json& old) {
              {"outputUnit", "mm"}});
     boundInput(id, "a");
     boundInput(id, "b");
+    rename(id, "absDx", "absDx");
+    rename(id, "absDy", "absDy");
     for (const auto& fields :
          {std::make_pair("scaleDx", "gainDx"), std::make_pair("scaleDy", "gainDy"),
           std::make_pair("dxOffset", "dxOffsetMm"), std::make_pair("dyOffset", "dyOffsetMm")})
