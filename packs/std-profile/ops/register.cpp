@@ -13,6 +13,10 @@ void registerProfileProcessing(Registry&);
 void registerProfileInput(Registry&);
 void registerNativeProfileAnalysis(Registry&);
 void registerProfileAnalysis(Registry&);
+void registerProfileSelection(Registry&);
+#ifdef LYFLOW_PROFILE_ROBUST
+void registerRobustProfileFeatures(Registry&);
+#endif
 namespace {
 
 Param text(const char* name, const char* label) {
@@ -239,6 +243,10 @@ void registerPackOps(Registry& r) {
   registerProfileAnalysis(r);
   registerProfileProcessing(r);
   registerNativeProfileAnalysis(r);
+  registerProfileSelection(r);
+#ifdef LYFLOW_PROFILE_ROBUST
+  registerRobustProfileFeatures(r);
+#endif
 }
 
 } // namespace lyflow::packs::std_profile

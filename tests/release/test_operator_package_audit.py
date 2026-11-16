@@ -21,6 +21,19 @@ class PackageAuditTests(unittest.TestCase):
     def setUpClass(cls):
         cls.baseline = json.loads((ROOT / 'docs/operator-package-audit.json').read_text(encoding='utf-8'))
 
+    def before_m4b(self):
+        data = copy.deepcopy(self.baseline)
+        data['operators'] = [row for row in data['operators'] if row['id'] not in REFRESH.M4B_DEFINITIONS]
+        data['stageLedger'] = [entry for entry in data['stageLedger'] if entry['stage'] != 'M4b']
+        data['registeredNativeIds'] = sorted(row['id'] for row in data['operators'])
+        data['nativeCount'] = len(data['operators'])
+        data['currentPackCounts'] = dict(collections.Counter(row['currentPack'] for row in data['operators']))
+        data['targetPackCounts'] = dict(collections.Counter(row['targetPack'] for row in data['operators']))
+        for index, row in enumerate(sorted(data['operators'] + data['pythonExamples'],
+                                            key=lambda item: item['migrationOrder']), 1):
+            row['migrationOrder'] = index
+        return data
+
     def test_baseline(self):
         self.assertEqual(CHECKER.validate(self.baseline, []), [])
 
@@ -145,20 +158,21 @@ class PackageAuditTests(unittest.TestCase):
         self.assertTrue(any('真实manifest' in p for p in CHECKER.validate(data, [])))
 
     def test_refresh_rejects_partial_manifest_before_touching_audit(self):
+        baseline = self.before_m4b()
         before = copy.deepcopy(self.baseline)
         with patch.object(REFRESH, 'load', return_value={'operators': [{'id': 'flow.select'}]}):
             with self.assertRaisesRegex(ValueError, '真实全包manifest'):
-                REFRESH.refreshed(self.baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
+                REFRESH.refreshed(baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
         self.assertEqual(self.baseline, before)
         for field in ('operators', 'pythonExamples'):
             with self.subTest(field=field):
-                damaged = copy.deepcopy(self.baseline)
+                damaged = copy.deepcopy(baseline)
                 damaged[field].pop(0)
                 with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
                     with self.assertRaisesRegex(ValueError, '丢失已审ID'):
                         REFRESH.refreshed(damaged, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.2', 'M3')
         for identifier in REFRESH.ADDITIONS:
-            damaged = copy.deepcopy(self.baseline)
+            damaged = copy.deepcopy(baseline)
             damaged['operators'] = [row for row in damaged['operators'] if row['id'] != identifier]
             with patch.object(REFRESH, 'load', side_effect=AssertionError('不应先读取manifest')):
                 with self.assertRaisesRegex(ValueError, '丢失已审ID'):
@@ -166,7 +180,7 @@ class PackageAuditTests(unittest.TestCase):
 
     def test_m3_retirement_is_explicit_reversible_to_history_and_not_an_alias(self):
         before = copy.deepcopy(self.baseline)
-        prepared = REFRESH.prepare(before, 'M3')
+        prepared = REFRESH.prepare(self.before_m4b(), 'M3')
         self.assertEqual(before, self.baseline)
         ledger = next(item for item in prepared['stageLedger'] if item['stage'] == 'M3')
         self.assertEqual(ledger['expectedNativeCount'], 261)
@@ -231,10 +245,11 @@ class PackageAuditTests(unittest.TestCase):
         self.assertTrue(any('M4a只能抽公共核' in problem for problem in CHECKER.validate(prepared, [])))
 
     def test_m4a_refuses_hidden_operator_contract_changes(self):
-        first = min(self.baseline['operators'], key=lambda row: row['migrationOrder'])['id']
+        baseline = self.before_m4b()
+        first = min(baseline['operators'], key=lambda row: row['migrationOrder'])['id']
         operators = [dict(id=row['id'], version=row['currentVersion'], pack=row['currentPackVersion'],
                           params=row['currentParams'], **row['currentPorts'])
-                     for row in self.baseline['operators']]
+                     for row in baseline['operators']]
         for field in ('version', 'pack', 'params', 'inputs', 'outputs'):
             with self.subTest(field=field):
                 manifest = dict(generatedBy='lyflow-core/1.4.3', operators=copy.deepcopy(operators))
@@ -245,7 +260,67 @@ class PackageAuditTests(unittest.TestCase):
                     op[field] = op[field] + [dict(name='unexpected', type='PointCloud')]
                 with patch.object(REFRESH, 'load', return_value=manifest), patch.object(REFRESH, 'pending_sources', return_value=[]):
                     with self.assertRaisesRegex(ValueError, '不得改变注册包、版本、端口或参数'):
-                        REFRESH.refreshed(self.baseline, Path('unit-fixture.json'), [], 'contract guard', '1.4.3', 'M4a')
+                        REFRESH.refreshed(baseline, Path('unit-fixture.json'), [], 'contract guard', '1.4.3', 'M4a')
+
+    def test_m4b_requires_m4a_evidence_and_keeps_all_deferred_ids(self):
+        baseline = self.before_m4b()
+        prepared = REFRESH.prepare(baseline, 'M4b')
+        m4a = next(entry for entry in prepared['stageLedger'] if entry['stage'] == 'M4a')
+        self.assertEqual(m4a['status'], 'complete')
+        self.assertEqual(m4a['mergeEvidence']['pr'], 65)
+        self.assertEqual(m4a['mergeEvidence']['revision'], REFRESH.M4A_MERGED_REVISION)
+        self.assertEqual(m4a['mergeEvidence']['jobCount'], 7)
+        self.assertEqual(m4a['mergeEvidence']['codexReview'], 'completed_no_findings')
+        ledger = next(entry for entry in prepared['stageLedger'] if entry['stage'] == 'M4b')
+        self.assertEqual(ledger['status'], 'pending_manifest')
+        self.assertEqual(ledger['expectedNativeCount'], 271)
+        self.assertEqual(set(ledger['introducedNativeIds']), set(REFRESH.M4B_DEFINITIONS))
+        self.assertEqual(ledger['retiredNativeIds'], [])
+        REFRESH.introduce_m4b_rows(prepared)
+        self.assertEqual(len(prepared['operators']), 271)
+        self.assertTrue(set(REFRESH.M4B_DEFERRED_RETIREMENTS) <= {row['id'] for row in prepared['operators']})
+        snapshot = copy.deepcopy(prepared)
+        REFRESH.introduce_m4b_rows(prepared)
+        self.assertEqual(prepared, snapshot)
+        for row in prepared['operators']:
+            if row['id'] in REFRESH.M4B_DEFINITIONS:
+                self.assertEqual(row['wave'], 'M4')
+                self.assertTrue(row['currentContract'] and row['targetContract'] and row['acceptance'])
+                self.assertNotIn('currentPorts', row)
+        damaged = self.before_m4b()
+        next(entry for entry in damaged['stageLedger'] if entry['stage'] == 'M4a').pop('manifestEvidence')
+        with self.assertRaisesRegex(ValueError, 'M4a真实全包manifest'):
+            REFRESH.prepare(damaged, 'M4b')
+        ledger['introducedNativeIds'].append('unreviewed.extra')
+        self.assertTrue(any('M4b新增范围' in problem for problem in CHECKER.validate(prepared, [])))
+        ledger['introducedNativeIds'].pop()
+        next(entry for entry in prepared['stageLedger'] if entry['stage'] == 'M4')['status'] = 'complete'
+        self.assertTrue(any('M4b不能代替整个M4' in problem for problem in CHECKER.validate(prepared, [])))
+
+    def test_m4b_rejects_partial_manifest_and_hidden_legacy_changes(self):
+        baseline = self.before_m4b()
+        with patch.object(REFRESH, 'load', return_value={'operators': [{'id': 'flow.select'}]}):
+            with self.assertRaisesRegex(ValueError, '真实全包manifest'):
+                REFRESH.refreshed(baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.4', 'M4b')
+        with self.assertRaisesRegex(ValueError, '产品版本1.4.4'):
+            REFRESH.refreshed(baseline, Path('not-an-evidence-file.json'), [], 'unit-test', '1.4.3', 'M4b')
+        operators = [dict(id=row['id'], version=REFRESH.M4B_CHANGED_VERSIONS.get(row['id'], row['currentVersion']),
+                          pack=row['currentPackVersion'], params=row['currentParams'], **row['currentPorts'])
+                     for row in baseline['operators']]
+        operators.extend(dict(id=identifier, version='1.0.0', pack=definition[0] + '@0.3.0')
+                         for identifier, definition in REFRESH.M4B_DEFINITIONS.items())
+        first = min(baseline['operators'], key=lambda row: row['migrationOrder'])['id']
+        for field in ('version', 'pack', 'params', 'inputs', 'outputs'):
+            with self.subTest(field=field):
+                manifest = dict(generatedBy='lyflow-core/1.4.4', operators=copy.deepcopy(operators))
+                op = next(row for row in manifest['operators'] if row['id'] == first)
+                if field in ('version', 'pack'):
+                    op[field] = '999.0.0' if field == 'version' else 'unexpected-package@1.0.0'
+                else:
+                    op[field] = op.get(field, []) + [dict(name='unexpected', type='PointCloud')]
+                with patch.object(REFRESH, 'load', return_value=manifest), patch.object(REFRESH, 'pending_sources', return_value=[]):
+                    with self.assertRaisesRegex(ValueError, 'M4b仅允许已审旧Gap节点patch'):
+                        REFRESH.refreshed(baseline, Path('unit-fixture.json'), [], 'contract guard', '1.4.4', 'M4b')
 
 
 if __name__ == '__main__':

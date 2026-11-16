@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 #include "lyflow/hash.h"
 #include "lyflow/profile.h"
@@ -148,6 +149,146 @@ inline bool geometryMatches(const Data& geometry, const Record* record,
     why = error.what();
     return false;
   }
+  why.clear();
+  return true;
+}
+inline bool sameSpace(const ProfileDescriptor& a, const ProfileDescriptor& b) {
+  return a.frame == b.frame && a.plane == b.plane && a.handedness == b.handedness;
+}
+
+inline bool validGeometryV2(const Data& geometry, std::string& why) {
+  const auto metric = [](Unit2D unit) { return unit == Unit2D::Meter; };
+  bool valid = false;
+  if (const auto* point = geometry.asPoint2D()) {
+    valid = metric(point->unit) && std::isfinite(point->p[0]) && std::isfinite(point->p[1]);
+  } else if (const auto* line = geometry.asLine2D()) {
+    valid = metric(line->unit) && std::isfinite(line->point[0]) && std::isfinite(line->point[1]) &&
+            std::isfinite(line->dir[0]) && std::isfinite(line->dir[1]) &&
+            std::hypot(static_cast<double>(line->dir[0]), line->dir[1]) > 0;
+    if (line->hasSegment)
+      valid = valid && std::isfinite(line->start[0]) && std::isfinite(line->start[1]) &&
+              std::isfinite(line->end[0]) && std::isfinite(line->end[1]);
+  } else if (const auto* circle = geometry.asCircle2D()) {
+    valid = metric(circle->unit) && std::isfinite(circle->center[0]) &&
+            std::isfinite(circle->center[1]) && std::isfinite(circle->radius) && circle->radius > 0;
+  } else if (const auto* box = geometry.asBox2D()) {
+    valid = metric(box->unit) && std::isfinite(box->min[0]) && std::isfinite(box->min[1]) &&
+            std::isfinite(box->max[0]) && std::isfinite(box->max[1]) &&
+            box->min[0] <= box->max[0] && box->min[1] <= box->max[1];
+  }
+  why = valid ? "" : "需要有效米制Point2D、Line2D、Circle2D或Box2D";
+  return valid;
+}
+
+inline std::string geometryHashV2(const Data& geometry) {
+  std::string why;
+  if (!validGeometryV2(geometry, why))
+    throw std::invalid_argument(why);
+  HashBuilder hash;
+  hash.add(geometry.typeName());
+  hash.add(geometry.valueJson());
+  return hash.hex();
+}
+
+inline bool geometrySources(const nlohmann::json& sources, ProfileDescriptor& descriptor,
+                            std::string& why) {
+  if (!sources.is_array() || sources.empty() || sources.size() > 64) {
+    why = "几何来源需要1到64项完整轮廓上下文";
+    return false;
+  }
+  ProfileDescriptor first;
+  for (std::size_t i = 0; i < sources.size(); ++i) {
+    ProfileDescriptor current;
+    if (!parse(sources[i], current, why))
+      return false;
+    if (i == 0)
+      first = current;
+    else if (!sameSpace(first, current)) {
+      why = "几何的所有来源必须处于相同坐标帧、轴平面和手性";
+      return false;
+    }
+    for (std::size_t previous = 0; previous < i; ++previous)
+      if (sources[previous] == sources[i]) {
+        why = "几何来源上下文重复";
+        return false;
+      }
+  }
+  descriptor = std::move(first);
+  why.clear();
+  return true;
+}
+
+inline nlohmann::json geometryContextV2FromSources(const Data& geometry,
+                                                   const nlohmann::json& sources,
+                                                   const std::string& relation = "derived") {
+  if (!sources.is_array() || sources.empty() || sources.size() > 256 ||
+      (relation != "derived" && relation != "declared"))
+    throw std::invalid_argument("几何来源或生成关系非法");
+  nlohmann::json unique = nlohmann::json::array();
+  for (const auto& source : sources) {
+    ProfileDescriptor descriptor;
+    std::string why;
+    if (!parse(source, descriptor, why))
+      throw std::invalid_argument(why);
+    if (std::find(unique.begin(), unique.end(), source) == unique.end())
+      unique.push_back(source);
+  }
+  ProfileDescriptor descriptor;
+  std::string why;
+  if (!geometrySources(unique, descriptor, why))
+    throw std::invalid_argument(why);
+  return {{"schemaVersion", 2},           {"geometryType", geometry.typeName()},
+          {"geometryUnit", "m"},          {"geometryHash", geometryHashV2(geometry)},
+          {"sources", std::move(unique)}, {"relation", relation}};
+}
+
+inline nlohmann::json geometryContextV2(const Data& profile, const Data& geometry,
+                                        const std::string& relation = "derived") {
+  return geometryContextV2FromSources(geometry, nlohmann::json::array({context(profile)}),
+                                      relation);
+}
+
+inline bool geometryMatchesPhysical(const Data& geometry, const Record* record,
+                                    ProfileDescriptor& descriptor, std::string& why,
+                                    nlohmann::json* sources = nullptr) {
+  ProfileDescriptor parsed;
+  if (record && record->type == "profile.Geometry.v1") {
+    if (!geometryMatches(geometry, record, parsed, why))
+      return false;
+    if (sources)
+      *sources = nlohmann::json::array({record->data["context"]});
+    descriptor = std::move(parsed);
+    return true;
+  }
+  if (!record || record->type != "profile.Geometry.v2" || !record->data.is_object()) {
+    why = "需要profile.Geometry.v1或v2几何上下文";
+    return false;
+  }
+  const auto& value = record->data;
+  if (value.size() != 6 || !value.contains("schemaVersion") ||
+      !value["schemaVersion"].is_number_integer() || value["schemaVersion"] != 2 ||
+      !value.contains("geometryType") || value["geometryType"] != geometry.typeName() ||
+      !value.contains("geometryUnit") || value["geometryUnit"] != "m" ||
+      !value.contains("geometryHash") || !fingerprint(value["geometryHash"]) ||
+      !value.contains("sources") || !value.contains("relation") ||
+      (value["relation"] != "derived" && value["relation"] != "declared")) {
+    why = "几何上下文版本、类型、单位、来源或生成关系非法";
+    return false;
+  }
+  if (!geometrySources(value["sources"], parsed, why))
+    return false;
+  try {
+    if (value["geometryHash"] != geometryHashV2(geometry)) {
+      why = "几何内容与配套上下文指纹不匹配";
+      return false;
+    }
+  } catch (const std::invalid_argument& error) {
+    why = error.what();
+    return false;
+  }
+  if (sources)
+    *sources = value["sources"];
+  descriptor = std::move(parsed);
   why.clear();
   return true;
 }

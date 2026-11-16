@@ -104,7 +104,10 @@ def main():
         consumer = build / ('lyflow-public-kernels.exe' if os.name == 'nt' else 'lyflow-public-kernels')
         if os.name == 'nt':
             evidence['consumerImports'] = imports(consumer)
-        run([str(consumer)], workspace)
+        result = run([str(consumer)], workspace)
+        if 'Profile dimensions OK:' not in result:
+            raise RuntimeError('Installed consumer did not execute the public profile dimensions kernel')
+        evidence['profileDimensionsPassed'] = True
         evidence.update(sdk=str(sdk), isolatedRuntimeDllCount=0, consumerPassed=True,
                         optionalBackendFallbackPassed=True)
     (output / 'evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + '\n',

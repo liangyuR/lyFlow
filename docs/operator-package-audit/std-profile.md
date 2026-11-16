@@ -1,13 +1,13 @@
 # std-profile 逐算子迁移清单
 
-状态：实施中；当前 10 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 16 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
 ## 020 · profile.from_cloud
 
 - 当前：`std-profile` / `1.0.0` / 点云显式转换轮廓。目标：`std-profile`；保留并验边界；**M1**。
-- 源码：[packs/std-profile/ops/register.cpp:171](../../packs/std-profile/ops/register.cpp#L171)。
+- 源码：[packs/std-profile/ops/register.cpp:175](../../packs/std-profile/ops/register.cpp#L175)。
 - 端口：`cloud:PointCloud` → `profile:Profile`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core公开Profile/几何/Record契约与C++标准库；无PCL/OpenCV/ONNX Runtime直接依赖
@@ -21,7 +21,7 @@
 ## 021 · profile.remap_axes
 
 - 当前：`std-profile` / `1.0.0` / 轮廓显式轴映射。目标：`std-profile`；保留并验边界；**M1**。
-- 源码：[packs/std-profile/ops/register.cpp:218](../../packs/std-profile/ops/register.cpp#L218)。
+- 源码：[packs/std-profile/ops/register.cpp:222](../../packs/std-profile/ops/register.cpp#L222)。
 - 端口：`profile:Profile` → `profile:Profile`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core公开Profile/几何/Record契约与C++标准库；无PCL/OpenCV/ONNX Runtime直接依赖
@@ -35,7 +35,7 @@
 ## 022 · profile.to_cloud
 
 - 当前：`std-profile` / `1.0.0` / 轮廓显式导出点云。目标：`std-profile`；保留并验边界；**M1**。
-- 源码：[packs/std-profile/ops/register.cpp:199](../../packs/std-profile/ops/register.cpp#L199)。
+- 源码：[packs/std-profile/ops/register.cpp:203](../../packs/std-profile/ops/register.cpp#L203)。
 - 端口：`profile:Profile` → `cloud:PointCloud`, `descriptor:Record`, `profile:Profile`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：core公开Profile/几何/Record契约与C++标准库；无PCL/OpenCV/ONNX Runtime直接依赖
@@ -173,3 +173,111 @@
 - 公开接口：kernels/include/lyflow/kernel/profile.h；kernels/include/lyflow/kernel/profile_analysis.h；kernels/include/lyflow/kernel/metrology.h；packs/std-profile/include/lyflow_profile/context.h
 - 阶段验收边界：真实全包manifest描述核验；完整数值、SDK、CLI与图升级回归另由运行证据证明。
 - M3迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/profile_analysis.cpp:201` @ `36c969149e119614b7d221c8006d1a311d6d2995`；原目标包和依赖规划保留。
+
+## 118 · profile.bind_geometry
+
+- 当前：`std-profile` / `1.0.0` / 轮廓几何坐标声明。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/selection.cpp:245](../../packs/std-profile/ops/selection.cpp#L245)。
+- 端口：`profile:Profile`, `geometry:Any` → `geometry:Any`, `context:Record`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：调用方显式确认frame与plane，为米制点/线/圆/框绑定完整Profile来源和几何内容hash，profile.Geometry.v2关系为declared；不缩放或换轴。
+- 目标契约：调用方显式确认frame与plane，为米制点/线/圆/框绑定完整Profile来源和几何内容hash，profile.Geometry.v2关系为declared；不缩放或换轴。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：缺帧/错平面/像素/非法几何拒绝；来源不冒充拟合结果、只读输入和取消原子性。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 119 · profile.nearest_sample
+
+- 当前：`std-profile` / `1.0.0` / 轮廓锚点最近样本。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/selection.cpp:261](../../packs/std-profile/ops/selection.cpp#L261)。
+- 端口：`profile:Profile`, `anchor:Point2D`, `anchorContext:Record` → `point:Point2D`, `pointContext:Record`, `selection:Record`, `profile:Profile`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：按明确分析轴和m/mm换算米，扫描有效槽到锚点的欧氏距离；等距取原槽较前者，输出真实米制样本、原slot/sourceIndex及完整来源绑定。
+- 目标契约：按明确分析轴和m/mm换算米，扫描有效槽到锚点的欧氏距离；等距取原槽较前者，输出真实米制样本、原slot/sourceIndex及完整来源绑定。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：NaN/finite-invalid跳过、非单调原序、YZ/XY/XZ、单位与错帧/手性/hash；保留轮廓和参考几何来源、无大数组Record、取消不发布。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 120 · profile.nearest_to_line
+
+- 当前：`std-profile` / `1.0.0` / 轮廓直线最近样本。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/selection.cpp:261](../../packs/std-profile/ops/selection.cpp#L261)。
+- 端口：`profile:Profile`, `line:Line2D`, `lineContext:Record` → `point:Point2D`, `pointContext:Record`, `selection:Record`, `profile:Profile`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：按到同物理空间无限直线的垂距选择有效原槽，不限幅到显示线段；米制输出保留原轮廓与参考几何来源、原slot和物理源索引。
+- 目标契约：按到同物理空间无限直线的垂距选择有效原槽，不限幅到显示线段；米制输出保留原轮廓与参考几何来源、原slot和物理源索引。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：线段外最近点、等距原序、非单位方向、掩码/NaN、上下文错配、来源预算与取消原子性。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 121 · profile.filter_validity
+
+- 当前：`std-profile` / `1.0.0` / 轮廓有效样本筛选。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/selection.cpp:282](../../packs/std-profile/ops/selection.cpp#L282)。
+- 端口：`profile:Profile` → `profile:Profile`, `sourceProfile:Profile`, `valid:Indices`, `invalid:Indices`, `selection:Record`。
+- 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：按既有有效掩码和XYZ有限性显式保槽或压缩；通道、原sourceCount/sourceIndices不变，valid/invalid Indices绑定输入cloud.id，保槽removedCount=0。
+- 目标契约：按既有有效掩码和XYZ有限性显式保槽或压缩；通道、原sourceCount/sourceIndices不变，valid/invalid Indices绑定输入cloud.id，保槽removedCount=0。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：有限无效与NaN、空/全无效、所有可选通道、原槽Indices与物理索引映射、保槽/压缩计数、只读和取消原子性。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 122 · profile.fit_line_robust
+
+- 当前：`std-profile` / `1.0.0` / 轮廓鲁棒直线特征拟合。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/robust_features.cpp:428](../../packs/std-profile/ops/robust_features.cpp#L428)。
+- 端口：`profile:Profile`, `box:Box2D`, `boxContext:Record`, `toward:Point2D`, `towardContext:Record`, `refLine:Line2D?`, `refLineContext:Record?` → `profile:Profile`, `inliers:Indices`, `weightedInliers:Indices`, `indexMap:Record`, `quality:Record`, `line:Line2D`, `lineContext:Record`, `innerEnd:Point2D`, `pointContext:Record`。
+- 参数单位标注：distanceThreshold=m, dirNominalDeg=°, dirTolDeg=°。
+- 依赖：公开profile_robust_kernel/profile_features，显式可选PCL后端；不依赖OpenCV/ORT/匹配后端
+- 当前契约：原生Profile明确米制分析平面，复用公共双迹线RANSAC、近端选段重拟合、free/band/fixed方向与中位回退；保留最终多重权重与原槽索引，几何上下文汇集全部来源。
+- 目标契约：原生Profile明确米制分析平面，复用公共双迹线RANSAC、近端选段重拟合、free/band/fixed方向与中位回退；保留最终多重权重与原槽索引，几何上下文汇集全部来源。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：不以TLS替换RANSAC；42个已有定义直线夹具逐位一致，固定方向重复权重、唯一观察内点、NaN掩码、同帧ROI/参考、单位与取消/失败原子性。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 123 · profile.fit_circle_robust
+
+- 当前：`std-profile` / `1.0.0` / 轮廓鲁棒圆拟合。目标：`std-profile`；保留并验边界；**M4**。
+- 源码：[packs/std-profile/ops/robust_features.cpp:483](../../packs/std-profile/ops/robust_features.cpp#L483)。
+- 端口：`profile:Profile` → `profile:Profile`, `inliers:Indices`, `weightedInliers:Indices`, `indexMap:Record`, `quality:Record`, `circle:Circle2D`, `circleContext:Record`。
+- 参数单位标注：distanceThreshold=m, minRadius=m, maxRadius=m, fixedRadius=m, radiusPrior=m, radiusPriorSigma=m。
+- 依赖：公开profile_robust_kernel/profile_features，显式可选PCL后端；不依赖OpenCV/ORT/匹配后端
+- 当前契约：原生Profile有效样本映射米制分析平面；固定种子Circle2D RANSAC/LM，自由、固定半径、软先验三模式及越界夹限明确分开，原槽及来源不排序不丢失。
+- 目标契约：原生Profile有效样本映射米制分析平面；固定种子Circle2D RANSAC/LM，自由、固定半径、软先验三模式及越界夹限明确分开，原槽及来源不排序不丢失。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：短弧/半径上下界/固定/先验/奇异圆心、m/mm和各平面、NaN/finite-invalid、原槽映射与输入只读、取消和失败原子性。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。

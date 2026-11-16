@@ -10,6 +10,7 @@
 #include <lyflow/kernel/rigid.h>
 #include <lyflow/kernel/profile.h>
 #include <lyflow/kernel/profile_analysis.h>
+#include <lyflow/kernel/profile_dimensions.h>
 
 namespace {
 void require(bool condition, const std::string& message) {
@@ -171,6 +172,54 @@ int main() {
             why);
     require(near(signedDistance.distance, 0.002) && near(signedDistance.foot[1], 0.002),
             "Signed distance and foot must use the same declared units");
+    namespace dimensions = k::profile_dimensions;
+    Line2D datum;
+    datum.hasSegment = true;
+    datum.start[0] = -0.001F;
+    datum.end[0] = 0.001F;
+    const Point2D reference{{0.004F, -0.003F}, Unit2D::Meter};
+    dimensions::FlushOptions flushOptions;
+    flushOptions.signedDistance = false;
+    flushOptions.gain = -2;
+    flushOptions.offsetMm = 0.5;
+    dimensions::FlushResult flush;
+    require(dimensions::flushPointLine(datum, reference, flushOptions, flush, why), why);
+    require(near(flush.valueMm, -5.5, 1e-6) && flush.baseLine.end[0] == reference.p[0] &&
+                datum.end[0] == 0.001F,
+            "Profile flush must preserve abs/gain/mm-offset order and readonly datum endpoints");
+    Circle2D left, right;
+    left.radius = 0.001F;
+    right.center[0] = 0.01F;
+    right.center[1] = 0.004F;
+    right.radius = 0.002F;
+    dimensions::CircleGapResult circleGap;
+    dimensions::CircleGapOptions gapOptions;
+    require(dimensions::circleGap(left, right, nullptr, gapOptions, circleGap, why), why);
+    require(circleGap.valid && near(circleGap.valueMm, std::sqrt(116.0) - 3.0, 1e-5),
+            "Center-line circle boundary distance changed");
+    datum.start[0] = 0;
+    datum.end[0] = 0.02F;
+    gapOptions.definition = dimensions::CircleGapDefinition::DatumTangents;
+    gapOptions.offsetMm = 0.25;
+    require(dimensions::circleGap(left, right, &datum, gapOptions, circleGap, why), why);
+    require(near(circleGap.valueMm, 7.25, 1e-5), "Datum tangent circle gap must be 7.25 mm");
+    dimensions::PointOffsetOptions offsetOptions;
+    offsetOptions.gainDx = -2;
+    offsetOptions.gainDy = 3;
+    offsetOptions.absDx = offsetOptions.absDy = true;
+    offsetOptions.dxOffsetMm = -0.5;
+    offsetOptions.dyOffsetMm = 0.25;
+    dimensions::PointOffsetResult offset;
+    const Point2D offsetA{{0.001F, 0.002F}, Unit2D::Meter};
+    const Point2D offsetB{{0.004F, -0.002F}, Unit2D::Meter};
+    require(dimensions::pointOffset(offsetA, offsetB, offsetOptions, offset, why), why);
+    require(near(offset.dxMm, 5.5, 1e-6) && near(offset.dyMm, 12.25, 1e-6) &&
+                near(offset.distanceMm, 5, 1e-6),
+            "Point offset must apply gain/abs/mm-offset and preserve uncompensated distance");
+    require(dimensions::pointOffset(offsetA, offsetA, {}, offset, why) && offset.distanceMm == 0,
+            "Identical physical points must have a valid zero distance");
+    std::cout
+        << "Profile dimensions OK: flush -5.5 mm; tangent gap 7.25 mm; point offset 5.5/12.25 mm\n";
     std::cout
         << "Static kernels OK: " << sourceFrame << "->" << targetFrame
         << " in m; 3 constraints validated (no pose solving); camera-A->table 0.01 m; weighted RMSE "

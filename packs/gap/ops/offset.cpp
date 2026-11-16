@@ -3,6 +3,7 @@
 #include <string>
 
 #include "gap_ops.h"
+#include "lyflow/kernel/profile_dimensions.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -13,54 +14,27 @@ std::string mmText(double mm) {
   return buf;
 }
 
-lyflow::Line2D segmentOf(const Eigen::Vector2f& start, const Eigen::Vector2f& end) {
-  lyflow::Line2D seg;
-  seg.hasSegment = true;
-  seg.start[0] = start.x();
-  seg.start[1] = start.y();
-  seg.end[0] = end.x();
-  seg.end[1] = end.y();
-  seg.point[0] = start.x();
-  seg.point[1] = start.y();
-  const Eigen::Vector2f d = end - start;
-  const float n = d.norm();
-  seg.dir[0] = n > 0 ? d.x() / n : 1.0f;
-  seg.dir[1] = n > 0 ? d.y() / n : 0.0f;
-  return seg;
-}
-
 Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                    ExecContext& ctx) {
   const lyflow::Point2D& a = *inputs.get("a").asPoint2D();
   const lyflow::Point2D& b = *inputs.get("b").asPoint2D();
-  const Eigen::Vector2f pa(a.p[0], a.p[1]);
-  const Eigen::Vector2f pb(b.p[0], b.p[1]);
-
-  const bool absDx = params.flag("absDx");
-  const bool absDy = params.flag("absDy");
-  const double scaleDx = params.number("scaleDx");
-  const double scaleDy = params.number("scaleDy");
-  const double dxOffset = params.number("dxOffset");
-  const double dyOffset = params.number("dyOffset");
-
-  double dx = static_cast<double>(pb.x() - pa.x()) * kScale * scaleDx;
-  if (absDx)
-    dx = std::fabs(dx);
-  dx += dxOffset;
-
-  double dy = static_cast<double>(pb.y() - pa.y()) * kScale * scaleDy;
-  if (absDy)
-    dy = std::fabs(dy);
-  dy += dyOffset;
-
-  const double distanceMm = static_cast<double>((pb - pa).norm()) * kScale;
-
-  setMeasurement(outputs, "dx", dx, true, {});
-  setMeasurement(outputs, "dy", dy, true, {});
-  setMeasurement(outputs, "distance", distanceMm, true, {});
-  outputs.set("segment", Data::line2d(segmentOf(pa, pb)));
-
-  ctx.log(LogLevel::Info, "point_offset: dx " + mmText(dx) + " mm，dy " + mmText(dy) + " mm");
+  kernel::profile_dimensions::PointOffsetOptions options;
+  options.absDx = params.flag("absDx");
+  options.absDy = params.flag("absDy");
+  options.gainDx = params.number("scaleDx");
+  options.gainDy = params.number("scaleDy");
+  options.dxOffsetMm = params.number("dxOffset");
+  options.dyOffsetMm = params.number("dyOffset");
+  kernel::profile_dimensions::PointOffsetResult result;
+  std::string why;
+  if (!kernel::profile_dimensions::pointOffset(a, b, options, result, why))
+    return Status::Error(Phase::Execute, "invalid_geometry", why);
+  setMeasurement(outputs, "dx", result.dxMm, true, {});
+  setMeasurement(outputs, "dy", result.dyMm, true, {});
+  setMeasurement(outputs, "distance", result.distanceMm, true, {});
+  outputs.set("segment", Data::line2d(result.segment));
+  ctx.log(LogLevel::Info,
+          "point_offset: dx " + mmText(result.dxMm) + " mm，dy " + mmText(result.dyMm) + " mm");
   return Status::Ok();
 }
 
@@ -90,7 +64,7 @@ Param numParam(const char* name, const char* label, double def, const char* doc)
 void registerPointOffset(Registry& r) {
   OperatorDesc op;
   op.id = "gap.point_offset";
-  op.version = "1.0.0";
+  op.version = "1.0.1";
   op.label = "二维位移分解";
   op.category = "间隙/测量";
   op.keywords = {"2D displacement decomposition",

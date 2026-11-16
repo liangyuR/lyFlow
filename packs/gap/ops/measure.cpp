@@ -6,19 +6,11 @@
 #include <set>
 #include <string>
 
-#include "gap_detection/GapUtils.hpp"
 #include "gap_ops.h"
+#include "lyflow/kernel/profile_dimensions.h"
 
 namespace lyflow::packs::gap {
 namespace {
-
-namespace utils = ::detection::utils;
-
-Eigen::VectorXf toLineCoefficients(const lyflow::Line2D& line) {
-  Eigen::VectorXf c(6);
-  c << line.point[0], line.point[1], 0.0f, line.dir[0], line.dir[1], 0.0f;
-  return c;
-}
 
 lyflow::Line2D segmentOf(const Eigen::Vector2f& start, const Eigen::Vector2f& end) {
   lyflow::Line2D seg;
@@ -39,82 +31,41 @@ lyflow::Line2D segmentOf(const Eigen::Vector2f& start, const Eigen::Vector2f& en
 Status flush(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
   const lyflow::Point2D& ref = *inputs.get("refPoint").asPoint2D();
-  const Eigen::Vector2f end(ref.p[0], ref.p[1]);
-  Eigen::Vector2f start;
-  utils::pointLineDistance(toLineCoefficients(base), end, &start);
-  // signed（默认）给带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）为正；
-  // 竖直基准线时在**右侧**（x 更大）为正。方向先按 canonicalLineDir 统一朝向再取法线
-  // (dir.y, -dir.x)，所以符号只看参考点在哪一侧，与上游拟合给出的方向正反无关。
-  // 关掉才取绝对值 —— 闭合缝上参考点几乎落在基准线上，绝对值会把响应折回去。
-  double distanceMm = static_cast<double>((end - start).norm()) * kScale;
-  if (params.flag("signed")) {
-    const Eigen::Vector2d u = canonicalLineDir(base.dir[0], base.dir[1]);
-    const Eigen::Vector2f normal(static_cast<float>(u.y()), static_cast<float>(-u.x()));
-    distanceMm = static_cast<double>(normal.dot(end - start)) * kScale;
-  }
-  const double valueMm = distanceMm * params.number("scale") + params.number("offset");
-
-  setMeasurement(outputs, "value", valueMm, true, {});
-  outputs.set("segment", Data::line2d(segmentOf(start, end)));
-
-  // 原算法在这里把垂足 start 并进基准线段（insertPoint2Segment），而 gap definition A
-  // 的方向 u 取的正是**并过之后**的那条线段 —— 所以基准线要从这里再出一份。
-  lyflow::Line2D extended = base;
-  if (base.hasSegment) {
-    Eigen::Matrix2f segment;
-    segment << base.start[0], base.end[0], base.start[1], base.end[1];
-    const Eigen::Matrix2f merged = utils::insertPoint2Segment(segment, start);
-    extended.start[0] = merged(0, 0);
-    extended.start[1] = merged(1, 0);
-    extended.end[0] = merged(0, 1);
-    extended.end[1] = merged(1, 1);
-  }
-  outputs.set("baseLine", Data::line2d(extended));
+  kernel::profile_dimensions::FlushOptions options;
+  options.signedDistance = params.flag("signed");
+  options.gain = params.number("scale");
+  options.offsetMm = params.number("offset");
+  kernel::profile_dimensions::FlushResult result;
+  std::string why;
+  if (!kernel::profile_dimensions::flushPointLine(base, ref, options, result, why))
+    return Status::Error(Phase::Execute, "invalid_geometry", why);
+  setMeasurement(outputs, "value", result.valueMm, true, {});
+  outputs.set("segment", Data::line2d(result.segment));
+  outputs.set("baseLine", Data::line2d(result.baseLine));
   return Status::Ok();
 }
 
 Status gapValue(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const lyflow::Circle2D& left = *inputs.get("left").asCircle2D();
   const lyflow::Circle2D& right = *inputs.get("right").asCircle2D();
-  const double offset = params.number("offset");
   const bool definitionA = params.choice("definition") == "A";
-
-  Eigen::Vector2f start;
-  Eigen::Vector2f end;
-  if (definitionA) {
-    const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
-    if (!base.hasSegment) {
-      return Status::Error(Phase::Execute, "bad_input",
-                           "definition A 要的是带两个端点的基准线（与 ROI 框的交点）", {},
-                           "baseLine");
-    }
-    Eigen::Vector2f u(base.end[0] - base.start[0], base.end[1] - base.start[1]);
-    u.normalize();
-    if (u.x() < 0)
-      u = -u; // 从左板指向右板
-    const Eigen::Vector2f c1(left.center[0], left.center[1]);
-    const Eigen::Vector2f c2(right.center[0], right.center[1]);
-    const float gapA = (c2 - c1).dot(u) - left.radius - right.radius;
-    if (!(gapA >= 0)) {
-      return Status::Error(Phase::Execute, "invalid_geometry",
-                           "definition A：两条切线交叉了（gap < 0）");
-    }
-    start = c1 + left.radius * u;
-    end = start + gapA * u;
-  } else {
-    Eigen::VectorXf c1(3), c2(3);
-    c1 << left.center[0], left.center[1], left.radius;
-    c2 << right.center[0], right.center[1], right.radius;
-    utils::circleCircleDistance(c1, c2, &start, &end);
+  const auto* base = inputs.get("baseLine").asLine2D();
+  if (definitionA && (!base || !base->hasSegment)) {
+    return Status::Error(Phase::Execute, "bad_input",
+                         "definition A 要的是带两个端点的基准线（与 ROI 框的交点）", {},
+                         "baseLine");
   }
-
-  // start.x > end.x 时原算法报 NAN 而不是一个负值（§3 与 getGap）
-  const bool crossed = start.x() > end.x();
-  const double valueMm =
-      crossed ? std::numeric_limits<double>::quiet_NaN()
-              : std::fabs(static_cast<double>((end - start).norm()) * kScale) + offset;
-  setMeasurement(outputs, "value", valueMm, !crossed, crossed ? "两侧交叉，gap 取 NaN" : "");
-  outputs.set("segment", Data::line2d(segmentOf(start, end)));
+  kernel::profile_dimensions::CircleGapOptions options;
+  options.definition = definitionA ? kernel::profile_dimensions::CircleGapDefinition::DatumTangents
+                                   : kernel::profile_dimensions::CircleGapDefinition::CenterLine;
+  options.offsetMm = params.number("offset");
+  kernel::profile_dimensions::CircleGapResult result;
+  std::string why;
+  if (!kernel::profile_dimensions::circleGap(left, right, base, options, result, why))
+    return Status::Error(Phase::Execute, "invalid_geometry", why);
+  setMeasurement(outputs, "value", result.valueMm, result.valid,
+                 result.crossed ? "两侧交叉，gap 取 NaN" : "");
+  outputs.set("segment", Data::line2d(result.segment));
   return Status::Ok();
 }
 
@@ -298,7 +249,7 @@ std::vector<Issue> validateGap(const ParamView& params, const std::set<std::stri
 void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "gap.flush";
-  op.version = "1.1.0";
+  op.version = "1.1.1";
   op.label = "面差测量";
   op.category = "间隙/测量";
   op.keywords = {
@@ -346,7 +297,7 @@ void registerFlush(Registry& r) {
 void registerGap(Registry& r) {
   OperatorDesc op;
   op.id = "gap.gap";
-  op.version = "1.0.0";
+  op.version = "1.0.1";
   op.label = "间隙测量";
   op.category = "间隙/测量";
   op.keywords = {"gap measurement",

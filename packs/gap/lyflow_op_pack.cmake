@@ -26,13 +26,13 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GAP_SNIPPETS})
 
 lyflow_op_pack(
   NAME     gap
-  VERSION  0.2.0
+  VERSION  0.2.1
   DEFAULT  OFF
   SOURCES  ${GAP_OP_SOURCES} ${GAP_ALGO_SOURCES}
   TEST_SOURCES ${GAP_TESTS}
   PCH      "${LYFLOW_PACK_DIR}/ops/gap_pch.h"
   INCLUDES "${LYFLOW_PACK_DIR}/algo" "${GAP_GENERATED}"
-  LINK     lyflow_pcl_support lyflow_std_algo lyflow_yaml_support lyflow_onnx_support
+  LINK     lyflow_pcl_support lyflow_std_algo lyflow_yaml_support lyflow_onnx_support lyflow_metrology_kernel
   # _ENABLE_EXTENDED_ALIGNED_STORAGE：groove.cpp 对 pcl::PointXYZRGB（16 字节对齐）做 std::stable_sort，
   # VS2019（MSVC 14.29）的实现借 aligned_union 开临时缓冲，遇到扩展对齐就 static_assert。定这个宏是认可
   # 15.8 之后正确的对齐 —— 只在与 15.8 之前编出的代码混链时才有布局差异，core 整个是同一个工具链编的

@@ -1,13 +1,13 @@
 # std-metrology 逐算子迁移清单
 
-状态：实施中；当前 4 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
+状态：实施中；当前 7 项。原251/7规划基线通过机器清单baselineReference追溯。返回[清单总览](../operator-package-audit.md)。
 
 下列顺序是迁移/验收顺序，不是执行图调度顺序。精确端口和参数见[机器清单](../operator-package-audit.json)。
 
 ## 060 · image.calibrated_distance
 
 - 当前：`std-metrology` / `1.1.0` / 平面标定距离量测。目标：`std-metrology`；迁移归属；**M2**。
-- 源码：[packs/std-metrology/ops/register.cpp:29](../../packs/std-metrology/ops/register.cpp#L29)。
+- 源码：[packs/std-metrology/ops/register.cpp:30](../../packs/std-metrology/ops/register.cpp#L30)。
 - 端口：`a:Point2D`, `b:Point2D`, `calib:Record` → `distance:Measurement`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前compute：标准C++、公共calibration::Plane解析及标量H映射，不使用OpenCV；同TU其他节点使用OpenCV。；目标：轻量几何/标定模型公共核，不链接OpenCV/PCL/ORT。
@@ -78,3 +78,57 @@
 - 公开接口：kernels/include/lyflow/kernel/profile.h；kernels/include/lyflow/kernel/profile_analysis.h；kernels/include/lyflow/kernel/metrology.h；packs/std-profile/include/lyflow_profile/context.h
 - 阶段验收边界：真实全包manifest描述核验；完整数值、SDK、CLI与图升级回归另由运行证据证明。
 - M3迁包来源：`std-pointcloud` / `packs/std-pointcloud/ops/profile_analysis.cpp:126` @ `36c969149e119614b7d221c8006d1a311d6d2995`；原目标包和依赖规划保留。
+
+## 124 · metrology.flush_point_line
+
+- 当前：`std-metrology` / `1.0.0` / 点线面差测量。目标：`std-metrology`；保留并验边界；**M4**。
+- 源码：[packs/std-metrology/ops/profile_dimensions.cpp:260](../../packs/std-metrology/ops/profile_dimensions.cpp#L260)。
+- 端口：`baseLine:Line2D`, `refPoint:Point2D`, `baseLineContext:Record`, `refPointContext:Record` → `value:Measurement`, `foot:Point2D`, `segment:Line2D`, `baseLine:Line2D`, `footContext:Record`, `segmentContext:Record`, `baseLineContext:Record`, `quality:Record`。
+- 参数单位标注：offsetMm=mm。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：同空间米制点线及v1/v2内容绑定上下文；显式正法向和canonical_axis口径，保持既有float方向及毫米补偿数值路径；输出m或mm测量、垂足与显示段。
+- 目标契约：同空间米制点线及v1/v2内容绑定上下文；显式正法向和canonical_axis口径，保持既有float方向及毫米补偿数值路径；输出m或mm测量、垂足与显示段。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：正负/水平竖直/归一化容差/零长度显示段、补偿与输出单位；像素/错帧/非有限/溢出拒绝，不把无效测量转业务合格。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 125 · metrology.circle_gap
+
+- 当前：`std-metrology` / `1.0.0` / 圆边界间隙测量。目标：`std-metrology`；保留并验边界；**M4**。
+- 源码：[packs/std-metrology/ops/profile_dimensions.cpp:298](../../packs/std-metrology/ops/profile_dimensions.cpp#L298)。
+- 端口：`left:Circle2D`, `right:Circle2D`, `leftContext:Record`, `rightContext:Record`, `baseLine:Line2D?`, `baseLineContext:Record?` → `value:Measurement`, `segment:Line2D`, `segmentContext:Record`, `quality:Record`。
+- 参数单位标注：offsetMm=mm。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：同空间米制两圆及来源上下文；圆心连线边界距离和基准切线距离是两个显式定义，保持Gap毫米数值/偏置/符号顺序，输出m或mm及来源绑定显示段。
+- 目标契约：同空间米制两圆及来源上下文；圆心连线边界距离和基准切线距离是两个显式定义，保持Gap毫米数值/偏置/符号顺序，输出m或mm及来源绑定显示段。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：两定义/左右交换/间隙符号/重合圆心拒绝、基准线单位与帧/手性/hash校验；合法定义量测与旧库逐位对照。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
+
+## 126 · metrology.point_offset
+
+- 当前：`std-metrology` / `1.0.0` / 二维位移分量测量。目标：`std-metrology`；保留并验边界；**M4**。
+- 源码：[packs/std-metrology/ops/profile_dimensions.cpp:335](../../packs/std-metrology/ops/profile_dimensions.cpp#L335)。
+- 端口：`a:Point2D`, `b:Point2D`, `aContext:Record`, `bContext:Record` → `dx:Measurement`, `dy:Measurement`, `distance:Measurement`, `segment:Line2D`, `segmentContext:Record`, `quality:Record`。
+- 参数单位标注：dxOffsetMm=mm, dyOffsetMm=mm。
+- 依赖：公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖
+- 当前契约：同空间米制点按b-a分解两轴位移，增益后绝对值再加毫米偏置；欧氏距离独立于补偿，保留全部来源并支持零位移显示段。
+- 目标契约：同空间米制点按b-a分解两轴位移，增益后绝对值再加毫米偏置；欧氏距离独立于补偿，保留全部来源并支持零位移显示段。
+- 迁移前置：M1；M2；M3
+- 关联算子：无额外逐ID前置；公共协议见前置项
+- 验收：正负/交换/增益abs偏置顺序/m和mm输出、零位移；像素/错帧/非法增益/非有限/溢出拒绝，失败及取消不发布。
+- 说明：M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。

@@ -43,7 +43,8 @@
 | ONNX推理与选定模型检测链               | [std-ml](../packs/std-ml/README.md) · [四模型检测](p1-analysis-detection.md)                                                                |
 | 涂胶检测                               | [glue 包](../packs/glue/README.md) · [接入指南](glue-integration.md) · [测量算子契约](glue-measure-ops.md)                                  |
 | 间隙与段差                             | [gap 包](../packs/gap/README.md) · [宿主接入](gap-inspector-integration-design.md)                                                          |
-| 车门胶条面差                           | [dts 包](../packs/dts/README.md)                                                                                                            |
+| 原生轮廓选择、稳健拟合及公共度量       | [公共Profile算子](profile-public-operators.md) · [Profile包](../packs/std-profile/README.md) · [度量包](../packs/std-metrology/README.md)   |
+| 车门胶条面差                           | [solution-dts 包](../solutions/dts/README.md)                                                                                               |
 | 开发新算子或外部包                     | [算子包机制](op-packs.md) · [core 开发指南](../core/README.md)                                                                              |
 | 算子资源与性能约束                     | [缓存、结果读取与推理资源](operator-optimization.md)                                                                                        |
 | 算子包边界重整                         | [目标边界](operator-package-boundaries.md) · [逐算子审计](operator-package-audit.md) · [迁移进度与验收](operator-package-migration-plan.md) |

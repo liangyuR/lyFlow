@@ -49,6 +49,44 @@ M2_MOVES = {
 
 M2_MERGED_REVISION = '36c969149e119614b7d221c8006d1a311d6d2995'
 M3_MERGED_REVISION = 'b22fde7fad01b7aea67886b6fe3345e92a5fe8bb'
+M4A_MERGED_REVISION = '02e15806136df452bd575ff0e20610db7636918c'
+M4B_DEFINITIONS = {
+    'geometry.box_2d': ('std-geometry', 'packs/std-geometry/ops/geometry.cpp',
+        '显式构造米制或像素Box2D；两轴边界须有限、在float32范围且min<=max，不自动交换边界。',
+        'm/px、相等边界、逆序/非有限/溢出边界拒绝；作为外部物理ROI时须另外显式绑定Profile坐标上下文。'),
+    'profile.bind_geometry': ('std-profile', 'packs/std-profile/ops/selection.cpp',
+        '调用方显式确认frame与plane，为米制点/线/圆/框绑定完整Profile来源和几何内容hash，profile.Geometry.v2关系为declared；不缩放或换轴。',
+        '缺帧/错平面/像素/非法几何拒绝；来源不冒充拟合结果、只读输入和取消原子性。'),
+    'profile.nearest_sample': ('std-profile', 'packs/std-profile/ops/selection.cpp',
+        '按明确分析轴和m/mm换算米，扫描有效槽到锚点的欧氏距离；等距取原槽较前者，输出真实米制样本、原slot/sourceIndex及完整来源绑定。',
+        'NaN/finite-invalid跳过、非单调原序、YZ/XY/XZ、单位与错帧/手性/hash；保留轮廓和参考几何来源、无大数组Record、取消不发布。'),
+    'profile.nearest_to_line': ('std-profile', 'packs/std-profile/ops/selection.cpp',
+        '按到同物理空间无限直线的垂距选择有效原槽，不限幅到显示线段；米制输出保留原轮廓与参考几何来源、原slot和物理源索引。',
+        '线段外最近点、等距原序、非单位方向、掩码/NaN、上下文错配、来源预算与取消原子性。'),
+    'profile.filter_validity': ('std-profile', 'packs/std-profile/ops/selection.cpp',
+        '按既有有效掩码和XYZ有限性显式保槽或压缩；通道、原sourceCount/sourceIndices不变，valid/invalid Indices绑定输入cloud.id，保槽removedCount=0。',
+        '有限无效与NaN、空/全无效、所有可选通道、原槽Indices与物理索引映射、保槽/压缩计数、只读和取消原子性。'),
+    'profile.fit_line_robust': ('std-profile', 'packs/std-profile/ops/robust_features.cpp',
+        '原生Profile明确米制分析平面，复用公共双迹线RANSAC、近端选段重拟合、free/band/fixed方向与中位回退；保留最终多重权重与原槽索引，几何上下文汇集全部来源。',
+        '不以TLS替换RANSAC；42个已有定义直线夹具逐位一致，固定方向重复权重、唯一观察内点、NaN掩码、同帧ROI/参考、单位与取消/失败原子性。'),
+    'profile.fit_circle_robust': ('std-profile', 'packs/std-profile/ops/robust_features.cpp',
+        '原生Profile有效样本映射米制分析平面；固定种子Circle2D RANSAC/LM，自由、固定半径、软先验三模式及越界夹限明确分开，原槽及来源不排序不丢失。',
+        '短弧/半径上下界/固定/先验/奇异圆心、m/mm和各平面、NaN/finite-invalid、原槽映射与输入只读、取消和失败原子性。'),
+    'metrology.flush_point_line': ('std-metrology', 'packs/std-metrology/ops/profile_dimensions.cpp',
+        '同空间米制点线及v1/v2内容绑定上下文；显式正法向和canonical_axis口径，保持既有float方向及毫米补偿数值路径；输出m或mm测量、垂足与显示段。',
+        '正负/水平竖直/归一化容差/零长度显示段、补偿与输出单位；像素/错帧/非有限/溢出拒绝，不把无效测量转业务合格。'),
+    'metrology.circle_gap': ('std-metrology', 'packs/std-metrology/ops/profile_dimensions.cpp',
+        '同空间米制两圆及来源上下文；圆心连线边界距离和基准切线距离是两个显式定义，保持Gap毫米数值/偏置/符号顺序，输出m或mm及来源绑定显示段。',
+        '两定义/左右交换/间隙符号/重合圆心拒绝、基准线单位与帧/手性/hash校验；合法定义量测与旧库逐位对照。'),
+    'metrology.point_offset': ('std-metrology', 'packs/std-metrology/ops/profile_dimensions.cpp',
+        '同空间米制点按b-a分解两轴位移，增益后绝对值再加毫米偏置；欧氏距离独立于补偿，保留全部来源并支持零位移显示段。',
+        '正负/交换/增益abs偏置顺序/m和mm输出、零位移；像素/错帧/非法增益/非有限/溢出拒绝，失败及取消不发布。'),
+}
+M4B_CHANGED_VERSIONS = {
+    'gap.fit_line': '1.1.1', 'gap.flush': '1.1.1', 'gap.gap': '1.0.1', 'gap.point_offset': '1.0.1',
+}
+M4B_DEFERRED_RETIREMENTS = ('gap.fit_line', 'gap.selected_point', 'gap.nearest_to_line',
+    'gap.drop_non_finite', 'gap.to_measurement_frame', 'gap.flush', 'gap.gap', 'gap.point_offset')
 M3_RETIREMENTS = {
     'dts.profile_clean': 'profile.clean',
     'dts.split_faces': 'profile.split_faces',
@@ -195,6 +233,29 @@ def manifest_generator(manifest):
 
 
 def prepare(data, stage='M2'):
+    if stage == 'M4b':
+        result = copy.deepcopy(data)
+        m4a = next((entry for entry in result.get('stageLedger', []) if entry['stage'] == 'M4a'), {})
+        if (m4a.get('status') not in {'validated_manifest', 'complete'} or
+                m4a.get('manifestEvidence', {}).get('operatorCount') != 261 or
+                not re.fullmatch(r'[0-9a-f]{64}', m4a.get('manifestEvidence', {}).get('sha256', '')) or
+                m4a.get('expectedNativeCount') != 261 or
+                m4a.get('targetProductVersion') != '1.4.3'):
+            raise ValueError('M4b需要M4a真实全包manifest与PR65前置验收')
+        m4a.update(status='complete', mergeEvidence=dict(pr=65,
+            url='https://github.com/liangyuR/lyFlow/pull/65', revision=M4A_MERGED_REVISION,
+            reviewedHead='2f2e99141b39ee94a105a01adf2dff40ce125337', workflowRun=43824076118,
+            jobCount=7, conclusion='success', codexReview='completed_no_findings',
+            reviewReceipt='https://github.com/liangyuR/lyFlow/pull/65#issuecomment-6910298242'),
+            note='公共稳健拟合核、可选模块与安装SDK已验收；PR65七项CI通过、同head Codex无问题并合并。整个M4及场景导入迁移不计作完成。')
+        if not any(entry['stage'] == 'M4b' for entry in result['stageLedger']):
+            result['stageLedger'].append(dict(stage='M4b', status='pending_manifest',
+                expectedNativeCount=271, expectedPythonExampleCount=8, targetProductVersion='1.4.4',
+                introducedNativeIds=sorted(M4B_DEFINITIONS), introducedPythonIds=[], retiredNativeIds=[],
+                changedNativeIds=sorted(M4B_CHANGED_VERSIONS),
+                deferredRetirements=dict(stage='M4c', nativeIds=sorted(M4B_DEFERRED_RETIREMENTS)),
+                note='新增公共Profile、度量与Box2D构造；旧Gap适配复用同一公共核并patch隔离缓存，非法输入明确拒绝。旧8ID及场景/Bundle/六导入器留M4c，整个M4未完成。'))
+        return result
     if stage == 'M4a':
         result = copy.deepcopy(data)
         m3 = next((entry for entry in result.get('stageLedger', []) if entry['stage'] == 'M3'), {})
@@ -248,6 +309,28 @@ def prepare(data, stage='M2'):
     return result
 
 
+def introduce_m4b_rows(result):
+    existing = {row['id'] for row in result['operators']}
+    additions = []
+    for identifier, (pack, source, contract, acceptance) in M4B_DEFINITIONS.items():
+        if identifier in existing:
+            continue
+        backend = identifier in {'profile.fit_line_robust', 'profile.fit_circle_robust'}
+        additions.append(dict(id=identifier, currentPack=pack, targetPack=pack, source=source,
+            action='retain', wave='M4', operatorKind='native',
+            dependencies=[('公开profile_robust_kernel/profile_features，显式可选PCL后端；不依赖OpenCV/ORT/匹配后端' if backend else
+                           '公开Profile/几何/度量契约与C++17；无PCL/OpenCV/ORT运行依赖')],
+            currentContract=contract, targetContract=contract, acceptance=acceptance,
+            prerequisites=['M1', 'M2', 'M3'], migrationPrerequisites=['M1', 'M2', 'M3'],
+            relatedOperators=[], notes='M4b新增公共能力；不注册旧ID别名，不声称M4c场景/Bundle/导入图迁移已经完成。'))
+    ordered = sorted(result['operators'], key=lambda row: row['migrationOrder'])
+    split = next((index for index, row in enumerate(ordered) if row['wave'] > 'M4'), len(ordered))
+    ordered[split:split] = additions
+    for index, row in enumerate(ordered + result['pythonExamples'], 1):
+        row['migrationOrder'] = index
+    result['operators'] = ordered
+
+
 def example_declarations():
     rows = {}
     for path in sorted((ROOT / 'python/examples').rglob('*.py')):
@@ -280,22 +363,28 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version,
     result = prepare(data, stage)
     if stage == 'M4a' and product_version != '1.4.3':
         raise ValueError('M4a公共SDK使用产品版本1.4.3，不能复用旧版本声明')
+    if stage == 'M4b' and product_version != '1.4.4':
+        raise ValueError('M4b公共节点使用产品版本1.4.4，不能复用旧缓存版本声明')
     if stage == 'M3':
         retire_m3_rows(result)
+    if stage == 'M4b':
+        introduce_m4b_rows(result)
     native_expected = set(result['baselineReference']['registeredNativeIds']) | set(ADDITIONS)
-    if stage in {'M3', 'M4a'}:
+    if stage in {'M3', 'M4a', 'M4b'}:
         native_expected = (native_expected - set(M3_RETIREMENTS)) | set(M3_DEFINITIONS)
+    if stage == 'M4b':
+        native_expected |= set(M4B_DEFINITIONS)
     for field, required in [('operators', native_expected),
                             ('pythonExamples', set(result['baselineReference']['pythonExampleIds']) | {EXAMPLE_ID})]:
         identifiers = [row['id'] for row in result[field]]
-        allowed = required if stage in {'M2', 'M3', 'M4a'} else required | set(ADDITIONS)
+        allowed = required if stage in {'M2', 'M3', 'M4a', 'M4b'} else required | set(ADDITIONS)
         if len(identifiers) != len(set(identifiers)) or not set(identifiers) <= allowed:
             raise ValueError(f'{field}: 重复或未经定义的ID，拒绝刷新')
         original = set(result['baselineReference']['registeredNativeIds'] if field == 'operators' else
                        result['baselineReference']['pythonExampleIds'])
         if stage == 'M1' and not original <= set(identifiers):
             raise ValueError(f'{field}: 原基线ID丢失，拒绝刷新')
-        if stage in {'M2', 'M3', 'M4a'} and set(identifiers) != required:
+        if stage in {'M2', 'M3', 'M4a', 'M4b'} and set(identifiers) != required:
             raise ValueError(f'{field}: 现有清单丢失已审ID，拒绝刷新')
     manifest = load(manifest_path)
     operators = manifest if isinstance(manifest, list) else manifest['operators']
@@ -327,6 +416,17 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version,
     ordered[split:split] = additions
     for row in ordered:
         op = exported[row['id']]
+        if stage == 'M4b' and row['id'] not in M4B_DEFINITIONS:
+            if (op.get('pack', 'core').split('@')[0] != row['currentPack'] or
+                    op.get('params', []) != row['currentParams'] or
+                    {key: op.get(key, []) for key in ('inputs', 'outputs')} != row['currentPorts'] or
+                    op.get('version') != M4B_CHANGED_VERSIONS.get(row['id'], row['currentVersion'])):
+                raise ValueError(f"{row['id']}: M4b仅允许已审旧Gap节点patch，不能隐式改包、端口或参数")
+            if row['id'] in M4B_CHANGED_VERSIONS and row['currentVersion'] != op['version']:
+                row.setdefault('contractHistory', []).append(dict(stage='M4b',
+                    version=row['currentVersion'], pack=row['currentPackVersion'],
+                    ports=copy.deepcopy(row['currentPorts']), params=copy.deepcopy(row['currentParams']),
+                    sourceRevision=M4A_MERGED_REVISION))
         if stage == 'M4a' and (op.get('pack', 'core').split('@')[0] != row['currentPack'] or
                 op.get('version') != row['currentVersion'] or op.get('params', []) != row['currentParams'] or
                 {key: op.get(key, []) for key in ('inputs', 'outputs')} != row['currentPorts']):
@@ -405,6 +505,24 @@ def refreshed(data, manifest_path, reviewed_paths, review_note, product_version,
                         stage='M3', version=row['currentVersion'],
                         contract='场景v2使用显式Profile的XZ/acquisition/frame/hand/source上下文；工作数值mm但裸几何真实m；Record与实际几何hash绑定。旧v1不自动猜单位，显式dtsProfile.v1整图升级保留资产。',
                         acceptance='既有默认/相邻基准和失败行为不变；签名、源索引、单位及桥v1/v2避免重复缩放；独立宿主数值一致。')]
+    if stage == 'M4b':
+        for row in ordered:
+            if row['id'] in M4B_DEFINITIONS or row['id'] in M4B_CHANGED_VERSIONS:
+                assessments = row.setdefault('stageAssessments', [])
+                assessments[:] = [entry for entry in assessments if entry.get('stage') != 'M4b'] + [dict(
+                    stage='M4b', status='manifest_verified',
+                    scope='公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。',
+                    publicInterfaces=['kernels/include/lyflow/kernel/profile_features.h',
+                                      'kernels/include/lyflow/kernel/profile_dimensions.h',
+                                      'packs/std-profile/include/lyflow_profile/context.h'],
+                    dependencyBoundary='稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。',
+                    acceptance='当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。')]
+            if row['id'] in M4B_CHANGED_VERSIONS:
+                updates = row.setdefault('contractUpdates', [])
+                updates[:] = [entry for entry in updates if entry.get('stage') != 'M4b'] + [dict(
+                    stage='M4b', version=row['currentVersion'],
+                    contract='旧端口/参数保留并复用公共核；NaN无效样本不参与直线选择，像素/非有限/重合圆心/溢出等非法量测明确拒绝；patch版本隔离旧缓存，不以包版本代替算子版本。',
+                    acceptance='42个已有定义直线与281个已有定义量测定义逐位一致；12非法输入预期变化单独登记，仍需完整CI/SDK与场景后续验收。')]
     if stage == 'M2':
         for row in ordered:
             if row['wave'] == 'M2':
@@ -459,8 +577,9 @@ def render_details(data):
 
 def render_overview(data):
     baseline = data['baselineReference']
-    current_stage = next(s for s in reversed(data['stageLedger']) if s['stage'] in {'M1', 'M2', 'M3', 'M4a'})
-    manifest_example = f"build/{current_stage['stage'].lower()}-full/manifest.json"
+    current_stage = next(s for s in reversed(data['stageLedger']) if s['stage'] in {'M1', 'M2', 'M3', 'M4a', 'M4b'})
+    manifest_example = current_stage.get('manifestEvidence', {}).get(
+        'path', f"build/{current_stage['stage'].lower()}-full/manifest.json")
     version_example = current_stage.get('targetProductVersion', data['productVersion'])
     lines = ['# 现有算子分包审计', '',
         f"状态：实施中。当前产品 {data['productVersion']}，{data['nativeCount']} 个原生算子及 {data['pythonExampleCount']} 个随附Python示例。", '',
@@ -478,7 +597,9 @@ def render_overview(data):
         '## 阶段证据', '', '| 阶段 | 状态 | 原生 / 示例 | 证据边界 |', '| --- | --- | --- | --- |']
     for stage in data['stageLedger']:
         proof = stage.get('manifestEvidence', {})
-        evidence = ('全包manifest SHA256 `' + proof['sha256'] + '`；描述匹配，不代表阶段全部验收已完成') if proof else stage['note']
+        evidence = ('全包manifest SHA256 `' + proof['sha256'] + '`；' +
+                    ('阶段完成另由合并、CI及运行记录证明' if stage['status'] == 'complete' else
+                     '描述匹配，不代表阶段全部验收已完成')) if proof else stage['note']
         if stage.get('mergeEvidence'):
             evidence += f"；[PR{stage['mergeEvidence']['pr']}]({stage['mergeEvidence']['url']})已合并 `{stage['mergeEvidence']['revision']}`"
         lines.append(f"| {stage['stage']} | {stage['status']} | {stage.get('expectedNativeCount', '待确定')} / {stage.get('expectedPythonExampleCount', '待确定')} | {evidence} |")
@@ -513,7 +634,7 @@ def main():
     parser.add_argument('--reviewed-path', action='append', default=[])
     parser.add_argument('--reviewed-change', default='')
     parser.add_argument('--product-version')
-    parser.add_argument('--stage', choices=['M1', 'M2', 'M3', 'M4a'], default='M2')
+    parser.add_argument('--stage', choices=['M1', 'M2', 'M3', 'M4a', 'M4b'], default='M2')
     args = parser.parse_args()
     if args.list_pending_sources:
         print(json.dumps(pending_sources(load(AUDIT)), ensure_ascii=False, indent=2))

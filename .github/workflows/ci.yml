@@ -596,6 +596,27 @@ jobs:
           & "$consumer/p6-delivery-host.exe" "$sdk/bin/lyflow_core.dll" $archive.FullName
           if ($LASTEXITCODE -ne 0) { throw 'P6 C++17 跨宿主读取与持有原生帧失败' }
 
+      - name: M4b公共轮廓链CLI与独立宿主一致性
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
+          $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p1-native/bin'
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p6-cli-ci'
+          cargo build --release --locked --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
+          if ($LASTEXITCODE -ne 0) { throw 'M4b发布CLI编译失败' }
+          python tests/release/profile_workflow_contract.py --sdk "$sdk" --cli "$env:CARGO_TARGET_DIR/release/lyflow.exe" --output-dir build/m4b-profile-delivery
+          if ($LASTEXITCODE -ne 0) { throw 'M4b公共轮廓链CLI/嵌入一致性失败' }
+          $eigen = (Select-String -LiteralPath build/p1-native/CMakeCache.txt -Pattern '^Eigen3_DIR:[^=]+=(.+)$').Matches[0].Groups[1].Value
+          if ([string]::IsNullOrWhiteSpace($eigen)) { throw 'M4b缺少已验证Eigen头文件配置' }
+          cmake -S core -B build/m4b-public -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-profile;std-geometry;std-metrology' -DLYFLOW_MODULES=profile-robust-kernel -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_MANIFEST_INSTALL=OFF "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" "-DEigen3_DIR=$eigen"
+          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包配置失败' }
+          cmake --build build/m4b-public --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包编译失败' }
+          ctest --test-dir build/m4b-public --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包回归失败' }
+          python tests/release/profile_workflow_contract.py --sdk "$sdk" --cli "$env:CARGO_TARGET_DIR/release/lyflow.exe" --runtime-dir build/m4b-public/bin --public-runtime --output-dir build/m4b-profile-public-delivery
+          if ($LASTEXITCODE -ne 0) { throw 'M4b公共运行库重依赖隔离或跨宿主一致性失败' }
+
       - name: 保存已验证的 OpenCV 安装
         if: github.ref == 'refs/heads/main' && steps.vision-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -621,5 +642,8 @@ jobs:
             build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
             build/p6-delivery-contract/
             build/p6-host-consumer/
+            build/m4b-profile-delivery/
+            build/m4b-profile-public-delivery/
+            build/m4b-public/Testing/Temporary/*.log
           if-no-files-found: ignore
           retention-days: 7

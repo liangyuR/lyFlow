@@ -6,8 +6,8 @@
 
 ## 079 · gap.fit_line
 
-- 当前：`gap` / `1.1.0` / 二维剖面直线拟合。目标：`std-profile`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/fit.cpp:1232](../../packs/gap/ops/fit.cpp#L1232)。
+- 当前：`gap` / `1.1.1` / 二维剖面直线拟合。目标：`std-profile`；拆公共能力/适配；**M4**。
+- 源码：[packs/gap/ops/fit.cpp:1014](../../packs/gap/ops/fit.cpp#L1014)。
 - 端口：`cloud:PointCloud`, `box:Box2D`, `toward:Box2D`, `refLine:Line2D?` → `line:Line2D`, `inliers:Indices`, `innerEnd:Point2D`, `quality:Record`。
 - 参数单位标注：distThresh=mm, dirNominalDeg=°, dirTolDeg=°。
 - 依赖：当前直接：PCL RANSAC/Eigen，经 lyflow_std_algo；含领域端点/方向约束；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：轮廓基础模块不引PCL/OpenCV/ONNX；明确标注的原PCL拟合方法作为可选后端隔离。
@@ -17,11 +17,16 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：minInliers、free/band/fixed方向、端点模式、segmentApplied、RMS/点序和输出内点索引基线。
 - 说明：新轻量包默认不能强绑PCL；保留方法作为可选能力并声明依赖，算法替换另开任务。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
+- M4b契约更新（1.1.1）：旧端口/参数保留并复用公共核；NaN无效样本不参与直线选择，像素/非有限/重合圆心/溢出等非法量测明确拒绝；patch版本隔离旧缓存，不以包版本代替算子版本。；验收：42个已有定义直线与281个已有定义量测定义逐位一致；12非法输入预期变化单独登记，仍需完整CI/SDK与场景后续验收。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
 ## 080 · gap.fit_gap_circles
 
 - 当前：`gap` / `1.4.0` / 间隙双侧圆拟合。目标：`solution-gap`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/fit.cpp:1375](../../packs/gap/ops/fit.cpp#L1375)。
+- 源码：[packs/gap/ops/fit.cpp:1157](../../packs/gap/ops/fit.cpp#L1157)。
 - 端口：`merged:PointCloud`, `primary:PointCloud`, `secondary:PointCloud`, `boxLeft:Box2D`, `boxRight:Box2D`, `refLine:Line2D?`, `refLineRight:Line2D?` → `left:Circle2D`, `right:Circle2D`, `leftCloud:PointCloud`, `rightCloud:PointCloud`, `leftInliers:Indices`, `rightInliers:Indices`, `quality:Record`。
 - 参数单位标注：distThresh=mm, retryDistance=mm, nominal=mm, offset=mm, leftRadiusValue=mm, leftRadiusMin=mm, leftRadiusMax=mm, leftRadiusPrior=mm, leftRadiusPriorSigma=mm, rightRadiusValue=mm, rightRadiusMin=mm, rightRadiusMax=mm, rightRadiusPrior=mm, rightRadiusPriorSigma=mm, leftCenterAbove=mm, leftCenterTol=mm, rightCenterAbove=mm, rightCenterTol=mm, leftTangentAbove=mm, leftTangentTol=mm, rightTangentAbove=mm, rightTangentTol=mm, leftArcBearingDeg=°, leftArcBearingTolDeg=°, rightArcBearingDeg=°, rightArcBearingTolDeg=°, leftMinArcDeg=°, rightMinArcDeg=°。
 - 依赖：当前直接：PCL RANSAC/Eigen/受约束LM；双相机回退/按标称间隙挑候选；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：按节点需求启用std-profile/std-pointcloud/std-metrology；仅模型路径启用std-ml/ONNX，旧配置适配才需yaml-cpp。
@@ -34,8 +39,8 @@
 
 ## 081 · gap.flush
 
-- 当前：`gap` / `1.1.0` / 面差测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/measure.cpp:300](../../packs/gap/ops/measure.cpp#L300)。
+- 当前：`gap` / `1.1.1` / 面差测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
+- 源码：[packs/gap/ops/measure.cpp:251](../../packs/gap/ops/measure.cpp#L251)。
 - 端口：`baseLine:Line2D`, `refPoint:Point2D` → `value:Measurement`, `segment:Line2D`, `baseLine:Line2D`。
 - 参数单位标注：offset=mm。
 - 依赖：当前直接：Eigen/GapUtils点线几何；度量内核本身无需PCL；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：std-geometry + core的小型测量数据；PCL/OpenCV/ONNX不得成为测量内核依赖。
@@ -45,11 +50,16 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：水平/竖直线、反转方向、负面差、scale/offset和baseLine扩展都保持；与DTS符号分别验证。
 - 说明：不能仅迁value而丢掉后续gap definition A使用的扩展baseLine。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
+- M4b契约更新（1.1.1）：旧端口/参数保留并复用公共核；NaN无效样本不参与直线选择，像素/非有限/重合圆心/溢出等非法量测明确拒绝；patch版本隔离旧缓存，不以包版本代替算子版本。；验收：42个已有定义直线与281个已有定义量测定义逐位一致；12非法输入预期变化单独登记，仍需完整CI/SDK与场景后续验收。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
 ## 082 · gap.gap
 
-- 当前：`gap` / `1.0.0` / 间隙测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/measure.cpp:348](../../packs/gap/ops/measure.cpp#L348)。
+- 当前：`gap` / `1.0.1` / 间隙测量。目标：`std-metrology`；拆公共能力/适配；**M4**。
+- 源码：[packs/gap/ops/measure.cpp:299](../../packs/gap/ops/measure.cpp#L299)。
 - 端口：`left:Circle2D`, `right:Circle2D`, `baseLine:Line2D?` → `value:Measurement`, `segment:Line2D`。
 - 参数单位标注：offset=mm。
 - 依赖：当前直接：Eigen/GapUtils两圆距离；可抽纯几何内核；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：std-geometry + core的小型测量数据；PCL/OpenCV/ONNX不得成为测量内核依赖。
@@ -59,6 +69,11 @@
 - 关联算子：gap.flush
 - 验收：两种定义、圆相交/左右接反、零间隙、缺基准端点及scale换算基线。
 - 说明：不得把B误写成纯圆心距离或统一成绝对距离掩盖交叉。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
+- M4b契约更新（1.0.1）：旧端口/参数保留并复用公共核；NaN无效样本不参与直线选择，像素/非有限/重合圆心/溢出等非法量测明确拒绝；patch版本隔离旧缓存，不以包版本代替算子版本。；验收：42个已有定义直线与281个已有定义量测定义逐位一致；12非法输入预期变化单独登记，仍需完整CI/SDK与场景后续验收。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
 ## 083 · gap.groove_joint
 
@@ -77,7 +92,7 @@
 ## 084 · gap.judge
 
 - 当前：`gap` / `1.0.0` / 间隙面差判定。目标：`solution-gap`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/measure.cpp:470](../../packs/gap/ops/measure.cpp#L470)。
+- 源码：[packs/gap/ops/measure.cpp:421](../../packs/gap/ops/measure.cpp#L421)。
 - 端口：`value:Measurement` → `value:Measurement`。
 - 参数单位标注：nominal=mm, upper=mm, lower=mm, margin=mm。
 - 依赖：当前直接：标准库Measurement公差比较，无PCL/ONNX算法调用；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：按节点需求启用std-profile/std-pointcloud/std-metrology；仅模型路径启用std-ml/ONNX，旧配置适配才需yaml-cpp。
@@ -203,7 +218,7 @@
 ## 093 · gap.corner_vertex
 
 - 当前：`gap` / `1.0.0` / 夹角接缝间隙测量。目标：`solution-gap`；拆公共能力/适配；**M4**。
-- 源码：[packs/gap/ops/measure.cpp:390](../../packs/gap/ops/measure.cpp#L390)。
+- 源码：[packs/gap/ops/measure.cpp:341](../../packs/gap/ops/measure.cpp#L341)。
 - 端口：`lineLeft:Line2D`, `lineRight:Line2D`, `baseLine:Line2D?`, `alignment:Record?` → `vertex:Point2D`, `gap:Measurement`, `flush:Measurement`, `angle:Measurement`, `segment:Line2D`, `quality:Record`。
 - 参数单位标注：originX=mm, originY=mm, gapOffset=mm, flushOffset=mm, minAngle=deg, maxAngle=deg。
 - 依赖：当前直接：Eigen 直线求交/基准分解；领域软装/金件顶点约定；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：按节点需求启用std-profile/std-pointcloud/std-metrology；仅模型路径启用std-ml/ONNX，旧配置适配才需yaml-cpp。
@@ -216,8 +231,8 @@
 
 ## 094 · gap.point_offset
 
-- 当前：`gap` / `1.0.0` / 二维位移分解。目标：`std-metrology`；迁移归属；**M4**。
-- 源码：[packs/gap/ops/offset.cpp:92](../../packs/gap/ops/offset.cpp#L92)。
+- 当前：`gap` / `1.0.1` / 二维位移分解。目标：`std-metrology`；迁移归属；**M4**。
+- 源码：[packs/gap/ops/offset.cpp:66](../../packs/gap/ops/offset.cpp#L66)。
 - 端口：`a:Point2D`, `b:Point2D` → `dx:Measurement`, `dy:Measurement`, `distance:Measurement`, `segment:Line2D`。
 - 参数单位标注：dxOffset=mm, dyOffset=mm, scaleDx=mm, scaleDy=mm。
 - 依赖：当前直接：标准库/Eigen两点差分，无需PCL求解；当前随包携带：PCL/Eigen、yaml-cpp、ONNX Runtime；不表示此节点逐项调用这些库。；目标：std-geometry + core的小型测量数据；PCL/OpenCV/ONNX不得成为测量内核依赖。
@@ -227,6 +242,11 @@
 - 关联算子：无额外逐ID前置；公共协议见前置项
 - 验收：轴旋转、正负dx/dy、重合点、独立scale/offset与线段方向回归。
 - 说明：scaleDx/scaleDy现有参数单位标注需单独审计，比例因子不能因标mm就作长度换算。
+- M4b契约更新（1.0.1）：旧端口/参数保留并复用公共核；NaN无效样本不参与直线选择，像素/非有限/重合圆心/溢出等非法量测明确拒绝；patch版本隔离旧缓存，不以包版本代替算子版本。；验收：42个已有定义直线与281个已有定义量测定义逐位一致；12非法输入预期变化单独登记，仍需完整CI/SDK与场景后续验收。
+- M4b边界验收（manifest_verified）：公共Profile/几何/度量与旧Gap薄适配；场景/Bundle和导入图迁移仍在M4c。
+- 阶段依赖边界：稳健拟合显式选择PCL；选择/几何/度量保持无PCL/CV/ORT；不存在执行另一包节点伪装C++依赖。
+- 公开接口：kernels/include/lyflow/kernel/profile_features.h；kernels/include/lyflow/kernel/profile_dimensions.h；packs/std-profile/include/lyflow_profile/context.h
+- 阶段验收边界：当前全包manifest精确核验；42个已有定义直线、281个已有定义量测逐位对照和12非法输入行为变化另由实际运行记录证明，不宣称全部输入兼容。
 
 ## 095 · gap.result_bundle
 
@@ -536,7 +556,7 @@
 - 验收：六通道与标签槽对齐、模型初始化复用、ROI失败、原云/裁后merged分流和取消。
 - 说明：模型能力必须可选，禁用模板模式不能仍隐式加载模型。 原生场景编排保留时，C++复用通过明确的内部算法库接口；不得用查找注册算子并调用其compute作为最终跨包复用接口。
 
-## 261 · gap.measure_reference
+## 271 · gap.measure_reference
 
 - 当前：`gap` / `1.0.0` / 参考基线测量。目标：`solution-gap`；保留场景职责；**M7**。
 - 源码：[packs/gap/ops/measure_reference.cpp:204](../../packs/gap/ops/measure_reference.cpp#L204)。

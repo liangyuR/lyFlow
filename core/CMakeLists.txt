@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.4.3)
+project(lyflow_core LANGUAGES CXX VERSION 1.4.4)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 option(LYFLOW_PACK_TESTS_ONLY "Build only enabled operator-pack tests" OFF)
@@ -498,7 +498,8 @@ if(BUILD_TESTING)
     list(APPEND _kernel_libraries lyflow_geometry_kernel)
   endif()
   if(TARGET lyflow_metrology_kernel)
-    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_metrology.cpp")
+    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_metrology.cpp"
+      "${LYFLOW_KERNEL_ROOT}/tests/test_profile_dimensions.cpp")
     list(APPEND _kernel_libraries lyflow_metrology_kernel)
   endif()
   if(TARGET lyflow_profile_kernel)
@@ -510,7 +511,8 @@ if(BUILD_TESTING)
     list(APPEND _kernel_libraries lyflow_profile_analysis_kernel)
   endif()
   if(TARGET lyflow_profile_robust_kernel)
-    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_profile_robust.cpp")
+    list(APPEND _kernel_tests "${LYFLOW_KERNEL_ROOT}/tests/test_profile_robust.cpp"
+      "${LYFLOW_KERNEL_ROOT}/tests/test_profile_features.cpp")
     list(APPEND _kernel_libraries lyflow_profile_robust_kernel)
   endif()
   if(_kernel_tests)
@@ -766,7 +768,8 @@ if(TARGET lyflow_geometry_kernel AND TARGET lyflow_metrology_kernel AND
    TARGET lyflow_profile_kernel AND TARGET lyflow_profile_analysis_kernel)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/public_kernels.cpp" DESTINATION examples)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/public-kernels/CMakeLists.txt" DESTINATION examples/public-kernels)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/public-kernels.md" DESTINATION docs)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/public-kernels.md"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../docs/profile-public-operators.md" DESTINATION docs)
 endif()
 
 if(TARGET lyflow_profile_robust_kernel)
@@ -774,6 +777,13 @@ if(TARGET lyflow_profile_robust_kernel)
                 "${CMAKE_CURRENT_SOURCE_DIR}/../examples/profile-robust/main.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../examples/profile-robust/README.md"
           DESTINATION examples/profile-robust)
+  if(TARGET lyflow_pack_std_profile AND TARGET lyflow_pack_std_geometry AND TARGET lyflow_pack_std_metrology)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m4-native-profile.lyflow.json"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m4-native-profile.csv"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m4-native-profile.md"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_profile_workflow.cpp"
+            DESTINATION examples)
+  endif()
 endif()
 
 if(TARGET lyflow_pack_solution_dts)

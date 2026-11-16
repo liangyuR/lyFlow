@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "id": "m4-native-profile",
+  "name": "公共轮廓鲁棒拟合、原槽选点与米制测量",
+  "nodes": [
+    {
+      "id": "source",
+      "op": "profile.input",
+      "params": {
+        "source": "file",
+        "path": "m4-native-profile.csv",
+        "frame": "m4-fixture",
+        "unit": "mm",
+        "plane": "XZ",
+        "handedness": "right",
+        "sampleOrder": "acquisition",
+        "sourceId": "synthetic-m4-csv"
+      }
+    },
+    {
+      "id": "roi",
+      "op": "geometry.box_2d",
+      "params": {
+        "min": [-0.001, -0.001],
+        "max": [0.013, 0.003],
+        "unit": "m"
+      }
+    },
+    {
+      "id": "anchor",
+      "op": "geometry.point_2d",
+      "params": {
+        "position": [0.012, 0.002],
+        "unit": "m"
+      }
+    },
+    {
+      "id": "roi_context",
+      "op": "profile.bind_geometry",
+      "params": {
+        "frame": "m4-fixture",
+        "plane": "XZ"
+      }
+    },
+    {
+      "id": "anchor_context",
+      "op": "profile.bind_geometry",
+      "params": {
+        "frame": "m4-fixture",
+        "plane": "XZ"
+      }
+    },
+    {
+      "id": "fit",
+      "op": "profile.fit_line_robust",
+      "params": {
+        "distanceThreshold": 5e-5,
+        "segmentPoints": 0,
+        "minInliers": 8,
+        "endpoints": "inlier_ends",
+        "dirMode": "free"
+      }
+    },
+    {
+      "id": "selected",
+      "op": "profile.nearest_sample",
+      "params": {}
+    },
+    {
+      "id": "flush",
+      "op": "metrology.flush_point_line",
+      "params": {
+        "signed": true,
+        "signConvention": "positive_normal",
+        "positiveNormal": [0, 1],
+        "gain": 1,
+        "offsetMm": 0,
+        "outputUnit": "m"
+      }
+    },
+    {
+      "id": "offset",
+      "op": "metrology.point_offset",
+      "params": {
+        "outputUnit": "m"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "source",
+        "port": "profile"
+      },
+      "to": {
+        "node": "roi_context",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "roi",
+        "port": "box"
+      },
+      "to": {
+        "node": "roi_context",
+        "port": "geometry"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "source",
+        "port": "profile"
+      },
+      "to": {
+        "node": "anchor_context",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "anchor",
+        "port": "point"
+      },
+      "to": {
+        "node": "anchor_context",
+        "port": "geometry"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "source",
+        "port": "profile"
+      },
+      "to": {
+        "node": "fit",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "roi_context",
+        "port": "geometry"
+      },
+      "to": {
+        "node": "fit",
+        "port": "box"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "roi_context",
+        "port": "context"
+      },
+      "to": {
+        "node": "fit",
+        "port": "boxContext"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "anchor_context",
+        "port": "geometry"
+      },
+      "to": {
+        "node": "fit",
+        "port": "toward"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "anchor_context",
+        "port": "context"
+      },
+      "to": {
+        "node": "fit",
+        "port": "towardContext"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "source",
+        "port": "profile"
+      },
+      "to": {
+        "node": "selected",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e10",
+      "from": {
+        "node": "anchor_context",
+        "port": "geometry"
+      },
+      "to": {
+        "node": "selected",
+        "port": "anchor"
+      }
+    },
+    {
+      "id": "e11",
+      "from": {
+        "node": "anchor_context",
+        "port": "context"
+      },
+      "to": {
+        "node": "selected",
+        "port": "anchorContext"
+      }
+    },
+    {
+      "id": "e12",
+      "from": {
+        "node": "fit",
+        "port": "line"
+      },
+      "to": {
+        "node": "flush",
+        "port": "baseLine"
+      }
+    },
+    {
+      "id": "e13",
+      "from": {
+        "node": "fit",
+        "port": "lineContext"
+      },
+      "to": {
+        "node": "flush",
+        "port": "baseLineContext"
+      }
+    },
+    {
+      "id": "e14",
+      "from": {
+        "node": "selected",
+        "port": "point"
+      },
+      "to": {
+        "node": "flush",
+        "port": "refPoint"
+      }
+    },
+    {
+      "id": "e15",
+      "from": {
+        "node": "selected",
+        "port": "pointContext"
+      },
+      "to": {
+        "node": "flush",
+        "port": "refPointContext"
+      }
+    },
+    {
+      "id": "e16",
+      "from": {
+        "node": "fit",
+        "port": "innerEnd"
+      },
+      "to": {
+        "node": "offset",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e17",
+      "from": {
+        "node": "fit",
+        "port": "pointContext"
+      },
+      "to": {
+        "node": "offset",
+        "port": "aContext"
+      }
+    },
+    {
+      "id": "e18",
+      "from": {
+        "node": "selected",
+        "port": "point"
+      },
+      "to": {
+        "node": "offset",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e19",
+      "from": {
+        "node": "selected",
+        "port": "pointContext"
+      },
+      "to": {
+        "node": "offset",
+        "port": "bContext"
+      }
+    }
+  ],
+  "outputs": {
+    "profile": {
+      "node": "source",
+      "port": "profile"
+    },
+    "line": {
+      "node": "fit",
+      "port": "line"
+    },
+    "point": {
+      "node": "selected",
+      "port": "point"
+    },
+    "flush": {
+      "node": "flush",
+      "port": "value"
+    },
+    "dy": {
+      "node": "offset",
+      "port": "dy"
+    },
+    "distance": {
+      "node": "offset",
+      "port": "distance"
+    },
+    "indexMap": {
+      "node": "fit",
+      "port": "indexMap"
+    },
+    "fitQuality": {
+      "node": "fit",
+      "port": "quality"
+    },
+    "selection": {
+      "node": "selected",
+      "port": "selection"
+    }
+  }
+}
