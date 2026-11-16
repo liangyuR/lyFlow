@@ -167,7 +167,8 @@ endif()
         build = workspace / "consumer"
         execute([cmake, "-S", str(source), "-B", str(build), "-G", "Ninja",
                  "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_TOOLCHAIN_FILE=",
-                 f"-Dlyflow_DIR={sdk}", f"-DSDK_EXAMPLES={sdk / 'examples'}",
+                 f"-Dlyflow_DIR:PATH={sdk.as_posix()}",
+                 f"-DSDK_EXAMPLES:PATH={(sdk / 'examples').as_posix()}",
                  f"-DCONSUMER_VERSION={version}", "-DCMAKE_DISABLE_FIND_PACKAGE_PCL=ON",
                  "-DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON", "-DCMAKE_DISABLE_FIND_PACKAGE_Eigen3=ON"],
                 workspace, output, "consumer-configure", environment)
