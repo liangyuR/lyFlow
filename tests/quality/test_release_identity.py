@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -87,6 +88,12 @@ class ReleaseIdentityTests(unittest.TestCase):
             self.assertEqual(json.loads((ROOT / relative).read_text(encoding='utf-8'))['version'], root_version, relative)
         for relative in ['bridge/Cargo.toml', 'crates/lyflow-client/Cargo.toml', 'python/pyproject.toml']:
             self.assertIn(f'version = "{root_version}"', (ROOT / relative).read_text(encoding='utf-8'), relative)
+        for directory in ['examples', 'tests/release']:
+            for cmake in (ROOT / directory).rglob('CMakeLists.txt'):
+                pins = re.findall(r'find_package\(\s*lyflow\s+(\d+\.\d+\.\d+)\s+EXACT\b',
+                                  cmake.read_text(encoding='utf-8'))
+                for version in pins:
+                    self.assertEqual(version, root_version, str(cmake.relative_to(ROOT)))
         self.assertNotIn('gap', self.configuration['packs'])
         self.assertIn('solution-gap', self.configuration['packs'])
         self.assertNotIn('gap.fit_line', self.configuration['requiredOperators'])

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "f48aa13199a55b29088d439b8a7dbe090734a6eb",
+  "sourceRevision": "2892ae93dd4cfd14a652226621d6ed91f9831506",
   "productVersion": "1.4.5",
   "nativeCount": 277,
   "pythonExampleCount": 8,
@@ -455,7 +455,7 @@
     "core/cmake/kernel-modules.cmake": "fbb4bfd5251c21211535f6dc18107039474fc746ddc8faf2450dc8d17c55e73d",
     "packs/glue/lyflow_pack_dependencies.cmake": "00c89f30a9ed9fcdb57ae0960cab49445765e6aca3ab2ca06491adca1dd1bd58",
     "packs/std-geometry/ops/transform_make.cpp": "5194bf2ff2cae28e495888ea56bc9c8aea5dfaf7fbd8cddd047a07734f2ccba4",
-    "examples/public-kernels/CMakeLists.txt": "d9b46e782757c0f298442e8fe0b905497057c471c7bdabb69a90ff0a581095de",
+    "examples/public-kernels/CMakeLists.txt": "4527337f49702b35827244a009536db4561900402df988ad48aedd3f4de4ab1c",
     "kernels/include/lyflow/kernel/metrology.h": "c6389466664106a46cb76b9bc67a360865d290987a4aee7f1c155923f211ac3b",
     "kernels/src/constraints.cpp": "db961477a60a7f63b05d5cb79bb207f780073640ba7642cbca966f880797cc1e",
     "packs/std-metrology/ops/register.cpp": "bf5c71e4a353a413ba17a9f77824240f6e5788ec5f32cd5d901352f94c9c66fc",
@@ -488,7 +488,7 @@
     "solutions/dts/ops/seal_root.cpp": "378d12cfa37fcebf8e556dd5517207bef5b493ed1f705aa0b76e8171d2d80e20",
     "solutions/dts/lyflow_pack_dependencies.cmake": "5b98d59e7f7688bb06ebb60cb3accc7809d38b783ee684a366264f38c2290886",
     "kernels/src/profile_robust.cpp": "96d1d81fdcbedf66fac9473ca34ac84218a0c479309ce488f283cfacc9de9409",
-    "examples/profile-robust/CMakeLists.txt": "2110d7fab7835d85398ac2897cc442a3d676f2f7feb557aff1bd7882171ce577",
+    "examples/profile-robust/CMakeLists.txt": "0c0b88386aadb26469832029a0ce78660d05a46c3a4c07314e2f36571bea95b3",
     "examples/profile-robust/main.cpp": "c4ec4422cb4992e9419f50ae2269fa27671dcf787a734dc58ff388892b177c71",
     "kernels/include/lyflow/kernel/profile_robust.h": "3a8a819ef2cf516bf533dc331a2ad5cf7283e69264ebda3a68cec6ba8688aa81",
     "kernels/include/lyflow/kernel/profile_features.h": "2a4c80b8b99abed1ee1a82321ab8eb32991a86614780128aa2a866afa1b01341",
@@ -556,7 +556,7 @@
     "solutions/gap/ops/profile_template.cpp": "46cddc026f4e6ef6d83926db8f39dd4d3d4596490059add474308aae4624e9d6",
     "packs/std-ml/src/session_cache.h": "218ecfeb9685a78a3bc2d86784fbe9c2c5dcf527612f380fd332a830e64ff5f8",
     "packs/std-profile/include/lyflow_profile/selection.h": "093ec0b39659545c51fb857ccd4b7502a9c74c9fade4bd7c02c41e56647671f2",
-    "core/src/graph_contract_upgrade_gap_rewrite.h": "9ecaada82a8e5c38cdf37b83ae21c675e7191f36d60e73b44a2e46d2678f1756",
+    "core/src/graph_contract_upgrade_gap_rewrite.h": "e090bf1f08816ceb97e57286e3725447072efbfe26ce19a3c7322f12e7c26022",
     "solutions/gap/algo/gap_ml/OnnxRoiPredictor.cpp": "97989b14fcf6ee66c8dc067cac6fe28a62ca875411b98d987aff8a20ef4539fe",
     "solutions/gap/ops/profile_regions.cpp": "52de22c7f6b10131742d6dd467959f086bc7c3db34832cadcc45351ac8caf991",
     "packs/glue/snippets/bead-inspect.lyflow-snippet.json": "b25c9cf64743392356f710ddb041e60a26dacdc61f5229b4ec3ed0ea4a901002",
@@ -51385,7 +51385,7 @@
         }
       ],
       "note": "仅M4c场景/Profile/原子Bundle/显式图升级切片；14新增、精确8退役及31项迁包。manifest匹配不代表整个M4或M5–M7完成。",
-      "reviewedChange": "最终格式复核：片段内容与实际manifest逐JSON等价，仅同步Prettier空白变化。",
+      "reviewedChange": "Codex P2：保留旧initialPoseMode且三种模式先红后绿；SDK示例同步1.4.5 EXACT，真实无DLL公共核与隔离PCL稳健核消费通过。",
       "reviewedSourceChanges": [
         {
           "path": "core/CMakeLists.txt",
@@ -52328,6 +52328,24 @@
           "previousSha256": null,
           "sha256": "82ee1d65cd2924671d09ebfbc4746b5ba56c5df60a81cdf94d4b6dfd7c2b0630",
           "kind": "tracking_added"
+        },
+        {
+          "path": "core/src/graph_contract_upgrade_gap_rewrite.h",
+          "previousSha256": "9ecaada82a8e5c38cdf37b83ae21c675e7191f36d60e73b44a2e46d2678f1756",
+          "sha256": "e090bf1f08816ceb97e57286e3725447072efbfe26ce19a3c7322f12e7c26022",
+          "kind": "modified"
+        },
+        {
+          "path": "examples/profile-robust/CMakeLists.txt",
+          "previousSha256": "2110d7fab7835d85398ac2897cc442a3d676f2f7feb557aff1bd7882171ce577",
+          "sha256": "0c0b88386aadb26469832029a0ce78660d05a46c3a4c07314e2f36571bea95b3",
+          "kind": "modified"
+        },
+        {
+          "path": "examples/public-kernels/CMakeLists.txt",
+          "previousSha256": "d9b46e782757c0f298442e8fe0b905497057c471c7bdabb69a90ff0a581095de",
+          "sha256": "4527337f49702b35827244a009536db4561900402df988ad48aedd3f4de4ab1c",
+          "kind": "modified"
         }
       ],
       "manifestEvidence": {

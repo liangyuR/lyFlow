@@ -276,3 +276,23 @@ TEST_CASE("GAP migration refuses historical quality fallback from a different me
   REQUIRE_MESSAGE(upgradeGraphContracts(renamed, renamedRequest, upgraded, report, error),
                   error.message);
 }
+
+TEST_CASE("GAP legacy template migration retains explicitly saved initial pose modes") {
+  for (const auto* mode : {"endpoint_midpoint", "centroid", "pca"}) {
+    CAPTURE(mode);
+    auto graph = legacyGaps().at("template");
+    const auto request = gapRequest(graph);
+    gapNode(graph, "n_locate")["params"]["initialPoseMode"] = mode;
+    Json upgraded, report;
+    GraphContractUpgradeError error;
+    const bool accepted = upgradeGraphContracts(graph, request, upgraded, report, error);
+    CHECK_MESSAGE(accepted, error.message);
+    if (accepted) {
+      CHECK(gapNode(upgraded, "n_locate")["params"]["initialPoseMode"] == mode);
+      CHECK(gapNode(upgraded, "n_locate")["opVersion"] == "3.0.0");
+    }
+    gapNode(graph, "n_locate")["opVersion"] = "2.1.1";
+    CHECK_FALSE(upgradeGraphContracts(graph, request, upgraded, report, error));
+    CHECK(error.message.find("精确版本白名单") != std::string::npos);
+  }
+}

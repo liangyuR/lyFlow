@@ -895,10 +895,10 @@ inline void GapRewrite::rewrite(const Json& old) {
                   "cropMaxRollBoxHeight", "cropMinPointsKept", "cropUsingCamera"});
     else {
       std::set<std::string> names{
-          "templateDir",     "overallRoi",     "overallMode",   "overallCamera", "datumSide",
-          "maxMatchingDist", "maxFitnessDist", "maxIterations", "normalKnn",     "minScore",
-          "bidirection",     "globalCoarse",   "successGuide",  "segRoi",        "trustTranslation",
-          "trustRotation",   "degenerateRatio"};
+          "templateDir",      "overallRoi",      "overallMode",    "overallCamera", "datumSide",
+          "initialPoseMode",  "maxMatchingDist", "maxFitnessDist", "maxIterations", "normalKnn",
+          "minScore",         "bidirection",     "globalCoarse",   "successGuide",  "segRoi",
+          "trustTranslation", "trustRotation",   "degenerateRatio"};
       for (int k = 1; k <= 4; ++k)
         for (const auto* suffix : {"Enabled", "Id", "Left", "Right", "DatumRoi", "TargetRoi",
                                    "SeamLeftRoi", "SeamRightRoi", "RoisFrom"})
