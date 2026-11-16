@@ -57,6 +57,7 @@ jobs:
         run: |
           python scripts/check-operator-package-audit.py
           python tests/release/test_operator_package_audit.py
+          python scripts/tests/test_operator_package_audit.py
           python tests/quality/test_module_graph.py
           python tests/quality/test_release_identity.py
 

@@ -2,7 +2,7 @@
 
 [分包迁移计划](operator-package-migration-plan.md) · [Profile 契约](profile-data-contract.md) · [公共算子](profile-public-operators.md)
 
-本页说明 M4c 的目标运行契约。M4c 仍在验证中，正式交付状态以迁移计划及对应 PR 的 CI、审查和交付证据为准；模板、模型的合成夹具不能替代现场工件验收。
+本页说明 M4c 的运行契约，实现已提交 [PR67](https://github.com/liangyuR/lyFlow/pull/67)。正式交付状态以该 PR 的 CI、审查和合并记录为准；模板、模型的合成夹具不能替代现场工件验收。
 
 ## 包与能力
 

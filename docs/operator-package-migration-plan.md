@@ -14,7 +14,7 @@
 | M3    | 已合并：公共Profile链、DTS场景v2、显式旧图升级、CLI/SDK交付 | [PR64](https://github.com/liangyuR/lyFlow/pull/64)、[图迁移](dts-profile-migration.md)、[原生Profile示例](../examples/m3-native-profile.md) |
 | M4a   | 已合并：稳健拟合公共核、可选模块及独立SDK消费               | [PR65](https://github.com/liangyuR/lyFlow/pull/65)，七项CI成功、对应提交Codex审查无问题                                                     |
 | M4b   | 已合并：10项公共算子、原生来源绑定与旧Gap薄适配             | [PR66](https://github.com/liangyuR/lyFlow/pull/66)、[公共算子契约](profile-public-operators.md)；七项CI通过、同head Codex无问题             |
-| M4c   | 实施与验证中：Gap场景、模板/模型、Bundle及导入图切换        | 下表的完整M4波次验收门槛；不将M4a/M4b等同整个M4完成                                                                                         |
+| M4c   | 实施与验证中：Gap场景、模板/模型、Bundle及导入图切换        | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移及验证](gap-profile-migration.md)；本地验收通过，远端CI与审查跟进中         |
 | M5–M7 | 待实施；不将M3试点算作glue或最终退役完成                    | 下表的波次及验收门槛                                                                                                                        |
 
 M1提升产品/ABI至1.4.0：`lyflow_run_options`扩展后与1.3系列二进制不兼容，所有客户端按1.4系列加载。`std-profile`仅包含三项数据适配；DTS、gap、glue的计算与归属暂未迁移。旧DTS几何的数值换算必须带已知v1来源声明，不推断未知外部节点的单位。
