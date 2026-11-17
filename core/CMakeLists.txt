@@ -219,6 +219,9 @@ foreach(_directory IN LISTS _std_candidates)
   if(NOT EXISTS "${_directory}/lyflow_pack_dependencies.cmake")
     message(FATAL_ERROR "Pack ${_name} is missing lyflow_pack_dependencies.cmake")
   endif()
+  if(EXISTS "${_directory}/lyflow_modules.cmake")
+    include("${_directory}/lyflow_modules.cmake")
+  endif()
   get_property(_before GLOBAL PROPERTY LYFLOW_DECLARED_PACKS)
   include("${_directory}/lyflow_pack_dependencies.cmake")
   get_property(_declared GLOBAL PROPERTY LYFLOW_DECLARED_PACKS)
@@ -785,23 +788,5 @@ if(TARGET lyflow_profile_robust_kernel)
                   "${CMAKE_CURRENT_SOURCE_DIR}/../examples/m4-native-profile.md"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_profile_workflow.cpp"
             DESTINATION examples)
-  endif()
-endif()
-
-if(TARGET lyflow_pack_solution_dts)
-  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/graphs/" DESTINATION examples/dts)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/dts/README.md" DESTINATION examples/dts)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/dts-profile-migration.md" DESTINATION docs)
-endif()
-
-if(TARGET lyflow_pack_solution_gap)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../docs/gap-profile-migration.md" DESTINATION docs)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/README.md" DESTINATION examples/gap)
-  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/snippets/"
-          DESTINATION examples/gap/snippets FILES_MATCHING PATTERN "*.lyflow-snippet.json"
-          PATTERN "model-with-template-fallback.lyflow-snippet.json" EXCLUDE)
-  if(TARGET lyflow_gap_model AND TARGET lyflow_gap_template)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../solutions/gap/snippets/model-with-template-fallback.lyflow-snippet.json"
-            DESTINATION examples/gap/snippets)
   endif()
 endif()
