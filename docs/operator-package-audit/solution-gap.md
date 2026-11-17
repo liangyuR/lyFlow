@@ -520,7 +520,7 @@
 ## 115 · gap.judge
 
 - 当前：`solution-gap` / `1.0.0` / 间隙面差判定。目标：`solution-gap`；保留场景职责；**M4**。
-- 源码：[solutions/gap/ops/measure.cpp:443](../../solutions/gap/ops/measure.cpp#L443)。
+- 源码：[solutions/gap/ops/measure.cpp:229](../../solutions/gap/ops/measure.cpp#L229)。
 - 端口：`value:Measurement` → `value:Measurement`。
 - 参数单位标注：nominal=mm, upper=mm, lower=mm, margin=mm。
 - 依赖：solution-gap公开Profile/Geometry/Metrology和唯一场景typed helper；包必需gap-geometry/PCL，模型/模板/导入/兼容重依赖均独立可选，无OpenCV依赖。

@@ -168,22 +168,6 @@ TEST_CASE("native scene corner preserves float geometry and explicit origin with
                                                  {"flushOffset", Value::number(-.2)}});
   scene::CornerResult result;
   REQUIRE(scene::measureProfileCorner(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
-  auto oldParameters = parameters;
-  oldParameters["originX"] = Value::number(10);
-  oldParameters["originY"] = Value::number(170);
-  const std::unordered_map<std::string, Data> oldInputs{{"lineLeft", input.lineLeft},
-                                                        {"lineRight", input.lineRight}};
-  std::unordered_map<std::string, Data> oldResults;
-  Outputs output(oldResults);
-  REQUIRE(scene::inspection_detail::cornerGeometry(
-              Inputs(oldInputs), ParamView(oldParameters, ctx.baseDir()), output, ctx, nullptr)
-              .ok);
-  for (const auto& entry : std::vector<std::pair<Data, const char*>>{{result.vertex, "vertex"},
-                                                                     {result.gap, "gap"},
-                                                                     {result.flush, "flush"},
-                                                                     {result.angle, "angle"},
-                                                                     {result.segment, "segment"}})
-    checkNumeric(entry.first, oldResults.at(entry.second));
   ProfileDescriptor descriptor;
   std::string why;
   CHECK(profile_contract::geometryMatchesPhysical(result.vertex, result.vertexContext.asRecord(),

@@ -1,12 +1,5 @@
 #include <cmath>
-#include <memory>
-#include <mutex>
-#include <unordered_map>
 
-#include <pcl/common/point_tests.h>
-#include <pcl/io/pcd_io.h>
-
-#include "gap_ml/SensorXzProfile.hpp"
 #include "gap_ops.h"
 
 namespace lyflow::packs::gap {
@@ -45,48 +38,10 @@ lyflow::PointCloud fromPcl(const GapCloud& cloud) {
   return out;
 }
 
-bool loadPcd(const std::string& path, GapCloud* out, std::string* message) {
-  try {
-    if (pcl::io::loadPCDFile(path, *out) < 0) {
-      *message = "读不了 " + path;
-      return false;
-    }
-  } catch (const std::exception& e) {
-    *message = std::string("读 ") + path + " 时出错: " + e.what();
-    return false;
-  }
-  return true;
-}
-
-void removeNonFinite(GapCloud* cloud) {
-  GapCloud finite;
-  finite.header = cloud->header;
-  finite.sensor_origin_ = cloud->sensor_origin_;
-  finite.sensor_orientation_ = cloud->sensor_orientation_;
-  finite.points.reserve(cloud->size());
-  for (const auto& point : *cloud) {
-    if (pcl::isFinite(point))
-      finite.points.push_back(point);
-  }
-  finite.width = static_cast<std::uint32_t>(finite.points.size());
-  finite.height = 1;
-  finite.is_dense = true;
-  *cloud = std::move(finite);
-}
-
 Eigen::Matrix2f toRoiMatrix(const lyflow::Box2D& box) {
   Eigen::Matrix2f roi;
   roi << box.min[0], box.max[0], box.min[1], box.max[1];
   return roi;
-}
-
-lyflow::Box2D boxFromMm(double xMin, double yMin, double xMax, double yMax) {
-  lyflow::Box2D box;
-  box.min[0] = mmToMRoi(xMin);
-  box.min[1] = mmToMRoi(yMin);
-  box.max[0] = mmToMRoi(xMax);
-  box.max[1] = mmToMRoi(yMax);
-  return box;
 }
 
 std::vector<double> transformToJson(const Eigen::Matrix3f& m) {
@@ -98,18 +53,6 @@ std::vector<double> transformToJson(const Eigen::Matrix3f& m) {
   return out;
 }
 
-Eigen::Matrix3f transformFromJson(const nlohmann::json& j) {
-  Eigen::Matrix3f m = Eigen::Matrix3f::Identity();
-  if (!j.is_array() || j.size() != 9)
-    return m;
-  for (int r = 0; r < 3; ++r) {
-    for (int c = 0; c < 3; ++c) {
-      m(r, c) = j[static_cast<std::size_t>(r * 3 + c)].get<float>();
-    }
-  }
-  return m;
-}
-
 std::string fileStamp(const std::filesystem::path& p) {
   if (p.empty())
     return {};
@@ -119,13 +62,6 @@ std::string fileStamp(const std::filesystem::path& p) {
   if (ec)
     return {};
   return std::to_string(size) + ":" + std::to_string(time.time_since_epoch().count());
-}
-
-bool profileRowOf(const lyflow::PointCloud& cloud, ::gap::ml::ProfileRow* out) {
-  if (cloud.pointCount() != ::gap::ml::kProfileSlots)
-    return false;
-  *out = ::gap::ml::profileRowsFromSensorXzCloud(toPcl(cloud));
-  return true;
 }
 
 void setMeasurement(Outputs& outputs, const char* port, double valueMm, bool ok,
