@@ -173,7 +173,7 @@ def queued_recording(core, recording, destination):
 def bundle_source_contract(cli, examples, output):
     profile = (examples / "p5-scene.pcd").as_posix()
     graph = {"schemaVersion": 1, "id": "p6-bundle-source", "name": "P6 Bundle source replay", "nodes": [
-        {"id": "scan", "op": "gap.read_scan", "opVersion": "2.0.0", "params": {
+        {"id": "scan", "op": "gap.read_scan", "opVersion": "3.0.0", "params": {
          "source": "files", "primaryFile": profile, "secondaryFile": profile, "removeOutliers": False,
          "unit": "m", "layout": "sensor", "fileFrame": "p6.fixture.file", "sensorFrame": "p6.fixture.sensor",
          "measurementFrame": "p6.measurement", "handedness": "right"}}], "edges": [], "outputs": {
@@ -187,7 +187,7 @@ def bundle_source_contract(cli, examples, output):
     original = execute(cli, "replay", recording)[0]
     restored = execute(cli, "replay", recording, "--recompute", "--no-cache")[0]
     require(restored["status"] == "ok", "Bundle source recompute injected virtual fields as target ports")
-    require(original["outputs"]["scan"]["type"] == restored["outputs"]["scan"]["type"] == "Bundle<gap.ScanPair.v2>",
+    require(original["outputs"]["scan"]["type"] == restored["outputs"]["scan"]["type"] == "Bundle<gap.ScanPair.v3>",
             "real versioned native Bundle source was not recorded")
     fields = ("sensorPrimary", "sensorSecondary", "primary", "secondary", "merged")
     for name in fields:
@@ -204,7 +204,7 @@ def bundle_source_contract(cli, examples, output):
                 "Profile lost its explicit sensor/measurement frame or analysis plane")
     virtual = [entry for entry in original["metadata"]["entries"] if entry.get("virtual") is True]
     require({entry["port"] for entry in virtual} ==
-            {f"scan.{name}" for name in (*fields, "mergedProvenance", "info")}, "Bundle virtual-port identity missing")
+            {f"scan.{name}" for name in (*fields, "info")}, "Bundle virtual-port identity missing")
     target = {"schemaVersion": 1, "id": "p6-bundle-field-binding", "name": "P6 explicit native Bundle source", "nodes": [
         {"id": "source", "op": "profile.input", "opVersion": "1.0.0", "params": {"source": "injected"}},
         {"id": "cloud", "op": "profile.to_cloud", "opVersion": "1.0.0", "params": {"unit": "m"}},
@@ -234,7 +234,7 @@ def bundle_source_contract(cli, examples, output):
     wrong_path = output / "bundle-wrong-target.lyflow.json"
     wrong_path.write_text(json.dumps(wrong), encoding="utf-8")
     execute(cli, "replay", recording, "--graph", wrong_path, "--bind", "scan.scan.merged=source.cloud", "--no-cache", success=False)
-    return {"bundleType": "Bundle<gap.ScanPair.v2>", "nativeFieldType": "Profile", "profileFields": list(fields),
+    return {"bundleType": "Bundle<gap.ScanPair.v3>", "nativeFieldType": "Profile", "profileFields": list(fields),
             "mergedSlots": original["outputs"]["merged"]["elementCount"], "recomputePassed": True,
             "explicitProfileToCloudPassed": True, "mismatchedBindingRejected": True}
 

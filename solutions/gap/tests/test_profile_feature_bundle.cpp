@@ -5,7 +5,6 @@
 #include "lyflow/profile.h"
 #include "lyflow_profile/features.h"
 #include "lyflow_profile/merge.h"
-#include "lyflow_profile/provenance.h"
 #include "ops/profile_circles.h"
 #include "ops/profile_feature_bundle.h"
 #include "ops/profile_scan.h"
@@ -39,9 +38,15 @@ Data source(const std::string& id = "camera-A", float shift = 0) {
   }
   return profile(std::move(cloud), id);
 }
-Data context(const Data& input, const Data& geometry) {
-  return Data::record(
-      Record{"profile.Geometry.v2", profile_contract::geometryContextV2(input, geometry)});
+Data context(const Data& input) {
+  return Data::record(profile_contract::geometryContext(input.asProfile()->descriptor));
+}
+Data foreignContext() {
+  ProfileDescriptor space;
+  space.frame = "template-frame";
+  space.plane = "XY";
+  space.handedness = "right";
+  return Data::record(profile_contract::geometryContext(space));
 }
 ParamMap defaults(const std::vector<Param>& descriptions) {
   ParamMap values;
@@ -56,8 +61,7 @@ profile_contract::RobustLineResult line(const Data& input) {
   anchor.p[0] = .011F;
   anchor.p[1] = .17F;
   const auto box = Data::box2d(roi), toward = Data::point2d(anchor);
-  profile_contract::RobustLineInputs in{
-      input, box, context(input, box), toward, context(input, toward), {}, {}, {}};
+  profile_contract::RobustLineInputs in{input, box, context(input), toward, context(input), {}, {}};
   auto parameters = defaults(profile_contract::robustLineParams());
   parameters["segmentPoints"] = Value::integer(0);
   profile_contract::RobustLineResult out;
@@ -67,9 +71,8 @@ profile_contract::RobustLineResult line(const Data& input) {
   return out;
 }
 scene::LineFeatureFields lineFields(const profile_contract::RobustLineResult& fit) {
-  return {fit.profile,         fit.line,         fit.lineContext,
-          fit.innerEnd,        fit.pointContext, fit.inliers,
-          fit.weightedInliers, fit.quality,      fit.provenance};
+  return {fit.profile,      fit.line,    fit.lineContext,     fit.innerEnd,
+          fit.pointContext, fit.inliers, fit.weightedInliers, fit.quality};
 }
 scene::ReferenceFeatureFields reference(const Data& input, const char* method) {
   test::StubContext ctx;
@@ -78,12 +81,11 @@ scene::ReferenceFeatureFields reference(const Data& input, const char* method) {
   anchor.p[1] = .17F;
   const auto point = Data::point2d(anchor);
   profile_contract::NearestResult nearest;
-  REQUIRE(profile_contract::nearestSample({input, point, context(input, point), {}},
+  REQUIRE(profile_contract::nearestSample({input, point, context(input)},
                                           profile_contract::NearestReference::Point, nearest, ctx)
               .ok);
   scene::ReferenceFeatureFields partial{
-      nearest.profile,   {}, {}, nearest.point, nearest.pointContext, nearest.selection, {},
-      nearest.provenance},
+      nearest.profile, {}, {}, nearest.point, nearest.pointContext, nearest.selection, {}},
       full;
   std::string why;
   REQUIRE_MESSAGE(scene::completeReferenceFeature(method, partial, full, why), why);
@@ -106,14 +108,13 @@ scene::CirclePairFeatureFields circles() {
   input.secondary = row("camera-B");
   profile_contract::MergeResult merged;
   std::string why;
-  REQUIRE(profile_contract::mergeProfiles(input.secondary, input.primary, nullptr, nullptr,
-                                          {"secondary", "primary", "require_equal"}, merged, why));
+  REQUIRE(profile_contract::mergeProfiles(input.secondary, input.primary, "require_equal", merged,
+                                          why));
   input.merged = merged.profile;
-  input.mergedProvenance = Data::record(merged.provenance);
   for (int side = 0; side < 2; ++side) {
     input.boxes[side] =
         Data::box2d(Box2D{{side ? .001F : -.006F, -.004F}, {side ? .006F : -.001F, .002F}});
-    input.boxContexts[side] = context(input.merged, input.boxes[side]);
+    input.boxContexts[side] = context(input.merged);
   }
   const auto parameters = defaults(scene::circlePairParams());
   test::StubContext ctx;
@@ -121,8 +122,7 @@ scene::CirclePairFeatureFields circles() {
   REQUIRE_MESSAGE(
       scene::fitProfileGapCircles(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok,
       "真实场景双圆拟合必须成功");
-  return {result.profiles,    result.circles, result.contexts,
-          result.provenances, result.inliers, result.quality};
+  return {result.profiles, result.circles, result.contexts, result.inliers, result.quality};
 }
 Data sensor(const std::string& id, float shift) {
   PointCloud cloud;
@@ -143,10 +143,10 @@ scene::LocationFields location(float shift = 0) {
   for (std::size_t i = 0; i < 4; ++i) {
     rois.boxes[i] = Data::box2d(Box2D{{.001F * static_cast<float>(i), .16F},
                                       {.003F + .001F * static_cast<float>(i), .18F}});
-    rois.contexts[i] = context(merged, rois.boxes[i]);
+    rois.contexts[i] = context(merged);
   }
   rois.info = {scene::kRoiInfoType,
-               {{"schemaVersion", 2},
+               {{"schemaVersion", 3},
                 {"source", "config"},
                 {"datumSide", "left"},
                 {"alignment", nullptr},
@@ -157,11 +157,6 @@ scene::LocationFields location(float shift = 0) {
   std::string why;
   REQUIRE(scene::makeRoiSet(rois, result.rois, why));
   return result;
-}
-Data replace(const Data& data, const char* name, const Data& value) {
-  Bundle copy = *data.asBundle();
-  copy.set(name, value);
-  return Data::bundle(std::move(copy));
 }
 class Cancel final : public ExecContext {
 public:
@@ -176,24 +171,22 @@ private:
 };
 }
 
-TEST_CASE(
-    "atomic line feature binds actual native observations indices geometry quality and provenance") {
+TEST_CASE("atomic line feature binds native observations indices geometry and quality") {
   const auto fit = line(source());
   const auto fields = lineFields(fit);
   Data feature;
   std::string why;
   REQUIRE_MESSAGE(scene::makeLineFeature(fields, feature, why), why);
   REQUIRE(feature.asBundle());
-  CHECK(feature.asBundle()->fields.size() == 9);
+  CHECK(feature.asBundle()->fields.size() == 8);
   scene::LineFeatureFields read;
   REQUIRE(scene::readLineFeature(feature, read, why));
   CHECK(read.profile.profilePtr() == fit.profile.profilePtr());
   CHECK(read.line.valueJson() == fit.line.valueJson());
   CHECK(read.weightedInliers.asIndices()->values == fit.weightedInliers.asIndices()->values);
   Data unchanged = feature;
-  auto other = line(source("camera-A", .001F));
   auto mixed = fields;
-  mixed.lineContext = other.lineContext;
+  mixed.lineContext = foreignContext();
   CHECK_FALSE(scene::makeLineFeature(mixed, feature, why));
   CHECK(feature.asBundle() == unchanged.asBundle());
   mixed = fields;
@@ -201,15 +194,6 @@ TEST_CASE(
   indices.sourceCloudId++;
   mixed.inliers = Data::indices(indices);
   CHECK_FALSE(scene::makeLineFeature(mixed, feature, why));
-  mixed = fields;
-  auto quality = *mixed.quality.asRecord();
-  quality.data["uniqueInlierCount"] = 1;
-  mixed.quality = Data::record(quality);
-  CHECK_FALSE(scene::makeLineFeature(mixed, feature, why));
-  CHECK_FALSE(scene::readLineFeature(replace(unchanged, "profile", other.profile), read, why));
-  Bundle extra = *unchanged.asBundle();
-  extra.fields.push_back({"line", fit.line});
-  CHECK_FALSE(scene::readLineFeature(Data::bundle(extra), read, why));
 }
 
 TEST_CASE(
@@ -218,14 +202,17 @@ TEST_CASE(
   const auto fit = line(input);
   scene::ReferenceFeatureFields partial{fit.profile,  fit.line,         fit.lineContext,
                                         fit.innerEnd, fit.pointContext, fit.indexMap,
-                                        fit.quality,  fit.provenance},
+                                        fit.quality},
       completed;
   Data feature;
   std::string why;
   REQUIRE_MESSAGE(scene::completeReferenceFeature("line_end", partial, completed, why), why);
   REQUIRE(scene::makeReferenceFeature(completed, feature, why));
-  CHECK(feature.asBundle()->fields.size() == 8);
-  CHECK(completed.selection.asRecord()->type == "gap.ReferenceSelection.v2");
+  CHECK(feature.asBundle()->fields.size() == 7);
+  CHECK(completed.selection.asRecord()->type == "gap.ReferenceSelection.v3");
+  auto unfitted = partial;
+  unfitted.quality = Data::record(Record{"gap.ReferencePoint.v3", Json::object()});
+  CHECK_FALSE(scene::completeReferenceFeature("line_end", unfitted, completed, why));
   for (const auto* method : {"selected_point", "nearest_point"}) {
     CAPTURE(method);
     auto full = reference(input, method);
@@ -233,63 +220,44 @@ TEST_CASE(
     scene::ReferenceFeatureFields read;
     REQUIRE(scene::readReferenceFeature(feature, read, why));
     CHECK(read.quality.asRecord()->data["lineFitted"] == false);
-    CHECK(read.lineContext.asRecord()->type == "gap.GeometryUnavailable.v1");
+    CHECK(read.lineContext.asRecord()->type == "gap.GeometryUnavailable.v2");
     ProfileDescriptor descriptor;
-    CHECK_FALSE(profile_contract::geometryMatchesPhysical(read.line, read.lineContext.asRecord(),
-                                                          descriptor, why));
-    auto invalid = full;
-    Line2D falseCarrier = *invalid.line.asLine2D();
-    falseCarrier.dir[1] = 1;
-    invalid.line = Data::line2d(falseCarrier);
-    CHECK_FALSE(scene::makeReferenceFeature(invalid, feature, why));
-    invalid = full;
-    auto falseSelection = *invalid.selection.asRecord();
-    falseSelection.data["source"] = {
-        {"logicalRole", "source"}, {"sourceId", "wrong-camera"}, {"sourceIndex", 3}};
-    invalid.selection = Data::record(falseSelection);
-    auto falseQuality = *invalid.quality.asRecord();
-    falseQuality.data["selection"] = falseSelection.data;
-    invalid.quality = Data::record(falseQuality);
-    CHECK_FALSE(scene::makeReferenceFeature(invalid, feature, why));
-    full.lineContext = context(input, full.line);
+    CHECK_FALSE(
+        profile_contract::geometrySpace(read.line, read.lineContext.asRecord(), descriptor, why));
+    full.pointContext = foreignContext();
     CHECK_FALSE(scene::makeReferenceFeature(full, feature, why));
-    auto fresh = reference(input, method);
-    fresh.selection = reference(source("same-other"), method).selection;
-    CHECK_FALSE(scene::makeReferenceFeature(fresh, feature, why));
   }
   const auto before = completed.profile.profilePtr();
   CHECK_FALSE(scene::completeReferenceFeature("selected_point", partial, completed, why));
   CHECK(completed.profile.profilePtr() == before);
 }
 
-TEST_CASE(
-    "atomic circle pair keeps both scene-selected profiles sources and indices in one payload") {
+TEST_CASE("atomic circle pair keeps both scene-selected profiles and indices in one payload") {
   auto fields = circles();
   Data feature;
   std::string why;
   REQUIRE_MESSAGE(scene::makeCirclePairFeature(fields, feature, why), why);
-  CHECK(feature.asBundle()->fields.size() == 11);
+  CHECK(feature.asBundle()->fields.size() == 9);
   scene::CirclePairFeatureFields read;
   REQUIRE_MESSAGE(scene::readCirclePairFeature(feature, read, why), why);
   CHECK(read.profiles[0].profilePtr() == fields.profiles[0].profilePtr());
   CHECK(read.profiles[1].profilePtr() == fields.profiles[1].profilePtr());
   CHECK(read.inliers[0].asIndices()->sourceCloudId == read.profiles[0].asProfile()->cloud->id);
   const auto before = feature.asBundle();
-  std::swap(fields.contexts[0], fields.contexts[1]);
+  fields.contexts[1] = foreignContext();
   CHECK_FALSE(scene::makeCirclePairFeature(fields, feature, why));
   CHECK(feature.asBundle() == before);
   fields = read;
-  fields.quality.data["left"]["inlierCount"] = 1;
+  std::swap(fields.inliers[0], fields.inliers[1]);
   CHECK_FALSE(scene::makeCirclePairFeature(fields, feature, why));
 }
 
-TEST_CASE(
-    "atomic location uses flat native fields and rejects stale same-id scan geometry bindings") {
+TEST_CASE("atomic location uses flat native fields and rejects role boxes from another space") {
   auto fields = location();
   Data feature;
   std::string why;
   REQUIRE_MESSAGE(scene::makeLocation(fields.scan, fields.rois, feature, why), why);
-  CHECK(feature.asBundle()->fields.size() == 16);
+  CHECK(feature.asBundle()->fields.size() == 15);
   for (const auto& field : feature.asBundle()->fields)
     CHECK(field.second.kind() != Data::Kind::Bundle);
   scene::LocationFields read;
@@ -298,14 +266,14 @@ TEST_CASE(
         fields.scan.asBundle()->field("sensorPrimary")->profilePtr());
   CHECK(read.rois.asBundle()->field("datum")->valueJson() ==
         fields.rois.asBundle()->field("datum")->valueJson());
-  const auto stale = location(.001F);
   const auto before = feature.asBundle();
-  CHECK_FALSE(scene::makeLocation(stale.scan, fields.rois, feature, why));
-  CHECK(feature.asBundle() == before);
-  const auto foreign = source("template-only");
   Bundle wrong = *fields.rois.asBundle();
-  wrong.set("datumContext", context(foreign, *wrong.field("datum")));
+  wrong.set("datumContext", foreignContext());
   CHECK_FALSE(scene::makeLocation(fields.scan, Data::bundle(wrong), feature, why));
+  CHECK(feature.asBundle() == before);
+  Bundle injected = *feature.asBundle();
+  injected.set("datumContext", foreignContext());
+  CHECK_FALSE(scene::readLocation(Data::bundle(std::move(injected)), read, why));
 }
 
 TEST_CASE(
@@ -322,26 +290,24 @@ TEST_CASE(
                  {"pointContext", fields.pointContext},
                  {"inliers", fields.inliers},
                  {"weightedInliers", fields.weightedInliers},
-                 {"quality", fields.quality},
-                 {"provenance", fields.provenance}};
+                 {"quality", fields.quality}};
   REQUIRE_MESSAGE(call.run("gap.make_line_feature").ok, call.status.message);
   const auto feature = call.out("feature");
   call.inputs = {{"feature", feature}};
   REQUIRE(call.run("gap.split_line_feature").ok);
-  CHECK(call.outputs.size() == 9);
+  CHECK(call.outputs.size() == 8);
   CHECK(call.out("profile").profilePtr() == fields.profile.profilePtr());
   const auto ref = reference(source(), "selected_point");
   call.inputs = {{"profile", ref.profile},
                  {"point", ref.point},
                  {"pointContext", ref.pointContext},
-                 {"selection", ref.selection},
-                 {"provenance", ref.provenance}};
+                 {"selection", ref.selection}};
   REQUIRE_MESSAGE(
       call.run("gap.make_reference_feature", {{"method", Value::text("selected_point")}}).ok,
       call.status.message);
   call.inputs = {{"feature", call.out("feature")}};
   REQUIRE(call.run("gap.split_reference_feature").ok);
-  CHECK(call.outputs.size() == 8);
+  CHECK(call.outputs.size() == 7);
   const auto loc = location();
   call.inputs = {{"scan", loc.scan}, {"rois", loc.rois}};
   REQUIRE_MESSAGE(call.run("gap.make_location").ok, call.status.message);

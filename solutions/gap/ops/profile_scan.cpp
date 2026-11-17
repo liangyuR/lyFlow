@@ -1,6 +1,5 @@
 #include "profile_migration.h"
 #include "profile_scan.h"
-#include "profile_guard.h"
 
 #include <algorithm>
 #include <cmath>
@@ -280,8 +279,6 @@ Status readCallback(const Inputs& inputs, const ParamView& params, Outputs& outp
   options.origins = origins;
   if (inputs.has("guardQuality")) {
     const auto* guard = inputs.get("guardQuality").asRecord();
-    if (guard->type != "gap.CameraGuard.v2")
-      return failure("需要实际gap.CameraGuard.v2质量记录", "bad_input", "guardQuality");
     options.guard = guard->data;
     if (origins.is_object() && options.guard.is_object() && options.guard.contains("taken")) {
       const auto taken = options.guard["taken"];
@@ -350,9 +347,6 @@ Status buildReadScan(const Data& sensorPrimary, const Data& sensorSecondary,
     return failure("需要同传感器帧XZ轮廓与明确不同的量测目标帧");
   if (context.cancelled())
     return cancelled();
-  if (!options.guard.is_null() && !guardMatches(sensorPrimary, sensorSecondary,
-                                                Record{"gap.CameraGuard.v2", options.guard}, why))
-    return failure(why, "bad_input", "guardQuality");
   Data frames[2], finite[2];
   const Data* sensors[2] = {&sensorPrimary, &sensorSecondary};
   for (int i = 0; i < 2; ++i) {
@@ -375,15 +369,8 @@ Status buildReadScan(const Data& sensorPrimary, const Data& sensorSecondary,
     if (!selected(frames[i], keep, finite[i], why, context))
       return context.cancelled() ? cancelled() : failure(why);
   }
-  Record finiteProvenance[2];
-  for (int i = 0; i < 2; ++i)
-    if (!profile_contract::rebindProvenance(frames[i], finite[i], nullptr, finiteProvenance[i],
-                                            why))
-      return failure(why);
   profile_contract::MergeResult merged;
-  if (!profile_contract::mergeProfiles(finite[1], finite[0], &finiteProvenance[1],
-                                       &finiteProvenance[0],
-                                       {"secondary", "primary", "intersection"}, merged, why,
+  if (!profile_contract::mergeProfiles(finite[1], finite[0], "intersection", merged, why,
                                        [&context] { return context.cancelled(); }))
     return context.cancelled() ? cancelled() : failure(why);
   for (const auto& channel : merged.info.data["droppedChannels"])
@@ -399,12 +386,7 @@ Status buildReadScan(const Data& sensorPrimary, const Data& sensorSecondary,
     Data filtered;
     if (!selected(merged.profile, selection.kept.values, filtered, why, context))
       return context.cancelled() ? cancelled() : failure(why);
-    Record rebound;
-    if (!profile_contract::rebindProvenance(merged.profile, filtered, &merged.provenance, rebound,
-                                            why))
-      return failure(why);
     merged.profile = std::move(filtered);
-    merged.provenance = std::move(rebound);
   }
   ScanMetadata metadata;
   metadata.sensorFrame = primary->descriptor.frame;
@@ -431,8 +413,8 @@ Status buildReadScan(const Data& sensorPrimary, const Data& sensorSecondary,
           {"before", beforeRadius},
           {"after", merged.profile.asProfile()->pointCount()}}}}}};
   Data result;
-  if (!makeScanPair(sensorPrimary, sensorSecondary, frames[0], frames[1], merged.profile,
-                    merged.provenance, metadata, result, why))
+  if (!makeScanPair(sensorPrimary, sensorSecondary, frames[0], frames[1], merged.profile, metadata,
+                    result, why))
     return failure(why);
   if (context.cancelled())
     return cancelled();
@@ -461,18 +443,20 @@ void registerProfileScanOps(Registry& registry) {
   registry.addOperator(std::move(load));
   OperatorDesc read;
   read.id = "gap.read_scan";
-  read.version = "2.0.0";
+  read.version = "3.0.0";
   declareGapGraphUpgrade(read);
+  read.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   read.label = "双路原生场景读入";
   read.category = "间隙/输入输出";
-  read.keywords = {"profile scene read scan provenance", "双路 场景 原生 轮廓 来源"};
+  read.keywords = {"profile scene read scan", "双路 场景 原生 轮廓 来源"};
   read.inputs = {
       {"primary", "Profile", "首传感器轮廓", "已有完整XZ声明；两路同时连接优先于文件参数。", false},
       {"secondary", "Profile", "次传感器轮廓", "原生源槽、通道与有效性声明。", false},
       {"sourceInfo", "Record", "来源记录", "可选gap.ProfilePairSource.v2。", false},
-      {"guardQuality", "Record", "guard质量", "已执行且绑定实际输入的gap.CameraGuard.v2。", false}};
+      {"guardQuality", "Record", "guard质量", "已执行的gap.CameraGuard.v3。", false}};
+  read.inputs.back().contract = {{"recordType", "gap.CameraGuard.v3"}};
   read.outputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "原生场景", "传感器原槽与完整量测/复合来源。", true},
+      {"scan", "Bundle<gap.ScanPair.v3>", "原生场景", "传感器原槽、量测轮廓与合并轮廓。", true},
       {"sensorPrimary", "Profile", "首传感器原槽", "共享实际选中输入。", true},
       {"sensorSecondary", "Profile", "次传感器原槽", "共享实际选中输入。", true}};
   read.params = fileParams(true);

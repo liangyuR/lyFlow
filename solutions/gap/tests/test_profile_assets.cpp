@@ -64,12 +64,11 @@ struct Location {
       fields.boxes[i] =
           Data::box2d(Box2D{{bounds[i][0], bounds[i][1]}, {bounds[i][2], bounds[i][3]}});
       fields.contexts[i] =
-          Data::record(Record{"profile.Geometry.v2",
-                              profile_contract::geometryContextV2(*view.merged, fields.boxes[i])});
+          Data::record(profile_contract::geometryContext(view.merged->asProfile()->descriptor));
     }
     fields.info = {
         scene::kRoiInfoType,
-        {{"schemaVersion", 2},
+        {{"schemaVersion", 3},
          {"source", "config"},
          {"datumSide", "left"},
          {"alignment", nullptr},
@@ -86,8 +85,8 @@ Json closed(const SnippetDesc& entry, const Location& location) {
   source.id = "test.gap_asset_source";
   source.version = "1.0.0";
   source.label = "test.gap_asset_source";
-  source.outputs = {{"scan", "Bundle<gap.ScanPair.v2>", "Scan", "", true},
-                    {"rois", "Bundle<gap.RoiSet.v2>", "ROIs", "", true}};
+  source.outputs = {{"scan", "Bundle<gap.ScanPair.v3>", "Scan", "", true},
+                    {"rois", "Bundle<gap.RoiSet.v3>", "ROIs", "", true}};
   source.capabilities = {false, false, true};
   source.compute = [scan = location.scan, rois = location.rois](const Inputs&, const ParamView&,
                                                                 Outputs& out, ExecContext&) {
@@ -389,7 +388,7 @@ TEST_CASE(
                                 output.at("port").get<std::string>().c_str());
       if (output.at("port") == "bundle") {
         REQUIRE(value.asRecord());
-        CHECK(value.asRecord()->data.at("schemaVersion") == 3);
+        CHECK(value.asRecord()->data.at("schemaVersion") == 4);
         CHECK(value.asRecord()->data.at("roi_source") == "config");
         CHECK(value.asRecord()->data.at("gap").at("status") == "success");
         CHECK(value.asRecord()->data.at("flush").at("status") == "success");

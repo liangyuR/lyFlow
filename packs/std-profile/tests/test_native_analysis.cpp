@@ -26,73 +26,25 @@ Profile fixture(const char* unit = "mm") {
 }
 }
 
-TEST_CASE(
-    "Profile context binds descriptors all channels masks and source indices across carriers") {
-  const auto original = fixture();
-  const auto input = Data::profile(original);
-  const auto context = profile_contract::context(input);
-  CHECK(profile_contract::fingerprint(context["profileHash"]));
-  std::string why;
-  REQUIRE(profile_contract::matches(input, context, why));
-  auto copied = original;
-  PointCloud copy = *original.cloud;
-  PointCloud identity;
-  copy.id = identity.id;
-  copied.cloud = std::make_shared<const PointCloud>(copy);
-  REQUIRE(profile_contract::matches(Data::profile(copied), context, why));
-  copied.validity[1] = 0;
-  CHECK_FALSE(profile_contract::matches(Data::profile(copied), context, why));
-  copied = original;
-  copied.sourceIndices[1] = 4;
-  CHECK_FALSE(profile_contract::matches(Data::profile(copied), context, why));
-  copied = original;
-  copied.descriptor.frame = "other";
-  CHECK_FALSE(profile_contract::matches(Data::profile(copied), context, why));
-  for (int channel = 0; channel < 4; ++channel) {
-    PointCloud changed = *original.cloud;
-    if (channel == 0)
-      changed.xyz[0] += 1;
-    if (channel == 1)
-      changed.intensity[0] += 1;
-    if (channel == 2)
-      changed.normals[0] += 1;
-    if (channel == 3)
-      changed.rgb[0] += 1;
-    copied = original;
-    copied.cloud = std::make_shared<const PointCloud>(changed);
-    CHECK_FALSE(profile_contract::matches(Data::profile(copied), context, why));
-  }
-  auto malformed = context;
-  malformed["extra"] = true;
-  CHECK_FALSE(profile_contract::matches(input, malformed, why));
-  malformed = context;
-  malformed["schemaVersion"] = 2;
-  CHECK_FALSE(profile_contract::matches(input, malformed, why));
-  CHECK_FALSE(profile_contract::matches(Data{}, context, why));
-}
-
-TEST_CASE(
-    "Native profile TLS uses declared planes SI conversion original context and delivered geometry") {
+TEST_CASE("Native profile TLS uses declared planes SI conversion and delivered geometry") {
   const auto input = Data::profile(fixture());
   test::OpCall call;
   call.inputs = {{"profile", input}};
   REQUIRE_MESSAGE(call.run("profile.fit_line").ok, call.status.message);
   const auto line = call.out("line");
   const auto stats = *call.out("statistics").asRecord();
-  CHECK(stats.type == "profile.LineFit.v1");
+  CHECK(stats.type == "profile.LineFit.v2");
   CHECK(stats.data["count"] == 4);
-  CHECK(stats.data["unit"] == "m");
   CHECK(stats.data["plane"] == "XZ");
-  CHECK(stats.data["context"] == profile_contract::context(input));
-  CHECK(stats.data["geometryHash"] == profile_contract::geometryHash(line));
-  CHECK(call.out("lineContext").asRecord()->type == "profile.Geometry.v1");
-  CHECK(call.out("lineContext").asRecord()->data == profile_contract::geometryContext(input, line));
+  CHECK(stats.data["handedness"] == input.asProfile()->descriptor.handedness);
+  CHECK(call.out("lineContext").asRecord()->data ==
+        profile_contract::geometryContext(input.asProfile()->descriptor).data);
   Profile metric;
   std::string why;
   REQUIRE(convertProfileUnit(*input.asProfile(), "m", metric, why));
   call.inputs = {{"cloud", Data::cloud(metric.cloud)}};
   REQUIRE(call.run("profile.analyze", {{"frame", Value::text("measurement")}}).ok);
-  CHECK(profile_contract::geometryHash(call.out("line")) == profile_contract::geometryHash(line));
+  CHECK(call.out("line").valueJson() == line.valueJson());
   CHECK(call.out("statistics").asRecord()->data["rms"] == stats.data["rms"]);
   call.inputs = {{"profile", input}};
   REQUIRE(call.run("profile.fit_line",
@@ -130,12 +82,6 @@ TEST_CASE(
   call.inputs = {{"profile", Data::profile(input)}};
   CHECK_FALSE(call.run("profile.fit_line", {{"invalidPolicy", Value::text("valid_only")}}).ok);
   CHECK(call.status.message == "点云强度必须有限");
-  Line2D geometry;
-  geometry.start[0] = std::numeric_limits<float>::quiet_NaN();
-  const auto unused = Data::line2d(geometry);
-  geometry.start[0] = 7;
-  CHECK(profile_contract::geometryHash(unused) ==
-        profile_contract::geometryHash(Data::line2d(geometry)));
 }
 
 TEST_CASE(
@@ -193,8 +139,7 @@ TEST_CASE(
   CHECK(movedSlave->sourceIndices == slave.sourceIndices);
   CHECK(movedSlave->cloud->intensity == slave.cloud->intensity);
   CHECK(movedMaster->cloud->rgb == master.cloud->rgb);
-  CHECK(profile_contract::matches(
-      call.out("master"), call.out("metadata").asRecord()->data["masterOutputContext"], why));
+  CHECK(call.out("metadata").asRecord()->type == "profile.PairFrames.v2");
   CHECK(masterData.asProfile()->descriptor.unit == "mm");
   CHECK(masterData.asProfile()->cloud->xyz == master.cloud->xyz);
   call.inputs.erase("commonToOutput");

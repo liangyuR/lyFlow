@@ -34,16 +34,14 @@ std::pair<Data, Data> sampledLineFixture(const Data& source) {
   line.dir[0] = 1;
   line.dir[1] = 0;
   const auto geometry = Data::line2d(line);
-  Record statistics{"profile.LineFit.v1",
-                    {{"schemaVersion", 1},
+  Record statistics{"profile.LineFit.v2",
+                    {{"schemaVersion", 2},
                      {"frame", input->descriptor.frame},
                      {"plane", input->descriptor.plane},
-                     {"unit", "m"},
+                     {"handedness", input->descriptor.handedness},
                      {"count", 4},
                      {"rms", 0.0},
-                     {"abscissaRange", {xyz[0], xyz[9]}},
-                     {"context", profile_contract::context(source)},
-                     {"geometryHash", profile_contract::geometryHash(geometry)}}};
+                     {"abscissaRange", {xyz[0], xyz[9]}}}};
   return {geometry, Data::record(std::move(statistics))};
 }
 std::unordered_map<std::string, Data> sampledFixtures(const Data& left, const Data& right) {
@@ -68,9 +66,7 @@ TEST_CASE(
   CHECK_FALSE(gap.hasLimits);
   CHECK(flush.verdict.empty());
   const auto quality = call.out("quality").asRecord();
-  CHECK(quality->type == "metrology.ProfileGapFlush.v1");
-  CHECK(quality->data["leftContext"] == profile_contract::context(left));
-  CHECK(quality->data["rightContext"] == profile_contract::context(right));
+  CHECK(quality->type == "metrology.ProfileGapFlush.v2");
   PointCloud cloud;
   for (const auto& input : {left, right}) {
     Profile metric;
@@ -85,20 +81,19 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Native profile metrology rejects mismatched declarations geometry statistics and unsupported extrapolation") {
+    "Native profile metrology rejects mismatched declarations statistics and unsupported extrapolation") {
   test::OpCall call;
   const auto good = sampledFixtures(profile(false), profile(true));
   call.inputs = good;
   CHECK_FALSE(call.run("metrology.profile_gap_flush", {{"maxExtrapolation", Value::number(0)}}).ok);
   auto line = *good.at("right").asLine2D();
-  line.point[1] += 1;
+  line.unit = Unit2D::Pixel;
   call.inputs = good;
   call.inputs["right"] = Data::line2d(line);
   CHECK_FALSE(call.run("metrology.profile_gap_flush").ok);
-  CHECK(call.status.message == "拟合统计版本、米制单位或几何指纹不匹配");
-  for (const auto* key : {"unit", "geometryHash"}) {
+  for (const auto* key : {"schemaVersion", "handedness", "count"}) {
     auto statistics = *good.at("rightStatistics").asRecord();
-    statistics.data[key] = "invalid";
+    statistics.data[key] = std::string(key) == "handedness" ? nlohmann::json(1) : "invalid";
     call.inputs = good;
     call.inputs["rightStatistics"] = Data::record(statistics);
     CHECK_FALSE(call.run("metrology.profile_gap_flush").ok);
@@ -112,10 +107,6 @@ TEST_CASE(
   call.inputs = good;
   call.inputs["rightStatistics"] = Data::record(malformed);
   CHECK_FALSE(call.run("metrology.profile_gap_flush").ok);
-  malformed = *good.at("rightStatistics").asRecord();
-  malformed.data["context"]["schemaVersion"] = 2;
-  call.inputs["rightStatistics"] = Data::record(malformed);
-  CHECK_FALSE(call.run("metrology.profile_gap_flush").ok);
 }
 
 TEST_CASE(
@@ -126,10 +117,10 @@ TEST_CASE(
   Line2D line;
   line.dir[0] = 2;
   const auto pointData = Data::point2d(point), lineData = Data::line2d(line);
-  const auto pointContext = Data::record(
-      Record{"profile.Geometry.v1", profile_contract::geometryContext(profile(false), pointData)});
-  const auto lineContext = Data::record(
-      Record{"profile.Geometry.v1", profile_contract::geometryContext(profile(true), lineData)});
+  const auto pointContext =
+      Data::record(profile_contract::geometryContext(profile(false).asProfile()->descriptor));
+  const auto lineContext =
+      Data::record(profile_contract::geometryContext(profile(true).asProfile()->descriptor));
   test::OpCall call;
   call.inputs = {{"point", pointData},
                  {"line", lineData},
@@ -153,35 +144,27 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Native signed point line rejects mixed geometry contexts frames units references and unrepresentable foot") {
+    "Native signed point line rejects mixed frames units references and unrepresentable foot") {
   Point2D point;
   point.p[1] = 3;
   Line2D line;
   const auto pointData = Data::point2d(point), lineData = Data::line2d(line);
   const auto pointSource = profile(false), lineSource = profile(true);
-  const auto context = [](const Data& source, const Data& geometry) {
-    return Data::record(
-        Record{"profile.Geometry.v1", profile_contract::geometryContext(source, geometry)});
+  const auto context = [](const Data& source) {
+    return Data::record(profile_contract::geometryContext(source.asProfile()->descriptor));
   };
-  const std::unordered_map<std::string, Data> good{
-      {"point", pointData},
-      {"line", lineData},
-      {"pointContext", context(pointSource, pointData)},
-      {"lineContext", context(lineSource, lineData)}};
+  const std::unordered_map<std::string, Data> good{{"point", pointData},
+                                                   {"line", lineData},
+                                                   {"pointContext", context(pointSource)},
+                                                   {"lineContext", context(lineSource)}};
   test::OpCall call;
   call.inputs = good;
   CHECK_FALSE(call.run("metrology.signed_point_line", {{"positiveNormal", Value::vec({1, 0})}}).ok);
   CHECK_FALSE(call.run("metrology.signed_point_line", {{"positiveNormal", Value::vec({0, 0})}}).ok);
-  call.inputs["pointContext"] = good.at("lineContext");
-  CHECK_FALSE(call.run("metrology.signed_point_line").ok);
   call.inputs = good;
-  point.p[0] = 1;
-  call.inputs["point"] = Data::point2d(point);
+  call.inputs["lineContext"] = context(profile(true, "other-frame"));
   CHECK_FALSE(call.run("metrology.signed_point_line").ok);
-  call.inputs = good;
-  call.inputs["lineContext"] = context(profile(true, "other-frame"), lineData);
-  CHECK_FALSE(call.run("metrology.signed_point_line").ok);
-  call.inputs["lineContext"] = context(profile(true, "measurement", "reflected"), lineData);
+  call.inputs["lineContext"] = context(profile(true, "measurement", "reflected"));
   CHECK_FALSE(call.run("metrology.signed_point_line").ok);
   auto declared = *good.at("pointContext").asRecord();
   declared.data["geometryUnit"] = "mm";
@@ -202,8 +185,8 @@ TEST_CASE(
   const auto largePoint = Data::point2d(point), largeLine = Data::line2d(line);
   call.inputs = {{"point", largePoint},
                  {"line", largeLine},
-                 {"pointContext", context(pointSource, largePoint)},
-                 {"lineContext", context(lineSource, largeLine)}};
+                 {"pointContext", context(pointSource)},
+                 {"lineContext", context(lineSource)}};
   CHECK_FALSE(call.run("metrology.signed_point_line").ok);
   CHECK(call.status.message == "垂足超出Point2D的float32范围");
   CHECK(call.outputs.empty());

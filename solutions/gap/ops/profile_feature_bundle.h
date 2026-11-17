@@ -6,19 +6,19 @@
 #include "lyflow/registry.h"
 
 namespace lyflow::packs::gap::profile_scene {
-inline constexpr const char* kLineFeatureKind = "gap.LineFeature.v2";
-inline constexpr const char* kReferenceFeatureKind = "gap.ReferenceFeature.v2";
-inline constexpr const char* kCirclePairKind = "gap.CirclePair.v2";
-inline constexpr const char* kLocationKind = "gap.Location.v2";
+inline constexpr const char* kLineFeatureKind = "gap.LineFeature.v3";
+inline constexpr const char* kReferenceFeatureKind = "gap.ReferenceFeature.v3";
+inline constexpr const char* kCirclePairKind = "gap.CirclePair.v3";
+inline constexpr const char* kLocationKind = "gap.Location.v3";
 struct LineFeatureFields {
   Data profile, line, lineContext, innerEnd, pointContext;
-  Data inliers, weightedInliers, quality, provenance;
+  Data inliers, weightedInliers, quality;
 };
 struct ReferenceFeatureFields {
-  Data profile, line, lineContext, point, pointContext, selection, quality, provenance;
+  Data profile, line, lineContext, point, pointContext, selection, quality;
 };
 struct CirclePairFeatureFields {
-  std::array<Data, 2> profiles, circles, contexts, provenances, inliers;
+  std::array<Data, 2> profiles, circles, contexts, inliers;
   Record quality;
 };
 struct LocationFields {

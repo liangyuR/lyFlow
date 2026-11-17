@@ -10,7 +10,7 @@
 #include <Eigen/Core>
 
 #include "lyflow/profile.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 #include "ops/profile_scan.h"
 #include "ops/profile_template.h"
 
@@ -73,10 +73,7 @@ Json origins(const Data& left, const Data& right) {
 }
 Data templates() {
   const auto left = profile("template-physical-left"), right = profile("template-physical-right");
-  Data output;
-  std::string why;
-  REQUIRE_MESSAGE(native::makeTemplatePair(left, right, origins(left, right), output, why), why);
-  return output;
+  return native::makeTemplatePair(left, right, origins(left, right));
 }
 Data scan(float dx = .0015F, float dy = -.0007F) {
   Context context;
@@ -143,47 +140,7 @@ Record roiRecord() {
              {"gapRight", {3.125, 157.875, 5.375, 161.625}}}}}};
 }
 }
-TEST_CASE("Native template pair binds full slots channels and physical source metadata") {
-  const auto pair = templates();
-  native::TemplateView view;
-  std::string why;
-  REQUIRE(native::readTemplatePair(pair, view, why));
-  CHECK(view.left->asProfile()->pointCount() == 160);
-  CHECK(view.left->asProfile()->descriptor.sourceCount == 180);
-  CHECK(view.left->asProfile()->sourceIndices.front() == 10);
-  CHECK(view.left->asProfile()->validity[9] == 0);
-  CHECK(view.left->asProfile()->cloud->intensity[0] == 8000);
-  CHECK(view.left->asProfile()->cloud->rgb[2] == 250);
-  for (const auto* channel : {"source", "mask", "rgb", "normal", "intensity", "xyz"}) {
-    auto altered = *pair.asBundle();
-    auto changed = *view.left->asProfile();
-    auto cloud = *changed.cloud;
-    if (std::string(channel) == "source")
-      changed.sourceIndices[0] = 9;
-    if (std::string(channel) == "mask")
-      changed.validity[9] = 1;
-    if (std::string(channel) == "rgb")
-      cloud.rgb[0] ^= 1;
-    if (std::string(channel) == "normal")
-      cloud.normals[0] += 1;
-    if (std::string(channel) == "intensity")
-      cloud.intensity[0] += 1;
-    if (std::string(channel) == "xyz")
-      cloud.xyz[0] += .001F;
-    changed.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-    altered.set("left", Data::profile(std::move(changed)));
-    native::TemplateView unchanged = view;
-    CHECK_FALSE(native::readTemplatePair(Data::bundle(std::move(altered)), unchanged, why));
-    CHECK(unchanged.left == view.left);
-  }
-  auto badOrigins = view.info->data["origins"];
-  badOrigins["left"]["sourceId"] = "logical-left";
-  Data out = Data::record({"sentinel", {}});
-  CHECK_FALSE(native::makeTemplatePair(*view.left, *view.right, badOrigins, out, why));
-  CHECK(out.asRecord()->type == "sentinel");
-}
-TEST_CASE(
-    "Template PCD loading preserves masked slots all channels units and file layout provenance") {
+TEST_CASE("Template PCD loading preserves masked slots all channels units and file layout") {
   Temp temporary;
   Context context;
   for (const bool sensor : {false, true})
@@ -203,6 +160,13 @@ TEST_CASE(
       native::TemplateView view;
       std::string why;
       REQUIRE_MESSAGE(native::readTemplatePair(result, view, why), why);
+      Bundle mixed = *result.asBundle();
+      auto reflected = *view.right->asProfile();
+      reflected.descriptor.handedness =
+          reflected.descriptor.handedness == "right" ? "reflected" : "right";
+      mixed.set("right", Data::profile(reflected));
+      native::TemplateView rejected;
+      CHECK_FALSE(native::readTemplatePair(Data::bundle(std::move(mixed)), rejected, why));
       const auto& p = *view.left->asProfile();
       CHECK(p.descriptor.unit == "m");
       CHECK(p.descriptor.plane == "XY");
@@ -216,25 +180,20 @@ TEST_CASE(
       CHECK(p.cloud->normals == std::vector<float>{3, 4, 0, 0, 0, 0, 0, 0, 0});
       CHECK(p.cloud->intensity == std::vector<float>{9000, 9100, 9200});
       CHECK(p.cloud->rgb == std::vector<std::uint8_t>{10, 20, 30, 30, 40, 50, 40, 50, 60});
-      const auto& details = view.info->data["origins"]["left"]["details"];
-      CHECK(details["fileLayout"] == opts.layout);
-      CHECK(details["fileContext"]["descriptor"]["unit"] == opts.unit);
-      CHECK(details["fileContext"]["descriptor"]["frame"] == opts.fileFrame);
+      CHECK(view.info->data["origins"]["left"]["details"]["fileLayout"] == opts.layout);
       CHECK_FALSE(native::templateFingerprint(opts).empty());
-      const auto before = profile_contract::context(*view.left);
+      const auto* before = view.left->asProfile();
       Context stopped;
       stopped.stopAt = 1;
       CHECK_FALSE(native::loadTemplatePair(opts, result, stopped).ok);
-      CHECK(profile_contract::context(*result.asBundle()->field("left")) == before);
+      CHECK(result.asBundle()->field("left")->asProfile() == before);
       opts.right = "missing.pcd";
       CHECK_FALSE(native::loadTemplatePair(opts, result, context).ok);
-      CHECK(profile_contract::context(*result.asBundle()->field("left")) == before);
+      CHECK(result.asBundle()->field("left")->asProfile() == before);
     }
 }
-TEST_CASE(
-    "Template alignment preserves original algorithm metadata applies real poses and rejects stale payloads") {
+TEST_CASE("Template alignment preserves original algorithm metadata and applies real poses") {
   const auto input = scan(), pair = templates();
-  const auto original = profile_contract::context(*pair.asBundle()->field("left"));
   const auto output = aligned(input, pair);
   native::AlignmentView view;
   std::string why;
@@ -243,7 +202,7 @@ TEST_CASE(
   CHECK(view.info->data["globalCoarse"] == true);
   CHECK(view.info->data["left"]["success"] == true);
   CHECK(view.info->data["left"]["score"].get<double>() >= 20);
-  const auto& before = *view.templateLeft->asProfile();
+  const auto& before = *pair.asBundle()->field("left")->asProfile();
   const auto& after = *view.alignedLeft->asProfile();
   CHECK(before.descriptor.frame == "template-frame");
   CHECK(after.descriptor.frame == "measurement-frame");
@@ -269,18 +228,6 @@ TEST_CASE(
   CHECK(std::memcmp(after.cloud->xyz.data() + 21, before.cloud->xyz.data() + 21,
                     3 * sizeof(float)) == 0);
   CHECK(after.cloud->xyz[27] == 10000);
-  CHECK(profile_contract::context(*pair.asBundle()->field("left")) == original);
-  for (const auto* field : {"alignedLeft", "templateLeft", "target"}) {
-    auto bundle = *output.asBundle();
-    auto p = *bundle.field(field)->asProfile();
-    auto cloud = *p.cloud;
-    cloud.xyz[0] += .001F;
-    p.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-    bundle.set(field, Data::profile(std::move(p)));
-    native::AlignmentView untouched = view;
-    CHECK_FALSE(native::readAlignment(Data::bundle(std::move(bundle)), untouched, why));
-    CHECK(untouched.target == view.target);
-  }
   auto opts = options();
   opts.successGuide = true;
   opts.globalCoarse = false;
@@ -299,7 +246,7 @@ TEST_CASE(
   CHECK(status.code == "cancelled");
   CHECK(sentinel.asRecord()->type == "sentinel");
 }
-TEST_CASE("Template selection uses original score ranking ties and same actual scan binding") {
+TEST_CASE("Template selection uses original score ranking and ties") {
   const auto input = scan(), pair = templates();
   auto a = options(), b = options();
   a.templateId = "z";
@@ -315,8 +262,6 @@ TEST_CASE("Template selection uses original score ranking ties and same actual s
   va = aligned(input, pair, a);
   REQUIRE(native::select({va, vb}, 20, selected, context).ok);
   CHECK(selected.asBundle()->field("info")->asRecord()->data["templateId"] == "a");
-  const auto other = aligned(scan(.002F), pair);
-  CHECK_FALSE(native::select({va, other}, 20, selected, context).ok);
   auto failOptions = options();
   failOptions.minScore = 100;
   failOptions.maxMatchingDist = .0001;
@@ -334,9 +279,8 @@ TEST_CASE("Template selection uses original score ranking ties and same actual s
     p.cloud = std::make_shared<const PointCloud>(std::move(c));
     unmatched[i] = Data::profile(std::move(p));
   }
-  Data unmatchedPair;
-  REQUIRE(native::makeTemplatePair(unmatched[0], unmatched[1], origins(unmatched[0], unmatched[1]),
-                                   unmatchedPair, bindingWhy));
+  const auto unmatchedPair =
+      native::makeTemplatePair(unmatched[0], unmatched[1], origins(unmatched[0], unmatched[1]));
   const auto failed = aligned(scan(.0015F, .001F), unmatchedPair, failOptions);
   native::AlignmentView failedView;
   std::string why;
@@ -398,7 +342,7 @@ TEST_CASE(
   CHECK(Data::box2d(boxes[0]).valueJson() == before);
 }
 TEST_CASE(
-    "Native business ROI leaves bind only actual measurement sources and retain ROI origin semantics") {
+    "Native business ROI boxes stay in the scan measurement space and retain ROI origin semantics") {
   const auto input = scan(), pair = templates();
   auto opts = options();
   opts.roisFrom = "config";
@@ -414,25 +358,13 @@ TEST_CASE(
   CHECK(fields.info.data["source"] == "config");
   CHECK(fields.info.data["roisFrom"] == "config");
   CHECK(fields.info.data["datumSide"] == "left");
-  native::AlignmentView view;
-  REQUIRE(native::readAlignment(alignment, view, why));
+  const auto& expected = input.asBundle()->field("merged")->asProfile()->descriptor;
   for (std::size_t i = 0; i < 4; ++i) {
-    ProfileDescriptor space;
-    Json sources;
-    REQUIRE(profile_contract::geometryMatchesPhysical(
-        fields.boxes[i], fields.contexts[i].asRecord(), space, why, &sources));
-    CHECK(space.frame == "measurement-frame");
-    CHECK(space.plane == "XY");
-    CHECK(space.unit == "m");
-    CHECK(std::find(sources.begin(), sources.end(),
-                    profile_contract::context(i == 0 || i == 2 ? *view.alignedLeft
-                                                               : *view.alignedRight)) !=
-          sources.end());
-    for (const auto& source : sources)
-      CHECK(source["descriptor"]["frame"] == "measurement-frame");
+    CHECK(profile_contract::geometryInSpace(fields.boxes[i], fields.contexts[i].asRecord(),
+                                            expected, why));
+    CHECK(expected.frame == "measurement-frame");
   }
-  ProfileDescriptor space;
-  REQUIRE(profile_contract::geometryMatchesPhysical(seam, seamContext.asRecord(), space, why));
+  CHECK(profile_contract::geometryInSpace(seam, seamContext.asRecord(), expected, why));
   const auto before = fields.info.data;
   Context stopped;
   stopped.stopAt = 1;
@@ -443,7 +375,7 @@ TEST_CASE(
   native::registerProfileTemplateOps(registry);
   CHECK(registry.operators().size() == 4);
   for (const auto& op : registry.operators())
-    CHECK(op.version == "2.0.0");
-  CHECK(registry.find("gap.align_template")->inputs[0].type == "Bundle<gap.ScanPair.v2>");
+    CHECK(op.version == "3.0.0");
+  CHECK(registry.find("gap.align_template")->inputs[0].type == "Bundle<gap.ScanPair.v3>");
   CHECK(registry.find("gap.business_rois")->outputs.size() == 11);
 }

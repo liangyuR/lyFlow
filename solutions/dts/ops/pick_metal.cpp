@@ -12,10 +12,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     const Status loaded = loadProfile(source, active, ctx);
     if (!loaded.ok)
       return loaded;
-    const auto context = profile_contract::context(source);
-    const auto pieces = checkedPieces(inputs.get("faces"), source, active);
+    const auto pieces = checkedPieces(inputs.get("faces"), active);
     const auto& fj = inputs.get("faces").asRecord()->data;
-    const auto& dj = checkedRecord(inputs.get("dome"), "DtsDome.v2", context);
+    const auto& dj = checkedRecord(inputs.get("dome"), "DtsDome.v3");
     const auto faces = facesFromJson(fj);
     if (faces.empty())
       return Status::Error(Phase::Execute, "no_metal_face", "面表是空的", {}, "faces");
@@ -57,14 +56,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     line.end[1] =
         static_cast<float>(pick.line.pz + (b - pick.line.px) * pick.line.dz / pick.line.dx);
     const Data geometry = Data::line2d(metricGeometry(line));
-    const auto geometryContext = profile_contract::geometryContext(source, geometry);
     nlohmann::json rejectedJson = nlohmann::json::array();
     for (const auto& candidate : rejected)
       rejectedJson.push_back({{"faceIndex", candidate.faceIndex},
                               {"gapMm", candidate.gapMm},
                               {"relDeg", candidate.relDeg},
                               {"reason", "角度或侧别不符"}});
-    nlohmann::json j = sceneRecord(source);
+    nlohmann::json j = sceneRecord();
     j.update({{"faceIndex", pick.faceIndex},
               {"gapMm", pick.gapMm},
               {"relDeg", pick.relDeg},
@@ -77,13 +75,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
               {"faceLenMm", face.lenMm},
               {"sealSign", pp.sealSign},
               {"rejected", std::move(rejectedJson)},
-              {"metalLineMm", lineMillimeters(line)},
-              {"metalGeometryHash", geometryContext.at("geometryHash")}});
+              {"metalLineMm", lineMillimeters(line)}});
     if (ctx.cancelled())
       return cancelledStatus();
     outputs.set("metal", geometry);
-    outputs.set("pick", Data::record(Record{"DtsMetalPick.v2", std::move(j)}));
-    outputs.set("metalContext", Data::record(Record{"profile.Geometry.v1", geometryContext}));
+    outputs.set("pick", Data::record(Record{"DtsMetalPick.v3", std::move(j)}));
+    outputs.set("metalContext",
+                Data::record(profile_contract::geometryContext(source.asProfile()->descriptor)));
     return Status::Ok();
   } catch (const kernel::profile::Cancelled&) {
     return cancelledStatus();
@@ -97,8 +95,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerPickMetal(Registry& r) {
   OperatorDesc op;
   op.id = "dts.pick_metal";
-  op.version = "2.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr}};
+  op.version = "3.0.0";
+  op.migrations = {{1, requireGraphMigration, nullptr},
+                   {2, nullptr, &profile_contract::keepInputs}};
   op.label = "钣金基准面提取";
   op.category = "DTS/钣金";
   op.keywords = {"sheet metal datum extraction",
@@ -121,9 +120,9 @@ void registerPickMetal(Registry& r) {
                Port{"faces", "Record", "Faces", "面表。", true},
                Port{"dome", "Record", "Dome", "胶条主体。", true}};
   op.outputs = {Port{"metal", "Line2D", "Metal", "基准线，带拟合段的两个端点。", true},
-                Port{"pick", "Record", "Pick", "挑中的面与全部落选候选（DtsMetalPick.v2）。", true},
+                Port{"pick", "Record", "Pick", "挑中的面与全部落选候选（DtsMetalPick.v3）。", true},
                 Port{"metalContext", "Record", "Metal Context",
-                     "profile.Geometry.v1米制基准线上下文。", true}};
+                     "基准线所在空间（profile.Geometry.v3）。", true}};
 
   Param ang;
   ang.name = "angleToApexDeg";

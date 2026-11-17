@@ -18,7 +18,7 @@
         },
         "title": "基准线"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "ref",
@@ -34,7 +34,7 @@
         },
         "title": "参考点"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "flush",
@@ -53,7 +53,7 @@
         "offsetMm": 0.0,
         "outputUnit": "mm"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     },
     {
       "id": "judgeFlush",
@@ -77,7 +77,7 @@
         },
         "title": "缝两侧圆"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "gap",
@@ -94,7 +94,7 @@
         "offsetMm": 0.0,
         "outputUnit": "mm"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     },
     {
       "id": "judgeGap",
@@ -118,7 +118,7 @@
         },
         "title": "结果汇总"
       },
-      "opVersion": "3.0.0"
+      "opVersion": "4.0.0"
     }
   ],
   "edges": [

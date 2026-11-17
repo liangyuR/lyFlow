@@ -3,7 +3,7 @@
   "id": "gap.backup_camera",
   "label": "备用相机回退",
   "category": "间隙",
-  "doc": "主相机与备用相机各一个读剖面节点并联：主相机读成功就用它，失败才去读备用相机（flow.fallback 的 b 是惰性的）。两个节点的目录分别指向两台相机的测点目录。 文件单位、坐标帧与手性按实际数据显式声明；物理来源由所选文件保留。",
+  "doc": "主相机与备用相机各一个读剖面节点并联：主相机读成功就用它，失败才去读备用相机（flow.fallback 的 b 是惰性的）。两个节点的目录分别指向两台相机的测点目录。 文件单位、坐标帧与手性按实际数据显式声明。",
   "nodes": [
     {
       "id": "main",
@@ -24,7 +24,7 @@
         "measurementFrame": "gap.measurement",
         "handedness": "right"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "backup",
@@ -45,7 +45,7 @@
         "measurementFrame": "gap.measurement",
         "handedness": "right"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "scan",

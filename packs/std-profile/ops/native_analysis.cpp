@@ -84,8 +84,7 @@ bool samples(const Profile& input, const std::string& invalidPolicy, analysis::C
 }
 
 Status fitLine(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
-  const auto& data = in.get("profile");
-  const auto* input = data.asProfile();
+  const auto* input = in.get("profile").asProfile();
   std::string why;
   const auto selected = p.choice("invalidPolicy");
   const double maximum = p.number("maxResidual");
@@ -110,21 +109,17 @@ Status fitLine(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
                            : failure("剖面直线退化或点数不足", "profile", "no_result");
   if (fit.rms > maximum)
     return failure("剖面线拟合残差超过门限", "profile", "no_result");
-  const auto line = Data::line2d(analysis::nativeLine(fit));
-  Record statistics{"profile.LineFit.v1",
-                    {{"schemaVersion", 1},
+  Record statistics{"profile.LineFit.v2",
+                    {{"schemaVersion", 2},
                      {"frame", input->descriptor.frame},
                      {"plane", input->descriptor.plane},
-                     {"unit", "m"},
+                     {"handedness", input->descriptor.handedness},
                      {"count", fit.count},
                      {"rms", fit.rms},
-                     {"abscissaRange", {fit.minimum, fit.maximum}},
-                     {"context", profile_contract::context(data)},
-                     {"geometryHash", profile_contract::geometryHash(line)}}};
-  out.set("line", line);
+                     {"abscissaRange", {fit.minimum, fit.maximum}}}};
+  out.set("line", Data::line2d(analysis::nativeLine(fit)));
   out.set("statistics", Data::record(std::move(statistics)));
-  out.set("lineContext", Data::record(Record{"profile.Geometry.v1",
-                                             profile_contract::geometryContext(data, line)}));
+  out.set("lineContext", Data::record(profile_contract::geometryContext(input->descriptor)));
   return Status::Ok();
 }
 
@@ -139,7 +134,7 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     return failure("不同输出帧需要commonToOutput", "commonToOutput");
   }
   Data master, slave;
-  nlohmann::json metadata{{"schemaVersion", 1},
+  nlohmann::json metadata{{"schemaVersion", 2},
                           {"commonFrame", commonFrame},
                           {"outputFrame", outputFrame},
                           {"plane", targetPlane},
@@ -148,8 +143,7 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
                           {"invalidSlots", "preserved_si_untransformed_not_observations"}};
   for (const auto& source :
        {std::make_pair("master", "masterToCommon"), std::make_pair("slave", "slaveToCommon")}) {
-    const auto& sourceData = in.get(source.first);
-    const auto* input = sourceData.asProfile();
+    const auto* input = in.get(source.first).asProfile();
     const auto* transform = in.get(source.second).asTransform();
     std::string why;
     ProfileDescriptor target = input->descriptor;
@@ -194,13 +188,11 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     auto data = Data::profile(std::move(metric));
     const std::string prefix = source.first;
     metadata[prefix + "Frame"] = input->descriptor.frame;
-    metadata[prefix + "Context"] = profile_contract::context(sourceData);
-    metadata[prefix + "OutputContext"] = profile_contract::context(data);
     (prefix == "master" ? master : slave) = std::move(data);
   }
   out.set("master", std::move(master));
   out.set("slave", std::move(slave));
-  out.set("metadata", Data::record(Record{"profile.PairFrames.v1", std::move(metadata)}));
+  out.set("metadata", Data::record(Record{"profile.PairFrames.v2", std::move(metadata)}));
   return Status::Ok();
 }
 }
@@ -208,7 +200,8 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
 void registerNativeProfileAnalysis(Registry& registry) {
   OperatorDesc op;
   op.id = "profile.fit_line";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "原生轮廓正交直线拟合";
   op.category = "轮廓/拟合";
   op.keywords = {"profile", "TLS", "line", "轮廓", "直线"};
@@ -217,10 +210,10 @@ void registerNativeProfileAnalysis(Registry& registry) {
            "默认拒绝无效槽，valid_only仅在工作缓冲选择有效槽，并严格检查其全部坐标和附加通道。"
            "闭区间及残差参数均按米解释，质量基于实际float32输出直线。";
   op.inputs = {{"profile", "Profile", "轮廓", "明确坐标与有效性契约的轮廓。", true}};
-  op.outputs = {
-      {"line", "Line2D", "拟合直线", "米制输出直线。", true},
-      {"statistics", "Record", "拟合统计", "profile.LineFit.v1，携带声明上下文与几何指纹。", true},
-      {"lineContext", "Record", "直线坐标上下文", "profile.Geometry.v1。", true}};
+  op.outputs = {{"line", "Line2D", "拟合直线", "米制输出直线。", true},
+                {"statistics", "Record", "拟合统计",
+                 "profile.LineFit.v2：坐标空间、点数、米制残差与横坐标范围。", true},
+                {"lineContext", "Record", "直线坐标上下文", "profile.Geometry.v3。", true}};
   Param enabled;
   enabled.name = "rangeEnabled";
   enabled.label = "限制拟合横坐标区间";
@@ -238,7 +231,8 @@ void registerNativeProfileAnalysis(Registry& registry) {
 
   op = {};
   op.id = "profile.transform_pair";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "原生双轮廓已知外参变换";
   op.category = "轮廓/坐标适配";
   op.keywords = {"profile", "transform", "pair", "轮廓", "外参"};
@@ -256,7 +250,7 @@ void registerNativeProfileAnalysis(Registry& registry) {
       {"commonToOutput", "Transform", "公共帧到输出帧", "帧名不同时必须显式提供。", false}};
   op.outputs = {{"master", "Profile", "主输出轮廓", "保留源槽和映射的米制轮廓。", true},
                 {"slave", "Profile", "副输出轮廓", "与主输出声明同一帧及分析平面。", true},
-                {"metadata", "Record", "双源坐标声明", "profile.PairFrames.v1。", true}};
+                {"metadata", "Record", "双源坐标声明", "profile.PairFrames.v2。", true}};
   auto plane = text("targetPlane", "输出分析轴平面", "");
   plane.type = ParamType::Enum;
   plane.options = {{"", "请选择"}, {"XY", "XY"}, {"XZ", "XZ"}, {"YZ", "YZ"}};

@@ -80,8 +80,8 @@ const Registry& registry() {
   return value;
 }
 Record copiedGuard(const Data& primary, const Data& secondary) {
-  return {"gap.CameraGuard.v2",
-          {{"schemaVersion", 2},
+  return {"gap.CameraGuard.v3",
+          {{"schemaVersion", 3},
            {"onDisagree", "keepPrimary"},
            {"maxDeltaMm", .5},
            {"taken", "primary"},
@@ -89,10 +89,6 @@ Record copiedGuard(const Data& primary, const Data& secondary) {
            {"exceeded", true},
            {"deltaMedianMm", 1.0},
            {"signedMedianMm", 1.0},
-           {"inputPrimaryContext", profile_contract::context(primary)},
-           {"inputSecondaryContext", profile_contract::context(secondary)},
-           {"primaryContext", profile_contract::context(primary)},
-           {"secondaryContext", profile_contract::context(primary)},
            {"inputPrimarySourceId", primary.asProfile()->descriptor.sourceId},
            {"inputSecondarySourceId", secondary.asProfile()->descriptor.sourceId},
            {"primarySourceId", primary.asProfile()->descriptor.sourceId},
@@ -195,7 +191,6 @@ TEST_CASE(
   scene::LoadedProfilePair loaded;
   LocalContext context;
   REQUIRE(scene::loadProfilePair(config, loaded, context).ok);
-  const auto before = profile_contract::context(loaded.primary);
   scene::ReadScanOptions read;
   read.measurementFrame = "measurement-frame";
   read.origins = loaded.sourceInfo.data["origins"];
@@ -219,7 +214,6 @@ TEST_CASE(
   CHECK(view.primary->asProfile()->sourceIndices == std::vector<std::uint32_t>{0, 1, 2, 3});
   CHECK(view.info->data["processing"]["details"]["radius"]["before"] == 6);
   CHECK(view.info->data["processing"]["details"]["radius"]["after"] == 4);
-  CHECK(profile_contract::context(loaded.primary) == before);
   auto allMissing = *loaded.primary.asProfile();
   auto noChannels = *allMissing.cloud;
   const auto nan = std::numeric_limits<float>::quiet_NaN();
@@ -252,9 +246,6 @@ TEST_CASE(
   cropped.validity = {1, 1, 1};
   cropped.sourceIndices = {4, 5, 7};
   const auto cropData = Data::profile(std::move(cropped));
-  Record rebound;
-  REQUIRE(profile_contract::rebindProvenance(*view.merged, cropData, view.mergedProvenance, rebound,
-                                             why));
   scene::ScanMetadata processed{
       view.info->data["sensorFrame"].get<std::string>(),
       view.info->data["measurementFrame"].get<std::string>(),
@@ -265,8 +256,8 @@ TEST_CASE(
       {{"method", "template"}, {"status", "complete"}, {"details", nlohmann::json::object()}}};
   Data processedScan;
   REQUIRE(scene::makeScanPair(*view.sensorPrimary, *view.sensorSecondary, *view.primary,
-                              Data::profile(std::move(empty)), cropData, rebound, processed,
-                              processedScan, why));
+                              Data::profile(std::move(empty)), cropData, processed, processedScan,
+                              why));
   REQUIRE(scene::readScanPair(processedScan, view, why));
   CHECK_FALSE(view.merged->asProfile()->cloud->hasRgb());
 }
@@ -307,7 +298,7 @@ TEST_CASE(
   auto graph = test::makeGraph(
       {{"read", "gap.read_scan", {{"source", "files"}, {"measurementFrame", "measurement-frame"}}}},
       {});
-  graph["nodes"][0]["opVersion"] = "2.0.0";
+  graph["nodes"][0]["opVersion"] = "3.0.0";
   REQUIRE(exec::parseGraph(graph.dump(), raw, diagnostics));
   exec::BuildOptions build;
   build.runId = "profile-scan-input-priority";
@@ -336,16 +327,8 @@ TEST_CASE(
   std::string why;
   REQUIRE(scene::readScanPair(call.out("scan"), view, why));
   CHECK(view.info->data["origins"]["primary"] == view.info->data["origins"]["secondary"]);
-  CHECK(view.info->data["roles"]["secondary"]["actualSourceId"] ==
-        loaded.primary.asProfile()->descriptor.sourceId);
+  CHECK(view.info->data["guard"]["taken"] == "primary");
   CHECK(view.merged->asProfile()->pointCount() == 6);
-  auto stale = copiedGuard(loaded.primary, loaded.secondary);
-  stale.data["secondaryContext"] = profile_contract::context(loaded.secondary);
-  call.inputs["guardQuality"] = Data::record(stale);
-  CHECK_FALSE(call.run("gap.read_scan", {{"source", Value::text("inputs")},
-                                         {"measurementFrame", Value::text("measurement-frame")}})
-                  .ok);
-  CHECK(call.outputs.empty());
 }
 
 TEST_CASE(
@@ -381,11 +364,10 @@ TEST_CASE(
   CHECK(scan.asBundle() == before);
   profile_contract::MergeResult merged;
   std::string why;
-  REQUIRE(profile_contract::mergeProfiles(loaded.primary, loaded.secondary, nullptr, nullptr,
-                                          {"a", "b", "require_equal"}, merged, why));
+  REQUIRE(profile_contract::mergeProfiles(loaded.primary, loaded.secondary, "require_equal", merged,
+                                          why));
   const auto mergeBefore = merged.profile.profilePtr();
-  CHECK_FALSE(profile_contract::mergeProfiles(loaded.primary, loaded.secondary, nullptr, nullptr,
-                                              {"a", "b", "require_equal"}, merged, why,
-                                              [] { return true; }));
+  CHECK_FALSE(profile_contract::mergeProfiles(loaded.primary, loaded.secondary, "require_equal",
+                                              merged, why, [] { return true; }));
   CHECK(merged.profile.profilePtr() == mergeBefore);
 }

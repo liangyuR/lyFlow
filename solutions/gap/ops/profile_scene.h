@@ -7,11 +7,11 @@
 #include "lyflow/registry.h"
 
 namespace lyflow::packs::gap::profile_scene {
-inline constexpr const char* kScanPairKind = "gap.ScanPair.v2";
-inline constexpr const char* kRoiSetKind = "gap.RoiSet.v2";
-inline constexpr const char* kLabelRowsKind = "gap.LabelRows.v2";
-inline constexpr const char* kScanInfoType = "gap.ScanInfo.v2";
-inline constexpr const char* kRoiInfoType = "gap.RoiInfo.v2";
+inline constexpr const char* kScanPairKind = "gap.ScanPair.v3";
+inline constexpr const char* kRoiSetKind = "gap.RoiSet.v3";
+inline constexpr const char* kLabelRowsKind = "gap.LabelRows.v3";
+inline constexpr const char* kScanInfoType = "gap.ScanInfo.v3";
+inline constexpr const char* kRoiInfoType = "gap.RoiInfo.v3";
 
 struct ScanMetadata {
   std::string sensorFrame;
@@ -21,8 +21,6 @@ struct ScanMetadata {
   nlohmann::json crop;
   nlohmann::json origins;
   nlohmann::json processing;
-  Record primaryProvenance;
-  Record secondaryProvenance;
 };
 
 struct ScanView {
@@ -31,16 +29,13 @@ struct ScanView {
   const Data* primary = nullptr;
   const Data* secondary = nullptr;
   const Data* merged = nullptr;
-  const Record* mergedProvenance = nullptr;
   const Record* info = nullptr;
-  Record primaryProvenance;
-  Record secondaryProvenance;
   const Data* pick(const std::string& role) const;
 };
 
 bool makeScanPair(const Data& sensorPrimary, const Data& sensorSecondary, const Data& primary,
-                  const Data& secondary, const Data& merged, const Record& mergedProvenance,
-                  const ScanMetadata& metadata, Data& result, std::string& why);
+                  const Data& secondary, const Data& merged, const ScanMetadata& metadata,
+                  Data& result, std::string& why);
 bool readScanPair(const Data& data, ScanView& result, std::string& why);
 
 struct RoiFields {

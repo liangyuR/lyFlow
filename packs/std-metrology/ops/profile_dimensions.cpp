@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cmath>
 #include <set>
 #include <utility>
@@ -16,34 +15,26 @@ Status failure(const std::string& why, const char* port = "", const char* code =
   return Status::Error(Phase::Execute, code, why, {}, port);
 }
 
-struct Sources {
-  ProfileDescriptor descriptor;
-  bool populated = false;
-  nlohmann::json values = nlohmann::json::array();
-};
-
-Status accept(const Inputs& inputs, const char* geometry, const char* context, Sources& sources) {
-  ProfileDescriptor descriptor;
-  nlohmann::json values;
+Status first(const Inputs& inputs, const char* geometry, const char* context,
+             ProfileDescriptor& space) {
   std::string why;
-  if (!profile_contract::geometryMatchesPhysical(
-          inputs.get(geometry), inputs.get(context).asRecord(), descriptor, why, &values))
+  if (!profile_contract::geometrySpace(inputs.get(geometry), inputs.get(context).asRecord(), space,
+                                       why))
     return failure(why, context);
-  if (sources.populated && !profile_contract::sameSpace(sources.descriptor, descriptor))
-    return failure("输入几何必须声明相同坐标帧、轴平面和手性", context);
-  sources.descriptor = descriptor;
-  sources.populated = true;
-  for (const auto& value : values)
-    if (std::find(sources.values.begin(), sources.values.end(), value) == sources.values.end())
-      sources.values.push_back(value);
-  if (sources.values.size() > 64)
-    return failure("合并后的几何来源超过64项", context);
   return Status::Ok();
 }
 
-Data contextOf(const Data& geometry, const Sources& sources) {
-  return Data::record(Record{"profile.Geometry.v2", profile_contract::geometryContextV2FromSources(
-                                                        geometry, sources.values)});
+Status same(const Inputs& inputs, const char* geometry, const char* context,
+            const ProfileDescriptor& space) {
+  std::string why;
+  if (!profile_contract::geometryInSpace(inputs.get(geometry), inputs.get(context).asRecord(),
+                                         space, why))
+    return failure(why, context);
+  return Status::Ok();
+}
+
+Data contextOf(const ProfileDescriptor& space) {
+  return Data::record(profile_contract::geometryContext(space));
 }
 
 Data measured(double valueMm, bool valid, const std::string& unit,
@@ -56,13 +47,11 @@ Data measured(double valueMm, bool valid, const std::string& unit,
   return Data::measurement(std::move(value));
 }
 
-Data quality(const char* type, const Sources& sources, nlohmann::json values) {
-  values["schemaVersion"] = 1;
-  values["frame"] = sources.descriptor.frame;
-  values["plane"] = sources.descriptor.plane;
-  values["handedness"] = sources.descriptor.handedness;
-  values["geometryUnit"] = "m";
-  values["sources"] = sources.values;
+Data quality(const char* type, const ProfileDescriptor& space, nlohmann::json values) {
+  values["schemaVersion"] = 2;
+  values["frame"] = space.frame;
+  values["plane"] = space.plane;
+  values["handedness"] = space.handedness;
   return Data::record(Record{type, std::move(values)});
 }
 
@@ -72,11 +61,11 @@ Status flushPointLine(const Inputs& inputs, const ParamView& params, Outputs& ou
     return Status::Ok();
   const auto* base = inputs.get("baseLine").asLine2D();
   const auto* point = inputs.get("refPoint").asPoint2D();
-  Sources sources;
-  auto status = accept(inputs, "baseLine", "baseLineContext", sources);
+  ProfileDescriptor space;
+  auto status = first(inputs, "baseLine", "baseLineContext", space);
   if (!status.ok)
     return status;
-  status = accept(inputs, "refPoint", "refPointContext", sources);
+  status = same(inputs, "refPoint", "refPointContext", space);
   if (!status.ok)
     return status;
   dimensions::FlushOptions options;
@@ -91,11 +80,8 @@ Status flushPointLine(const Inputs& inputs, const ParamView& params, Outputs& ou
   std::string why;
   if (!dimensions::flushPointLine(*base, *point, options, result, why))
     return failure(why, "baseLine", "invalid_geometry");
-  const auto foot = Data::point2d(result.foot), segment = Data::line2d(result.segment),
-             extended = Data::line2d(result.baseLine);
-  const auto footContext = contextOf(foot, sources), segmentContext = contextOf(segment, sources),
-             baseContext = contextOf(extended, sources);
-  auto diagnostic = quality("metrology.FlushPointLine.v1", sources,
+  const auto context = contextOf(space);
+  auto diagnostic = quality("metrology.FlushPointLine.v2", space,
                             {{"valueMm", result.valueMm},
                              {"signed", options.signedDistance},
                              {"signConvention", params.choice("signConvention")},
@@ -104,12 +90,12 @@ Status flushPointLine(const Inputs& inputs, const ParamView& params, Outputs& ou
   if (ctx.cancelled())
     return Status::Ok();
   outputs.set("value", measured(result.valueMm, true, params.choice("outputUnit")));
-  outputs.set("foot", foot);
-  outputs.set("segment", segment);
-  outputs.set("baseLine", extended);
-  outputs.set("footContext", footContext);
-  outputs.set("segmentContext", segmentContext);
-  outputs.set("baseLineContext", baseContext);
+  outputs.set("foot", Data::point2d(result.foot));
+  outputs.set("segment", Data::line2d(result.segment));
+  outputs.set("baseLine", Data::line2d(result.baseLine));
+  outputs.set("footContext", context);
+  outputs.set("segmentContext", context);
+  outputs.set("baseLineContext", context);
   outputs.set("quality", std::move(diagnostic));
   return Status::Ok();
 }
@@ -120,11 +106,11 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
     return Status::Ok();
   const auto* left = inputs.get("left").asCircle2D();
   const auto* right = inputs.get("right").asCircle2D();
-  Sources sources;
-  auto status = accept(inputs, "left", "leftContext", sources);
+  ProfileDescriptor space;
+  auto status = first(inputs, "left", "leftContext", space);
   if (!status.ok)
     return status;
-  status = accept(inputs, "right", "rightContext", sources);
+  status = same(inputs, "right", "rightContext", space);
   if (!status.ok)
     return status;
   dimensions::CircleGapOptions options;
@@ -138,7 +124,7 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
     base = inputs.get("baseLine").asLine2D();
     if (!base)
       return failure("基准线与其上下文必须成对提供", "baseLine");
-    status = accept(inputs, "baseLine", "baseLineContext", sources);
+    status = same(inputs, "baseLine", "baseLineContext", space);
     if (!status.ok)
       return status;
   }
@@ -146,10 +132,8 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
   std::string why;
   if (!dimensions::circleGap(*left, *right, base, options, result, why))
     return failure(why, "left", "invalid_geometry");
-  const auto segment = Data::line2d(result.segment);
-  const auto segmentContext = contextOf(segment, sources);
   auto diagnostic =
-      quality("metrology.CircleGap.v1", sources,
+      quality("metrology.CircleGap.v2", space,
               {{"valid", result.valid},
                {"crossed", result.crossed},
                {"valueMm",
@@ -160,8 +144,8 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
     return Status::Ok();
   outputs.set("value", measured(result.valueMm, result.valid, params.choice("outputUnit"),
                                 result.crossed ? "两侧交叉，间隙无效" : ""));
-  outputs.set("segment", segment);
-  outputs.set("segmentContext", segmentContext);
+  outputs.set("segment", Data::line2d(result.segment));
+  outputs.set("segmentContext", contextOf(space));
   outputs.set("quality", std::move(diagnostic));
   return Status::Ok();
 }
@@ -172,11 +156,11 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
     return Status::Ok();
   const auto* a = inputs.get("a").asPoint2D();
   const auto* b = inputs.get("b").asPoint2D();
-  Sources sources;
-  auto status = accept(inputs, "a", "aContext", sources);
+  ProfileDescriptor space;
+  auto status = first(inputs, "a", "aContext", space);
   if (!status.ok)
     return status;
-  status = accept(inputs, "b", "bContext", sources);
+  status = same(inputs, "b", "bContext", space);
   if (!status.ok)
     return status;
   dimensions::PointOffsetOptions options;
@@ -190,8 +174,7 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
   std::string why;
   if (!dimensions::pointOffset(*a, *b, options, result, why))
     return failure(why, "a", "invalid_geometry");
-  const auto segment = Data::line2d(result.segment), segmentContext = contextOf(segment, sources);
-  auto diagnostic = quality("metrology.PointOffset.v1", sources,
+  auto diagnostic = quality("metrology.PointOffset.v2", space,
                             {{"dxMm", result.dxMm},
                              {"dyMm", result.dyMm},
                              {"distanceMm", result.distanceMm},
@@ -207,8 +190,8 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
   outputs.set("dx", measured(result.dxMm, true, unit));
   outputs.set("dy", measured(result.dyMm, true, unit));
   outputs.set("distance", measured(result.distanceMm, true, unit));
-  outputs.set("segment", segment);
-  outputs.set("segmentContext", segmentContext);
+  outputs.set("segment", Data::line2d(result.segment));
+  outputs.set("segmentContext", contextOf(space));
   outputs.set("quality", std::move(diagnostic));
   return Status::Ok();
 }
@@ -244,20 +227,20 @@ Param outputUnit() {
   return choice("outputUnit", "结果单位", "m", {{"m", "米", ""}, {"mm", "毫米", ""}});
 }
 Port contextPort(const char* name, const char* label, bool required = true) {
-  return {name, "Record", label, "与几何内容绑定的profile.Geometry.v1/v2；保留所有实际来源。",
-          required};
+  return {name, "Record", label, "profile.Geometry.v3坐标空间。", required};
 }
 } // namespace
 
 void registerProfileDimensions(Registry& registry) {
   OperatorDesc op;
   op.id = "metrology.flush_point_line";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "点线面差测量";
   op.category = "计量/轮廓";
   op.keywords = {"flush", "point line", "signed distance", "面差", "垂足", "段差"};
   op.capabilities = {true, false, true};
-  op.doc = "验证米制点线的坐标帧、分析平面、手性和内容指纹。显式正法向参考决定符号；"
+  op.doc = "验证米制点线的坐标帧、分析平面和手性。显式正法向参考决定符号；"
            "canonical_axis采用方向朝+x、竖直朝+y后的右法向。关闭signed时先取绝对距离，"
            "再乘无量纲gain并加offsetMm；输出单位独立选择。输出垂足、显示线段与并入垂足的基准段。";
   op.inputs = {{"baseLine", "Line2D", "基准线", "米制无限直线；可带待扩展的端点。", true},
@@ -271,7 +254,7 @@ void registerProfileDimensions(Registry& registry) {
                 contextPort("footContext", "垂足上下文"),
                 contextPort("segmentContext", "线段上下文"),
                 contextPort("baseLineContext", "扩展基准段上下文"),
-                {"quality", "Record", "测量信息", "metrology.FlushPointLine.v1。", true}};
+                {"quality", "Record", "测量信息", "metrology.FlushPointLine.v2。", true}};
   Param normal;
   normal.name = "positiveNormal";
   normal.label = "正法向参考";
@@ -290,7 +273,8 @@ void registerProfileDimensions(Registry& registry) {
 
   op = {};
   op.id = "metrology.circle_gap";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "圆边界间隙测量";
   op.category = "计量/轮廓";
   op.keywords = {"circle gap", "tangent separation", "clearance", "圆间隙", "切线间隙"};
@@ -308,7 +292,7 @@ void registerProfileDimensions(Registry& registry) {
   op.outputs = {{"value", "Measurement", "间隙", "无公差判定；交叉无效保持NaN。", true},
                 {"segment", "Line2D", "显示线段", "测量方向上的米制线段。", true},
                 contextPort("segmentContext", "线段上下文"),
-                {"quality", "Record", "测量信息", "metrology.CircleGap.v1。", true}};
+                {"quality", "Record", "测量信息", "metrology.CircleGap.v2。", true}};
   op.params = {choice("definition", "测量定义", "center_line",
                       {{"center_line", "圆心连线上的边界距离", ""},
                        {"datum_tangents", "沿基准方向的切线距离", ""}}),
@@ -327,7 +311,8 @@ void registerProfileDimensions(Registry& registry) {
 
   op = {};
   op.id = "metrology.point_offset";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "二维位移分量测量";
   op.category = "计量/轮廓";
   op.keywords = {"point offset", "displacement", "dx", "dy", "位移分解", "两点位移"};
@@ -344,7 +329,7 @@ void registerProfileDimensions(Registry& registry) {
                 {"distance", "Measurement", "两点距离", "未加补偿的欧氏距离。", true},
                 {"segment", "Line2D", "显示线段", "从a指向b的米制线段。", true},
                 contextPort("segmentContext", "线段上下文"),
-                {"quality", "Record", "测量信息", "metrology.PointOffset.v1。", true}};
+                {"quality", "Record", "测量信息", "metrology.PointOffset.v2。", true}};
   op.params = {boolean("absDx", "横向取绝对值", false),
                boolean("absDy", "纵向取绝对值", false),
                scalar("gainDx", "横向增益", 1),

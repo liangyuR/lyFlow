@@ -72,14 +72,12 @@ Data scan(const Data& primary, const Data& secondary) {
         indices.values.push_back(static_cast<std::int32_t>(i));
     profile_contract::SelectionOptions options;
     options.emptyPolicy = "allow";
-    REQUIRE(profile_contract::selectProfileIndices(*data, indices, nullptr, options, finite[role++],
-                                                   ctx)
-                .ok);
+    REQUIRE(
+        profile_contract::selectProfileIndices(*data, indices, options, finite[role++], ctx).ok);
   }
   profile_contract::MergeResult merged;
-  REQUIRE(profile_contract::mergeProfiles(finite[1].profile, finite[0].profile,
-                                          &finite[1].provenance, &finite[0].provenance,
-                                          {"secondary", "primary", "intersection"}, merged, why));
+  REQUIRE(profile_contract::mergeProfiles(finite[1].profile, finite[0].profile, "intersection",
+                                          merged, why));
   Json origins = Json::object();
   for (const auto& entry :
        {std::make_pair("primary", &primary), std::make_pair("secondary", &secondary)})
@@ -95,9 +93,8 @@ Data scan(const Data& primary, const Data& secondary) {
       origins,
       {{"method", "read"}, {"status", "complete"}, {"details", {{"mergedPrefiltered", true}}}}};
   Data result;
-  REQUIRE_MESSAGE(scene::makeScanPair(primary, secondary, p, s, merged.profile, merged.provenance,
-                                      metadata, result, why),
-                  why);
+  REQUIRE_MESSAGE(
+      scene::makeScanPair(primary, secondary, p, s, merged.profile, metadata, result, why), why);
   return result;
 }
 Tensor labelTensor(bool missing = false) {
@@ -195,10 +192,11 @@ public:
 
 TEST_CASE(
     "Native model adapter registry exposes all tensor labels and ROI operations without hidden ML dependency") {
-  for (const auto* id : {"gap.profile_tensor", "gap.labels_from_logits", "gap.roi_from_labels",
-                         "gap.labels_to_cloud"}) {
+  REQUIRE(registry().find("gap.profile_tensor"));
+  CHECK(registry().find("gap.profile_tensor")->version == "2.0.0");
+  for (const auto* id : {"gap.labels_from_logits", "gap.roi_from_labels", "gap.labels_to_cloud"}) {
     REQUIRE(registry().find(id));
-    CHECK(registry().find(id)->version == "2.0.0");
+    CHECK(registry().find(id)->version == "3.0.0");
   }
 #ifdef LYFLOW_GAP_MODEL
   CHECK(registry().find("gap.locate_model") != nullptr);
@@ -214,24 +212,17 @@ TEST_CASE(
   REQUIRE(call.run("gap.profile_tensor").ok);
   const auto tensor = call.out("tensor");
   CHECK(tensor.asTensor()->shape == std::vector<std::int64_t>{2, 6, 1280});
-  call.inputs = {
-      {"primary", a}, {"secondary", b}, {"tensor", Data::tensor(logits())}, {"modelInput", tensor}};
+  call.inputs = {{"primary", a}, {"secondary", b}, {"tensor", Data::tensor(logits())}};
   REQUIRE(call.run("gap.labels_from_logits").ok);
   native::LabelRowsView view;
   std::string why;
   REQUIRE(native::readLabelRows(call.out("labels"), view, why));
   CHECK(view.labels->shape == std::vector<std::int64_t>{2, 1280});
-  CHECK(view.info->data["association"] == "declared");
-  CHECK(view.info->data.dump().size() < 4096);
-  auto incorrect = *tensor.asTensor();
-  incorrect.data[0] += 1;
-  call.inputs["modelInput"] = Data::tensor(std::move(incorrect));
-  CHECK_FALSE(call.run("gap.labels_from_logits").ok);
-  CHECK(call.outputs.empty());
+  CHECK(view.classCount == 8);
 }
 
 TEST_CASE(
-    "Native model ROI callbacks preserve formal source contexts and missing segment diagnostic backdrop") {
+    "Native model ROI callbacks bind measurement space and keep missing segment diagnostic backdrop") {
   const auto a = sensor("A"), b = sensor("B"), input = scan(a, b);
   test::OpCall call(registry());
   const auto backdrop = Data::cloud(*measured(a).asProfile()->cloud);
@@ -243,9 +234,7 @@ TEST_CASE(
   REQUIRE(scene::readRoiSet(call.out("rois"), view, why));
   CHECK(call.out("gapLeft").valueJson() == view.boxes[2]->valueJson());
   CHECK(call.out("flushRef").valueJson() == view.boxes[1]->valueJson());
-  const auto* context = call.out("gapLeftContext").asRecord();
-  for (const auto& source : context->data["sources"])
-    CHECK(source["descriptor"]["plane"] == "XY");
+  CHECK(call.out("gapLeftContext").asRecord()->data["plane"] == "XY");
   call.inputs["labels"] = labels(a, b, true);
   CHECK_FALSE(call.run("gap.roi_from_labels").ok);
   CHECK(call.status.code == "model_roi_failed");
@@ -262,12 +251,10 @@ TEST_CASE(
   CHECK(typed.rois.asRecord()->type == "sentinel");
 }
 
-TEST_CASE(
-    "Native label visualization keeps legacy eight colors and rejects stale or compacted model slots") {
+TEST_CASE("Native label visualization keeps legacy eight colors and publishes atomically") {
   const auto a = sensor("A"), b = sensor("B"), input = scan(a, b), labelData = labels(a, b);
   LocalContext ctx;
   Data output;
-  const auto before = profile_contract::context(a);
   REQUIRE(native::labelsToCloud(input, labelData, "primary", output, ctx).ok);
   REQUIRE(output.asCloud());
   CHECK(output.asProfile() == nullptr);
@@ -278,11 +265,7 @@ TEST_CASE(
   CHECK(output.asCloud()->intensity[100] == 2);
   CHECK(output.asCloud()->intensity[300] == 3);
   CHECK(output.asCloud()->normals.size() == 3840);
-  CHECK(profile_contract::context(a) == before);
   const auto previous = output.cloudPtr();
-  CHECK_FALSE(
-      native::labelsToCloud(input, labels(sensor("different"), b), "primary", output, ctx).ok);
-  CHECK(output.cloudPtr() == previous);
   Stop stop;
   CHECK_FALSE(native::labelsToCloud(input, labelData, "primary", output, stop).ok);
   CHECK(output.cloudPtr() == previous);
@@ -318,16 +301,12 @@ TEST_CASE(
   fine.inputs = {{"input", Data::tensor(features)}};
   REQUIRE(fine.run("gap.infer_profile", {{"modelPath", Value::text(model.u8string())}}).ok);
   const auto actualOutput = fine.out("output");
-  fine.inputs = {{"tensor", actualOutput},
-                 {"primary", a},
-                 {"secondary", b},
-                 {"modelInput", Data::tensor(features)}};
+  fine.inputs = {{"tensor", actualOutput}, {"primary", a}, {"secondary", b}};
   REQUIRE(fine.run("gap.labels_from_logits").ok);
   native::LabelRowsView fineLabels;
   std::string fineWhy;
   REQUIRE(native::readLabelRows(fine.out("labels"), fineLabels, fineWhy));
   CHECK(fineLabels.labels->data == labelTensor().data);
-  CHECK(fineLabels.info->data["association"] == "declared");
   native::LocateModelOptions options;
   options.modelPath = model;
   options.refine = ::gap::ml::MaskRefineOptions::contractExact();
@@ -344,7 +323,6 @@ TEST_CASE(
   CHECK(view.sensorPrimary->asProfile()->pointCount() == 1280);
   CHECK(view.info->data["crop"]["status"] == "disabled");
   CHECK(view.info->data["processing"]["details"]["inferenceAssociation"] == "direct_infer_call");
-  CHECK(profile_contract::fingerprint(view.info->data["processing"]["details"]["inputHash"]));
   native::LabelRowsView decoded;
   REQUIRE(native::readLabelRows(result.labels, decoded, why));
   CHECK(decoded.labels->shape == std::vector<std::int64_t>{2, 1280});

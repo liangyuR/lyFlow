@@ -2476,7 +2476,7 @@ fn migrate_dts_profile_requires_evidence_and_writes_offline_migration() {
     assert!(doc.get("contractUpgrade").is_none());
     assert!(doc["meta"].get("contractUpgradeHistory").is_none());
     assert_eq!(doc["nodes"][1]["op"], "profile.clean");
-    assert_eq!(doc["nodes"][3]["opVersion"], "2.0.0");
+    assert_eq!(doc["nodes"][3]["opVersion"], "3.0.0");
     // 迁移过的图再按同一来源迁移：源节点已不是 dts.profile_in@1.0.0，core 拒绝，文件不动
     let again = cli(&args);
     assert_eq!(again.code, EXIT_FAILED, "{} {}", again.err, again.out);

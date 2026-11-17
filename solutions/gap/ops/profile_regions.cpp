@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "lyflow/profile.h"
+#include "lyflow_profile/context.h"
 #include "lyflow_profile/selection.h"
 
 namespace lyflow::packs::gap::profile_scene {
@@ -24,45 +25,22 @@ Box2D boxMm(const std::array<double, 4>& values) {
   box.max[1] = static_cast<float>(values[3]) / 1000.0F;
   return box;
 }
-bool inputProfile(const Data& data, const Record* provenance, Profile& metric, Json& sources,
-                  std::string& why, ExecContext& context) {
+bool inputProfile(const Data& data, Profile& metric, std::string& why, ExecContext& context) {
   const auto* profile = data.asProfile();
   if (profile->descriptor.plane != "XY") {
     why = "场景范围只接受明确量测XY平面";
     return false;
   }
-  if (!profile_contract::profileSources(data, provenance, sources, why))
-    return false;
   return convertProfileUnit(*profile, "m", metric, why, [&context] { return context.cancelled(); });
 }
-bool inputBox(const Data& data, const Record& record, ProfileDescriptor& descriptor, Json& sources,
-              std::string& why) {
-  if (!data.asBox2D() || record.type != "profile.Geometry.v2" ||
-      !profile_contract::geometryMatchesPhysical(data, &record, descriptor, why, &sources) ||
-      descriptor.plane != "XY") {
-    if (why.empty())
-      why = "需要严格版本2上下文绑定的米制量测XY框";
+bool inputBox(const Data& data, const Record* record, ProfileDescriptor& space, std::string& why) {
+  if (!profile_contract::geometrySpace(data, record, space, why))
+    return false;
+  if (space.plane != "XY") {
+    why = "需要米制量测XY框";
     return false;
   }
   return true;
-}
-bool unionSources(Json& output, const Json& extra, std::string& why) {
-  for (const auto& source : extra)
-    if (std::find(output.begin(), output.end(), source) == output.end())
-      output.push_back(source);
-  ProfileDescriptor descriptor;
-  return profile_contract::geometrySources(output, descriptor, why);
-}
-bool geometry(const Data& box, const Json& sources, const std::string& relation, Record& output,
-              std::string& why) {
-  try {
-    output = {"profile.Geometry.v2",
-              profile_contract::geometryContextV2FromSources(box, sources, relation)};
-    return true;
-  } catch (const std::invalid_argument& error) {
-    why = error.what();
-    return false;
-  }
 }
 std::optional<std::array<float, 2>> center(const Profile& profile, ExecContext& context) {
   std::vector<float> xs, ys;
@@ -181,7 +159,7 @@ Param mm(const char* name, double initial) {
 OperatorDesc description(const char* id, const char* label) {
   OperatorDesc op;
   op.id = id;
-  op.version = "2.0.0";
+  op.version = "3.0.0";
   declareGapGraphUpgrade(op);
   op.label = label;
   op.category = "间隙/预处理";
@@ -191,19 +169,16 @@ OperatorDesc description(const char* id, const char* label) {
 }
 } // namespace
 
-Status overallRoi(const Data& primary, const Data& secondary, const Record* primaryProvenance,
-                  const Record* secondaryProvenance, const OverallRoiOptions& options,
+Status overallRoi(const Data& primary, const Data& secondary, const OverallRoiOptions& options,
                   GeometryResult& result, ExecContext& context) {
   if (context.cancelled())
     return cancelled();
   Profile p, s;
-  Json sources, other;
   std::string why;
-  if (!inputProfile(primary, primaryProvenance, p, sources, why, context) ||
-      !inputProfile(secondary, secondaryProvenance, s, other, why, context))
+  if (!inputProfile(primary, p, why, context) || !inputProfile(secondary, s, why, context))
     return context.cancelled() ? cancelled() : bad(why);
-  if (!unionSources(sources, other, why))
-    return bad(why);
+  if (!profile_contract::sameSpace(p.descriptor, s.descriptor))
+    return bad("两路量测轮廓必须处于同一坐标帧、分析平面和手性");
   const auto& roi = options.roiMm;
   if (roi[0] > roi[2] || roi[1] > roi[3])
     return bad("范围边界倒置", "", "bad_param");
@@ -236,8 +211,7 @@ Status overallRoi(const Data& primary, const Data& secondary, const Record* prim
   }
   GeometryResult output;
   output.box = Data::box2d(boxMm(resolved));
-  if (!geometry(output.box, sources, moved ? "derived" : "declared", output.context, why))
-    return bad(why);
+  output.context = profile_contract::geometryContext(p.descriptor);
   output.status = {
       "gap.OverallRoi.v2",
       {{"mode", options.mode}, {"usingCamera", options.usingCamera}, {"centerApplied", moved}}};
@@ -255,14 +229,14 @@ Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* 
     return bad("高度锚框与上下文必须成对提供", "heightAnchor");
   if (options.startMm < 0 || options.lengthMm <= 0 || options.heightMm < 0)
     return bad("基准窗口毫米距离参数非法", "", "bad_param");
-  Json sources, more;
   ProfileDescriptor space, other;
   std::string why;
-  if (!inputBox(anchor, anchorContext, space, sources, why))
+  if (!inputBox(anchor, &anchorContext, space, why))
     return bad(why, "anchorContext");
-  if (heightAnchor && (!inputBox(*heightAnchor, *heightContext, other, more, why) ||
-                       !unionSources(sources, more, why)))
+  if (heightAnchor && !inputBox(*heightAnchor, heightContext, other, why))
     return bad(why, "heightContext");
+  if (heightAnchor && !profile_contract::sameSpace(space, other))
+    return bad("水平锚框与高度锚框必须处于同一量测空间", "heightContext");
   const auto& a = *anchor.asBox2D();
   const auto& h = heightAnchor ? *heightAnchor->asBox2D() : a;
   const double start = static_cast<float>(options.startMm / 1000.);
@@ -280,8 +254,7 @@ Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* 
   box.max[1] = static_cast<float>(h.max[1] + height);
   GeometryResult output;
   output.box = Data::box2d(box);
-  if (!geometry(output.box, sources, "derived", output.context, why))
-    return bad(why);
+  output.context = profile_contract::geometryContext(space);
   output.status = {"gap.DatumWindow.v2",
                    {{"side", options.side},
                     {"startMm", options.startMm},
@@ -302,14 +275,11 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
   std::string why;
   if (!readScanPair(scan, view, why))
     return bad(why, "scan");
-  Json sources, more;
-  ProfileDescriptor leftSpace, rightSpace;
-  if (!inputBox(gapLeft, gapLeftContext, leftSpace, sources, why) ||
-      !inputBox(gapRight, gapRightContext, rightSpace, more, why) ||
-      !unionSources(sources, more, why))
+  const auto& space = view.primary->asProfile()->descriptor;
+  if (!profile_contract::geometryInSpace(gapLeft, &gapLeftContext, space, why))
     return bad(why, "gapLeftContext");
-  if (!profile_contract::sameSpace(leftSpace, view.primary->asProfile()->descriptor))
-    return bad("锚框与场景量测空间不一致");
+  if (!profile_contract::geometryInSpace(gapRight, &gapRightContext, space, why))
+    return bad(why, "gapRightContext");
   std::string reason;
   const auto requested = candidate(*gapLeft.asBox2D(), *gapRight.asBox2D(), options, reason);
   const auto minimum = static_cast<std::size_t>(std::max<std::int64_t>(0, options.minPointsKept));
@@ -318,26 +288,20 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
   RollCropResult output;
   const auto& p = *view.primary->asProfile();
   const auto& s = *view.secondary->asProfile();
-  output.primaryProvenance = view.primaryProvenance;
-  output.secondaryProvenance = view.secondaryProvenance;
   std::size_t keptP = p.pointCount(), keptS = s.pointCount();
   if (requested) {
     const auto window = Data::box2d(boxMm(*requested));
-    Record windowContext;
-    if (!geometry(window, sources, "derived", windowContext, why))
-      return bad(why);
+    const auto windowContext = profile_contract::geometryContext(space);
     profile_contract::SelectionOptions selection;
     selection.bounds = "open";
     selection.emptyPolicy = "allow";
     profile_contract::SelectionResult cutP, cutS, cutMerged;
-    if (auto status =
-            profile_contract::cropProfile(*view.primary, window, windowContext,
-                                          &view.primaryProvenance, selection, cutP, context);
+    if (auto status = profile_contract::cropProfile(*view.primary, window, &windowContext,
+                                                    selection, cutP, context);
         !status.ok)
       return status;
-    if (auto status =
-            profile_contract::cropProfile(*view.secondary, window, windowContext,
-                                          &view.secondaryProvenance, selection, cutS, context);
+    if (auto status = profile_contract::cropProfile(*view.secondary, window, &windowContext,
+                                                    selection, cutS, context);
         !status.ok)
       return status;
     const bool insufficient =
@@ -348,9 +312,8 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
     if (insufficient)
       status = "reverted:min_points";
     else {
-      if (auto status =
-              profile_contract::cropProfile(*view.merged, window, windowContext,
-                                            view.mergedProvenance, selection, cutMerged, context);
+      if (auto status = profile_contract::cropProfile(*view.merged, window, &windowContext,
+                                                      selection, cutMerged, context);
           !status.ok)
         return status;
       const auto& info = view.info->data;
@@ -363,10 +326,6 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
                             info["processing"]};
       keptP = cutP.profile.asProfile()->pointCount();
       keptS = cutS.profile.asProfile()->pointCount();
-      output.primaryProvenance = std::move(cutP.provenance);
-      output.secondaryProvenance = std::move(cutS.provenance);
-      metadata.primaryProvenance = output.primaryProvenance;
-      metadata.secondaryProvenance = output.secondaryProvenance;
       output.window = window;
       output.windowContext = windowContext;
       applied = true;
@@ -386,7 +345,7 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
       metadata.processing["details"]["operation"] = "roll_anchored_crop";
       metadata.processing["details"]["mergedRebuilt"] = false;
       if (!makeScanPair(*view.sensorPrimary, *view.sensorSecondary, cutP.profile, cutS.profile,
-                        cutMerged.profile, cutMerged.provenance, metadata, output.scan, why))
+                        cutMerged.profile, metadata, output.scan, why))
         return bad(why);
     }
   } else
@@ -396,15 +355,8 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
     if (!bounds(p, s, actual, context))
       return context.cancelled() ? cancelled()
                                  : bad("没有有效样本，不能构造实际范围", "scan", "no_result");
-    Json actualSources, other;
-    if (!profile_contract::profileSources(*view.primary, &view.primaryProvenance, actualSources,
-                                          why) ||
-        !profile_contract::profileSources(*view.secondary, &view.secondaryProvenance, other, why) ||
-        !unionSources(actualSources, other, why))
-      return bad(why);
     output.window = Data::box2d(actual);
-    if (!geometry(output.window, actualSources, "derived", output.windowContext, why))
-      return bad(why);
+    output.windowContext = profile_contract::geometryContext(space);
     output.scan = scan;
     output.status = {"gap.RollCrop.v2",
                      {{"status", status},
@@ -430,11 +382,14 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
 void registerProfileRegionOps(Registry& registry) {
   auto overall = description("gap.overall_roi", "原生整体范围构建");
   overall.inputs = {{"primary", "Profile", "首量测轮廓", "明确量测XY平面。", true},
-                    {"secondary", "Profile", "次量测轮廓", "允许单侧无有效点。", true},
-                    {"primaryProvenance", "Record", "首来源", "可选复合来源。", false},
-                    {"secondaryProvenance", "Record", "次来源", "可选复合来源。", false}};
+                    {"secondary", "Profile", "次量测轮廓", "允许单侧无有效点。", true}};
+  overall.migrations.push_back(
+      {2, nullptr, [](const Json&, const std::vector<MigrationInput>& inputs) {
+         return profile_contract::retireInputs(inputs,
+                                               {"primaryProvenance", "secondaryProvenance"});
+       }});
   overall.outputs = {{"box", "Box2D", "整体范围", "固定或中位数居中。", true},
-                     {"context", "Record", "范围上下文", "严格几何来源。", true},
+                     {"context", "Record", "范围上下文", "量测空间的profile.Geometry.v3。", true},
                      {"status", "Record", "状态", "是否实际应用居中。", true}};
   auto roi = text("roi", "");
   roi.type = ParamType::Vec4f;
@@ -444,11 +399,9 @@ void registerProfileRegionOps(Registry& registry) {
   overall.params = {roi, choice("mode", "fixed", {"fixed", "auto_center"}),
                     choice("usingCamera", "Both", {"Both", "Left", "Right"})};
   overall.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
-    const auto* a = in.get("primaryProvenance").asRecord();
-    const auto* b = in.get("secondaryProvenance").asRecord();
     GeometryResult result;
     const auto status = overallRoi(
-        in.get("primary"), in.get("secondary"), a, b,
+        in.get("primary"), in.get("secondary"),
         {params.vec4("roi"), params.choice("mode"), params.choice("usingCamera")}, result, ctx);
     if (!status.ok)
       return status;
@@ -459,12 +412,13 @@ void registerProfileRegionOps(Registry& registry) {
   };
   registry.addOperator(std::move(overall));
   auto datum = description("gap.datum_window", "原生方向基准范围构建");
+  datum.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   datum.inputs = {{"anchor", "Box2D", "水平锚框", "定义窗口水平位置。", true},
-                  {"anchorContext", "Record", "水平上下文", "严格v2几何绑定。", true},
+                  {"anchorContext", "Record", "水平上下文", "profile.Geometry.v3。", true},
                   {"heightAnchor", "Box2D", "高度锚框", "可选独立高度范围。", false},
                   {"heightContext", "Record", "高度上下文", "与高度锚框成对。", false}};
   datum.outputs = {{"box", "Box2D", "基准窗口", "沿明确方向推出的窗口。", true},
-                   {"context", "Record", "窗口上下文", "保留双锚框来源。", true},
+                   {"context", "Record", "窗口上下文", "锚框所在空间。", true},
                    {"status", "Record", "参数记录", "实际窗口定义。", true}};
   datum.params = {choice("side", "left", {"left", "right"}), mm("startMm", 0), mm("lengthMm", 13),
                   mm("heightMm", 2.5)};
@@ -486,19 +440,18 @@ void registerProfileRegionOps(Registry& registry) {
   };
   registry.addOperator(std::move(datum));
   auto roll = description("gap.roll_anchored_crop", "原生零件随动裁剪");
+  roll.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   roll.inputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "场景", "保留raw传感器与已有去噪merged。", true},
+      {"scan", "Bundle<gap.ScanPair.v3>", "场景", "保留raw传感器与已有去噪merged。", true},
       {"gapLeft", "Box2D", "左锚框", "米制量测框。", true},
-      {"gapLeftContext", "Record", "左上下文", "严格v2几何绑定。", true},
+      {"gapLeftContext", "Record", "左上下文", "profile.Geometry.v3。", true},
       {"gapRight", "Box2D", "右锚框", "米制量测框。", true},
-      {"gapRightContext", "Record", "右上下文", "严格v2几何绑定。", true}};
+      {"gapRightContext", "Record", "右上下文", "profile.Geometry.v3。", true}};
   roll.outputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "裁剪场景", "未apply共享原场景；不重建merged。", true},
+      {"scan", "Bundle<gap.ScanPair.v3>", "裁剪场景", "未apply共享原场景；不重建merged。", true},
       {"window", "Box2D", "实际窗口", "候选窗或真实有效点范围。", true},
-      {"windowContext", "Record", "窗口上下文", "实际量测来源。", true},
-      {"status", "Record", "裁剪状态", "保留旧状态与前后点数。", true},
-      {"primaryProvenance", "Record", "首裁剪来源", "细粒度拟合的引用来源。", true},
-      {"secondaryProvenance", "Record", "次裁剪来源", "细粒度拟合的引用来源。", true}};
+      {"windowContext", "Record", "窗口上下文", "量测空间的profile.Geometry.v3。", true},
+      {"status", "Record", "裁剪状态", "保留旧状态与前后点数。", true}};
   auto enabled = text("enabled", "");
   enabled.type = ParamType::Bool;
   enabled.def = Value::boolean(true);
@@ -527,8 +480,6 @@ void registerProfileRegionOps(Registry& registry) {
     out.set("window", std::move(result.window));
     out.set("windowContext", Data::record(std::move(result.windowContext)));
     out.set("status", Data::record(std::move(result.status)));
-    out.set("primaryProvenance", Data::record(std::move(result.primaryProvenance)));
-    out.set("secondaryProvenance", Data::record(std::move(result.secondaryProvenance)));
     return Status::Ok();
   };
   registry.addOperator(std::move(roll));

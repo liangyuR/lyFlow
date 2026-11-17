@@ -5,7 +5,7 @@
 
 #include "gap_ml/RoiFeatures.hpp"
 #include "lyflow/profile.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/merge.h"
 #include "ops/profile_model.h"
 
 using namespace lyflow;
@@ -72,26 +72,9 @@ Data scan(const Data& a, const Data& b, bool processed = false) {
       p.sourceIndices = {0, 1, 2};
       *data = Data::profile(std::move(p));
     }
-  PointCloud cloud;
-  Profile merged;
-  for (const auto* data : {&secondary, &primary}) {
-    const auto& p = *data->asProfile();
-    const auto& c = *p.cloud;
-    const auto offset = merged.descriptor.sourceCount;
-    cloud.xyz.insert(cloud.xyz.end(), c.xyz.begin(), c.xyz.end());
-    cloud.intensity.insert(cloud.intensity.end(), c.intensity.begin(), c.intensity.end());
-    cloud.rgb.insert(cloud.rgb.end(), c.rgb.begin(), c.rgb.end());
-    merged.validity.insert(merged.validity.end(), p.validity.begin(), p.validity.end());
-    for (const auto index : p.sourceIndices)
-      merged.sourceIndices.push_back(static_cast<std::uint32_t>(offset + index));
-    merged.descriptor.sourceCount += p.descriptor.sourceCount;
-  }
-  merged.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  Record provenance;
+  profile_contract::MergeResult merged;
   std::string why;
-  REQUIRE(profile_contract::makeCompositeProvenance(secondary, primary, nullptr, nullptr,
-                                                    "secondary", "primary", "require_equal", merged,
-                                                    provenance, why));
+  REQUIRE(profile_contract::mergeProfiles(secondary, primary, "require_equal", merged, why));
   Json origins = Json::object();
   for (const auto& item : {std::make_pair("primary", &a), std::make_pair("secondary", &b)})
     origins[item.first] = {{"kind", "injected_profile"},
@@ -106,9 +89,8 @@ Data scan(const Data& a, const Data& b, bool processed = false) {
       origins,
       {{"method", "read"}, {"status", "complete"}, {"details", Json::object()}}};
   Data result;
-  REQUIRE_MESSAGE(scene::makeScanPair(a, b, primary, secondary, Data::profile(std::move(merged)),
-                                      provenance, metadata, result, why),
-                  why);
+  REQUIRE_MESSAGE(
+      scene::makeScanPair(a, b, primary, secondary, merged.profile, metadata, result, why), why);
   return result;
 }
 Tensor labelTensor() {
@@ -132,7 +114,6 @@ Data labelData(const Data& a, const Data& b) {
 
 TEST_CASE("Native model features retain 1280 slots masks RGB R and exact m/mm conversion") {
   const auto mm = sensor("physical-A", "mm"), meters = sensor("physical-A");
-  const auto before = profile_contract::context(mm);
   Tensor fromMm, fromM;
   Context ctx;
   REQUIRE(native::buildTensor(mm, mm, fromMm, ctx).ok);
@@ -155,7 +136,6 @@ TEST_CASE("Native model features retain 1280 slots masks RGB R and exact m/mm co
     CHECK(fromMm.data[channel * 1280 + 5] == 0);
     CHECK(fromMm.data[channel * 1280 + 7] == 0);
   }
-  CHECK(profile_contract::context(mm) == before);
   const auto noRgb = sensor("physical-B", "m", false);
   REQUIRE(native::buildTensor(noRgb, noRgb, fromM, ctx).ok);
   CHECK(fromM.data[4 * 1280 + 10] == 0);
@@ -163,45 +143,23 @@ TEST_CASE("Native model features retain 1280 slots masks RGB R and exact m/mm co
   CHECK_FALSE(ctx.logs.empty());
 }
 
-TEST_CASE("Native labels keep arrays in Tensor bind actual rows and preserve minimum argmax ties") {
+TEST_CASE("Native labels keep arrays in Tensor and preserve minimum argmax ties") {
   const auto a = sensor("same-actual-source");
   Context ctx;
-  Tensor input;
-  REQUIRE(native::buildTensor(a, a, input, ctx).ok);
   Tensor logits;
   logits.shape = {2, 8, 1280};
   logits.data.assign(2 * 8 * 1280, -1);
   logits.data[2 * 1280 + 10] = logits.data[3 * 1280 + 10] = 5;
   Data labels;
-  REQUIRE(native::labelsFromLogits(logits, a, a, labels, ctx, &input).ok);
+  REQUIRE(native::labelsFromLogits(logits, a, a, labels, ctx).ok);
   native::LabelRowsView view;
   std::string why;
   REQUIRE(native::readLabelRows(labels, view, why));
   CHECK(view.labels->data.size() == 2560);
   CHECK(view.labels->data[10] == 2);
   CHECK(view.labels->data[11] == 0);
-  CHECK(view.info->data["sensorContexts"][0] == view.info->data["sensorContexts"][1]);
-  CHECK(view.info->data["logicalRows"] == Json::array({"primary", "secondary"}));
-  CHECK(view.info->data["association"] == "declared");
-  CHECK(view.info->data.dump().size() < 4096);
-  CHECK(native::matchesSensors(labels, a, a, why));
-  auto changed = *a.asProfile();
-  auto cloud = *changed.cloud;
-  cloud.rgb[0] += 1;
-  changed.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  CHECK_FALSE(native::matchesSensors(labels, Data::profile(changed), a, why));
-  auto bundle = *labels.asBundle();
-  auto altered = *view.labels;
-  altered.data[10] = 1;
-  bundle.set("labels", Data::tensor(std::move(altered)));
-  native::LabelRowsView sentinel;
-  sentinel.classCount = 99;
-  CHECK_FALSE(native::readLabelRows(Data::bundle(std::move(bundle)), sentinel, why));
-  CHECK(sentinel.classCount == 99);
-  input.data[0] += 1;
-  Data untouched = Data::record({"sentinel", {}});
-  CHECK_FALSE(native::labelsFromLogits(logits, a, a, untouched, ctx, &input).ok);
-  CHECK(untouched.asRecord()->type == "sentinel");
+  CHECK(view.classCount == 8);
+  CHECK(view.info->type == native::kLabelInfoType);
 }
 
 TEST_CASE("Native label model validation and cancellation do not publish partial payloads") {
@@ -210,6 +168,16 @@ TEST_CASE("Native label model validation and cancellation do not publish partial
   Data output = Data::record({"sentinel", {}});
   for (int classes : {0, 257})
     CHECK_FALSE(native::makeLabelRows(labelTensor(), classes, a, b, output, ctx).ok);
+  REQUIRE(native::makeLabelRows(labelTensor(), 8, a, b, output, ctx).ok);
+  native::LabelRowsView view;
+  std::string why;
+  Bundle injected = *output.asBundle();
+  Tensor shortLabels;
+  shortLabels.shape = {1};
+  shortLabels.data = {0};
+  injected.set("labels", Data::tensor(shortLabels));
+  CHECK_FALSE(native::readLabelRows(Data::bundle(std::move(injected)), view, why));
+  output = Data::record({"sentinel", {}});
   for (float value : {-1.F, 8.F, 1.5F, std::numeric_limits<float>::quiet_NaN()}) {
     auto labels = labelTensor();
     labels.data[0] = value;
@@ -284,16 +252,12 @@ TEST_CASE("Native model boxes reuse the exact ROI algorithm and bind full measur
   Data rois;
   std::string why;
   REQUIRE_MESSAGE(scene::makeRoiSet(output.fields, rois, why), why);
-  const auto fullA = profile_contract::context(measurement(a));
-  const auto fullB = profile_contract::context(measurement(b));
   for (int i = 0; i < 4; ++i) {
     ProfileDescriptor descriptor;
-    REQUIRE(profile_contract::geometryMatchesPhysical(
-        output.fields.boxes[i], output.fields.contexts[i].asRecord(), descriptor, why));
+    REQUIRE(profile_contract::geometrySpace(output.fields.boxes[i],
+                                            output.fields.contexts[i].asRecord(), descriptor, why));
     CHECK(descriptor.frame == "measurement-frame");
     CHECK(descriptor.plane == "XY");
-    const auto& sources = output.fields.contexts[i].asRecord()->data["sources"];
-    CHECK(sources == Json::array({fullA, fullB}));
   }
   CHECK(output.fields.boxes[0].asBox2D()->min[0] < output.fields.boxes[2].asBox2D()->min[0]);
   CHECK(output.fields.boxes[2].asBox2D()->min[0] < output.fields.boxes[3].asBox2D()->min[0]);
@@ -304,8 +268,7 @@ TEST_CASE("Native model boxes reuse the exact ROI algorithm and bind full measur
   CHECK(output.fields.info.data["overallMm"].is_null());
 }
 
-TEST_CASE(
-    "Native model missing segments remain candidates while stale mapping and cancel are atomic") {
+TEST_CASE("Native model missing segments remain candidates and cancellation is atomic") {
   const auto a = sensor("A"), b = sensor("B");
   const auto bundle = scan(a, b);
   Context ctx;
@@ -336,9 +299,6 @@ TEST_CASE(
   CHECK_FALSE(scene::makeRoiSet(candidate.fields, formal, why));
   CHECK(formal.empty());
   candidate.missingSegments = {"sentinel"};
-  CHECK_FALSE(
-      native::boxesFromLabels(labelData(sensor("different"), b), bundle, {}, candidate, ctx).ok);
-  CHECK(candidate.missingSegments == std::vector<std::string>{"sentinel"});
   Context completed;
   const auto valid = labelData(a, b);
   native::BoxComputation baseline;

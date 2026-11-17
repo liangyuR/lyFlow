@@ -7,7 +7,7 @@
 
 #include "lyflow/profile.h"
 #include "lyflow/registry.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 #include "profile_feature_bundle.h"
 #include "profile_scene.h"
 #ifdef LYFLOW_GAP_TEMPLATE
@@ -26,25 +26,6 @@ Status cancelled() { return Status::Error(Phase::Execute, "cancelled", "结果�
 Json pick(const Json& value, const char* key) {
   const auto found = value.find(key);
   return found == value.end() ? Json() : *found;
-}
-bool bounded(const Json& value, unsigned depth = 0) {
-  if (depth > 20 || (value.is_number_float() && !std::isfinite(value.get<double>())) ||
-      (value.is_string() && value.get_ref<const std::string&>().size() > 65536) ||
-      (value.is_structured() && value.size() > 256))
-    return false;
-  if (value.is_structured())
-    for (const auto& item : value)
-      if (!bounded(item, depth + 1))
-        return false;
-  return true;
-}
-bool record(const Record* value, std::string& why) {
-  if (!value || !value->data.is_object() || !bounded(value->data) ||
-      value->data.dump().size() > 262144) {
-    why = "汇总质量或来源必须是有界、有限的对象Record";
-    return false;
-  }
-  return true;
 }
 Json native(const Record& value) { return {{"type", value.type}, {"data", value.data}}; }
 Json count(const Json& value) {
@@ -106,7 +87,7 @@ Json fitEntry(const std::string& component, const Record& quality, const Data* l
               {"line_point_y_mm", pick(q, "linePointYMm")},
               {"line_dir_x", pick(q, "lineDirX")},
               {"line_dir_y", pick(q, "lineDirY")}};
-  if (quality.type == "profile.LineFitRobust.v1") {
+  if (quality.type == "profile.LineFitRobust.v2") {
     output["model"] = "line";
     output["point_count"] = count(pick(q, "inputSlotCount"));
     output["valid_point_count"] = count(pick(q, "validSlotCount"));
@@ -124,7 +105,7 @@ Json fitEntry(const std::string& component, const Record& quality, const Data* l
     output["residual_aggregation"] = pick(q, "residualAggregation");
     output["rms_residual_mm"] = millimeters(pick(q, "weightedRmsResidual"));
     output["max_residual_mm"] = millimeters(pick(q, "maxResidual"));
-  } else if (quality.type == "gap.ReferencePoint.v2") {
+  } else if (quality.type == "gap.ReferencePoint.v3") {
     output["line_fitted"] = false;
     output["inlier_count"] = nullptr;
     output["inlier_ratio"] = nullptr;
@@ -140,61 +121,13 @@ Json fitEntry(const std::string& component, const Record& quality, const Data* l
     output["geometry_status"] = "bound_feature";
   } else {
     output["geometry_status"] =
-        quality.type == "gap.ReferencePoint.v2" ? "unavailable" : "quality_only";
+        quality.type == "gap.ReferencePoint.v3" ? "unavailable" : "quality_only";
   }
   return output;
 }
-bool fitQuality(const Record* value, std::string& why) {
-  if (!record(value, why))
-    return false;
-  const auto& q = value->data;
-  if (value->type == "profile.LineFitRobust.v1") {
-    ProfileDescriptor descriptor;
-    if (pick(q, "schemaVersion") != 1 || pick(q, "unit") != "m" ||
-        !contract::parse(pick(q, "context"), descriptor, why) ||
-        !contract::fingerprint(pick(q, "geometryHash"))) {
-      why = "公共直线质量需要实际Profile上下文与米制几何指纹";
-      return false;
-    }
-    for (const auto* field :
-         {"inputSlotCount", "validSlotCount", "uniqueInlierCount", "weightedInlierCount"})
-      if (count(pick(q, field)).is_null()) {
-        why = "公共直线质量缺少明确的原槽/观测/权重计数";
-        return false;
-      }
-    for (const auto* field : {"weightedRmsResidual", "maxResidual"})
-      if (!pick(q, field).is_number() || q.at(field).get<double>() < 0) {
-        why = "公共直线质量缺少有限非负米制残差";
-        return false;
-      }
-    return true;
-  }
-  if (value->type == "gap.ReferencePoint.v2")
-    return pick(q, "schemaVersion") == 2 && pick(q, "lineFitted") == false &&
-           (pick(q, "model") == "selected_point" || pick(q, "model") == "nearest_point") &&
-           !count(pick(q, "pointCount")).is_null() && pick(q, "selection").is_object();
-  if (value->type == "gap.FitQuality.v2" || value->type == "GapFitQuality")
-    return true;
-  why = "fitBase/fitRef质量类型不受支持";
-  return false;
-}
-bool circleQuality(const Record* value, std::string& why) {
-  if (!record(value, why) || value->type != "gap.CircleFitPair.v2" ||
-      pick(value->data, "schemaVersion") != 2 || !pick(value->data, "left").is_object() ||
-      !pick(value->data, "right").is_object()) {
-    why = "双圆质量必须为gap.CircleFitPair.v2";
-    return false;
-  }
-  for (const auto* side : {"left", "right"}) {
-    const auto& q = value->data.at(side);
-    ProfileDescriptor descriptor;
-    if (pick(q, "logicalRole") != side ||
-        !contract::parse(pick(q, "profileContext"), descriptor, why)) {
-      why = "双圆质量必须保留真实左右角色的完整Profile上下文";
-      return false;
-    }
-  }
-  return true;
+bool fitQuality(const Record* value) {
+  return value->type == "profile.LineFitRobust.v2" || value->type == "gap.ReferencePoint.v3" ||
+         value->type == "gap.FitQuality.v3" || value->type == "GapFitQuality";
 }
 Json boxMm(const Box2D& box) {
   return Json::array(
@@ -252,11 +185,10 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
        !inputs.get("flush").asError()))
     return bad("gap/flush必须为测量值，不能静默忽略错误端口类型", "gap");
   try {
-    Json result{{"schemaVersion", 3},
+    Json result{{"schemaVersion", 4},
                 {"gap", measurement(inputs.get("gap"), true)},
                 {"flush", measurement(inputs.get("flush"), inputs.has("flush"))}};
-    Json evidence = Json::object(), nativeQuality = Json::object(), fits = Json::array(),
-         counts = Json::object();
+    Json nativeQuality = Json::object(), fits = Json::array(), counts = Json::object();
     std::string why;
     scene::ScanView scan;
     scene::RoiView rois;
@@ -268,60 +200,18 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
         return bad(why, "scan");
       expected = scan.primary->asProfile()->descriptor;
       haveExpected = true;
-      evidence["scan"] = {{"status", "bound_native_profiles"},
-                          {"primary", contract::context(*scan.primary)},
-                          {"secondary", contract::context(*scan.secondary)},
-                          {"merged", contract::context(*scan.merged)},
-                          {"sensor_primary", contract::context(*scan.sensorPrimary)},
-                          {"sensor_secondary", contract::context(*scan.sensorSecondary)},
-                          {"info", native(*scan.info)}};
     }
     if (haveRois) {
       if (!scene::readRoiSet(inputs.get("rois"), rois, why))
         return bad(why, "rois");
       ProfileDescriptor space;
-      if (!contract::geometryMatchesPhysical(*rois.boxes[0], rois.contexts[0]->asRecord(), space,
-                                             why) ||
+      if (!contract::geometrySpace(*rois.boxes[0], rois.contexts[0]->asRecord(), space, why) ||
           !jointSpace(space, expected, haveExpected, why))
         return bad(why, "rois");
-      if (haveScan) {
-        Data location;
-        if (!scene::makeLocation(inputs.get("scan"), inputs.get("rois"), location, why))
-          return bad(why, "rois");
-      }
-      evidence["rois"] = {{"status", haveScan ? "bound_to_scan" : "bound_geometry_only"},
-                          {"info", native(*rois.info)}};
     }
-    Json scanSources = Json::array();
-    if (haveScan)
-      for (const auto& pair : std::array<std::pair<const Data*, const Record*>, 3>{
-               std::make_pair(scan.primary, &scan.primaryProvenance),
-               std::make_pair(scan.secondary, &scan.secondaryProvenance),
-               std::make_pair(scan.merged, scan.mergedProvenance)}) {
-        Json source;
-        if (!contract::profileSources(*pair.first, pair.second, source, why))
-          return bad(why, "scan");
-        for (const auto& value : source)
-          if (std::find(scanSources.begin(), scanSources.end(), value) == scanSources.end())
-            scanSources.push_back(value);
-      }
-    if (scanSources.size() > 64)
-      return bad("scan来源联合超过64项预算", "scan");
-    auto featureSpace = [&](const Data& profile, const Data& provenance,
-                            const char* name) -> Status {
+    auto featureSpace = [&](const Data& profile, const char* name) -> Status {
       if (!jointSpace(profile.asProfile()->descriptor, expected, haveExpected, why))
         return bad(why, name);
-      Json sources;
-      if (!contract::profileSources(profile, provenance.asRecord(), sources, why))
-        return bad(why, name);
-      if (haveScan && std::none_of(sources.begin(), sources.end(), [&](const Json& source) {
-            return std::find(scanSources.begin(), scanSources.end(), source) != scanSources.end();
-          }))
-        return bad("原子特征来源未绑定本次scan的完整Profile上下文", name);
-      evidence[name] = {{"status", "bound_native_feature"},
-                        {"profile", contract::context(profile)},
-                        {"sources", sources},
-                        {"provenance", provenance.asRecord()->data}};
       return Status::Ok();
     };
     const char* qualityPorts[]{"fitBase", "fitRef"};
@@ -337,36 +227,25 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
         if (i == 0) {
           if (!scene::readLineFeature(inputs.get(featureNames[i]), lineFeature, why))
             return bad(why, featureNames[i]);
-          if (auto status =
-                  featureSpace(lineFeature.profile, lineFeature.provenance, featureNames[i]);
-              !status.ok)
+          if (auto status = featureSpace(lineFeature.profile, featureNames[i]); !status.ok)
             return status;
           quality = lineFeature.quality.asRecord();
           geometry = &lineFeature.line;
         } else {
           if (!scene::readReferenceFeature(inputs.get(featureNames[i]), referenceFeature, why))
             return bad(why, featureNames[i]);
-          if (auto status = featureSpace(referenceFeature.profile, referenceFeature.provenance,
-                                         featureNames[i]);
-              !status.ok)
+          if (auto status = featureSpace(referenceFeature.profile, featureNames[i]); !status.ok)
             return status;
           quality = referenceFeature.quality.asRecord();
-          if (referenceFeature.lineContext.asRecord()->type == "profile.Geometry.v2")
+          if (referenceFeature.lineContext.asRecord()->type == "profile.Geometry.v3")
             geometry = &referenceFeature.line;
         }
         if (!sameRecord(inputs, qualityPorts[i], *quality, why))
           return bad(why, qualityPorts[i]);
       } else if (inputs.has(qualityPorts[i])) {
         quality = inputs.get(qualityPorts[i]).asRecord();
-        if (!fitQuality(quality, why))
-          return bad(why, qualityPorts[i]);
-        evidence[featureNames[i]] = {{"status", "quality_only"}, {"geometry", "unavailable"}};
-      }
-      if (quality && quality->type == "profile.LineFitRobust.v1") {
-        ProfileDescriptor space;
-        if (!contract::parse(quality->data.at("context"), space, why) ||
-            !jointSpace(space, expected, haveExpected, why))
-          return bad(why, qualityPorts[i]);
+        if (!fitQuality(quality))
+          return bad("fitBase/fitRef质量类型不受支持", qualityPorts[i]);
       }
       if (quality) {
         auto entry = fitEntry(componentNames[i], *quality, geometry);
@@ -381,26 +260,20 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       if (!scene::readCirclePairFeature(inputs.get("circleFeature"), pair, why))
         return bad(why, "circleFeature");
       for (std::size_t side = 0; side < 2; ++side)
-        if (auto status = featureSpace(pair.profiles[side], pair.provenances[side],
-                                       side ? "circle_right" : "circle_left");
-            !status.ok)
+        if (auto status = featureSpace(pair.profiles[side], "circleFeature"); !status.ok)
           return status;
       circles = &pair.quality;
       if (!sameRecord(inputs, "fits", *circles, why))
         return bad(why, "fits");
     } else if (inputs.has("fits")) {
       circles = inputs.get("fits").asRecord();
-      if (!circleQuality(circles, why))
-        return bad(why, "fits");
+      if (circles->type != "gap.CircleFitPair.v3")
+        return bad("双圆质量必须为gap.CircleFitPair.v3", "fits");
     }
     if (circles) {
       for (const auto* side : {"left", "right"}) {
-        ProfileDescriptor space;
-        if (!contract::parse(circles->data.at(side).at("profileContext"), space, why) ||
-            !jointSpace(space, expected, haveExpected, why))
-          return bad(why, "fits");
         auto entry = fitEntry(std::string("gap_") + side,
-                              Record{"gap.FitQuality.v2", circles->data.at(side)});
+                              Record{"gap.FitQuality.v3", circles->data.at(side)});
         counts[std::string("gap_") + side + "_roi"] = entry["point_count"];
         fits.push_back(std::move(entry));
       }
@@ -412,15 +285,12 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     if (inputs.has("roiOverall") != inputs.has("roiOverallContext"))
       return bad("整体ROI与其上下文必须成对提供", "roiOverallContext");
     if (inputs.has("roiOverall")) {
-      const auto* binding = inputs.get("roiOverallContext").asRecord();
       ProfileDescriptor space;
-      if (!inputs.get("roiOverall").asBox2D() || !binding ||
-          binding->type != "profile.Geometry.v2" ||
-          !contract::geometryMatchesPhysical(inputs.get("roiOverall"), binding, space, why) ||
+      if (!contract::geometrySpace(inputs.get("roiOverall"),
+                                   inputs.get("roiOverallContext").asRecord(), space, why) ||
           !jointSpace(space, expected, haveExpected, why))
-        return bad(why.empty() ? "整体ROI需要严格米制几何上下文" : why, "roiOverallContext");
+        return bad(why, "roiOverallContext");
       effective["overall"] = boxMm(*inputs.get("roiOverall").asBox2D());
-      evidence["roi_overall"] = binding->data;
     } else if (info && !pick(*info, "overallMm").is_null())
       effective["overall"] = info->at("overallMm");
     if (haveRois) {
@@ -443,27 +313,17 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       profile_template::AlignmentView view;
       if (!profile_template::readAlignment(inputs.get("alignment"), view, why))
         return bad(why, "alignment");
-      if (!jointSpace(view.target->asProfile()->descriptor, expected, haveExpected, why))
-        return bad(why, "alignment");
-      if (auto status =
-              featureSpace(*view.target, Data::record(*view.targetProvenance), "alignment");
-          !status.ok)
+      if (auto status = featureSpace(*view.target, "alignment"); !status.ok)
         return status;
       alignment = view.info->data;
       if (info && !pick(*info, "alignment").is_null() && info->at("alignment") != alignment)
         return bad("独立配准输入与实际RoiSet的配准记录不一致", "alignment");
-      evidence["alignment"] = {{"status", "strict_native_alignment"},
-                               {"target", contract::context(*view.target)}};
     }
 #endif
-    if (alignment.is_null() && info && !pick(*info, "alignment").is_null()) {
+    if (alignment.is_null() && info && !pick(*info, "alignment").is_null())
       alignment = info->at("alignment");
-      evidence["alignment"] = {{"status", "roi_metadata"}};
-    }
     Json icp = Json::array();
     if (!alignment.is_null()) {
-      if (!alignment.is_object() || !bounded(alignment))
-        return bad("配准元数据必须是有限对象", "alignment");
       for (const auto* side : {"left", "right"})
         if (pick(alignment, side).is_object())
           icp.push_back(icpSide(alignment.at(side), side, pick(alignment, "templateId")));
@@ -484,7 +344,7 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     Json crop;
     if (inputs.has("cropStatus")) {
       const auto* value = inputs.get("cropStatus").asRecord();
-      if (!record(value, why) || value->type != "gap.RollCrop.v2")
+      if (value->type != "gap.RollCrop.v2")
         return bad("裁剪状态必须为gap.RollCrop.v2", "cropStatus");
       crop = value->data;
       if (info && !pick(*info, "cropStatus").is_null() && crop != info->at("cropStatus"))
@@ -492,30 +352,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     } else if (info)
       crop = pick(*info, "cropStatus");
     if (!crop.is_null()) {
-      if (!crop.is_object() || !pick(crop, "status").is_string() ||
-          !pick(crop, "applied").is_boolean() || !bounded(crop))
-        return bad("裁剪元数据缺少实际状态", "cropStatus");
       cropStatus = crop.at("status").get<std::string>();
-      const bool overall = pick(crop, "kind") == "gap.OverallCrop.v1";
-      if (overall) {
-        if (inputs.has("cropStatus") || crop.size() != 9 ||
-            !pick(crop, "schemaVersion").is_number_integer() || pick(crop, "schemaVersion") != 1 ||
-            pick(crop, "method") != "overall" || cropStatus != "applied" ||
-            crop.at("applied") != true || pick(crop, "bounds") != "open" || !info || !haveScan ||
-            pick(pick(*info, "processing"), "method") != "template" ||
-            !pick(crop, "boxMm").is_array() || crop.at("boxMm").size() != 4 ||
-            pick(*info, "overallMm") != pick(crop, "boxMm") ||
-            pick(scan.info->data, "crop") != crop || !pick(crop, "before").is_array() ||
-            !pick(crop, "after").is_array() || crop.at("before").size() != 3 ||
-            crop.at("after").size() != 3)
-          return bad("整体裁剪需要版本化状态、实际窗口和同一轮廓对的完整处理记录", "cropStatus");
-        const Data* profiles[] = {scan.primary, scan.secondary, scan.merged};
-        for (std::size_t i = 0; i < 3; ++i) {
-          const auto before = count(crop.at("before")[i]), after = count(crop.at("after")[i]);
-          if (before.is_null() || after.is_null() || before < after ||
-              after != profiles[i]->asProfile()->pointCount())
-            return bad("整体裁剪点数与实际轮廓不一致", "cropStatus");
-        }
+      if (pick(crop, "kind") == "gap.OverallCrop.v1") {
         counts["roll_crop_applied"] = 0;
         counts["roll_crop_reverted"] = 0;
       } else {
@@ -524,7 +362,6 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
         counts["roll_crop_applied"] = crop.at("applied").get<bool>() ? 1 : 0;
         counts["roll_crop_reverted"] = cropStatus.rfind("reverted", 0) == 0 ? 1 : 0;
       }
-      evidence["crop"] = crop;
     }
     result["crop_status"] = cropStatus;
     Json decisions = Json::object();
@@ -535,7 +372,7 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       if (!inputs.has(item.first))
         continue;
       const auto* value = inputs.get(item.first).asRecord();
-      if (!record(value, why) || value->type != "FallbackChoice" ||
+      if (value->type != "FallbackChoice" ||
           (pick(value->data, "choice") != "a" && pick(value->data, "choice") != "b") ||
           !pick(value->data, "reason").is_string())
         return bad("回退决策必须为实际FallbackChoice", item.first);
@@ -568,11 +405,6 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       result["preprocessed_point_count"] = primary + secondary;
       result["left_point_count"] = merged;
       result["right_point_count"] = merged;
-      evidence["point_count_semantics"] = {
-          {"input_preprocess", "current_measurement_profile_slots_after_scene_processing"},
-          {"sensor_input", "original_selected_sensor_profile_slots_including_invalid"},
-          {"left_right", "same_current_merged_profile_slots"},
-          {"fit_inliers", "legacy_final_inlier_multiset_with_separate_unique_observation_count"}};
     }
     result["point_counts"] = std::move(counts);
     result["timings"] = Json::array();
@@ -588,7 +420,6 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     result["pack_versions"] = packVersions();
     result["graph_sha256"] = params.text("graphSha256");
     result["native_quality"] = std::move(nativeQuality);
-    result["source_evidence"] = std::move(evidence);
     if (ctx.cancelled())
       return cancelled();
     outputs.set("bundle", Data::record(Record{"GapResultBundle", std::move(result)}));
@@ -613,8 +444,9 @@ Port optional(const char* name, const char* type, const char* description) {
 void registerResultBundle(Registry& registry) {
   OperatorDesc op;
   op.id = "gap.result_bundle";
-  op.version = "3.0.0";
+  op.version = "4.0.0";
   declareGapGraphUpgrade(op, 2);
+  op.migrations.push_back({3, nullptr, &contract::keepInputs});
   op.label = "原生间隙检测结果汇总";
   op.category = "间隙/测量";
   op.keywords = {"gap inspection result",
@@ -624,20 +456,20 @@ void registerResultBundle(Registry& registry) {
                  "原生轮廓",
                  "质量汇总"};
   op.doc =
-      "GapResultBundle schemaVersion3保留CSV业务字段；仅m/mm测量可换算value_mm。"
-      "原子特征严格绑定数值、几何、观测和来源；独立质量缺失的几何字段保持null。"
+      "GapResultBundle schemaVersion4保留CSV业务字段；仅m/mm测量可换算value_mm。"
+      "原子特征绑定数值、几何与观测，所有输入须处于同一坐标空间；独立质量缺失的几何字段保持null。"
       "当前量测槽数与原始传感器槽数分开记录；未提供scan时点数为null，未测时序/一致性保持unavailable。"
       "局部line/reference/circles回退仅记录各自决策，不重写实际ROI来源。旧major须显式gapProfile升级。";
   op.inputs = {{"gap", "Measurement", "间隙", "明确m/mm单位。", true},
                optional("flush", "Measurement", "可不接；失败仍记failure。"),
-               optional("rois", "Bundle<gap.RoiSet.v2>", "实际定位角色框。"),
-               optional("scan", "Bundle<gap.ScanPair.v2>", "实际量测原生轮廓对。"),
-               optional("baseFeature", "Bundle<gap.LineFeature.v2>", "原子基准线特征。"),
-               optional("refFeature", "Bundle<gap.ReferenceFeature.v2>", "原子参考特征。"),
-               optional("circleFeature", "Bundle<gap.CirclePair.v2>", "原子双侧圆特征。"),
+               optional("rois", "Bundle<gap.RoiSet.v3>", "实际定位角色框。"),
+               optional("scan", "Bundle<gap.ScanPair.v3>", "实际量测原生轮廓对。"),
+               optional("baseFeature", "Bundle<gap.LineFeature.v3>", "原子基准线特征。"),
+               optional("refFeature", "Bundle<gap.ReferenceFeature.v3>", "原子参考特征。"),
+               optional("circleFeature", "Bundle<gap.CirclePair.v3>", "原子双侧圆特征。"),
                optional("roiOverall", "Box2D", "实际整体框；须成对上下文。"),
-               optional("roiOverallContext", "Record", "profile.Geometry.v2，严格同空间。"),
-               optional("fits", "Record", "gap.CircleFitPair.v2原生质量。"),
+               optional("roiOverallContext", "Record", "profile.Geometry.v3，同一空间。"),
+               optional("fits", "Record", "gap.CircleFitPair.v3原生质量。"),
                optional("fitBase", "Record", "公共直线、参考点或原生inspection质量。"),
                optional("fitRef", "Record", "公共直线、参考点或原生inspection质量。"),
                optional("cropStatus", "Record", "gap.RollCrop.v2实际裁剪状态。"),
@@ -647,10 +479,9 @@ void registerResultBundle(Registry& registry) {
                optional("fallbackCircles", "Record", "双圆FallbackChoice。")};
   op.inputs[1].acceptsError = true;
 #ifdef LYFLOW_GAP_TEMPLATE
-  op.inputs.push_back(
-      optional("alignment", "Bundle<gap.Alignment.v2>", "严格验证的原生模板配准。"));
+  op.inputs.push_back(optional("alignment", "Bundle<gap.Alignment.v3>", "原生模板配准。"));
 #endif
-  op.outputs = {{"bundle", "Record", "结果", "GapResultBundle schemaVersion3。", true}};
+  op.outputs = {{"bundle", "Record", "结果", "GapResultBundle schemaVersion4。", true}};
   op.params = {text("roiSource", "", "缺省取实际rois.info.source；显式值必须一致。"),
                text("cropStatus", "", "缺少实际裁剪来源时的声明文本。"),
                text("consistencyMode", "off", "只记录配置；没有实际测量来源则状态unavailable。"),

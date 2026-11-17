@@ -14,7 +14,6 @@
 namespace lyflow::packs::gap::profile_scene {
 namespace {
 namespace contract = profile_contract;
-using Json = nlohmann::json;
 Status bad(const std::string& message, const char* port = "scan") {
   return Status::Error(Phase::Execute, "bad_input", message, {}, port);
 }
@@ -66,19 +65,13 @@ ParamMap lineValues(const ParamView& params) {
   }
   return values;
 }
-const Record* provenance(const ScanView& scan, const std::string& role) {
-  return role == "primary"     ? &scan.primaryProvenance
-         : role == "secondary" ? &scan.secondaryProvenance
-         : role == "merged"    ? scan.mergedProvenance
-                               : nullptr;
-}
-Status crop(const Data& input, const Record* origin, const Data& box, const Data& context,
+Status crop(const Data& input, const Data& box, const Data& context,
             contract::SelectionResult& result, ExecContext& ctx) {
   contract::SelectionOptions options;
   options.bounds = "open";
   options.mode = "compact";
   options.emptyPolicy = "error";
-  return contract::cropProfile(input, box, *context.asRecord(), origin, options, result, ctx);
+  return contract::cropProfile(input, box, context.asRecord(), options, result, ctx);
 }
 Status fitRole(const ScanView& scan, const RoiView& rois, const ParamView& params,
                const Data& refLine, const Data& refContext, contract::RobustLineResult& result,
@@ -87,22 +80,15 @@ Status fitRole(const ScanView& scan, const RoiView& rois, const ParamView& param
   const auto* context = rois.context(params.choice("role"));
   const auto* profile = scan.pick(params.choice("cloud"));
   contract::SelectionResult selected;
-  if (const auto status =
-          crop(*profile, provenance(scan, params.choice("cloud")), *box, *context, selected, ctx);
-      !status.ok)
+  if (const auto status = crop(*profile, *box, *context, selected, ctx); !status.ok)
     return status;
   Data toward;
   Record towardContext;
   if (const auto status = seamTowardGeometry(rois, toward, towardContext, ctx); !status.ok)
     return status;
-  contract::RobustLineInputs input{selected.profile,
-                                   *box,
-                                   *context,
-                                   toward,
-                                   Data::record(std::move(towardContext)),
-                                   refLine,
-                                   refContext,
-                                   Data::record(std::move(selected.provenance))};
+  contract::RobustLineInputs input{
+      selected.profile, *box,      *context, toward, Data::record(std::move(towardContext)),
+      refLine,          refContext};
   const auto values = lineValues(params);
   return contract::fitRobustLine(input, ParamView(values, params.baseDir()), result, ctx);
 }
@@ -117,11 +103,10 @@ void publishFit(const contract::RobustLineResult& fit, Outputs& out, bool point 
     out.set("inliers", fit.inliers);
     out.set("weightedInliers", fit.weightedInliers);
   }
-  out.set("provenance", fit.provenance);
 }
 bool lineFeatureOf(const contract::RobustLineResult& fit, Data& feature, std::string& why) {
   return makeLineFeature({fit.profile, fit.line, fit.lineContext, fit.innerEnd, fit.pointContext,
-                          fit.inliers, fit.weightedInliers, fit.quality, fit.provenance},
+                          fit.inliers, fit.weightedInliers, fit.quality},
                          feature, why);
 }
 Status publishReference(const std::string& method, const ReferenceFeatureFields& partial,
@@ -141,7 +126,6 @@ Status publishReference(const std::string& method, const ReferenceFeatureFields&
   out.set("pointContext", fields.pointContext);
   out.set("selection", fields.selection);
   out.set("quality", fields.quality);
-  out.set("provenance", fields.provenance);
   out.set("feature", std::move(feature));
   return Status::Ok();
 }
@@ -177,7 +161,7 @@ Status refPoint(const Inputs& in, const ParamView& params, Outputs& out, ExecCon
       return status;
     return publishReference(method,
                             {fit.profile, fit.line, fit.lineContext, fit.innerEnd, fit.pointContext,
-                             fit.indexMap, fit.quality, fit.provenance},
+                             fit.indexMap, fit.quality},
                             out, ctx);
   }
   const auto* boxData = rois.role(params.choice("role"));
@@ -185,29 +169,18 @@ Status refPoint(const Inputs& in, const ParamView& params, Outputs& out, ExecCon
   const auto* input = scan.pick(params.choice("cloud"));
   contract::NearestInputs nearest;
   nearest.profile = *input;
-  nearest.provenance = Data::record(*provenance(scan, params.choice("cloud")));
   contract::NearestReference kind;
   if (method == "selected_point") {
     Point2D anchor;
     std::copy_n(boxData->asBox2D()->min, 2, anchor.p);
     nearest.reference = Data::point2d(anchor);
-    ProfileDescriptor descriptor;
-    Json sources;
-    std::string why;
-    if (!contract::geometryMatchesPhysical(*boxData, boxContext->asRecord(), descriptor, why,
-                                           &sources))
-      return bad(why, "rois");
-    nearest.referenceContext = Data::record(Record{
-        "profile.Geometry.v2", contract::geometryContextV2FromSources(nearest.reference, sources)});
+    nearest.referenceContext = *boxContext;
     kind = contract::NearestReference::Point;
   } else {
     contract::SelectionResult selected;
-    if (const auto status = crop(*input, provenance(scan, params.choice("cloud")), *boxData,
-                                 *boxContext, selected, ctx);
-        !status.ok)
+    if (const auto status = crop(*input, *boxData, *boxContext, selected, ctx); !status.ok)
       return status;
     nearest.profile = selected.profile;
-    nearest.provenance = Data::record(std::move(selected.provenance));
     nearest.reference = in.get("baseLine");
     nearest.referenceContext = in.get("baseLineContext");
     kind = contract::NearestReference::Line;
@@ -215,16 +188,9 @@ Status refPoint(const Inputs& in, const ParamView& params, Outputs& out, ExecCon
   contract::NearestResult point;
   if (const auto status = contract::nearestSample(nearest, kind, point, ctx); !status.ok)
     return status;
-  return publishReference(method,
-                          {point.profile,
-                           {},
-                           {},
-                           point.point,
-                           point.pointContext,
-                           point.selection,
-                           {},
-                           point.provenance},
-                          out, ctx);
+  return publishReference(
+      method, {point.profile, {}, {}, point.point, point.pointContext, point.selection, {}}, out,
+      ctx);
 }
 Status datumDirection(const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
   ScanView scan;
@@ -246,8 +212,8 @@ Status datumDirection(const Inputs& in, const ParamView& params, Outputs& out, E
       !status.ok)
     return status;
   contract::SelectionResult selected;
-  if (const auto status = crop(*scan.merged, scan.mergedProvenance, window.box,
-                               Data::record(window.context), selected, ctx);
+  if (const auto status =
+          crop(*scan.merged, window.box, Data::record(window.context), selected, ctx);
       !status.ok)
     return status;
   auto values = lineValues(params);
@@ -259,8 +225,7 @@ Status datumDirection(const Inputs& in, const ParamView& params, Outputs& out, E
                                    *rois.boxes[side],
                                    *rois.contexts[side],
                                    {},
-                                   {},
-                                   Data::record(std::move(selected.provenance))};
+                                   {}};
   contract::RobustLineResult fit;
   if (const auto status =
           contract::fitRobustLine(input, ParamView(values, params.baseDir()), fit, ctx);
@@ -286,9 +251,6 @@ Status seamCircles(const Inputs& in, const ParamView& params, Outputs& out, Exec
   CirclePairInputs input{*scan.merged,
                          *scan.primary,
                          *scan.secondary,
-                         Data::record(*scan.mergedProvenance),
-                         Data::record(scan.primaryProvenance),
-                         Data::record(scan.secondaryProvenance),
                          {*rois.boxes[2], *rois.boxes[3]},
                          {*rois.contexts[2], *rois.contexts[3]},
                          in.get("refLine"),
@@ -300,9 +262,9 @@ Status seamCircles(const Inputs& in, const ParamView& params, Outputs& out, Exec
     return status;
   Data feature;
   std::string why;
-  if (!makeCirclePairFeature({result.profiles, result.circles, result.contexts, result.provenances,
-                              result.inliers, result.quality},
-                             feature, why))
+  if (!makeCirclePairFeature(
+          {result.profiles, result.circles, result.contexts, result.inliers, result.quality},
+          feature, why))
     return bad(why, "feature");
   if (ctx.cancelled())
     return cancelled();
@@ -311,7 +273,6 @@ Status seamCircles(const Inputs& in, const ParamView& params, Outputs& out, Exec
     out.set(side, result.circles[i]);
     out.set(side + "Context", result.contexts[i]);
     out.set(side + "Profile", result.profiles[i]);
-    out.set(side + "Provenance", result.provenances[i]);
     out.set(side + "Inliers", result.inliers[i]);
   }
   out.set("quality", Data::record(std::move(result.quality)));
@@ -320,14 +281,13 @@ Status seamCircles(const Inputs& in, const ParamView& params, Outputs& out, Exec
 }
 std::vector<Port> lineOutputs(bool point) {
   std::vector<Port> ports{
-      {"feature", point ? "Bundle<gap.ReferenceFeature.v2>" : "Bundle<gap.LineFeature.v2>",
+      {"feature", point ? "Bundle<gap.ReferenceFeature.v3>" : "Bundle<gap.LineFeature.v3>",
        "原子特征", "几何、上下文、观测和质量随同一fallback选择。", true},
       {"line", "Line2D", "拟合线", "仅参考点非拟合方法输出声明占位线。", true},
-      {"lineContext", "Record", "线上下文", "与实际几何内容绑定。", true},
+      {"lineContext", "Record", "线上下文", "线所在的profile.Geometry.v3空间。", true},
       {point ? "point" : "innerEnd", "Point2D", "近端点", "原生观测样本。", true},
       {"pointContext", "Record", "点上下文", "与点成对。", true},
       {"profile", "Profile", "观测轮廓", "保留原槽和通道。", true},
-      {"provenance", "Record", "观测来源", "当前轮廓的完整来源。", true},
       {"quality", "Record", "质量", "显式区分拟合与选点。", true}};
   if (point)
     ports.push_back(
@@ -363,17 +323,18 @@ void registerProfileMeasurementOps(Registry& registry) {
                            std::string("datum_direction"), std::string("seam_circles")}) {
     OperatorDesc op;
     op.id = "gap." + kind;
-    op.version = "2.0.0";
+    op.version = "3.0.0";
     declareGapGraphUpgrade(op);
+    op.migrations.push_back({2, nullptr, &contract::keepInputs});
     op.label = kind == "role_line"         ? "角色区域直线拟合"
                : kind == "ref_point"       ? "参考点提取"
                : kind == "datum_direction" ? "方向基准线提取"
                                            : "缝隙双侧圆拟合";
     op.category = "间隙/积木";
     op.keywords = {"profile", "datum", "reference", "circle", "角色", "基准", "参考", "圆弧"};
-    op.doc = "复用公共轮廓特征与严格场景来源；不通过其他算子的注册表运行计算。";
-    op.inputs = {{"scan", "Bundle<gap.ScanPair.v2>", "轮廓对", "实际输入及原始传感器槽。", true},
-                 {"rois", "Bundle<gap.RoiSet.v2>", "角色区域", "绑定量测几何及全部来源。", true}};
+    op.doc = "复用公共轮廓特征；不通过其他算子的注册表运行计算。";
+    op.inputs = {{"scan", "Bundle<gap.ScanPair.v3>", "轮廓对", "实际输入及原始传感器槽。", true},
+                 {"rois", "Bundle<gap.RoiSet.v3>", "角色区域", "量测空间的角色框。", true}};
     op.capabilities = {false, false, true};
     if (kind == "seam_circles") {
       op.params = circlePairParams();
@@ -385,18 +346,16 @@ void registerProfileMeasurementOps(Registry& registry) {
       }
       for (const auto* name : {"left", "right"}) {
         op.outputs.push_back({name, "Circle2D", name, "实际选定圆。", true});
-        op.outputs.push_back(
-            {std::string(name) + "Context", "Record", "圆来源", "完整上下文。", true});
+        op.outputs.push_back({std::string(name) + "Context", "Record", "圆上下文",
+                              "圆所在的profile.Geometry.v3空间。", true});
         op.outputs.push_back(
             {std::string(name) + "Profile", "Profile", "观测轮廓", "真实原槽。", true});
-        op.outputs.push_back(
-            {std::string(name) + "Provenance", "Record", "轮廓来源", "完整绑定。", true});
         op.outputs.push_back(
             {std::string(name) + "Inliers", "Indices", "观测内点", "实际轮廓索引。", true});
       }
       op.outputs.push_back({"quality", "Record", "质量", "双侧实际候选选择。", true});
-      op.outputs.push_back({"feature", "Bundle<gap.CirclePair.v2>", "原子双圆特征",
-                            "双侧几何、来源与质量同时选择。", true});
+      op.outputs.push_back({"feature", "Bundle<gap.CirclePair.v3>", "原子双圆特征",
+                            "双侧几何、观测与质量同时选择。", true});
       op.compute = &seamCircles;
     } else {
       op.params = lineParameters(kind != "ref_point");
@@ -431,7 +390,8 @@ void registerProfileMeasurementOps(Registry& registry) {
           op.params.push_back(std::move(p));
         }
         op.outputs.push_back({"window", "Box2D", "方向窗口", "真实长面范围。", true});
-        op.outputs.push_back({"windowContext", "Record", "窗口来源", "双锚来源。", true});
+        op.outputs.push_back(
+            {"windowContext", "Record", "窗口上下文", "窗口所在的profile.Geometry.v3空间。", true});
         op.compute = &datumDirection;
       } else {
         op.params.push_back(choice("cloud", "merged", {"merged", "primary", "secondary"}));

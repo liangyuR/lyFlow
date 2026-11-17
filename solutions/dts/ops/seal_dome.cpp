@@ -12,7 +12,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     const Status loaded = loadProfile(source, active, ctx);
     if (!loaded.ok)
       return loaded;
-    const auto pieces = checkedPieces(inputs.get("faces"), source, active);
+    const auto pieces = checkedPieces(inputs.get("faces"), active);
     if (pieces.empty())
       return Status::Error(Phase::Execute, "no_segments", "面表里没有分片", {}, "faces");
     DomeParams dp;
@@ -31,7 +31,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                   params.number("radiusMaxMm"), axis, [&ctx] { return ctx.cancelled(); }))
       return Status::Error(Phase::Execute, "no_apex_axis",
                            "顶部圆拟合失败或半径超出范围（胶条半径是硬判据）", {}, "clean");
-    nlohmann::json j = sceneRecord(source);
+    nlohmann::json j = sceneRecord();
     j.update({{"xPeak", dome.xPeak},
               {"zPeak", dome.zPeak},
               {"xLo", dome.xLo},
@@ -54,10 +54,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     apex.end[0] = static_cast<float>(dome.xPeak);
     apex.end[1] = static_cast<float>(dome.zPeak);
     const Data geometry = Data::line2d(metricGeometry(apex));
-    j["apexGeometryHash"] = profile_contract::geometryHash(geometry);
     if (ctx.cancelled())
       return cancelledStatus();
-    outputs.set("dome", Data::record(Record{"DtsDome.v2", std::move(j)}));
+    outputs.set("dome", Data::record(Record{"DtsDome.v3", std::move(j)}));
     outputs.set("apex", geometry);
     return Status::Ok();
   } catch (const kernel::profile::Cancelled&) {
@@ -72,8 +71,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerSealDome(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_dome";
-  op.version = "2.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr}};
+  op.version = "3.0.0";
+  op.migrations = {{1, requireGraphMigration, nullptr},
+                   {2, nullptr, &profile_contract::keepInputs}};
   op.label = "胶条主体提取";
   op.category = "DTS/胶条";
   op.keywords = {"seal dome extraction",
@@ -94,7 +94,7 @@ void registerSealDome(Registry& r) {
   op.inputs = {
       Port{"clean", "Profile", "Clean", "清理过的轮廓。", true},
       Port{"faces", "Record", "Faces", "profile.split_faces 的输出，取其中的分片。", true}};
-  op.outputs = {Port{"dome", "Record", "Dome", "胶条主体（DtsDome.v2）。", true},
+  op.outputs = {Port{"dome", "Record", "Dome", "胶条主体（DtsDome.v3）。", true},
                 Port{"apex", "Line2D", "Apex Axis", "圆心指向顶点，带端点。", true}};
 
   auto mk = [](const char* name, const char* label, double def, const char* doc,

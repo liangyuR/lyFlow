@@ -62,7 +62,7 @@ Data roi() {
 }
 }
 TEST_CASE(
-    "Native camera guard retains legacy PR66 overlap statistics and float bits on declared sensor planes") {
+    "Native camera guard retains legacy overlap statistics and float bits on declared sensor planes") {
   struct Case {
     const char* name;
     const char* action;
@@ -89,7 +89,6 @@ TEST_CASE(
     const auto a = flat(item.a, "physical-A", item.xy ? "XY" : "XZ");
     const auto b =
         flat(item.b, "physical-B", item.xy ? "XY" : "XZ", "m", item.shifted ? 20 : 0, item.cropped);
-    const auto beforeA = profile_contract::context(a), beforeB = profile_contract::context(b);
     scene::CameraGuardOptions options;
     options.onDisagree = item.action;
     options.minSamples = item.minimum;
@@ -97,7 +96,7 @@ TEST_CASE(
     result.quality.type = "sentinel";
     test::StubContext ctx;
     const auto box = roi();
-    const auto context = Record{"profile.Geometry.v2", profile_contract::geometryContextV2(a, box)};
+    const auto context = profile_contract::geometryContext(a.asProfile()->descriptor);
     const auto status =
         scene::guardProfiles(a, b, options, result, ctx, item.cropped ? &box : nullptr,
                              item.cropped ? &context : nullptr);
@@ -108,13 +107,7 @@ TEST_CASE(
       continue;
     }
     REQUIRE_MESSAGE(status.ok, status.message);
-    REQUIRE(result.quality.type == "gap.CameraGuard.v2");
-    std::string bindingWhy;
-    CHECK(scene::guardMatches(result.primary, result.secondary, result.quality, bindingWhy));
-    auto stale = result.quality;
-    stale.data["primaryContext"]["profileHash"] = std::string(32, '0');
-    CHECK_FALSE(scene::guardMatches(result.primary, result.secondary, stale, bindingWhy));
-    CHECK_FALSE(bindingWhy.empty());
+    REQUIRE(result.quality.type == "gap.CameraGuard.v3");
     const auto& quality = result.quality.data;
     CHECK(quality["onDisagree"] == item.action);
     CHECK(bitEqual(quality["maxDeltaMm"].get<double>(), .5));
@@ -145,12 +138,8 @@ TEST_CASE(
     const auto* selectedB = std::string(item.action) == "keepPrimary" ? &a : &b;
     CHECK(result.primary.profilePtr() == selectedA->profilePtr());
     CHECK(result.secondary.profilePtr() == selectedB->profilePtr());
-    CHECK(quality["inputPrimaryContext"] == beforeA);
-    CHECK(quality["inputSecondaryContext"] == beforeB);
     CHECK(quality["primarySourceId"] == selectedA->asProfile()->descriptor.sourceId);
     CHECK(quality["secondarySourceId"] == selectedB->asProfile()->descriptor.sourceId);
-    CHECK(profile_contract::context(a) == beforeA);
-    CHECK(profile_contract::context(b) == beforeB);
   }
 }
 TEST_CASE("Native camera guard uses declared planes and units and ignores finite-invalid payload") {
@@ -216,13 +205,12 @@ TEST_CASE(
   CHECK(result.quality.type == "sentinel");
   auto wrong = *b.asProfile();
   wrong.descriptor.frame = "other";
+  const auto otherSpace = profile_contract::geometryContext(wrong.descriptor);
   const auto mismatch = Data::profile(std::move(wrong));
   CHECK_FALSE(scene::guardProfiles(a, mismatch, options, result, ctx).ok);
   const auto box = roi();
   CHECK_FALSE(scene::guardProfiles(a, b, options, result, ctx, &box).ok);
-  auto context = Record{"profile.Geometry.v2", profile_contract::geometryContextV2(a, box)};
-  context.data["geometryHash"] = std::string(32, '0');
-  CHECK_FALSE(scene::guardProfiles(a, b, options, result, ctx, &box, &context).ok);
+  CHECK_FALSE(scene::guardProfiles(a, b, options, result, ctx, &box, &otherSpace).ok);
   CHECK(result.quality.type == "sentinel");
 }
 TEST_CASE(
@@ -243,7 +231,7 @@ TEST_CASE(
   call.inputs = {{"primary", a}, {"secondary", b}};
   REQUIRE(call.run("gap.camera_guard").ok);
   CHECK(call.out("primary").profilePtr() == a.profilePtr());
-  CHECK(call.out("quality").asRecord()->type == "gap.CameraGuard.v2");
+  CHECK(call.out("quality").asRecord()->type == "gap.CameraGuard.v3");
   call.inputs["box"] = roi();
   CHECK_FALSE(call.run("gap.camera_guard").ok);
   CHECK(call.outputs.empty());

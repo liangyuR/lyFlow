@@ -18,7 +18,7 @@
         },
         "title": "基准线"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "ref",
@@ -34,7 +34,7 @@
         },
         "title": "参考点（选点）"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "flush",
@@ -53,7 +53,7 @@
         "offsetMm": 0.0,
         "outputUnit": "mm"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     },
     {
       "id": "judge",

@@ -34,9 +34,8 @@ Data point(float x, float y) {
   value.p[1] = y;
   return Data::point2d(value);
 }
-Data declared(const Data& profile, const Data& geometry) {
-  return Data::record(Record{"profile.Geometry.v2",
-                             profile_contract::geometryContextV2(profile, geometry, "declared")});
+Data declared(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
 }
 struct PollContext : ExecContext {
   mutable int calls = 0;
@@ -63,13 +62,10 @@ TEST_CASE("Profile geometry declarations require explicit matching frame and pla
   REQUIRE(call.run("profile.bind_geometry",
                    {{"frame", Value::text("measurement")}, {"plane", Value::text("XZ")}})
               .ok);
-  CHECK(call.out("context").asRecord()->data["relation"] == "declared");
-  CHECK(profile_contract::geometryHashV2(call.out("geometry")) ==
-        profile_contract::geometryHashV2(anchor));
-  ProfileDescriptor descriptor;
+  CHECK(call.out("geometry").asPoint2D()->p[0] == anchor.asPoint2D()->p[0]);
   std::string why;
-  CHECK(profile_contract::geometryMatchesPhysical(anchor, call.out("context").asRecord(),
-                                                  descriptor, why));
+  CHECK(profile_contract::geometryInSpace(anchor, call.out("context").asRecord(),
+                                          source.asProfile()->descriptor, why));
   auto pixel = *anchor.asPoint2D();
   pixel.unit = Unit2D::Pixel;
   call.inputs["geometry"] = Data::point2d(pixel);
@@ -81,10 +77,8 @@ TEST_CASE("Profile geometry declarations require explicit matching frame and pla
 
 TEST_CASE("Profile nearest samples retain original slot and physical source index") {
   const auto source = fixture(), anchor = point(.0038F, .0029F);
-  const auto before = profile_contract::context(source);
   test::OpCall call;
-  call.inputs = {
-      {"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source, anchor)}};
+  call.inputs = {{"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source)}};
   REQUIRE(call.run("profile.nearest_sample").ok);
   CHECK(call.out("point").asPoint2D()->unit == Unit2D::Meter);
   CHECK(call.out("point").asPoint2D()->p[0] == doctest::Approx(.004));
@@ -92,23 +86,16 @@ TEST_CASE("Profile nearest samples retain original slot and physical source inde
   CHECK(call.out("selection").asRecord()->data["slotIndex"] == 3);
   CHECK(call.out("selection").asRecord()->data["sourceIndex"] == 13);
   CHECK(call.out("profile").profilePtr() == source.profilePtr());
-  CHECK(profile_contract::context(source) == before);
   CHECK(call.out("selection").asRecord()->data.dump().size() < 1024);
   const auto midpoint = point(.002F, .0015F);
   call.inputs["anchor"] = midpoint;
-  call.inputs["anchorContext"] = declared(source, midpoint);
+  call.inputs["anchorContext"] = declared(source);
   REQUIRE(call.run("profile.nearest_sample").ok);
   CHECK(call.out("selection").asRecord()->data["slotIndex"] == 0);
-  call.inputs["anchorContext"] = declared(source, anchor);
-  auto changed = *anchor.asPoint2D();
-  changed.p[0] += .01F;
-  call.inputs["anchor"] = Data::point2d(changed);
-  CHECK_FALSE(call.run("profile.nearest_sample").ok);
-  CHECK(call.outputs.empty());
   for (const auto& other : {fixture("other"), fixture("measurement", "XY"),
                             fixture("measurement", "XZ", "reflected")}) {
     call.inputs["anchor"] = anchor;
-    call.inputs["anchorContext"] = declared(other, anchor);
+    call.inputs["anchorContext"] = declared(other);
     CHECK_FALSE(call.run("profile.nearest_sample").ok);
     CHECK(call.outputs.empty());
   }
@@ -126,8 +113,7 @@ TEST_CASE(
                       {3, 7}, profile, why));
   const auto source = Data::profile(std::move(profile)), anchor = point(-3e38F, 0);
   test::OpCall call;
-  call.inputs = {
-      {"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source, anchor)}};
+  call.inputs = {{"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source)}};
   REQUIRE(call.run("profile.nearest_sample").ok);
   CHECK(call.out("selection").asRecord()->data["slotIndex"] == 1);
   CHECK(call.out("selection").asRecord()->data["sourceIndex"] == 7);
@@ -144,11 +130,7 @@ TEST_CASE("Profile nearest to a line uses the infinite line and skips masked sam
   line.end[0] = 101;
   const auto geometry = Data::line2d(line);
   test::OpCall call;
-  call.inputs = {
-      {"profile", source},
-      {"line", geometry},
-      {"lineContext", Data::record(Record{"profile.Geometry.v1",
-                                          profile_contract::geometryContext(source, geometry)})}};
+  call.inputs = {{"profile", source}, {"line", geometry}, {"lineContext", declared(source)}};
   REQUIRE(call.run("profile.nearest_to_line").ok);
   CHECK(call.out("selection").asRecord()->data["slotIndex"] == 0);
   CHECK(call.out("selection").asRecord()->data["sourceIndex"] == 2);
@@ -156,15 +138,13 @@ TEST_CASE("Profile nearest to a line uses the infinite line and skips masked sam
   auto masked = *source.asProfile();
   masked.validity[0] = 0;
   const auto onlyLast = Data::profile(std::move(masked));
-  call.inputs = {
-      {"profile", onlyLast}, {"line", geometry}, {"lineContext", declared(onlyLast, geometry)}};
+  call.inputs = {{"profile", onlyLast}, {"line", geometry}, {"lineContext", declared(onlyLast)}};
   REQUIRE(call.run("profile.nearest_to_line").ok);
   CHECK(call.out("selection").asRecord()->data["slotIndex"] == 3);
 }
 
 TEST_CASE("Profile validity filtering preserves channels and exposes native input slot indices") {
   const auto source = fixture();
-  const auto before = profile_contract::context(source);
   test::OpCall call;
   call.inputs = {{"profile", source}};
   REQUIRE(call.run("profile.filter_validity").ok);
@@ -187,7 +167,6 @@ TEST_CASE("Profile validity filtering preserves channels and exposes native inpu
   CHECK(call.out("invalid").asIndices()->values == std::vector<std::int32_t>{1, 2});
   CHECK(call.out("selection").asRecord()->data["removedCount"] == 2);
   CHECK(call.out("selection").asRecord()->data.dump().size() < 2048);
-  CHECK(profile_contract::context(source) == before);
 }
 
 TEST_CASE(
@@ -196,8 +175,7 @@ TEST_CASE(
   invalid.validity.assign(invalid.pointCount(), 0);
   const auto source = Data::profile(std::move(invalid)), anchor = point(0, 0);
   test::OpCall call;
-  call.inputs = {
-      {"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source, anchor)}};
+  call.inputs = {{"profile", source}, {"anchor", anchor}, {"anchorContext", declared(source)}};
   CHECK_FALSE(call.run("profile.nearest_sample").ok);
   CHECK(call.status.code == "no_result");
   CHECK(call.outputs.empty());
@@ -217,7 +195,7 @@ TEST_CASE(
     std::unordered_map<std::string, Data> in{{"profile", validSource},
                                              {"geometry", anchor},
                                              {"anchor", anchor},
-                                             {"anchorContext", declared(validSource, anchor)}};
+                                             {"anchorContext", declared(validSource)}};
     Inputs inputs(in);
     std::unordered_map<std::string, Data> values;
     Outputs outputs(values);
@@ -238,13 +216,13 @@ TEST_CASE(
   test::StubContext ctx;
   for (const bool toLine : {false, true}) {
     const auto reference = toLine ? Data::line2d(Line2D{}) : point(.004F, .003F);
-    const auto referenceContext = declared(source, reference);
+    const auto referenceContext = declared(source);
     test::OpCall call;
     call.inputs = {{"profile", source},
                    {toLine ? "line" : "anchor", reference},
                    {toLine ? "lineContext" : "anchorContext", referenceContext}};
     REQUIRE(call.run(toLine ? "profile.nearest_to_line" : "profile.nearest_sample").ok);
-    profile_contract::NearestInputs inputs{source, reference, referenceContext, {}};
+    profile_contract::NearestInputs inputs{source, reference, referenceContext};
     profile_contract::NearestResult result;
     const auto kind = toLine ? profile_contract::NearestReference::Line
                              : profile_contract::NearestReference::Point;

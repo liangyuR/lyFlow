@@ -1,16 +1,11 @@
-#include <cmath>
-#include <limits>
 #include <vector>
 
 #include "lyflow/operator.h"
-#include "lyflow/profile.h"
 #include "lyflow/registry.h"
-#include "lyflow_profile/context.h"
 #include "lyflow_profile/selection.h"
 
 namespace lyflow::packs::std_profile {
 namespace {
-using Json = nlohmann::json;
 Param choice(const char* name, const char* initial, std::initializer_list<const char*> values) {
   Param p;
   p.name = name;
@@ -24,7 +19,6 @@ Param choice(const char* name, const char* initial, std::initializer_list<const 
 
 Status select(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx,
               bool byBox) {
-  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
   profile_contract::SelectionOptions options;
   options.mode = params.choice("mode");
   options.emptyPolicy = params.choice("emptyPolicy");
@@ -32,14 +26,13 @@ Status select(const Inputs& inputs, const ParamView& params, Outputs& outputs, E
   Status status;
   if (byBox) {
     options.bounds = params.choice("bounds");
-    status = profile_contract::cropProfile(inputs.get("profile"), inputs.get("box"),
-                                           *inputs.get("boxContext").asRecord(), provenance,
-                                           options, result, ctx);
+    status =
+        profile_contract::cropProfile(inputs.get("profile"), inputs.get("box"),
+                                      inputs.get("boxContext").asRecord(), options, result, ctx);
   } else {
     options.invalidPolicy = params.choice("invalidPolicy");
-    status = profile_contract::selectProfileIndices(inputs.get("profile"),
-                                                    *inputs.get("indices").asIndices(), provenance,
-                                                    options, result, ctx);
+    status = profile_contract::selectProfileIndices(
+        inputs.get("profile"), *inputs.get("indices").asIndices(), options, result, ctx);
   }
   if (!status.ok)
     return status;
@@ -48,7 +41,6 @@ Status select(const Inputs& inputs, const ParamView& params, Outputs& outputs, E
   outputs.set("selected", Data::indices(std::move(result.selected)));
   outputs.set("rejected", Data::indices(std::move(result.rejected)));
   outputs.set("selection", Data::record(std::move(result.selection)));
-  outputs.set("provenance", Data::record(std::move(result.provenance)));
   return Status::Ok();
 }
 }
@@ -56,7 +48,11 @@ void registerProfileRegionSelection(Registry& registry) {
   for (const bool byBox : {true, false}) {
     OperatorDesc op;
     op.id = byBox ? "profile.crop_box" : "profile.select_indices";
-    op.version = "1.0.0";
+    op.version = "2.0.0";
+    op.migrations = {
+        {1, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+           return profile_contract::retireInputs(inputs, {"provenance"});
+         }}};
     op.label = byBox ? "轮廓矩形选区" : "轮廓索引选区";
     op.category = "轮廓/选择与适配";
     op.keywords = {"profile", "selection", "crop", "indices", "轮廓", "选区", "索引"};
@@ -66,19 +62,17 @@ void registerProfileRegionSelection(Registry& registry) {
     if (byBox) {
       op.inputs.push_back({"box", "Box2D", "ROI", "同空间米制矩形。", true});
       op.inputs.push_back(
-          {"boxContext", "Record", "ROI上下文", "绑定实际框内容的物理空间。", true});
+          {"boxContext", "Record", "ROI上下文", "profile.Geometry.v3，须与轮廓同空间。", true});
     } else {
       op.inputs.push_back(
           {"indices", "Indices", "槽索引", "当前cloud.id上的严格升序唯一槽。", true});
     }
-    op.inputs.push_back(
-        {"provenance", "Record", "来源", "可选CompositeSources.v1，严格绑定输入。", false});
     op.outputs = {{"profile", "Profile", "选区轮廓", "不修改原输入，保留通道与物理源索引。", true},
                   {"sourceProfile", "Profile", "原始轮廓", "selected/rejected的索引空间。", true},
                   {"selected", "Indices", "保留槽", "当前输入cloud.id上的槽。", true},
                   {"rejected", "Indices", "排除槽", "与保留槽互补。", true},
-                  {"selection", "Record", "选区描述", "小元数据，数组留在原生载荷。", true},
-                  {"provenance", "Record", "来源", "绑定输出Profile的来源映射。", true}};
+                  {"selection", "Record", "选区描述",
+                   "profile.RegionSelection.v2计数，数组留在原生载荷。", true}};
     op.params = {choice("mode", "compact", {"compact", "preserve_slots"}),
                  choice("emptyPolicy", "error", {"error", "allow"})};
     if (byBox)

@@ -70,31 +70,16 @@ double number(const nlohmann::json& data, const char* field) {
   return result;
 }
 
-const nlohmann::json& checkedRecord(const Data& data, const char* type,
-                                    const nlohmann::json& context, int schema) {
+const nlohmann::json& checkedRecord(const Data& data, const char* type) {
   const auto* record = data.asRecord();
-  require(record && record->type == type, "场景Record类型或版本不匹配");
-  const auto& value = record->data;
-  require(value.is_object() && value.at("schemaVersion").is_number_integer() &&
-              value.at("schemaVersion") == schema && value.at("workingUnit") == "mm",
-          "场景Record需要明确版本和毫米工作单位");
-  ProfileDescriptor descriptor;
-  std::string why;
-  require(profile_contract::parse(value.at("context"), descriptor, why), "场景Record上下文无效");
-  require(descriptor.plane == "XZ" && descriptor.sampleOrder == "acquisition",
-          "DTS场景上下文需要XZ采样轮廓");
-  require(value.at("context") == context, "场景Record与轮廓来源、帧或内容不一致");
-  return value;
+  require(record && record->type == type && record->data.is_object(), "场景Record类型或版本不匹配");
+  return record->data;
 }
 
-nlohmann::json sceneRecord(const Data& source) {
-  return {
-      {"schemaVersion", 2}, {"workingUnit", "mm"}, {"context", profile_contract::context(source)}};
-}
+nlohmann::json sceneRecord() { return {{"schemaVersion", 3}, {"workingUnit", "mm"}}; }
 
-std::vector<Piece> checkedPieces(const Data& data, const Data& source,
-                                 const ActiveProfile& active) {
-  const auto& value = checkedRecord(data, "profile.Faces.v1", profile_contract::context(source), 1);
+std::vector<Piece> checkedPieces(const Data& data, const ActiveProfile& active) {
+  const auto& value = checkedRecord(data, "profile.Faces.v2");
   require(value.at("indexSpace") == "active_samples" &&
               value.at("slotCount") == active.native->pointCount() &&
               value.at("activeCount") == active.samples.size(),
@@ -197,7 +182,7 @@ Line2D lineMillimeters(const nlohmann::json& data) {
     line.end[i] = data.at("end").at(i).get<float>();
   }
   std::string why;
-  require(profile_contract::validLine(Data::line2d(line), why), "毫米基准线坐标或方向无效");
+  require(profile_contract::validGeometry(Data::line2d(line), why), "毫米基准线坐标或方向无效");
   return line;
 }
 

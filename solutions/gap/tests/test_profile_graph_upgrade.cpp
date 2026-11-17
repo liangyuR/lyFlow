@@ -186,7 +186,6 @@ TEST_CASE(
     CHECK_FALSE(gapNode(upgraded, "renamed_n_load")["params"].contains("dropNonFinite"));
     CHECK(gapNode(upgraded, "renamed_n_frame_p")["op"] == "profile.remap_axes");
     CHECK(gapNode(upgraded, "renamed_n_frame_p")["params"]["axes"] == "XZY");
-    CHECK(gapNode(upgraded, "renamed_n_merge")["params"]["roleA"] == "secondary");
     CHECK(gapNode(upgraded, "renamed_n_merge")["params"]["channelPolicy"] == "intersection");
     CHECK(gapNode(upgraded, "renamed_n_filter")["op"] == "profile.radius_outlier");
     CHECK(gapNode(upgraded, "renamed_n_fit_base")["op"] == "profile.fit_line_robust");
@@ -198,8 +197,7 @@ TEST_CASE(
       ports[edge["to"]["node"].get<std::string>()].insert(edge["to"]["port"].get<std::string>());
     if (name != std::string("template-fine")) {
       CHECK(gapNode(upgraded, "renamed_n_infer")["op"] == "gap.infer_profile");
-      CHECK(ports.at("renamed_n_seg") ==
-            std::set<std::string>{"tensor", "modelInput", "primary", "secondary"});
+      CHECK(ports.at("renamed_n_seg") == std::set<std::string>{"tensor", "primary", "secondary"});
       CHECK(ports.at("renamed_n_labels_p") == std::set<std::string>{"scan", "labels"});
     }
     unsigned guarded = 0;
@@ -292,7 +290,7 @@ TEST_CASE("GAP legacy template migration retains explicitly saved initial pose m
     CHECK_MESSAGE(accepted, error.message);
     if (accepted) {
       CHECK(gapNode(upgraded, "n_locate")["params"]["initialPoseMode"] == mode);
-      CHECK(gapNode(upgraded, "n_locate")["opVersion"] == "3.0.0");
+      CHECK(gapNode(upgraded, "n_locate")["opVersion"] == "4.0.0");
     }
     gapNode(graph, "n_locate")["opVersion"] = "2.1.1";
     CHECK_FALSE(migrate(graph, request, upgraded, error));
@@ -512,7 +510,7 @@ TEST_CASE(
           item.value().at("measurements").at("n_flush").at("baseLine"));
     const auto bundle = result(session, "n_bundle", "bundle");
     REQUIRE(bundle.asRecord());
-    CHECK(bundle.asRecord()->data.at("schemaVersion") == 3);
+    CHECK(bundle.asRecord()->data.at("schemaVersion") == 4);
     const bool fine = item.key().find("fine") != std::string::npos;
     const auto sensor =
         result(session, fine ? "n_load" : "n_scan", fine ? "primary" : "sensorPrimary");

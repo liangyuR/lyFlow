@@ -1,6 +1,6 @@
 # std-profile
 
-`std-profile` 0.3.0 提供原生 Profile 输入、适配、处理、选择及拟合。轻量配置含 14 项，不依赖 PCL/OpenCV/ONNX Runtime；显式启用公共稳健后端后注册另外两项拟合，共 16 项。完整端口和参数见[逐算子清单](../../docs/operator-package-audit.md)。
+`std-profile` 0.5.0 提供原生 Profile 输入、适配、处理、选择及拟合。轻量配置含 14 项，不依赖 PCL/OpenCV/ONNX Runtime；显式启用公共稳健后端后注册另外两项拟合，共 16 项。完整端口和参数见[逐算子清单](../../docs/operator-package-audit.md)。
 
 | 算子                                                      | 行为                                                                 |
 | --------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -10,12 +10,12 @@
 | `profile.input` / `profile.clean` / `profile.split_faces` | 显式原生输入、保槽/压缩清洗及分面；不猜轴与单位。                    |
 | `profile.fit_line` / `profile.transform_pair`             | TLS拟合及明确坐标变换，保留原生来源身份。                            |
 | `profile.analyze` / `profile.project_pair`                | 已迁入的既有裸云分析接口，保留原ID与契约。                           |
-| `profile.bind_geometry`                                   | 明确外部米制点/线/圆/框的frame/plane和来源，不自动换轴。             |
+| `profile.bind_geometry`                                   | 明确外部米制点/线/圆/框的frame/plane，不自动换轴。                   |
 | `profile.nearest_sample` / `profile.nearest_to_line`      | 按锚点距离或无限线垂距选有效原槽，保留物理源索引。                   |
-| `profile.filter_validity`                                 | 显式保槽或压缩，所有通道与来源映射保持对应。                         |
+| `profile.filter_validity`                                 | 显式保槽或压缩，所有通道与源索引保持对应。                           |
 | `profile.fit_line_robust` / `profile.fit_circle_robust`   | 可选PCL RANSAC/LM后端；与TLS方法区分。                               |
 
-数据契约见[Profile](../../docs/profile-data-contract.md)，跨宿主接口见[协议](../../docs/profile-host-protocol.md)。M3已迁入`profile.analyze/project_pair`，`profile.gap_flush`归属`std-metrology`。M4b的v2几何来源、选槽和度量定义见[公共算子契约](../../docs/profile-public-operators.md)，旧Gap场景及导入图仍待M4c切换。
+数据契约见[Profile](../../docs/profile-data-contract.md)，跨宿主接口见[协议](../../docs/profile-host-protocol.md)。M3已迁入`profile.analyze/project_pair`，`profile.gap_flush`归属`std-metrology`。几何上下文、选槽和度量定义见[公共算子契约](../../docs/profile-public-operators.md)，旧Gap场景及导入图仍待M4c切换。
 
 独立配置：
 

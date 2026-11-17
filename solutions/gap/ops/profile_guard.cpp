@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
-#include <set>
 #include <vector>
 
 #include "lyflow/profile.h"
@@ -72,98 +71,6 @@ Param number(const char* name, double value, const char* unit) {
   return parameter;
 }
 }
-bool guardMatches(const Data& primary, const Data& secondary, const Record& quality,
-                  std::string& why) {
-  try {
-    if (quality.type != "gap.CameraGuard.v2") {
-      why = "需要gap.CameraGuard.v2实际质量绑定";
-      return false;
-    }
-    const auto& guard = quality.data;
-    const auto fail = [&](const char* message) {
-      why = message;
-      return false;
-    };
-    if (!guard.is_object() || !guard.contains("schemaVersion") ||
-        !guard["schemaVersion"].is_number_integer() || guard["schemaVersion"] != 2)
-      return fail("需要版本2相机guard的实际内容绑定");
-    const std::set<std::string> known{
-        "schemaVersion",   "onDisagree",        "maxDeltaMm",           "taken",
-        "evaluated",       "exceeded",          "inputPrimaryContext",  "inputSecondaryContext",
-        "primaryContext",  "secondaryContext",  "inputPrimarySourceId", "inputSecondarySourceId",
-        "primarySourceId", "secondarySourceId", "sampleCount",          "reason",
-        "deltaMedianMm",   "signedMedianMm"};
-    for (const auto& item : guard.items())
-      if (!known.count(item.key()))
-        return fail("guard质量包含未知字段");
-    for (const auto* key :
-         {"onDisagree", "maxDeltaMm", "taken", "evaluated", "exceeded", "inputPrimaryContext",
-          "inputSecondaryContext", "primaryContext", "secondaryContext", "inputPrimarySourceId",
-          "inputSecondarySourceId", "primarySourceId", "secondarySourceId"})
-      if (!guard.contains(key))
-        return fail("guard质量缺少实际输入/输出来源绑定");
-    ProfileDescriptor beforeA, beforeB;
-    if (!profile_contract::parse(guard["inputPrimaryContext"], beforeA, why) ||
-        !profile_contract::parse(guard["inputSecondaryContext"], beforeB, why) ||
-        !profile_contract::matches(primary, guard["primaryContext"], why) ||
-        !profile_contract::matches(secondary, guard["secondaryContext"], why))
-      return false;
-    if (!profile_contract::sameSpace(beforeA, beforeB))
-      return fail("guard原输入必须处于同一物理空间");
-    if (guard["inputPrimarySourceId"] != beforeA.sourceId ||
-        guard["inputSecondarySourceId"] != beforeB.sourceId ||
-        guard["primarySourceId"] != primary.asProfile()->descriptor.sourceId ||
-        guard["secondarySourceId"] != secondary.asProfile()->descriptor.sourceId ||
-        !guard["evaluated"].is_boolean() || !guard["exceeded"].is_boolean() ||
-        !guard["maxDeltaMm"].is_number() || !std::isfinite(guard["maxDeltaMm"].get<double>()) ||
-        guard["maxDeltaMm"].get<double>() < 0)
-      return fail("guard来源或评估字段非法");
-    const auto taken = guard["taken"];
-    if (taken == "both") {
-      if (guard["primaryContext"] != guard["inputPrimaryContext"] ||
-          guard["secondaryContext"] != guard["inputSecondaryContext"])
-        return fail("双路guard必须保留各实际原输入内容");
-    } else if (taken == "primary" || taken == "secondary") {
-      const auto& trusted =
-          guard[taken == "primary" ? "inputPrimaryContext" : "inputSecondaryContext"];
-      if (guard["primaryContext"] != trusted || guard["secondaryContext"] != trusted)
-        return fail("单路guard的两输出必须绑定同一可信实际原输入");
-    } else
-      return fail("guard逻辑选择非法");
-    const bool evaluated = guard["evaluated"].get<bool>(), exceeded = guard["exceeded"].get<bool>();
-    const auto action = guard["onDisagree"];
-    if (action != "off" && action != "record" && action != "fail" && action != "keepPrimary" &&
-        action != "keepSecondary")
-      return fail("guard策略非法");
-    if ((!evaluated && exceeded) || (action == "off" && (evaluated || taken != "both")) ||
-        (action == "fail" && exceeded) || (taken != "both" && (!evaluated || !exceeded)) ||
-        (taken == "primary" && action != "keepPrimary") ||
-        (taken == "secondary" && action != "keepSecondary") ||
-        (exceeded && action == "keepPrimary" && taken != "primary") ||
-        (exceeded && action == "keepSecondary" && taken != "secondary"))
-      return fail("guard策略、统计状态与选择互相矛盾");
-    for (const auto* key : {"deltaMedianMm", "signedMedianMm"}) {
-      if (evaluated && (!guard.contains(key) || !guard[key].is_number() ||
-                        !std::isfinite(guard[key].get<double>())))
-        return fail("guard已评估必须保留实际有限高度差");
-      if (!evaluated && guard.contains(key))
-        return fail("guard未评估不得伪造高度差");
-    }
-    if (evaluated &&
-        (guard["deltaMedianMm"].get<double>() < 0 ||
-         exceeded != (guard["deltaMedianMm"].get<double>() > guard["maxDeltaMm"].get<double>())))
-      return fail("guard分歧状态与实际门限不一致");
-    if (guard.contains("sampleCount") &&
-        (!guard["sampleCount"].is_number_integer() || guard["sampleCount"] < 0))
-      return fail("guard样本数必须为实际非负整数");
-    why.clear();
-    return true;
-  } catch (const nlohmann::json::exception&) {
-    why = "guard质量字段类型或编码非法";
-    return false;
-  }
-}
-
 Status guardProfiles(const Data& primary, const Data& secondary, const CameraGuardOptions& options,
                      GuardResult& out, ExecContext& ctx, const Data* box,
                      const Record* boxContext) {
@@ -191,28 +98,21 @@ Status guardProfiles(const Data& primary, const Data& secondary, const CameraGua
     return bad("ROI与上下文须成对提供", "", "bad_input");
   const Box2D* roi = nullptr;
   if (box) {
-    ProfileDescriptor space;
-    if (boxContext->type != "profile.Geometry.v2" || !(roi = box->asBox2D()) ||
-        !profile_contract::geometryMatchesPhysical(*box, boxContext, space, why))
-      return bad(why.empty() ? "ROI必须为带严格v2上下文的米制框" : why, "", "bad_input");
-    if (!profile_contract::sameSpace(a->descriptor, space))
-      return bad("ROI与轮廓的物理空间不一致", "", "space_mismatch");
+    if (!profile_contract::geometryInSpace(*box, boxContext, a->descriptor, why))
+      return bad(why, "", "space_mismatch");
+    roi = box->asBox2D();
   }
   if (ctx.cancelled())
     return cancelled();
   Record quality{
-      "gap.CameraGuard.v2",
-      {{"schemaVersion", 2}, {"onDisagree", action}, {"maxDeltaMm", options.maxDeltaMm}}};
+      "gap.CameraGuard.v3",
+      {{"schemaVersion", 3}, {"onDisagree", action}, {"maxDeltaMm", options.maxDeltaMm}}};
   const auto emit = [&](const Data& left, const Data& right, const char* taken) {
     GuardResult result;
     result.primary = left;
     result.secondary = right;
     result.quality = quality;
     result.quality.data["taken"] = taken;
-    result.quality.data["inputPrimaryContext"] = profile_contract::context(primary);
-    result.quality.data["inputSecondaryContext"] = profile_contract::context(secondary);
-    result.quality.data["primaryContext"] = profile_contract::context(left);
-    result.quality.data["secondaryContext"] = profile_contract::context(right);
     result.quality.data["inputPrimarySourceId"] = a->descriptor.sourceId;
     result.quality.data["inputSecondarySourceId"] = b->descriptor.sourceId;
     result.quality.data["primarySourceId"] = left.asProfile()->descriptor.sourceId;
@@ -291,20 +191,21 @@ Status guardProfiles(const Data& primary, const Data& secondary, const CameraGua
 void registerProfileCameraGuard(Registry& registry) {
   OperatorDesc op;
   op.id = "gap.camera_guard";
-  op.version = "2.0.0";
+  op.version = "3.0.0";
   declareGapGraphUpgrade(op);
+  op.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   op.label = "双相机轮廓一致性校验";
   op.category = "间隙/质量";
   op.keywords = {"camera guard", "profile", "consistency", "双相机", "轮廓", "一致性"};
   op.inputs = {{"primary", "Profile", "Primary", "第一逻辑角色所选的真实物理源。", true},
                {"secondary", "Profile", "Secondary", "第二逻辑角色所选的真实物理源。", true},
                {"box", "Box2D", "ROI", "可选米制横向范围，与上下文成对。", false},
-               {"boxContext", "Record", "ROI上下文", "严格v2几何内容与同空间绑定。", false}};
+               {"boxContext", "Record", "ROI上下文", "profile.Geometry.v3，与轮廓同空间。", false}};
   op.outputs = {
       {"primary", "Profile", "Primary", "共享所选原Profile，保留原槽和真实来源。", true},
       {"secondary", "Profile", "Secondary", "共享所选原Profile，保留原槽和真实来源。", true},
       {"quality", "Record", "质量", "实际评估/分歧/选择与来源，不代表生产就绪。", true}};
-  op.outputs[2].contract = {{"recordType", "gap.CameraGuard.v2"}};
+  op.outputs[2].contract = {{"recordType", "gap.CameraGuard.v3"}};
   Param action;
   action.name = "onDisagree";
   action.label = "分歧处置";

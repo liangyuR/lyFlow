@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     const auto indexMap = output(client, run.runId, "fit", "indexMap")["data"];
     require(indexMap["sourceCloudId"] == std::to_string(source.cloudId()) &&
                 indexMap["indexCount"] == 13 && indexMap["weightedInlierCount"] == 13 &&
-                indexMap["sourceIndexMapping"] == "profile.sourceIndices" && indexMap.size() == 7,
+                indexMap["sourceIndexMapping"] == "profile.sourceIndices" && indexMap.size() == 6,
             "Small index-map contract changed");
     const auto selected = output(client, run.runId, "selected", "selection")["data"];
     require(selected["slotIndex"] == 15 && selected["sourceIndex"] == 15,
@@ -99,7 +99,6 @@ int main(int argc, char** argv) {
                        {"flush", flush},
                        {"dy", dy},
                        {"distance", distance},
-                       {"profileHash", indexMap["context"]["profileHash"]},
                        {"namedOutputs", Json::parse(run.outputs)}})
                      .dump()
               << '\n';

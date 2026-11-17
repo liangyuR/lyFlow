@@ -64,16 +64,14 @@ Data box(const Json& values) {
   result.max[1] = values[1][1].get<float>();
   return Data::box2d(result);
 }
-Record context(const Data& profile, const Data& geometry) {
-  return {"profile.Geometry.v2",
-          profile_contract::geometryContextV2(profile, geometry, "declared")};
+Record context(const Data& profile) {
+  return profile_contract::geometryContext(profile.asProfile()->descriptor);
 }
 Data scan(const Row& primary, const Row& secondary, bool narrowMerged = true) {
   profile_contract::MergeResult merged;
   std::string why;
-  REQUIRE(profile_contract::mergeProfiles(secondary.measurement, primary.measurement, nullptr,
-                                          nullptr, {"secondary", "primary", "intersection"}, merged,
-                                          why));
+  REQUIRE(profile_contract::mergeProfiles(secondary.measurement, primary.measurement,
+                                          "intersection", merged, why));
   if (narrowMerged && primary.measurement.asProfile()->pointCount() > 1) {
     TestContext ctx;
     profile_contract::SelectionOptions options;
@@ -82,11 +80,9 @@ Data scan(const Row& primary, const Row& secondary, bool narrowMerged = true) {
     Indices indices{
         merged.profile.asProfile()->cloud->id,
         {static_cast<std::int32_t>(secondary.measurement.asProfile()->pointCount() + 1)}};
-    REQUIRE(profile_contract::selectProfileIndices(merged.profile, indices, &merged.provenance,
-                                                   options, result, ctx)
-                .ok);
+    REQUIRE(
+        profile_contract::selectProfileIndices(merged.profile, indices, options, result, ctx).ok);
     merged.profile = result.profile;
-    merged.provenance = result.provenance;
   }
   Json origins = Json::object();
   for (const auto& entry :
@@ -106,8 +102,7 @@ Data scan(const Row& primary, const Row& secondary, bool narrowMerged = true) {
        {"details", {{"mergedPrefiltered", narrowMerged}}}}};
   Data output;
   REQUIRE_MESSAGE(scene::makeScanPair(primary.sensor, secondary.sensor, primary.measurement,
-                                      secondary.measurement, merged.profile, merged.provenance,
-                                      metadata, output, why),
+                                      secondary.measurement, merged.profile, metadata, output, why),
                   why);
   return output;
 }
@@ -130,12 +125,9 @@ TEST_CASE(
     options.mode = test["params"]["mode"];
     options.usingCamera = test["params"]["usingCamera"];
     scene::GeometryResult result;
-    REQUIRE(
-        scene::overallRoi(p.measurement, s.measurement, nullptr, nullptr, options, result, ctx).ok);
+    REQUIRE(scene::overallRoi(p.measurement, s.measurement, options, result, ctx).ok);
     CHECK(Json(bits(result.box)) == test["bits"]);
-    ProfileDescriptor descriptor;
-    std::string why;
-    CHECK(profile_contract::geometryMatchesPhysical(result.box, &result.context, descriptor, why));
+    CHECK(result.context.data == context(p.measurement).data);
   }
 }
 
@@ -148,7 +140,7 @@ TEST_CASE(
     CAPTURE(test["name"]);
     const auto source = row(test["primary"], "P").measurement;
     const auto anchor = box(test["left"]), height = box(test["height"]);
-    const auto anchorContext = context(source, anchor), heightContext = context(source, height);
+    const auto anchorContext = context(source), heightContext = context(source);
     scene::GeometryResult result;
     REQUIRE(scene::datumWindow(anchor, anchorContext, &height, &heightContext,
                                {test["params"]["side"], test["params"]["startMm"],
@@ -167,8 +159,7 @@ TEST_CASE("Gap native roll windows and all status fields match nine actual legac
     CAPTURE(test["name"]);
     const auto p = row(test["primary"], "P"), s = row(test["secondary"], "S");
     const auto input = scan(p, s), left = box(test["left"]), right = box(test["right"]);
-    const auto leftContext = context(p.measurement, left),
-               rightContext = context(s.measurement, right);
+    const auto leftContext = context(p.measurement), rightContext = context(s.measurement);
     const auto& params = test["params"];
     scene::RollCropOptions options{
         params.value("enabled", true),     params.value("halfWidth", 35.),
@@ -204,47 +195,6 @@ TEST_CASE("Gap native roll windows and all status fields match nine actual legac
 }
 
 TEST_CASE(
-    "Gap role provenance persists crop references inside ScanPair and rejects stale role bindings") {
-  const auto& test = baseline()["cases"][8];
-  auto p = row(test["primary"], "P"), s = row(test["secondary"], "S"),
-       third = row(test["primary"], "external-reference");
-  const auto input = scan(p, s), left = box(test["left"]), right = box(test["right"]);
-  auto leftContext = context(p.measurement, left), rightContext = context(s.measurement, right);
-  leftContext.data = profile_contract::geometryContextV2FromSources(
-      left,
-      Json::array(
-          {profile_contract::context(p.measurement), profile_contract::context(third.measurement)}),
-      "declared");
-  TestContext ctx;
-  scene::RollCropResult result;
-  REQUIRE(scene::rollAnchoredCrop(input, left, leftContext, right, rightContext,
-                                  {true, 4, 4, 8, 1, "Both"}, result, ctx)
-              .ok);
-  scene::ScanView view;
-  std::string why;
-  Json sources;
-  REQUIRE(scene::readScanPair(result.scan, view, why));
-  REQUIRE(profile_contract::profileSources(*view.primary, &view.primaryProvenance, sources, why));
-  CHECK(std::find(sources.begin(), sources.end(), profile_contract::context(third.measurement)) !=
-        sources.end());
-  CHECK(view.primaryProvenance.data == view.info->data["roles"]["primary"]["provenance"]);
-  scene::RollCropResult again;
-  REQUIRE(scene::rollAnchoredCrop(result.scan, left, leftContext, right, rightContext,
-                                  {true, 4, 4, 8, 1, "Both"}, again, ctx)
-              .ok);
-  REQUIRE(scene::readScanPair(again.scan, view, why));
-  REQUIRE(profile_contract::profileSources(*view.primary, &view.primaryProvenance, sources, why));
-  CHECK(std::find(sources.begin(), sources.end(), profile_contract::context(third.measurement)) !=
-        sources.end());
-  auto changed = *again.scan.asBundle();
-  auto info = *changed.field("info")->asRecord();
-  info.data["roles"]["primary"]["provenance"]["profileContext"] =
-      profile_contract::context(p.measurement);
-  changed.set("info", Data::record(info));
-  CHECK_FALSE(scene::readScanPair(Data::bundle(changed), view, why));
-}
-
-TEST_CASE(
     "Gap region helpers enforce mask physical space no fake empty bounds and cancellation atomically") {
   const auto& test = baseline()["cases"][0];
   auto p = row(test["primary"], "P"), s = row(test["secondary"], "S");
@@ -253,23 +203,18 @@ TEST_CASE(
   TestContext ctx;
   scene::GeometryResult result;
   scene::OverallRoiOptions options{{-11.2345F, -4.3456F, 10.7891F, 9.5432F}, "auto_center", "Both"};
-  REQUIRE(scene::overallRoi(Data::profile(masked), s.measurement, nullptr, nullptr, options, result,
-                            ctx)
-              .ok);
+  REQUIRE(scene::overallRoi(Data::profile(masked), s.measurement, options, result, ctx).ok);
   CHECK(Json(bits(result.box)) == baseline()["cases"][3]["bits"]);
   const auto original = result.box.valueJson();
   auto other = *s.measurement.asProfile();
   other.descriptor.frame = "unrelated-frame";
-  CHECK_FALSE(
-      scene::overallRoi(p.measurement, Data::profile(other), nullptr, nullptr, options, result, ctx)
-          .ok);
+  CHECK_FALSE(scene::overallRoi(p.measurement, Data::profile(other), options, result, ctx).ok);
   CHECK(result.box.valueJson() == original);
   Stop stop;
-  CHECK_FALSE(
-      scene::overallRoi(p.measurement, s.measurement, nullptr, nullptr, options, result, stop).ok);
+  CHECK_FALSE(scene::overallRoi(p.measurement, s.measurement, options, result, stop).ok);
   CHECK(result.box.valueJson() == original);
   const auto left = box(test["left"]), right = box(test["right"]);
-  const auto a = context(p.measurement, left), b = context(s.measurement, right);
+  const auto a = context(p.measurement), b = context(s.measurement);
   CHECK_FALSE(scene::datumWindow(left, a, &right, nullptr, {}, result, ctx).ok);
   CHECK_FALSE(scene::datumWindow(left, a, nullptr, nullptr, {"left", 0, 0, 1}, result, ctx).ok);
   const auto input = scan(p, s);
@@ -281,9 +226,9 @@ TEST_CASE(
   CHECK(roll.scan.asBundle() == unchanged);
   const auto empty = row(Json::array(), "empty");
   const auto emptyScan = scan(empty, empty, false);
-  auto status = scene::rollAnchoredCrop(emptyScan, left, context(empty.measurement, left), right,
-                                        context(empty.measurement, right),
-                                        {false, 4, 4, 8, 1, "Both"}, roll, ctx);
+  auto status =
+      scene::rollAnchoredCrop(emptyScan, left, context(empty.measurement), right,
+                              context(empty.measurement), {false, 4, 4, 8, 1, "Both"}, roll, ctx);
   CHECK_FALSE(status.ok);
   CHECK(status.code == "no_result");
   CHECK(roll.scan.asBundle() == unchanged);

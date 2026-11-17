@@ -33,11 +33,8 @@ struct RollCropResult {
   Data window;
   Record windowContext;
   Record status;
-  Record primaryProvenance;
-  Record secondaryProvenance;
 };
-Status overallRoi(const Data& primary, const Data& secondary, const Record* primaryProvenance,
-                  const Record* secondaryProvenance, const OverallRoiOptions& options,
+Status overallRoi(const Data& primary, const Data& secondary, const OverallRoiOptions& options,
                   GeometryResult& result, ExecContext& context);
 Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* heightAnchor,
                    const Record* heightContext, const DatumWindowOptions& options,

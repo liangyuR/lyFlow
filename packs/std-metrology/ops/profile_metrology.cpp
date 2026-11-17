@@ -29,39 +29,31 @@ struct FittedLine {
   metrology::SampledLine line;
   ProfileDescriptor descriptor;
   std::uint64_t count = 0;
-  nlohmann::json context;
 };
 
 bool fittedLine(const Data& geometry, const Record* statistics, FittedLine& output,
                 std::string& why) {
   const auto* line = geometry.asLine2D();
-  if (line->unit != Unit2D::Meter || !profile_contract::validLine(geometry, why)) {
-    why = "量测需要米制Line2D";
+  if (!profile_contract::validGeometry(geometry, why))
     return false;
-  }
-  if (statistics->type != "profile.LineFit.v1" || !statistics->data.is_object()) {
-    why = "量测需要profile.LineFit.v1拟合统计";
+  if (statistics->type != "profile.LineFit.v2" || !statistics->data.is_object()) {
+    why = "量测需要profile.LineFit.v2拟合统计";
     return false;
   }
   try {
     const auto& stats = statistics->data;
-    if (!stats.at("schemaVersion").is_number_integer() || stats.at("schemaVersion") != 1 ||
-        !stats.at("unit").is_string() || stats.at("unit") != "m" ||
-        !stats.at("geometryHash").is_string() ||
-        stats.at("geometryHash") != profile_contract::geometryHash(geometry)) {
-      why = "拟合统计版本、米制单位或几何指纹不匹配";
+    if (!stats.at("schemaVersion").is_number_integer() || stats.at("schemaVersion") != 2) {
+      why = "拟合统计版本不匹配";
       return false;
     }
     FittedLine result;
-    if (!profile_contract::parse(stats.at("context"), result.descriptor, why))
-      return false;
-    if (stats.at("frame") != result.descriptor.frame ||
-        stats.at("plane") != result.descriptor.plane || !stats.at("count").is_number_integer() ||
-        stats.at("count").get<double>() < 3 ||
-        stats.at("count").get<double>() > result.descriptor.sourceCount ||
+    result.descriptor.frame = stats.at("frame").get<std::string>();
+    result.descriptor.plane = stats.at("plane").get<std::string>();
+    result.descriptor.handedness = stats.at("handedness").get<std::string>();
+    if (!stats.at("count").is_number_integer() || stats.at("count").get<double>() < 3 ||
         !stats.at("rms").is_number() || !std::isfinite(stats.at("rms").get<double>()) ||
         stats.at("rms").get<double>() < 0) {
-      why = "拟合统计坐标声明、点数或残差非法";
+      why = "拟合统计点数或残差非法";
       return false;
     }
     const auto& range = stats.at("abscissaRange");
@@ -77,7 +69,6 @@ bool fittedLine(const Data& geometry, const Record* statistics, FittedLine& outp
     result.line.maximum = range[1].get<double>();
     result.line.rms = stats.at("rms").get<double>();
     result.count = stats.at("count").get<std::uint64_t>();
-    result.context = stats.at("context");
     output = std::move(result);
     why.clear();
     return true;
@@ -102,9 +93,7 @@ Status gapFlush(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
     return failure(why, "leftStatistics");
   if (!fittedLine(in.get("right"), in.get("rightStatistics").asRecord(), right, why))
     return failure(why, "rightStatistics");
-  if (left.descriptor.frame != right.descriptor.frame ||
-      left.descriptor.plane != right.descriptor.plane ||
-      left.descriptor.handedness != right.descriptor.handedness)
+  if (!profile_contract::sameSpace(left.descriptor, right.descriptor))
     return failure("左右轮廓必须声明相同坐标帧、轴平面和手性", "rightStatistics");
   if (left.line.maximum >= right.line.minimum)
     return failure("左右实际采样范围必须按横坐标严格分离", "rightStatistics");
@@ -115,8 +104,8 @@ Status gapFlush(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
     return failure(why, "left", "no_result");
   out.set("gap", Data::measurement(measurement(result.gap)));
   out.set("flush", Data::measurement(measurement(result.flush)));
-  out.set("quality", Data::record(Record{"metrology.ProfileGapFlush.v1",
-                                         {{"schemaVersion", 1},
+  out.set("quality", Data::record(Record{"metrology.ProfileGapFlush.v2",
+                                         {{"schemaVersion", 2},
                                           {"frame", left.descriptor.frame},
                                           {"plane", left.descriptor.plane},
                                           {"handedness", left.descriptor.handedness},
@@ -125,9 +114,7 @@ Status gapFlush(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
                                           {"leftCount", left.count},
                                           {"rightCount", right.count},
                                           {"leftRms", left.line.rms},
-                                          {"rightRms", right.line.rms},
-                                          {"leftContext", left.context},
-                                          {"rightContext", right.context}}}));
+                                          {"rightRms", right.line.rms}}}));
   return Status::Ok();
 }
 
@@ -136,18 +123,12 @@ Status signedPointLine(const Inputs& in, const ParamView& p, Outputs& out, ExecC
   const auto& lineData = in.get("line");
   const auto* point = pointData.asPoint2D();
   const auto* line = lineData.asLine2D();
-  ProfileDescriptor pointDescriptor, lineDescriptor;
+  ProfileDescriptor space;
   std::string why;
-  if (!profile_contract::geometryMatches(pointData, in.get("pointContext").asRecord(),
-                                         pointDescriptor, why))
+  if (!profile_contract::geometrySpace(pointData, in.get("pointContext").asRecord(), space, why))
     return failure(why, "pointContext");
-  if (!profile_contract::geometryMatches(lineData, in.get("lineContext").asRecord(), lineDescriptor,
-                                         why))
+  if (!profile_contract::geometryInSpace(lineData, in.get("lineContext").asRecord(), space, why))
     return failure(why, "lineContext");
-  if (pointDescriptor.frame != lineDescriptor.frame ||
-      pointDescriptor.plane != lineDescriptor.plane ||
-      pointDescriptor.handedness != lineDescriptor.handedness)
-    return failure("点线必须声明相同坐标帧、轴平面和手性", "lineContext");
   const auto reference = p.vec2("positiveNormal");
   if (reference[0] == 0 && reference[1] == 0)
     return Status::Error(Phase::Execute, "bad_param", "正法向参考必须为非零向量", "positiveNormal");
@@ -174,21 +155,22 @@ Status signedPointLine(const Inputs& in, const ParamView& p, Outputs& out, ExecC
 void registerProfileMetrology(Registry& registry) {
   OperatorDesc op;
   op.id = "metrology.profile_gap_flush";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "轮廓拟合结果间隙与面差";
   op.category = "计量/轮廓";
   op.keywords = {"profile", "gap", "flush", "间隙", "面差"};
   op.capabilities = {true, false, true};
-  op.doc = "接收已拟合的米制直线及其profile.LineFit.v1统计，核对几何指纹与声明坐标语义。"
+  op.doc = "接收已拟合的米制直线及其profile.LineFit.v2统计，核对左右坐标空间。"
            "不重新拟合，不推断标定正确性；允许不同源身份，但坐标帧、轴平面及手性必须相同。"
            "间隙为右采样最小横坐标减左采样最大横坐标，面差为共同referenceX处右减左。";
   op.inputs = {{"left", "Line2D", "左拟合直线", "米制直线，与leftStatistics配套。", true},
                {"right", "Line2D", "右拟合直线", "米制直线，与rightStatistics配套。", true},
-               {"leftStatistics", "Record", "左拟合统计", "profile.LineFit.v1。", true},
-               {"rightStatistics", "Record", "右拟合统计", "profile.LineFit.v1。", true}};
+               {"leftStatistics", "Record", "左拟合统计", "profile.LineFit.v2。", true},
+               {"rightStatistics", "Record", "右拟合统计", "profile.LineFit.v2。", true}};
   op.outputs = {{"gap", "Measurement", "间隙", "采样边缘横坐标间距，m。", true},
                 {"flush", "Measurement", "有符号面差", "共同横坐标的右减左纵差，m。", true},
-                {"quality", "Record", "质量", "metrology.ProfileGapFlush.v1。", true}};
+                {"quality", "Record", "质量", "metrology.ProfileGapFlush.v2。", true}};
   op.params = {scalar("referenceX", "面差横坐标", 0, -1e6, 1e6),
                scalar("maxResidual", "最大正交RMS", 0.001, 1e-12, 1e3),
                scalar("maxExtrapolation", "最大外推距离", 0.05, 0, 1e3)};
@@ -197,18 +179,19 @@ void registerProfileMetrology(Registry& registry) {
 
   op = {};
   op.id = "metrology.signed_point_line";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "有符号点线距离";
   op.category = "计量/二维几何";
   op.keywords = {"signed", "point", "line", "distance", "垂足", "有符号距离"};
   op.capabilities = {true, false, true};
-  op.doc = "核对点线的米制单位、几何内容指纹及声明坐标帧、轴平面和手性；允许不同采样源。"
+  op.doc = "核对点线的米制单位及声明坐标帧、轴平面和手性；允许不同采样源。"
            "将直线方向归一化，以positiveNormal指定分析平面中的距离正法向，参考不能与法向正交。"
            "输出米制有符号垂距和垂足，不推断业务方向、物理标定或判定阈值。";
   op.inputs = {{"point", "Point2D", "点", "米制点。", true},
                {"line", "Line2D", "直线", "米制无限直线；端点不限制垂足。", true},
-               {"pointContext", "Record", "点坐标上下文", "profile.Geometry.v1。", true},
-               {"lineContext", "Record", "直线坐标上下文", "profile.Geometry.v1。", true}};
+               {"pointContext", "Record", "点坐标上下文", "profile.Geometry.v3。", true},
+               {"lineContext", "Record", "直线坐标上下文", "profile.Geometry.v3。", true}};
   op.outputs = {{"distance", "Measurement", "有符号距离", "按指定正法向的米制垂距。", true},
                 {"foot", "Point2D", "垂足", "米制Point2D。", true}};
   Param reference;

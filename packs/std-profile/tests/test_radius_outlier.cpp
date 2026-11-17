@@ -5,7 +5,6 @@
 #include "helpers.h"
 #include "lyflow/profile.h"
 #include "lyflow_pcl/filters.h"
-#include "lyflow_profile/provenance.h"
 
 namespace lyflow::packs::std_profile {
 void registerProfileRadiusOutlier(Registry&);
@@ -82,7 +81,6 @@ TEST_CASE(
     "Profile radius filtering matches the shared finite kernel and retains all original channels and slots") {
   for (const char* unit : {"m", "mm"}) {
     const auto source = profileFixture(false, unit);
-    const auto before = profile_contract::context(source);
     test::StubContext ctx;
     pcl_support::RadiusSelection expected;
     REQUIRE(pcl_support::radiusOutlier(cloudFixture(), .5, 1, expected, ctx).ok);
@@ -103,15 +101,9 @@ TEST_CASE(
     CHECK(selected->cloud->intensity == std::vector<float>{1, 2, 3, 4});
     CHECK(selected->cloud->normals.size() == 12);
     CHECK(selected->cloud->rgb.size() == 12);
-    CHECK(profile_contract::context(source) == before);
-    std::string why;
-    nlohmann::json sources;
-    CHECK(profile_contract::profileSources(call.out("profile"), call.out("provenance").asRecord(),
-                                           sources, why));
   }
 }
-TEST_CASE(
-    "Profile radius filtering masks finite-invalid samples without fabricating neighbors or lineage") {
+TEST_CASE("Profile radius filtering masks finite-invalid samples without fabricating neighbors") {
   auto source = profileFixture(true);
   auto value = *source.asProfile();
   auto cloud = *value.cloud;
@@ -119,33 +111,14 @@ TEST_CASE(
   value.cloud = std::make_shared<const PointCloud>(std::move(cloud));
   value.validity[4] = 0;
   source = Data::profile(std::move(value));
-  Record provenance;
-  std::string why;
-  REQUIRE(profile_contract::rebindProvenance(source, source, nullptr, provenance, why));
-  auto reference = *source.asProfile();
-  reference.descriptor.sourceId = "ROI-camera-B";
-  const auto extra = Data::profile(std::move(reference));
-  Record extended;
-  REQUIRE(profile_contract::extendProvenanceSources(
-      source, provenance, nlohmann::json::array({profile_contract::context(extra)}), extended,
-      why));
   test::OpCall call(radiusRegistry());
-  call.inputs = {{"profile", source}, {"provenance", Data::record(extended)}};
+  call.inputs = {{"profile", source}};
   REQUIRE(call.run("profile.radius_outlier",
                    {{"radius", Value::number(.51)}, {"minNeighbors", Value::integer(1)}})
               .ok);
   CHECK(call.out("kept").asIndices()->values == std::vector<std::int32_t>{0, 2, 3});
   CHECK(call.out("removed").asIndices()->values == std::vector<std::int32_t>{1, 4});
   CHECK(call.out("profile").asProfile()->sourceIndices == std::vector<std::uint32_t>{2, 11, 20});
-  nlohmann::json sources;
-  REQUIRE(profile_contract::profileSources(call.out("profile"), call.out("provenance").asRecord(),
-                                           sources, why));
-  CHECK(std::find(sources.begin(), sources.end(), profile_contract::context(extra)) !=
-        sources.end());
-  extended.data["profileContext"]["profileHash"] = std::string(32, '0');
-  call.inputs["provenance"] = Data::record(extended);
-  CHECK_FALSE(call.run("profile.radius_outlier").ok);
-  CHECK(call.outputs.empty());
 }
 TEST_CASE("Shared radius kernel rejects illegal parameters atomically and honors cancellation") {
   const auto cloud = cloudFixture();

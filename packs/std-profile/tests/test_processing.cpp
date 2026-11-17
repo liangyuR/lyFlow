@@ -6,7 +6,6 @@
 
 #include "helpers.h"
 #include "lyflow/profile.h"
-#include "lyflow_profile/context.h"
 
 namespace lyflow::packs::std_profile {
 void registerProfileProcessing(Registry&);
@@ -204,9 +203,9 @@ TEST_CASE("Profile processing: face pieces use active acquisition adjacency befo
               .ok);
   const auto* output = call.out("faces").asRecord();
   REQUIRE(output);
-  CHECK(output->type == "profile.Faces.v1");
+  CHECK(output->type == "profile.Faces.v2");
   const auto& result = output->data;
-  CHECK(result["schemaVersion"] == 1);
+  CHECK(result["schemaVersion"] == 2);
   CHECK(result["workingUnit"] == "mm");
   CHECK(result["indexSpace"] == "active_samples");
   CHECK(result["slotCount"] == 7);
@@ -228,11 +227,6 @@ TEST_CASE("Profile processing: face pieces use active acquisition adjacency befo
   CHECK(result["faces"].empty());
   CHECK_FALSE(result.contains("xyz"));
   CHECK_FALSE(result.contains("sourceIndices"));
-  std::string why;
-  CHECK(profile_contract::matches(source, result["context"], why));
-  auto changed = *source.asProfile();
-  changed.validity[0] = 0;
-  CHECK_FALSE(profile_contract::matches(Data::profile(changed), result["context"], why));
   CHECK(source.asProfile()->cloud->xyz[18] == 0);
   CHECK(source.asProfile()->sourceIndices[6] == 22);
 }
@@ -260,7 +254,6 @@ TEST_CASE("Profile processing: extracted TLS faces agree across selected planes 
       CHECK(face["dx"].get<double>() == doctest::Approx(1));
       CHECK(face["dz"].get<double>() == doctest::Approx(0));
       CHECK(face["n"] == 101);
-      CHECK(result["context"]["descriptor"]["handedness"] == "reflected");
     }
 }
 

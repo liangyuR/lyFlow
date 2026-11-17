@@ -1,23 +1,23 @@
 # 公共 Profile 选择、稳健拟合与度量
 
-M4b 随产品 1.4.4 增加 10 项公共算子：6 项 Profile 能力、3 项度量及 1 项 Box2D 构造。M4c 随产品 1.4.5 增加下列五项公开图节点，并把 Gap 消费者切换到原生契约；C ABI 布局保持 1.4 系列兼容。当前 `std-profile` 为 0.4.0，`std-geometry` 为 0.7.0，`std-metrology` 为 0.3.0；场景边界见 [Gap 原生迁移](gap-profile-migration.md)。
+M4b 随产品 1.4.4 增加 10 项公共算子：6 项 Profile 能力、3 项度量及 1 项 Box2D 构造。M4c 随产品 1.4.5 增加下列五项公开图节点，并把 Gap 消费者切换到原生契约；C ABI 布局保持 1.4 系列兼容。当前 `std-profile` 为 0.5.0，`std-geometry` 为 0.7.0，`std-metrology` 为 0.4.0；场景边界见 [Gap 原生迁移](gap-profile-migration.md)。
 
 | M4c 新 ID                | 契约                                                                                        |
 | ------------------------ | ------------------------------------------------------------------------------------------- |
 | `geometry.box_anchor`    | 从明确的 Box2D 得到指定锚点，传递完整几何来源，不依赖工件角色。                             |
-| `profile.select_indices` | 按实际输入轮廓上的索引选择，保留原槽身份、通道和父来源，不把原始索引当作当前数组下标。      |
-| `profile.merge`          | 显式合并顺序与可选通道策略，输出新 Profile 和原始来源映射；不因物理来源相同而丢弃逻辑角色。 |
-| `profile.crop_box`       | 米制 ROI 与严格上下文成对输入，选择已有观测，输出实际索引及来源。                           |
-| `profile.radius_outlier` | 显式 PCL 半径滤波，复用标准点云数值实现并保持 Profile 采样来源；没有后端时不注册占位入口。  |
+| `profile.select_indices` | 按实际输入轮廓上的索引选择，保留原槽身份和通道，不把原始索引当作当前数组下标。              |
+| `profile.merge`          | 显式合并顺序与可选通道策略，输出新 Profile 及不重叠的原始索引区间。                         |
+| `profile.crop_box`       | 米制 ROI 与同空间上下文成对输入，选择已有观测，输出实际索引。                               |
+| `profile.radius_outlier` | 显式 PCL 半径滤波，复用标准点云数值实现并保持 Profile 采样槽；没有后端时不注册占位入口。    |
 
-M4c 中 `profile.bind_geometry`、`profile.nearest_sample`、`profile.nearest_to_line`、`profile.filter_validity`、`profile.fit_line_robust`、`profile.fit_circle_robust` 使用算子版本 1.1.0，支持完整组合来源的绑定和传递。未授权的父来源、失效的几何内容或原槽映射不能通过仅匹配 sourceId 绕过校验。
+std-profile 0.5.0 / std-metrology 0.4.0 删除了来源集合、`profile.CompositeSources.v1`、全部 `provenance` 端口及内容/配方/绑定指纹。涉及的算子升为 2.0.0，旧图经 `lyflow migrate` 删除连到已退役输入（`provenance`、`aProvenance`/`bProvenance`、`referenceGeometry`/`referenceContext`）的边，`profile.merge` 同时删除 `roleA`/`roleB` 参数。信息 Record 去掉内嵌轮廓上下文与指纹并升版本，例如 `profile.LineFit.v2`、`profile.Selection.v2`、`profile.SampleSelection.v2`、`profile.LineFitRobust.v2`、`metrology.FlushPointLine.v2`。
 
 ## 注册与依赖
 
 | 算子                         | 契约                                                                                |
 | ---------------------------- | ----------------------------------------------------------------------------------- |
 | `geometry.box_2d`            | 构造单位明确的轴对齐框；边界须有限且 min≤max，不自动交换。                          |
-| `profile.bind_geometry`      | 调用方显式确认 frame、plane，将米制点/线/圆/框绑定到 Profile 来源；不做缩放或换轴。 |
+| `profile.bind_geometry`      | 调用方显式确认 frame、plane，输出米制点/线/圆/框所在空间的上下文；不做缩放或换轴。  |
 | `profile.nearest_sample`     | 全部有效槽中按锚点欧氏距离选样本；等距保留原槽序。                                  |
 | `profile.nearest_to_line`    | 按无限直线垂距选有效样本，不限幅到显示线段。                                        |
 | `profile.filter_validity`    | 按掩码及 XYZ 有限性保槽或压缩，保持所有通道和原源索引。                             |
@@ -40,11 +40,11 @@ cmake -S core -B build/profile-public -G Ninja -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_
 
 Profile 仍使用[完整原生契约](profile-data-contract.md)：m/mm、XY/XZ/YZ、frame、handedness、sourceId、sourceCount、validity 和 sourceIndices。计算时按声明映射分析平面并换算到米，输出几何真实为米。图像像素几何不能直接送入这些物理度量节点。
 
-`profile.Geometry.v1` 的点线约束和严格校验保持原样。新增 `profile.Geometry.v2` 支持点、线、圆、框，绑定几何类型、米制单位、实际内容指纹及 1–64 项唯一来源上下文。所有来源须属于同一 frame、plane 和 handedness；原始载荷的 m/mm 可以不同，因为输出几何已统一为米。来源上下文包含小型描述和内容 hash，大数组继续保留在原生 Profile。
+几何上下文统一为 `profile.Geometry.v3`，只含 `schemaVersion`、`frame`、`plane`、`handedness`，供消费者判定几何与轮廓或其他几何处于同一物理空间。几何本身须为米制、坐标有限且非退化（零长线段、零方向、非正半径、min>max 的框均拒绝）；原始载荷的 m/mm 可以不同，因为输出几何已统一为米。上下文不绑定几何内容，也不记录来源；`profile.bind_geometry` 只表示调用方确认外部几何与该轮廓共用物理空间，不能当作标定正确或由该轮廓拟合得到的证明。混用帧/轴/手性或缺上下文均拒绝。
 
-`relation=declared` 表示调用方确认外部几何与该轮廓共用物理空间，不能当作标定正确或由该轮廓拟合得到的证明。拟合和派生测量使用 `relation=derived`，保留参与输入的全部来源，合并去重后超过 64 项明确失败。改几何内容后继续使用旧上下文、混用帧/轴/手性或缺上下文均拒绝。
+`profile.merge` 输出的 `sourceId` 为 `derived:composite/` 后按 a、b 顺序以 `+` 连接的父来源；父来源本身是复合轮廓时展开其后缀，例如 a 与（b+c）合并得到 `derived:composite/a+b+c`，`sourceCount` 为两者之和。
 
-最近样本输出小型 `profile.SampleSelection.v1`：原 slotIndex、物理 sourceIndex、原 cloud.id 和米制距离；完整数组仍从透传的原 Profile 读取。有效性筛选的 valid/invalid 是原始 cloud.id 上的槽号，不能直接应用到压缩后的新点云。默认 `preserve_slots` 保持输入共享且 removedCount=0；显式 `compact` 按原序选择有效槽，保留 sourceCount、sourceIndices、强度、法线与 RGB。
+最近样本输出小型 `profile.SampleSelection.v2`：原 slotIndex、物理 sourceIndex、原 cloud.id 和米制距离；完整数组仍从透传的原 Profile 读取。有效性筛选的 valid/invalid 是原始 cloud.id 上的槽号，不能直接应用到压缩后的新点云。默认 `preserve_slots` 保持输入共享且 removedCount=0；显式 `compact` 按原序选择有效槽，保留 sourceCount、sourceIndices、强度、法线与 RGB。
 
 ## 方法与测量定义
 

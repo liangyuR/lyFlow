@@ -1,47 +1,28 @@
 #include "profile_migration.h"
 #include "profile_circles.h"
 
-#include <algorithm>
+#include <unordered_map>
 #include <limits>
 #include <set>
 
 #include "lyflow/profile.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 
 namespace lyflow::packs::gap::fine {
 std::vector<Issue> validateFitGapCircles(const ParamView&, const std::set<std::string>&);
 }
 namespace lyflow::packs::gap::profile_scene {
 namespace {
-using Json = nlohmann::json;
 Status bad(const std::string& message, const char* port = "merged",
            const char* code = "bad_input") {
   return Status::Error(Phase::Execute, code, message, {}, port);
 }
 Status cancelled() { return bad("间隙圆拟合已取消", "merged", "cancelled"); }
 bool present(const Data& data) { return data.kind() != Data::Kind::None; }
-bool joinSources(Json& into, const Json& from, std::string& why) {
-  for (const auto& source : from)
-    if (std::find(into.begin(), into.end(), source) == into.end())
-      into.push_back(source);
-  if (into.size() > 64) {
-    why = "圆拟合几何来源超过64项预算";
-    return false;
-  }
-  return true;
-}
 Status physical(const Data& geometry, const Data& context, const ProfileDescriptor& expected,
-                Json& sources, const char* port) {
-  ProfileDescriptor space;
-  Json parents;
+                const char* port) {
   std::string why;
-  const auto* record = context.asRecord();
-  if (!record || record->type != "profile.Geometry.v2" ||
-      !profile_contract::geometryMatchesPhysical(geometry, record, space, why, &parents))
-    return bad(why.empty() ? "几何需要严格v2内容绑定上下文" : why, port);
-  if (!profile_contract::sameSpace(expected, space))
-    return bad("圆拟合几何与轮廓的物理空间不一致", port);
-  if (!joinSources(sources, parents, why))
+  if (!profile_contract::geometryInSpace(geometry, context.asRecord(), expected, why))
     return bad(why, port);
   return Status::Ok();
 }
@@ -106,10 +87,6 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
   if (ctx.cancelled())
     return cancelled();
   const std::array<const Data*, 3> sources{&inputs.merged, &inputs.primary, &inputs.secondary};
-  const std::array<const Data*, 3> provenanceData{
-      &inputs.mergedProvenance, &inputs.primaryProvenance, &inputs.secondaryProvenance};
-  std::array<const Record*, 3> provenance{};
-  Json geometrySources = Json::array();
   std::string why;
   for (std::size_t i = 0; i < sources.size(); ++i) {
     const auto* profile = sources[i]->asProfile();
@@ -117,15 +94,10 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
       return bad("输入轮廓超过原槽索引范围", "merged", "budget_exceeded");
     if (i && !profile_contract::sameSpace(sources[0]->asProfile()->descriptor, profile->descriptor))
       return bad("三路轮廓必须在同一明确物理空间");
-    provenance[i] = provenanceData[i]->asRecord();
-    Json parents;
-    if (!profile_contract::profileSources(*sources[i], provenance[i], parents, why) ||
-        !joinSources(geometrySources, parents, why))
-      return bad(why, "mergedProvenance");
   }
   const auto& space = inputs.merged.asProfile()->descriptor;
   for (std::size_t i = 0; i < 2; ++i) {
-    if (auto status = physical(inputs.boxes[i], inputs.boxContexts[i], space, geometrySources,
+    if (auto status = physical(inputs.boxes[i], inputs.boxContexts[i], space,
                                i ? "boxRightContext" : "boxLeftContext");
         !status.ok)
       return status;
@@ -137,7 +109,7 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
     if (present(*lines[i]) != present(*lineContexts[i]))
       return bad("参考线与上下文须成对提供", "refLineContext");
     if (present(*lines[i]))
-      if (auto status = physical(*lines[i], *lineContexts[i], space, geometrySources,
+      if (auto status = physical(*lines[i], *lineContexts[i], space,
                                  i ? "refLineRightContext" : "refLineContext");
           !status.ok)
         return status;
@@ -165,8 +137,9 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
     return status;
   CirclePairResult result;
   result.quality = *legacyResults.at("quality").asRecord();
-  result.quality.type = "gap.CircleFitPair.v2";
-  result.quality.data["schemaVersion"] = 2;
+  result.quality.type = "gap.CircleFitPair.v3";
+  result.quality.data["schemaVersion"] = 3;
+  const auto context = Data::record(profile_contract::geometryContext(space));
   const std::array<const char*, 2> sideNames{"left", "right"};
   for (std::size_t side = 0; side < 2; ++side) {
     if (ctx.cancelled())
@@ -174,66 +147,23 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
     const auto sourceIndex = trace.sides[side].source == CircleSource::Primary     ? 1U
                              : trace.sides[side].source == CircleSource::Secondary ? 2U
                                                                                    : 0U;
-    const auto& original = *sources[sourceIndex];
-    const auto* profile = original.asProfile();
+    const auto* profile = sources[sourceIndex]->asProfile();
     const auto& slots = trace.sides[side].slots;
     Profile selected = *profile;
     selected.validity.clear();
     selected.sourceIndices.clear();
-    for (std::size_t i = 0; i < slots.size(); ++i) {
-      if ((i & 1023U) == 0 && ctx.cancelled())
-        return cancelled();
-      const auto slot = slots[i];
-      if (slot < 0 || static_cast<std::size_t>(slot) >= profile->pointCount() ||
-          !profile->validity[slot])
-        return bad("拟合云原槽追踪非法", sideNames[side], "invalid_geometry");
+    for (const auto slot : slots) {
       selected.validity.push_back(profile->validity[slot]);
       selected.sourceIndices.push_back(profile->sourceIndices[slot]);
     }
     selected.cloud = std::make_shared<const PointCloud>(profile->cloud->select(slots));
     result.profiles[side] = Data::profile(std::move(selected));
-    Record rebound, extended;
-    if (!profile_contract::rebindProvenance(original, result.profiles[side],
-                                            provenance[sourceIndex], rebound, why) ||
-        !profile_contract::extendProvenanceSources(result.profiles[side], rebound, geometrySources,
-                                                   extended, why))
-      return bad(why, "mergedProvenance");
-    result.provenances[side] = Data::record(std::move(extended));
-    const auto& circle = legacyResults.at(sideNames[side]);
-    if (!profile_contract::validGeometryV2(circle, why))
-      return bad(why, sideNames[side], "invalid_geometry");
-    result.circles[side] = circle;
-    Json allSources = geometrySources;
-    if (!joinSources(allSources, Json::array({profile_contract::context(result.profiles[side])}),
-                     why))
-      return bad(why);
-    try {
-      result.contexts[side] =
-          Data::record(Record{"profile.Geometry.v2",
-                              profile_contract::geometryContextV2FromSources(circle, allSources)});
-    } catch (const std::invalid_argument& error) {
-      return bad(error.what());
-    }
+    result.circles[side] = legacyResults.at(sideNames[side]);
+    result.contexts[side] = context;
     const auto* inliers = legacyResults.at(side == 0 ? "leftInliers" : "rightInliers").asIndices();
-    if (!inliers)
-      return bad("拟合未返回内点索引");
-    for (auto slot : inliers->values)
-      if (slot < 0 || static_cast<std::size_t>(slot) >= slots.size())
-        return bad("内点索引越界");
     result.inliers[side] =
         Data::indices(Indices{result.profiles[side].asProfile()->cloud->id, inliers->values});
-    auto& quality = result.quality.data[sideNames[side]];
-    quality["logicalRole"] = sideNames[side];
-    quality["selectedInput"] = names[sourceIndex];
-    quality["selectedSourceId"] = profile->descriptor.sourceId;
-    quality["profileContext"] = profile_contract::context(result.profiles[side]);
-    quality["actualSourceIds"] = Json::array();
-    for (const auto& segment : rebound.data.at("recipe").at("segments")) {
-      const auto& identity = segment.at("sourceContext").at("descriptor").at("sourceId");
-      auto& identities = quality["actualSourceIds"];
-      if (std::find(identities.begin(), identities.end(), identity) == identities.end())
-        identities.push_back(identity);
-    }
+    result.quality.data[sideNames[side]]["selectedInput"] = names[sourceIndex];
   }
   if (ctx.cancelled())
     return cancelled();
@@ -243,20 +173,22 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
 void registerProfileGapCircles(Registry& registry) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
-  op.version = "2.0.0";
+  op.version = "3.0.0";
   declareGapGraphUpgrade(op);
+  op.migrations.push_back(
+      {2, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+         return profile_contract::retireInputs(
+             inputs, {"mergedProvenance", "primaryProvenance", "secondaryProvenance"});
+       }});
   op.label = "原生轮廓间隙双侧圆拟合";
   op.category = "间隙/拟合";
   op.keywords = {"circle pair", "profile", "camera fallback", "间隙", "圆弧", "双相机"};
   for (const auto* name : {"merged", "primary", "secondary"})
     op.inputs.push_back({name, "Profile", name, "同空间明确单位及原槽来源。", true});
-  op.inputs.push_back({"mergedProvenance", "Record", "合并来源", "严格绑定merged Profile。", true});
-  for (const auto* name : {"primaryProvenance", "secondaryProvenance"})
-    op.inputs.push_back({name, "Record", name, "可选输入来源。", false});
   for (const auto* side : {"Left", "Right"}) {
     op.inputs.push_back({std::string("box") + side, "Box2D", side, "米制业务ROI。", true});
-    op.inputs.push_back(
-        {std::string("box") + side + "Context", "Record", "ROI上下文", "严格v2内容绑定。", true});
+    op.inputs.push_back({std::string("box") + side + "Context", "Record", "ROI上下文",
+                         "ROI所在的profile.Geometry.v3空间。", true});
   }
   for (const auto* name : {"refLine", "refLineRight"}) {
     op.inputs.push_back({name, "Line2D", name, "可选约束参考线。", false});
@@ -266,16 +198,14 @@ void registerProfileGapCircles(Registry& registry) {
   for (const auto* side : {"left", "right"}) {
     op.outputs.push_back({side, "Circle2D", side, "米制所选圆。", true});
     op.outputs.push_back({std::string(side) + "Context", "Record", "圆上下文",
-                          "全部实际测量父、ROI及参考线来源。", true});
+                          "圆所在的profile.Geometry.v3空间。", true});
     op.outputs.push_back({std::string(side) + "Profile", "Profile", "拟合轮廓",
                           "所选ROI的原生采样与完整通道。", true});
     op.outputs.push_back(
-        {std::string(side) + "Provenance", "Record", "拟合来源", "绑定所选Profile的来源。", true});
-    op.outputs.push_back(
         {std::string(side) + "Inliers", "Indices", "内点", "绑定所选Profile实际cloud.id。", true});
   }
-  op.outputs.push_back({"quality", "Record", "质量", "保留旧数值与明确实际来源。", true});
-  op.outputs.back().contract = {{"recordType", "gap.CircleFitPair.v2"}};
+  op.outputs.push_back({"quality", "Record", "质量", "保留旧数值与各侧所选输入路。", true});
+  op.outputs.back().contract = {{"recordType", "gap.CircleFitPair.v3"}};
   op.params = circlePairParams();
   op.validate = &validateCirclePairParams;
   op.capabilities.cancellable = true;
@@ -285,11 +215,6 @@ void registerProfileGapCircles(Registry& registry) {
     inputs.merged = in.get("merged");
     inputs.primary = in.get("primary");
     inputs.secondary = in.get("secondary");
-    inputs.mergedProvenance = in.get("mergedProvenance");
-    if (in.has("primaryProvenance"))
-      inputs.primaryProvenance = in.get("primaryProvenance");
-    if (in.has("secondaryProvenance"))
-      inputs.secondaryProvenance = in.get("secondaryProvenance");
     inputs.boxes = {in.get("boxLeft"), in.get("boxRight")};
     inputs.boxContexts = {in.get("boxLeftContext"), in.get("boxRightContext")};
     if (in.has("refLine"))
@@ -310,7 +235,6 @@ void registerProfileGapCircles(Registry& registry) {
       out.set(side, result.circles[i]);
       out.set(side + "Context", result.contexts[i]);
       out.set(side + "Profile", result.profiles[i]);
-      out.set(side + "Provenance", result.provenances[i]);
       out.set(side + "Inliers", result.inliers[i]);
     }
     out.set("quality", Data::record(std::move(result.quality)));

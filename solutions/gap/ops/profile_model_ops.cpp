@@ -5,7 +5,6 @@
 #include <array>
 #include <cmath>
 
-#include "lyflow_profile/provenance.h"
 #include "lyflow_profile/selection.h"
 #ifdef LYFLOW_GAP_MODEL
 #include "lyflow_ml/runtime.h"
@@ -60,8 +59,9 @@ Param camera(const char* name) {
 OperatorDesc description(const char* id, const char* label) {
   OperatorDesc op;
   op.id = id;
-  op.version = "2.0.0";
+  op.version = "3.0.0";
   declareGapGraphUpgrade(op);
+  op.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   op.label = label;
   op.category = "间隙/模型";
   op.capabilities.cancellable = true;
@@ -144,8 +144,6 @@ Status labelsToCloud(const Data& scanData, const Data& labelData, const std::str
   std::string why;
   if (!profile_scene::readScanPair(scanData, scan, why))
     return bad(why, "scan");
-  if (!matchesSensors(labelData, *scan.sensorPrimary, *scan.sensorSecondary, why))
-    return bad(why, "labels");
   LabelRowsView labels;
   if (!readLabelRows(labelData, labels, why))
     return bad(why, "labels");
@@ -230,8 +228,8 @@ Status locateModel(const Data& input, const LocateModelOptions& options, LocateM
     return status;
   }
   Data labels;
-  if (auto status = labelsFromLogits(logits, *scan.sensorPrimary, *scan.sensorSecondary, labels,
-                                     context, &modelInput);
+  if (auto status =
+          labelsFromLogits(logits, *scan.sensorPrimary, *scan.sensorSecondary, labels, context);
       !status.ok)
     return status;
   ModelRegionResult regions;
@@ -245,7 +243,6 @@ Status locateModel(const Data& input, const LocateModelOptions& options, LocateM
   const auto* rightContext = regions.boxes.fields.contexts[3].asRecord();
   profile_contract::SelectionResult finite[2];
   const Data* measured[2]{scan.primary, scan.secondary};
-  const Record* provenance[2]{&scan.primaryProvenance, &scan.secondaryProvenance};
   profile_contract::SelectionOptions selection;
   selection.emptyPolicy = "allow";
   for (int side = 0; side < 2; ++side) {
@@ -257,27 +254,21 @@ Status locateModel(const Data& input, const LocateModelOptions& options, LocateM
       if (profile.validity[i])
         keep.values.push_back(static_cast<std::int32_t>(i));
     }
-    if (auto status = profile_contract::selectProfileIndices(
-            *measured[side], keep, provenance[side], selection, finite[side], context);
+    if (auto status = profile_contract::selectProfileIndices(*measured[side], keep, selection,
+                                                             finite[side], context);
         !status.ok)
       return status;
   }
   const auto& rawInfo = scan.info->data;
-  profile_scene::ScanMetadata finiteMetadata{rawInfo["sensorFrame"],
-                                             rawInfo["measurementFrame"],
-                                             "processed",
-                                             rawInfo["guard"],
-                                             nullptr,
-                                             rawInfo["origins"],
-                                             rawInfo["processing"],
-                                             finite[0].provenance,
-                                             finite[1].provenance};
+  profile_scene::ScanMetadata finiteMetadata{
+      rawInfo["sensorFrame"], rawInfo["measurementFrame"], "processed", rawInfo["guard"], nullptr,
+      rawInfo["origins"],     rawInfo["processing"]};
   finiteMetadata.processing["method"] = "model";
   finiteMetadata.processing["details"]["operation"] = "pre_roll_validity_compact";
   Data finiteScan;
   if (!profile_scene::makeScanPair(*scan.sensorPrimary, *scan.sensorSecondary, finite[0].profile,
-                                   finite[1].profile, *scan.merged, *scan.mergedProvenance,
-                                   finiteMetadata, finiteScan, why))
+                                   finite[1].profile, *scan.merged, finiteMetadata, finiteScan,
+                                   why))
     return bad(why, "scan");
   profile_scene::RollCropResult crop;
   if (auto status = profile_scene::rollAnchoredCrop(finiteScan, regions.boxes.fields.boxes[2],
@@ -303,20 +294,15 @@ Status locateModel(const Data& input, const LocateModelOptions& options, LocateM
   auto processing = info["processing"];
   processing["method"] = "model";
   processing["status"] = "complete";
-  const auto* labelInfo = labels.asBundle()->field("info")->asRecord();
-  processing["details"]["labelsHash"] = labelInfo->data["labelsHash"];
-  processing["details"]["inputHash"] = labelInfo->data["inputHash"];
-  processing["details"]["logitsHash"] = labelInfo->data["logitsHash"];
   processing["details"]["inferenceAssociation"] = "direct_infer_call";
   processing["details"]["modelFingerprint"] = ::lyflow::ml::modelFingerprint(options.modelPath);
   processing["details"]["mergedRebuilt"] = false;
   profile_scene::ScanMetadata metadata{
-      info["sensorFrame"],   info["measurementFrame"],  "processed",
-      info["guard"],         crop.status.data,          info["origins"],
-      std::move(processing), cropped.primaryProvenance, cropped.secondaryProvenance};
+      info["sensorFrame"], info["measurementFrame"], "processed",          info["guard"],
+      crop.status.data,    info["origins"],          std::move(processing)};
   if (!profile_scene::makeScanPair(*cropped.sensorPrimary, *cropped.sensorSecondary,
-                                   *cropped.primary, *cropped.secondary, *cropped.merged,
-                                   *cropped.mergedProvenance, metadata, output.scan, why))
+                                   *cropped.primary, *cropped.secondary, *cropped.merged, metadata,
+                                   output.scan, why))
     return bad(why, "scan");
   if (context.cancelled())
     return cancelled();
@@ -327,6 +313,8 @@ Status locateModel(const Data& input, const LocateModelOptions& options, LocateM
 
 void registerProfileModelOps(Registry& registry) {
   auto tensor = description("gap.profile_tensor", "原生剖面特征张量构建");
+  tensor.version = "2.0.0";
+  tensor.migrations.pop_back();
   tensor.inputs = {
       {"primary", "Profile", "首传感器原槽", "1280槽、XZ、acquisition、原源索引。", true},
       {"secondary", "Profile", "次传感器原槽", "RGB.R为旧约定强度，保NaN槽。", true}};
@@ -343,21 +331,18 @@ void registerProfileModelOps(Registry& registry) {
   auto decode = description("gap.labels_from_logits", "原生逐槽标签解码");
   decode.inputs = {{"tensor", "Tensor", "logits", "[2,类别数,1280]，并列保较小类别。", true},
                    {"primary", "Profile", "首传感器原槽", "标签来源声明。", true},
-                   {"secondary", "Profile", "次传感器原槽", "标签来源声明。", true},
-                   {"modelInput", "Tensor", "外部输入关联声明",
-                    "可选；核对特征内容，不证明外部推理实际使用它。", false}};
-  decode.outputs = {{"labels", "Bundle<gap.LabelRows.v2>", "原生标签行",
-                     "大数组保留Tensor，info仅绑定指纹与完整来源。", true}};
-  decode.doc =
-      "外部logits与输入的关联为显式软件声明；仅locate_model直调路径使用实际同次infer输入。";
+                   {"secondary", "Profile", "次传感器原槽", "标签来源声明。", true}};
+  decode.migrations.back().topology = [](const nlohmann::json&,
+                                         const std::vector<MigrationInput>& inputs) {
+    return profile_contract::retireInputs(inputs, {"modelInput"});
+  };
+  decode.outputs = {{"labels", "Bundle<gap.LabelRows.v3>", "原生标签行",
+                     "大数组保留Tensor，info记录类别数。", true}};
+  decode.doc = "逐槽取最大logit的类别；logits与传感器原槽的关联由连线声明。";
   decode.compute = [](const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx) {
-    const auto* logits = in.get("tensor").asTensor();
-    const auto* model = in.get("modelInput").asTensor();
-    if (!logits || (in.has("modelInput") && !model))
-      return bad("logits与关联输入必须为原生Tensor", "tensor");
     Data result;
-    auto status =
-        labelsFromLogits(*logits, in.get("primary"), in.get("secondary"), result, ctx, model);
+    auto status = labelsFromLogits(*in.get("tensor").asTensor(), in.get("primary"),
+                                   in.get("secondary"), result, ctx);
     if (!status.ok)
       return status;
     out.set("labels", std::move(result));
@@ -366,20 +351,20 @@ void registerProfileModelOps(Registry& registry) {
   registry.addOperator(std::move(decode));
   auto regions = description("gap.roi_from_labels", "原生标签区域提取");
   regions.inputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "场景", "模型标签sensor来源与实际量测XY映射。", true},
-      {"labels", "Bundle<gap.LabelRows.v2>", "标签行", "原生Tensor[2,1280]与完整来源绑定。", true},
+      {"scan", "Bundle<gap.ScanPair.v3>", "场景", "模型标签sensor来源与实际量测XY映射。", true},
+      {"labels", "Bundle<gap.LabelRows.v3>", "标签行", "原生Tensor[2,1280]。", true},
       {"backdrop", "PointCloud", "诊断底图", "可选，只读透传不参与推框。", false}};
-  regions.outputs = {{"rois", "Bundle<gap.RoiSet.v2>", "角色框", "四框及测量空间上下文。", true},
+  regions.outputs = {{"rois", "Bundle<gap.RoiSet.v3>", "角色框", "四框及测量空间上下文。", true},
                      {"flushBase", "Box2D", "基准面", "模型left_surface。", true},
-                     {"flushBaseContext", "Record", "基准上下文", "严格v2。", true},
+                     {"flushBaseContext", "Record", "基准上下文", "profile.Geometry.v3。", true},
                      {"flushRef", "Box2D", "参考面", "模型right_surface。", true},
-                     {"flushRefContext", "Record", "参考上下文", "严格v2。", true},
+                     {"flushRefContext", "Record", "参考上下文", "profile.Geometry.v3。", true},
                      {"gapLeft", "Box2D", "左缝框", "模型left_roll。", true},
-                     {"gapLeftContext", "Record", "左上下文", "严格v2。", true},
+                     {"gapLeftContext", "Record", "左上下文", "profile.Geometry.v3。", true},
                      {"gapRight", "Box2D", "右缝框", "模型right_roll。", true},
-                     {"gapRightContext", "Record", "右上下文", "严格v2。", true},
+                     {"gapRightContext", "Record", "右上下文", "profile.Geometry.v3。", true},
                      {"seam", "Box2D", "缝中心锚", "零尺寸方向锚。", true},
-                     {"seamContext", "Record", "缝上下文", "严格v2。", true},
+                     {"seamContext", "Record", "缝上下文", "profile.Geometry.v3。", true},
                      {"refinements", "Record", "细化诊断", "缺段时仍可查看。", true},
                      {"backdrop", "PointCloud", "只读底图", "没接时为空云。", true}};
   regions.params = refineParams();
@@ -403,8 +388,8 @@ void registerProfileModelOps(Registry& registry) {
   registry.addOperator(std::move(regions));
   auto colored = description("gap.labels_to_cloud", "原生标签诊断着色");
   colored.inputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "完整场景", "当前量测行仍需1280原槽。", true},
-      {"labels", "Bundle<gap.LabelRows.v2>", "标签行", "与实际sensor两路绑定。", true}};
+      {"scan", "Bundle<gap.ScanPair.v3>", "完整场景", "当前量测行仍需1280原槽。", true},
+      {"labels", "Bundle<gap.LabelRows.v3>", "标签行", "两路1280槽标签。", true}};
   colored.outputs = {
       {"cloud", "PointCloud", "诊断点云", "RGB8色与intensity类编号；不作为raw Profile。", true}};
   auto row = text("row", "primary");
@@ -451,11 +436,11 @@ void registerProfileModelOps(Registry& registry) {
   registry.addOperator(std::move(infer));
   auto locate = description("gap.locate_model", "原生分割模型定位");
   locate.inputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "原始场景", "只接受raw完整1280原槽。", true}};
+      {"scan", "Bundle<gap.ScanPair.v3>", "原始场景", "只接受raw完整1280原槽。", true}};
   locate.outputs = {
-      {"rois", "Bundle<gap.RoiSet.v2>", "角色框", "完整模型定位。", true},
-      {"scan", "Bundle<gap.ScanPair.v2>", "定位场景", "保留raw sensor与裁剪后的量测轮廓。", true},
-      {"labels", "Bundle<gap.LabelRows.v2>", "实际推理标签", "绑定实际同次输入与sensor槽。", true},
+      {"rois", "Bundle<gap.RoiSet.v3>", "角色框", "完整模型定位。", true},
+      {"scan", "Bundle<gap.ScanPair.v3>", "定位场景", "保留raw sensor与裁剪后的量测轮廓。", true},
+      {"labels", "Bundle<gap.LabelRows.v3>", "实际推理标签", "同次推理的逐槽标签。", true},
       {"refinements", "Record", "细化诊断", "完整缺段与细化状态。", true}};
   auto path = text("modelPath");
   path.type = ParamType::Path;

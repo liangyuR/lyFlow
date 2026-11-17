@@ -198,12 +198,12 @@ endif()
         require(profile["kind"] == "Profile" and profile["count"] == 16 and
                 profile["validCount"] == 14 and profile["descriptor"]["unit"] == "mm",
                 "CLI source Profile slots or raw unit changed")
-        mapping = record(values, "indexMap", "profile.Selection.v1")
-        selection = record(values, "selection", "profile.SampleSelection.v1")
-        quality = record(values, "fitQuality", "profile.LineFitRobust.v1")
+        mapping = record(values, "indexMap", "profile.Selection.v2")
+        selection = record(values, "selection", "profile.SampleSelection.v2")
+        quality = record(values, "fitQuality", "profile.LineFitRobust.v2")
         require(mapping["sourceCloudId"] == profile["cloudId"] == selection["sourceCloudId"],
                 "CLI native source identities are not bound to the same original Profile")
-        require(mapping["indexCount"] == 13 and mapping["weightedInlierCount"] == 13 and len(mapping) == 7,
+        require(mapping["indexCount"] == 13 and mapping["weightedInlierCount"] == 13 and len(mapping) == 6,
                 "Unique/weighted inlier mapping changed or contains large index arrays")
         require(selection["slotIndex"] == 15 and selection["sourceIndex"] == 15,
                 "Nearest sample lost the original physical index")
