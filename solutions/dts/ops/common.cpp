@@ -25,7 +25,8 @@ Status cancelledStatus() { return Status::Error(Phase::Execute, "cancelled", "DT
 
 nlohmann::json requireGraphMigration(const nlohmann::json&) {
   throw std::invalid_argument(
-      "旧DTS节点需要dtsProfile.v1图级请求：明确unit=mm、plane=XZ、frame、sourceId、sampleOrder=acquisition与精确v1来源");
+      "旧DTS节点需要dtsProfile.v1图级迁移（unit=mm、plane=XZ、sampleOrder=acquisition）：运行 lyflow migrate "
+      "<图> --profile-source <dts.profile_in节点> --profile-frame <frame> --profile-source-id <sourceId> --write");
 }
 
 Status sceneError(const std::exception& error, const char* port) {

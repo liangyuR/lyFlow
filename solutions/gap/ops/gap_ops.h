@@ -56,5 +56,6 @@ void registerMeasureReference(Registry& r);
 void registerResultBundle(Registry& r);
 void registerStandardGapImporter(Registry& r);
 void registerSnippets(Registry& r);
+void registerGraphMigrations(Registry& r);
 
 } // namespace lyflow::packs::gap

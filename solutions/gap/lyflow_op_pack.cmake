@@ -3,6 +3,7 @@ set(GAP_OP_SOURCES
   "${LYFLOW_PACK_DIR}/ops/common.cpp"
   "${LYFLOW_PACK_DIR}/ops/result_bundle.cpp"
   "${LYFLOW_PACK_DIR}/ops/snippets.cpp"
+  "${LYFLOW_PACK_DIR}/ops/graph_migration.cpp"
   "${LYFLOW_PACK_DIR}/ops/fit.cpp"
   "${LYFLOW_PACK_DIR}/ops/measure.cpp"
   "${LYFLOW_PACK_DIR}/ops/groove.cpp"

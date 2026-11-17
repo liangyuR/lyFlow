@@ -39,6 +39,7 @@ void registerPackOps(Registry& registry) {
   registerStandardGapImporter(registry);
 #endif
   registerSnippets(registry);
+  registerGraphMigrations(registry);
 }
 } // namespace lyflow::packs::gap
 namespace lyflow::packs::solution_gap {

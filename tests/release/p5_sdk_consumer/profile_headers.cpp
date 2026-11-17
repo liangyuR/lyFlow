@@ -1,5 +1,5 @@
 #include "lyflow/hash.h"
-#include "lyflow/graph_contract_upgrade.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/profile.h"
 
 lyflow::ProfileDescriptor profileHeaderContract() {

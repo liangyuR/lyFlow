@@ -14,7 +14,7 @@
 | 选择门禁步骤 | `pwsh -NoProfile -File scripts/check.ps1 -Steps frontend,mcp` | 可选步骤为 core、manifest、schema、bridge、client、cli、sdk、frontend、mcp；不给 `-Steps` 则全部运行。 |
 | C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算法数值、执行语义和 C ABI 契约的主要入口。 |
 | Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量首次与重复读取 `valueJson()` 计时，不代表整图耗时。 |
-| 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 24 个文件、94 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
+| 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 25 个文件、96 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
 | 编辑器类型 | `pnpm --filter @lyflow/editor typecheck` | 同时检查 React 18 与 React 19 类型契约。 |
 | 共享可视化 | `pnpm --filter @lyflow/visualization test` | 图像、点云等共享可视化逻辑。 |
 | Python SDK 与 worker | `python -B -m unittest discover -s python/tests -v` | Python 3.11 及以上与 NumPy；检查节点发现、数据交换和 worker 行为。 |

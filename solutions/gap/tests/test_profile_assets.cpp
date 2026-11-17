@@ -119,8 +119,10 @@ TEST_CASE("native gap assets pin executable versions and expose only available c
   CHECK(registry.validate().empty());
   for (const char* retired :
        {"gap.fit_line", "gap.selected_point", "gap.nearest_to_line", "gap.drop_non_finite",
-        "gap.to_measurement_frame", "gap.flush", "gap.gap", "gap.point_offset"})
+        "gap.to_measurement_frame", "gap.flush", "gap.gap", "gap.point_offset"}) {
     CHECK(registry.find(retired) == nullptr);
+    CHECK(registry.retiredOperatorHint(retired) != nullptr);
+  }
   std::set<std::string> actual;
   for (const auto& entry : registry.snippets()) {
     if (entry.id.rfind("gap.", 0) != 0)

@@ -1,7 +1,7 @@
 // ExecutionEvent 的 TypeScript 镜像，契约在 schema/execution-event.schema.json。
 // 与 manifest 一样，这里只是给编辑器用的视图；改动顺序永远是 schema → C++ → 这里。
 
-import type { GraphDoc, PortRef } from './graph';
+import type { PortRef } from './graph';
 import { profileDescriptor as sharedProfileDescriptor } from '@lyflow/visualization';
 
 export type NodeState = 'idle' | 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'skipped';
@@ -39,25 +39,6 @@ export interface MigrationAction extends GraphDiagnostic {
   notes?: string[];
   /** 端口增删时的连线改写（ADR-0025）。节点 id 已由 core 分配好，照做即可。 */
   edits?: MigrationEdits;
-  graphUpdate?: {
-    contractUpgradeRetirement?: ContractUpgradeRetirement;
-    contractUpgradeReplacement?: { before: GraphDoc; after: GraphDoc };
-  };
-}
-
-export interface ContractUpgradeRetirement {
-  request: NonNullable<GraphDoc['contractUpgrade']>;
-  historyEntry: {
-    schemaVersion: 1;
-    request: NonNullable<GraphDoc['contractUpgrade']>;
-    appliedSources: unknown[];
-  };
-  requirements: {
-    source: { node: string; op: string; opVersion: string; port: string };
-    target: PortRef;
-    adapter: { id: string; op: string; opVersion: string; params: Record<string, unknown> };
-    port: string;
-  }[];
 }
 
 export interface MigrationEdits {

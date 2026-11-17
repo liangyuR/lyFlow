@@ -35,6 +35,7 @@ nlohmann::json faceToJson(const Face& f);
 const nlohmann::json* recordData(const Data& d, const char* type);
 
 void registerProfileIn(Registry& r);
+void registerGraphMigrations(Registry& r);
 void registerSealDome(Registry& r);
 void registerPickMetal(Registry& r);
 void registerSealRoot(Registry& r);

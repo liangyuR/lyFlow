@@ -4,7 +4,6 @@
 #include <set>
 
 #include "lyflow/manifest.h"
-#include "lyflow/graph_contract_upgrade.h"
 
 namespace lyflow::exec {
 namespace {
@@ -289,37 +288,10 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
   }
 
   if (doc.contains("contractUpgrade")) {
-    nlohmann::json upgraded, report;
-    GraphContractUpgradeError error;
-    if (!upgradeGraphContracts(doc, doc["contractUpgrade"], upgraded, report, error)) {
-      diags.error(error.nodeId, Phase::Validate, "bad_input", error.message);
-      return false;
-    }
-    doc = std::move(upgraded);
-    for (const auto& change : report) {
-      MigrationPlan plan;
-      plan.op = change.at("op").get<std::string>();
-      plan.opVersion = change.at("opVersion").get<std::string>();
-      plan.paramsJson = change.at("params").dump();
-      plan.editsJson = change.at("edits").dump();
-      if (change.contains("graphUpdate"))
-        plan.graphUpdateJson = change["graphUpdate"].dump();
-      plan.notes = {"显式契约升级；源算子和原版本证据：" + change.at("source").dump()};
-      diags.migration(change.at("nodeId"), "已按明确的版本和消费连线插入契约适配节点",
-                      std::move(plan));
-    }
-  }
-
-  if (doc.contains("nodes") && doc["nodes"].is_array()) {
-    for (const auto& node : doc["nodes"]) {
-      const auto op = node.value("op", std::string());
-      if (op == "dts.profile_clean" || op == "dts.split_faces") {
-        diags.error(
-            node.value("id", std::string()), Phase::Validate, "migration_required",
-            "旧DTS PointCloud消费链需要显式升级：lyflow migrate <graph> --profile-source <dts.profile_in节点> --profile-frame <frame> --profile-source-id <sourceId> --write；子图来源使用<定义ID>/<节点ID>，库图直接迁移原始图资产");
-        return false;
-      }
-    }
+    diags.error(
+        "", Phase::Validate, "migration_required",
+        "图中带有待执行的迁移请求 contractUpgrade：运行 lyflow migrate <图> --write 迁移后再使用");
+    return false;
   }
 
   {

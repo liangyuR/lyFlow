@@ -10,6 +10,7 @@ void registerPackOps(Registry& r) {
   lyflow::dts::registerFlush(r);
   lyflow::dts::registerProfileBundle(r);
   lyflow::dts::registerGeometryAdapter(r);
+  lyflow::dts::registerGraphMigrations(r);
 }
 
 } // namespace lyflow::packs::solution_dts

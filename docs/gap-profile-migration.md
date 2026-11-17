@@ -105,11 +105,11 @@ ROI 底图可引用原生 Profile 或 Bundle 的单层采样字段，例如 `tem
 
 `component.nodes` 必须列出实际完整闭包，示例节点列表不能直接套到任意工作流。细粒度请求用 `style=fine`，精确锚定旧 `gap.load_profile_pair` 1.0.0 的 primary 端口。模板帧/手性与已知默认契约不一致时，还须给出 `templates={unit,fileFrame,templateFrame,handedness}`，不能通过 ICP 推断反射。该历史升级器只接受已知旧数值契约的 `unit=m`，传感器或模板文件为毫米时不能靠声明自动缩放，须先明确调整图或重新导入。
 
-请求结构同时受正式 GraphDoc JSON Schema 和编辑器 TypeScript 类型约束；C++、Rust、HTTP 与 CLI 将同一请求交给 core，不自行猜测来源。
+把请求存为 JSON 文件，运行 `lyflow migrate <graph> --request <file.json> --write` 离线迁移；`planeCalib.v1`、`dtsGeometry.v1` 请求同样经 `--request` 提交。图顶层仍带旧 `contractUpgrade` 的文件直接运行 `lyflow migrate <graph> --write`。编辑器与宿主加载不执行升级，遇到 `contractUpgrade` 只报 `migration_required`，不自行猜测来源。
 
-升级前核验原图及已知旧版本；未知、未来版本、无来源的外部注入、跨组件未知消费者及未支持结构均拒绝推断。升级作为整图 CAS 结构替换交给宿主确认并保存，保留 UI、其他元数据、合法顶层参数及命名输出；涉及单位换算的动态绑定、无法证明同源的 source/datumSide 覆盖会明确拒绝。共享子图以 `scope.subgraph` 指定，提升参数使用原生 SubgraphDef 数组与对象绑定格式，不支持把内部节点路径冒充提升参数；已完成请求进入历史并支持幂等重载。合法参数绑定只移除升级器新增的显式默认值，原图已有的显式值与绑定冲突仍拒绝；图顶层与共享子图提升参数分别核验。动态单位/布局/definition、可能更换实际相机来源的标签 row 绑定不能安全转换时明确拒绝，模型原槽路径也不接受已压缩采样的声明。
+升级前核验原图及已知旧版本；未知、未来版本、无来源的外部注入、跨组件未知消费者及未支持结构均拒绝推断。升级由 CLI 核验后整图写回，保留 UI、其他元数据、合法顶层参数及命名输出；涉及单位换算的动态绑定、无法证明同源的 source/datumSide 覆盖会明确拒绝。共享子图以 `scope.subgraph` 指定，提升参数使用原生 SubgraphDef 数组与对象绑定格式，不支持把内部节点路径冒充提升参数；迁移是一次性的，已迁移的图再跑同一请求会因来源不再匹配而失败。合法参数绑定只移除升级器新增的显式默认值，原图已有的显式值与绑定冲突仍拒绝；图顶层与共享子图提升参数分别核验。动态单位/布局/definition、可能更换实际相机来源的标签 row 绑定不能安全转换时明确拒绝，模型原槽路径也不接受已压缩采样的声明。
 
-此机制与[历史 DTS 升级](dts-profile-migration.md)共享 core 升级能力，不由各宿主再实现一套转换。
+规则由 solution-gap 注册，与[历史 DTS 升级](dts-profile-migration.md)共用 core 的离线迁移入口，各宿主不再实现转换。
 
 旧通用 ID `gap.fit_line`、`gap.selected_point`、`gap.nearest_to_line`、`gap.drop_non_finite`、`gap.to_measurement_frame`、`gap.flush`、`gap.gap`、`gap.point_offset` 随消费者迁移退出正式注册。旧源码及真正兼容引擎的最终删除留到 M7，不能将“未参与当前构建”记作全部历史行为已验收。
 

@@ -1,5 +1,6 @@
 #pragma once
 // 算子注册表。进程内唯一，启动时由 registerBuiltinOps() 填充。
+#include <map>
 #include <string>
 #include <memory>
 #include <shared_mutex>
@@ -22,6 +23,10 @@ public:
   void addImporter(ImporterDesc importer);
   /// 注册一份片段（m8-plan L14）。同 id 重复注册时后者覆盖前者。
   void addSnippet(SnippetDesc snippet);
+  /// 注册一种图级迁移规则。同 kind 重复注册时后者覆盖前者。
+  void addGraphMigration(GraphMigrationDesc migration);
+  /// 登记一个已退役的算子 ID；图里仍用它时报 migration_required 并附上 hint（如何迁移）。
+  void addRetiredOperator(std::string id, std::string hint);
   void clear();
 
   /// 之后 addOperator 进来的算子归属哪个包（S7）。生成的注册入口在调包之前设、
@@ -40,6 +45,7 @@ public:
   const std::vector<OperatorDesc>& pythonOperators() const { return pythonOperators_; }
   const std::vector<ImporterDesc>& importers() const { return importers_; }
   const std::vector<SnippetDesc>& snippets() const { return snippets_; }
+  const std::vector<GraphMigrationDesc>& graphMigrations() const { return graphMigrations_; }
 
   const OperatorDesc* find(const std::string& id) const;
   const PortType* findType(const std::string& name) const;
@@ -55,6 +61,8 @@ public:
                           nlohmann::json* expected = nullptr,
                           nlohmann::json* actual = nullptr) const;
   const ImporterDesc* findImporter(const std::string& kind) const;
+  const GraphMigrationDesc* findGraphMigration(const std::string& kind) const;
+  const std::string* retiredOperatorHint(const std::string& id) const;
 
   // 自检。导出 manifest 前跑，把算子作者的笔误挡在这里。
   // 返回人类可读的问题列表，空 = 无问题。
@@ -73,6 +81,8 @@ private:
   std::vector<BundleDesc> bundles_;
   std::vector<OperatorDesc> operators_;
   std::vector<ImporterDesc> importers_;
+  std::vector<GraphMigrationDesc> graphMigrations_;
+  std::map<std::string, std::string> retiredOperators_;
   std::vector<SnippetDesc> snippets_;
   /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。
   std::size_t builtinCount_ = 0;

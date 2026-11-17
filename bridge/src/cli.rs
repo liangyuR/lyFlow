@@ -79,7 +79,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                      graph（顶层图参数灌进来的，graphParam 说是哪一个）。
         --set 先应用再解析，所以「这组 --set 之后生效值是什么」一条命令。
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
-  lyflow migrate  <graph> [--write] [--profile-source <node> --profile-frame <frame> --profile-source-id <id>]
+  lyflow migrate  <graph> [--request <file.json>] [--write]
+                          [--profile-source <node|subgraph/node> --profile-frame <frame> --profile-source-id <id>]
+        离线迁移：图级请求取 --request 文件，或 DTS 选项拼出的 dtsProfile.v1 规则，或图自带的 contractUpgrade；
+        之后报告逐节点迁移。--write 把两者一并原子写回。--request 与 DTS 选项不能同时给。
   lyflow manifest [--check]
   lyflow python settings|refresh
   lyflow python configure --config <python-nodes.json>
@@ -1407,7 +1410,10 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
 fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
-        line(err, "用法：lyflow migrate <graph> [--write]");
+        line(
+            err,
+            "用法：lyflow migrate <graph> [--request <file.json>] [--profile-source <node|subgraph/node> --profile-frame <frame> --profile-source-id <id>] [--write]",
+        );
         return EXIT_USAGE;
     };
     // migrate --write 写回的是读进来的整份 doc：带着配方读，就会把配方的值烙成基础
@@ -1418,19 +1424,38 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             EXIT_USAGE,
         );
     }
-    let core = match core() {
-        Ok(c) => c,
-        Err(e) => return fail(err, &e, EXIT_FAILED),
-    };
+    let profile_options = ["profile-source", "profile-frame", "profile-source-id"];
+    let dts = profile_options
+        .iter()
+        .any(|name| parsed.one(name).is_some());
+    if dts && parsed.one("request").is_some() {
+        return fail(
+            err,
+            "--request 与 --profile-source/--profile-frame/--profile-source-id 不能同时给",
+            EXIT_USAGE,
+        );
+    }
     let mut loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
-    let profile_options = ["profile-source", "profile-frame", "profile-source-id"];
-    if profile_options
-        .iter()
-        .any(|name| parsed.one(name).is_some())
-    {
+    // 图级迁移请求：--request 文件 → DTS 选项拼出的规则 → 图自带的 contractUpgrade（交给 core 自己读）
+    let request: Option<Option<String>> = if let Some(file) = parsed.one("request") {
+        let text = match std::fs::read_to_string(file) {
+            Ok(t) => t,
+            Err(e) => return fail(err, &format!("读取 {file} 失败: {e}"), EXIT_USAGE),
+        };
+        match serde_json::from_str::<Value>(&text) {
+            Ok(v) if v.is_object() => Some(Some(v.to_string())),
+            _ => {
+                return fail(
+                    err,
+                    &format!("--request {file} 必须是 JSON 对象"),
+                    EXIT_USAGE,
+                )
+            }
+        }
+    } else if dts {
         if profile_options.iter().any(|name| {
             parsed.many(name).len() != 1 || parsed.one(name).map_or(true, |v| v.is_empty())
         }) {
@@ -1464,26 +1489,50 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         if parts.len() == 2 {
             rule["scope"] = json!({"subgraph":parts[0]});
         }
-        let retired = loaded
-            .doc
-            .meta
-            .as_ref()
-            .and_then(|meta| meta["contractUpgradeHistory"].as_array())
-            .is_some_and(|history| {
-                history.iter().any(|entry| {
-                    entry["request"]["rules"]
-                        .as_array()
-                        .is_some_and(|rules| rules.contains(&rule))
-                })
-            });
-        if !retired {
-            rules.push(rule);
-            loaded.doc.contract_upgrade = Some(request);
+        rules.push(rule);
+        Some(Some(request.to_string()))
+    } else if loaded.doc.contract_upgrade.is_some() {
+        Some(None)
+    } else {
+        None
+    };
+    let core = match core() {
+        Ok(c) => c,
+        Err(e) => return fail(err, &e, EXIT_FAILED),
+    };
+    let graph_migrated = request.is_some();
+    if let Some(request) = request {
+        let migrated = match core.migrate(&loaded.json, request.as_deref()) {
+            Ok(doc) => doc,
+            Err(e) => {
+                let Ok(diags) = serde_json::from_str::<Vec<Value>>(&e) else {
+                    return fail(err, &e, EXIT_FAILED);
+                };
+                json_line(
+                    out,
+                    &json!({"diagnostics":diags,"migrations":[],"written":null}),
+                );
+                return fail(err, "图级迁移失败，未写入文件", EXIT_FAILED);
+            }
+        };
+        let doc: GraphDoc = match serde_json::from_str(&migrated) {
+            Ok(d) => d,
+            Err(e) => {
+                return fail(
+                    err,
+                    &format!("core 迁移后的图不是合法的 GraphDoc: {e}"),
+                    EXIT_FAILED,
+                )
+            }
+        };
+        if let Err(e) = doc.validate_structure() {
+            return fail(err, &e.to_string(), EXIT_FAILED);
         }
-        loaded.json = match serde_json::to_string(&loaded.doc) {
+        loaded.json = match serde_json::to_string(&doc) {
             Ok(json) => json,
             Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
         };
+        loaded.doc = doc;
     }
     let diags = match diagnostics_of(&core, &loaded) {
         Ok(d) => d,
@@ -1502,7 +1551,7 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .collect();
 
     let mut written = Value::Null;
-    if parsed.has("write") && !migrations.is_empty() {
+    if parsed.has("write") && (graph_migrated || !migrations.is_empty()) {
         // 与前端 applyMigrations 同一套语义：params 是完整对象而不是补丁（ADR-0008），
         // edits 里的连线改动一并写回（ADR-0025）
         for m in &migrations {
@@ -1527,8 +1576,11 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
     json_line(
         out,
-        &json!({ "migrations": migrations, "written": written }),
+        &json!({ "migrations": migrations, "written": written, "graphMigrated": graph_migrated }),
     );
+    if graph_migrated {
+        line(err, "已执行图级迁移请求");
+    }
     line(err, &format!("{} 个节点需要迁移", migrations.len()));
     for m in &migrations {
         for note in m["notes"].as_array().into_iter().flatten() {
@@ -2559,6 +2611,7 @@ const VALUE_OPTS: &[&str] = &[
     "profile-source",
     "profile-frame",
     "profile-source-id",
+    "request",
     "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[

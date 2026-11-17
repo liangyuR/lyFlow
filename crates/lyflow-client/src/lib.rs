@@ -501,6 +501,7 @@ type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnRunSummary = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnImport = unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
+type FnMigrate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
 type FnLibraryDefinition = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -592,6 +593,7 @@ pub struct Core {
     configure_python: Option<FnPythonConfigure>,
     python_status: Option<FnJson>,
     refresh_python: Option<FnJson>,
+    migrate: Option<FnMigrate>,
     frames: frames::Functions,
     profiles: profiles::Functions,
     #[allow(dead_code)]
@@ -711,6 +713,7 @@ impl Core {
             configure_python: sym_opt!(lib, "lyflow_configure_python", FnPythonConfigure),
             python_status: sym_opt!(lib, "lyflow_python_status", FnJson),
             refresh_python: sym_opt!(lib, "lyflow_refresh_python", FnJson),
+            migrate: sym_opt!(lib, "lyflow_migrate", FnMigrate),
             frames: frames::Functions::load(&lib),
             profiles: profiles::Functions::load(&lib),
             lib,
@@ -1150,6 +1153,25 @@ impl Core {
         let raw = unsafe { self.take_owned((self.import)(k.as_ptr(), t.as_ptr(), b.as_ptr())) }
             .map_err(|e| e.to_string())?;
         // 成功是 GraphDoc 对象，失败是诊断数组 —— 与 lyflow_plan 同一套区分办法。
+        if raw.starts_with('{') {
+            Ok(raw)
+        } else {
+            Err(raw)
+        }
+    }
+
+    /// 离线图迁移。`request_json` 为 None 时用图自身的 `contractUpgrade`。成功是迁移后的
+    /// GraphDoc（'{' 开头），Err 里是诊断数组的文本（'[' 开头）或调用错误。
+    pub fn migrate(&self, graph_json: &str, request_json: Option<&str>) -> Result<String, String> {
+        let migrate = self
+            .migrate
+            .ok_or_else(|| CoreError::MissingSymbol("lyflow_migrate").to_string())?;
+        let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
+        let graph = cs(graph_json)?;
+        let request = request_json.map(cs).transpose()?;
+        let request_ptr = request.as_ref().map_or(std::ptr::null(), |r| r.as_ptr());
+        let raw = unsafe { self.take_owned(migrate(graph.as_ptr(), request_ptr)) }
+            .map_err(|e| e.to_string())?;
         if raw.starts_with('{') {
             Ok(raw)
         } else {
