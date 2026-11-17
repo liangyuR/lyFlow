@@ -560,6 +560,11 @@ bool readTemplatePair(const Data& data, TemplateView& result, std::string& why) 
   if (!bundle || bundle->kind != kTemplatePairKind)
     return fail(why, "需要gap.TemplatePair.v3");
   result = {bundle->field("left"), bundle->field("right"), bundle->field("info")->asRecord()};
+  const Profile *left = nullptr, *right = nullptr;
+  if (!metricProfile(*result.left, left, why) || !metricProfile(*result.right, right, why))
+    return false;
+  if (!profile_contract::sameSpace(left->descriptor, right->descriptor))
+    return fail(why, "左右模板必须处于同一坐标帧、分析平面和手性");
   why.clear();
   return true;
 }

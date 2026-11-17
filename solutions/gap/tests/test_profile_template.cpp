@@ -160,6 +160,13 @@ TEST_CASE("Template PCD loading preserves masked slots all channels units and fi
       native::TemplateView view;
       std::string why;
       REQUIRE_MESSAGE(native::readTemplatePair(result, view, why), why);
+      Bundle mixed = *result.asBundle();
+      auto reflected = *view.right->asProfile();
+      reflected.descriptor.handedness =
+          reflected.descriptor.handedness == "right" ? "reflected" : "right";
+      mixed.set("right", Data::profile(reflected));
+      native::TemplateView rejected;
+      CHECK_FALSE(native::readTemplatePair(Data::bundle(std::move(mixed)), rejected, why));
       const auto& p = *view.left->asProfile();
       CHECK(p.descriptor.unit == "m");
       CHECK(p.descriptor.plane == "XY");

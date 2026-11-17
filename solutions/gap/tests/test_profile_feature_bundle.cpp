@@ -271,6 +271,9 @@ TEST_CASE("atomic location uses flat native fields and rejects role boxes from a
   wrong.set("datumContext", foreignContext());
   CHECK_FALSE(scene::makeLocation(fields.scan, Data::bundle(wrong), feature, why));
   CHECK(feature.asBundle() == before);
+  Bundle injected = *feature.asBundle();
+  injected.set("datumContext", foreignContext());
+  CHECK_FALSE(scene::readLocation(Data::bundle(std::move(injected)), read, why));
 }
 
 TEST_CASE(

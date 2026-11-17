@@ -400,7 +400,8 @@ void registerProfileFeatureBundles(Registry& registry) {
             out.set("location", std::move(result));
           } else {
             LocationFields location;
-            readLocation(in.get("location"), location, why);
+            if (!readLocation(in.get("location"), location, why))
+              return bad(why, "location");
             out.set("scan", std::move(location.scan));
             out.set("rois", std::move(location.rois));
           }
