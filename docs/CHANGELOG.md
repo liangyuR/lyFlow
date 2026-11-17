@@ -6,6 +6,7 @@
 - `profile.Geometry.v2`绑定点线圆框的米制内容、坐标空间及最多64项唯一来源；原槽/物理源索引保留在原生Profile，Indices绑定实际输入cloud.id，保槽不虚报移除数。
 - 旧Gap直线/面差/间隙/位移复用公共静态核，4项patch版本隔离缓存；42已有定义直线、281已有定义量测逐位一致，12非法输入行为更严格，不能宣称全部历史输入兼容。
 - 旧图迁移改为离线执行：编辑器和宿主加载时不再自动升级，图中带`contractUpgrade`或已退役的DTS/Gap节点时报`migration_required`并提示命令，运行`lyflow migrate <图> --write`（或`--request <文件>`）迁移后保存。迁移规则由提供算子的包注册，C ABI新增`lyflow_migrate`；执行状态不再返回`graphUpdate`，SDK头`graph_contract_upgrade.h`改为`graph_migration.h`。
+- 执行器对算子输出的Bundle逐字段做与顶层输出相同的Profile/点云/图像自洽校验，字段非法时报`internal`并指明字段；算子不再重复检查执行器已保证的参数枚举、范围与端口类型。
 - std-profile/std-metrology升级0.3.0、std-geometry升级0.6.0、gap升级0.2.1；产品1.4.4保持1.4系列C ABI布局。旧8ID、场景/Bundle及六导入器迁移留M4c，整个M4尚未完成。
 
 ## 1.4.3（M4a已合并）

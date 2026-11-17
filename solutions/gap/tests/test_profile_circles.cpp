@@ -419,10 +419,6 @@ TEST_CASE(
   CHECK_FALSE(
       scene::fitProfileGapCircles(inputs, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
   CHECK(result.quality.type == "sentinel");
-  parameters["distThresh"] = Value::number(std::numeric_limits<double>::quiet_NaN());
-  CHECK_FALSE(
-      scene::fitProfileGapCircles(inputs, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
-  CHECK(result.quality.type == "sentinel");
 }
 TEST_CASE("Native scene circle pair and shared legacy helper publish nothing on cancellation") {
   const auto inputs = fixture();

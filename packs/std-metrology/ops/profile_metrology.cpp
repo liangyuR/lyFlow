@@ -35,11 +35,11 @@ struct FittedLine {
 bool fittedLine(const Data& geometry, const Record* statistics, FittedLine& output,
                 std::string& why) {
   const auto* line = geometry.asLine2D();
-  if (!line || line->unit != Unit2D::Meter || !profile_contract::validLine(geometry, why)) {
+  if (line->unit != Unit2D::Meter || !profile_contract::validLine(geometry, why)) {
     why = "量测需要米制Line2D";
     return false;
   }
-  if (!statistics || statistics->type != "profile.LineFit.v1" || !statistics->data.is_object()) {
+  if (statistics->type != "profile.LineFit.v1" || !statistics->data.is_object()) {
     why = "量测需要profile.LineFit.v1拟合统计";
     return false;
   }
@@ -96,10 +96,6 @@ Measurement measurement(double value) {
 Status gapFlush(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const double x = p.number("referenceX"), maximum = p.number("maxResidual"),
                extrapolation = p.number("maxExtrapolation");
-  if (!std::isfinite(x) || !std::isfinite(maximum) || maximum <= 0 ||
-      !std::isfinite(extrapolation) || extrapolation < 0)
-    return Status::Error(Phase::Execute, "bad_param", "面差横坐标、残差或外推参数非法",
-                         "referenceX");
   FittedLine left, right;
   std::string why;
   if (!fittedLine(in.get("left"), in.get("leftStatistics").asRecord(), left, why))
@@ -140,8 +136,6 @@ Status signedPointLine(const Inputs& in, const ParamView& p, Outputs& out, ExecC
   const auto& lineData = in.get("line");
   const auto* point = pointData.asPoint2D();
   const auto* line = lineData.asLine2D();
-  if (!point || !line)
-    return failure("需要Point2D与Line2D", "point");
   ProfileDescriptor pointDescriptor, lineDescriptor;
   std::string why;
   if (!profile_contract::geometryMatches(pointData, in.get("pointContext").asRecord(),
@@ -155,10 +149,8 @@ Status signedPointLine(const Inputs& in, const ParamView& p, Outputs& out, ExecC
       pointDescriptor.handedness != lineDescriptor.handedness)
     return failure("点线必须声明相同坐标帧、轴平面和手性", "lineContext");
   const auto reference = p.vec2("positiveNormal");
-  if (!std::isfinite(reference[0]) || !std::isfinite(reference[1]) ||
-      (reference[0] == 0 && reference[1] == 0))
-    return Status::Error(Phase::Execute, "bad_param", "正法向参考必须为有限非零向量",
-                         "positiveNormal");
+  if (reference[0] == 0 && reference[1] == 0)
+    return Status::Error(Phase::Execute, "bad_param", "正法向参考必须为非零向量", "positiveNormal");
   if (ctx.cancelled())
     return Status::Ok();
   metrology::SignedPointLine result;

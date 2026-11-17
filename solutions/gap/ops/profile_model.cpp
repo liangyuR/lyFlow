@@ -40,7 +40,7 @@ bool rawDescriptor(const ProfileDescriptor& d) {
 }
 bool sensor(const Data& data, std::string& why) {
   const auto* p = data.asProfile();
-  if (!p || !validateProfile(*p, why) || p->pointCount() != slots || !rawDescriptor(p->descriptor))
+  if (!p || p->pointCount() != slots || !rawDescriptor(p->descriptor))
     return fail(why, "模型输入必须为完整1280原槽、acquisition、XZ的单源Profile");
   for (std::size_t i = 0; i < slots; ++i)
     if (p->sourceIndices[i] != i)
@@ -281,10 +281,6 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
     return bad(why, "scan");
   if (!matchesSensors(labelData, *scan.sensorPrimary, *scan.sensorSecondary, why))
     return bad(why);
-  if (!std::isfinite(options.split_step_mm) || options.split_step_mm < 0 ||
-      !std::isfinite(options.link_mm) || options.link_mm < 0 ||
-      !std::isfinite(options.anchor_gap_mm) || options.anchor_gap_mm < 0)
-    return bad("细化距离必须有限且非负", "refine", "bad_param");
   std::array<model::ProfileRow, 2> raw;
   auto status = rows(*scan.sensorPrimary, *scan.sensorSecondary, raw, ctx);
   if (!status.ok)

@@ -85,11 +85,9 @@ std::vector<Param> refineParams() {
   ::gap::ml::MaskRefineOptions result;
   result.enabled = p.flag("refine");
   result.split_step_mm = p.number("splitStepMm");
-  result.split_slot_gap =
-      static_cast<std::size_t>(std::max<std::int64_t>(0, p.integer("splitSlotGap")));
+  result.split_slot_gap = static_cast<std::size_t>(p.integer("splitSlotGap"));
   result.link_mm = p.number("linkMm");
-  result.min_component_slots =
-      static_cast<std::size_t>(std::max<std::int64_t>(0, p.integer("minComponentSlots")));
+  result.min_component_slots = static_cast<std::size_t>(p.integer("minComponentSlots"));
   result.anchor_gap_mm = p.number("anchorGapMm");
   return result;
 }
@@ -142,8 +140,6 @@ Status labelsToCloud(const Data& scanData, const Data& labelData, const std::str
                      Data& result, ExecContext& context) {
   if (context.cancelled())
     return cancelled();
-  if (row != "primary" && row != "secondary")
-    return bad("标签可视化row必须明确primary或secondary", "row", "bad_param");
   profile_scene::ScanView scan;
   std::string why;
   if (!profile_scene::readScanPair(scanData, scan, why))

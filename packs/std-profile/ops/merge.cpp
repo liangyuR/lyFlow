@@ -10,10 +10,6 @@ Status failure(const std::string& why, const char* port = "a", const char* code 
 Status merge(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const auto* aProvenance = inputs.get("aProvenance").asRecord();
   const auto* bProvenance = inputs.get("bProvenance").asRecord();
-  if (inputs.has("aProvenance") && !aProvenance)
-    return failure("首来源必须为Record", "aProvenance");
-  if (inputs.has("bProvenance") && !bProvenance)
-    return failure("次来源必须为Record", "bProvenance");
   profile_contract::MergeOptions options{params.text("roleA"), params.text("roleB"),
                                          params.choice("channelPolicy")};
   profile_contract::MergeResult result;

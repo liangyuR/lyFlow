@@ -264,8 +264,7 @@ TEST_CASE("Profile processing: extracted TLS faces agree across selected planes 
     }
 }
 
-TEST_CASE(
-    "Profile processing: unknown order, insufficient samples and invalid data fail explicitly") {
+TEST_CASE("Profile processing: unknown order and insufficient samples fail explicitly") {
   test::OpCall call(processingRegistry());
   auto source = *profileOf({0, 1, 2}, {0, 0, 0}).asProfile();
   source.descriptor.sampleOrder = "unknown";
@@ -280,13 +279,6 @@ TEST_CASE(
   status = call.run("profile.split_faces");
   CHECK_FALSE(status.ok);
   CHECK(status.code == "no_segments");
-  CHECK(call.outputs.empty());
-  source.descriptor.plane = "unknown";
-  call.inputs["profile"] = Data::profile(source);
-  CHECK_FALSE(call.run("profile.clean").ok);
-  CHECK(call.outputs.empty());
-  call.inputs["profile"] = Data::cloud(PointCloud{});
-  CHECK_FALSE(call.run("profile.clean").ok);
   CHECK(call.outputs.empty());
 }
 

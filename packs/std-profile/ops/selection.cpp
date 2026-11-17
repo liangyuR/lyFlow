@@ -16,15 +16,6 @@ Status failure(const std::string& why, const char* port = "profile",
   return Status::Error(Phase::Execute, code, why, {}, port);
 }
 Status cancelled() { return failure("轮廓选择已取消", "profile", "cancelled"); }
-const Profile* profile(const Inputs& inputs, std::string& why) {
-  const auto* result = inputs.get("profile").asProfile();
-  if (!result || !validateProfile(*result, why)) {
-    if (why.empty())
-      why = "需要有效的原生Profile";
-    return nullptr;
-  }
-  return result;
-}
 Param text(const char* name, const char* label, const char* value = "") {
   Param result;
   result.name = name;
@@ -56,9 +47,7 @@ OperatorDesc description(const char* id, const char* label, const char* keywords
 Status bindGeometry(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                     ExecContext& ctx) {
   std::string why;
-  const auto* input = profile(inputs, why);
-  if (!input)
-    return failure(why);
+  const auto* input = inputs.get("profile").asProfile();
   if (params.text("frame") != input->descriptor.frame)
     return Status::Error(Phase::Execute, "bad_param", "必须明确声明与轮廓相同的坐标帧", "frame");
   if (params.choice("plane") != input->descriptor.plane)
@@ -69,8 +58,6 @@ Status bindGeometry(const Inputs& inputs, const ParamView& params, Outputs& outp
   if (ctx.cancelled())
     return cancelled();
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return failure("来源必须为Record", "provenance");
   nlohmann::json sources;
   if (!profile_contract::profileSources(inputs.get("profile"), provenance, sources, why))
     return failure(why, "provenance");
@@ -116,16 +103,12 @@ Status bindGeometry(const Inputs& inputs, const ParamView& params, Outputs& outp
 
 Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, bool toLine) {
   std::string why;
-  const auto* input = profile(inputs, why);
-  if (!input)
-    return failure(why);
+  const auto* input = inputs.get("profile").asProfile();
   const char* geometryPort = toLine ? "line" : "anchor";
   const char* contextPort = toLine ? "lineContext" : "anchorContext";
   const auto& geometry = inputs.get(geometryPort);
   const auto* anchor = geometry.asPoint2D();
   const auto* line = geometry.asLine2D();
-  if ((toLine && !line) || (!toLine && !anchor))
-    return failure("选择参考几何类型不符", geometryPort);
   ProfileDescriptor descriptor;
   nlohmann::json sources;
   if (!profile_contract::geometryMatchesPhysical(geometry, inputs.get(contextPort).asRecord(),
@@ -189,8 +172,6 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
   const auto result = Data::point2d(point);
   const auto inputContext = profile_contract::context(inputs.get("profile"));
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return failure("来源必须为Record", "provenance");
   nlohmann::json profileSources;
   Record rebound;
   if (!profile_contract::profileSources(inputs.get("profile"), provenance, profileSources, why) ||
@@ -241,14 +222,10 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
 Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                       ExecContext& ctx) {
   std::string why;
-  const auto* input = profile(inputs, why);
-  if (!input)
-    return failure(why);
+  const auto* input = inputs.get("profile").asProfile();
   if (input->pointCount() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
     return failure("轮廓槽数超过Indices范围", "profile", "budget_exceeded");
   const auto& mode = params.choice("mode");
-  if (mode != "preserve_slots" && mode != "compact")
-    return failure("无效的槽保留模式", "mode");
   Indices valid, invalid;
   valid.sourceCloudId = invalid.sourceCloudId = input->cloud->id;
   for (std::size_t i = 0; i < input->pointCount(); ++i) {
@@ -269,16 +246,11 @@ Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& ou
         return cancelled();
       sourceIndices.push_back(input->sourceIndices[static_cast<std::size_t>(slot)]);
     }
-    Profile selected;
-    if (!makeProfile(std::make_shared<const PointCloud>(std::move(cloud)), input->descriptor,
-                     std::vector<std::uint8_t>(valid.values.size(), 1), std::move(sourceIndices),
-                     selected, why))
-      return failure(why);
-    result = Data::profile(std::move(selected));
+    result = Data::profile(
+        Profile{std::make_shared<const PointCloud>(std::move(cloud)), input->descriptor,
+                std::vector<std::uint8_t>(valid.values.size(), 1), std::move(sourceIndices)});
   }
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return failure("来源必须为Record", "provenance");
   Record rebound;
   if (!profile_contract::rebindProvenance(inputs.get("profile"), result, provenance, rebound, why))
     return failure(why, "provenance");
@@ -401,9 +373,6 @@ Status nearestSample(const NearestInputs& input, NearestReference reference, Nea
   if (reference != NearestReference::Point && reference != NearestReference::Line)
     return Status::Error(Phase::Execute, "bad_param", "未知最近样本参考类型");
   const bool toLine = reference == NearestReference::Line;
-  if (!input.profile.asProfile() || !input.referenceContext.asRecord() ||
-      (toLine ? !input.reference.asLine2D() : !input.reference.asPoint2D()))
-    return Status::Error(Phase::Execute, "bad_input", "最近样本需要Profile和成对参考几何/上下文");
   std::unordered_map<std::string, Data> inputs{
       {"profile", input.profile},
       {toLine ? "line" : "anchor", input.reference},

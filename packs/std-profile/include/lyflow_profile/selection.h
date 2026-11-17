@@ -34,8 +34,6 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
                      ExecContext& ctx, bool byBox) {
   const auto* input = source.asProfile();
   std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why);
   if (ctx.cancelled())
     return cancelled();
   const auto n = input->pointCount();
@@ -43,8 +41,6 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
     return bad("轮廓槽数超过Indices范围", "profile", "budget_exceeded");
   const auto& mode = options.mode;
   const auto& empty = options.emptyPolicy;
-  if ((mode != "compact" && mode != "preserve_slots") || (empty != "allow" && empty != "error"))
-    return bad("选区模式或空结果策略非法", "mode", "bad_param");
   Json sources;
   if (!profile_contract::profileSources(source, provenance, sources, why))
     return bad(why, "provenance");
@@ -61,8 +57,6 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
     if (!profile_contract::sameSpace(input->descriptor, space))
       return bad("ROI与轮廓不在相同物理空间", "boxContext");
     const auto& bounds = options.bounds;
-    if (bounds != "open" && bounds != "closed")
-      return bad("ROI边界策略非法", "bounds", "bad_param");
     Profile metric;
     if (!convertProfileUnit(*input, "m", metric, why, [&ctx] { return ctx.cancelled(); }))
       return ctx.cancelled() ? cancelled() : bad(why);
@@ -83,8 +77,6 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
     if (!indices || indices->sourceCloudId != input->cloud->id)
       return bad("Indices必须绑定当前Profile实际cloud.id", "indices");
     const auto& invalid = options.invalidPolicy;
-    if (invalid != "reject" && invalid != "preserve")
-      return bad("无效槽策略非法", "invalidPolicy", "bad_param");
     std::int32_t previous = -1;
     for (std::size_t i = 0; i < indices->values.size(); ++i) {
       if ((i & 1023U) == 0 && ctx.cancelled())
@@ -126,8 +118,6 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
       result.validity[i] = input->validity[i] && accepted[i];
     }
   }
-  if (!validateProfile(result, why))
-    return bad(why);
   const auto data = Data::profile(std::move(result));
   Record rebound;
   if (!profile_contract::rebindProvenance(source, data, provenance, rebound, why))

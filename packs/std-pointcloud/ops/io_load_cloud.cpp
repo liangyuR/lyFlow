@@ -460,9 +460,8 @@ void registerIoLoadCloud(Registry& r) {
     const auto bytes = std::filesystem::file_size(path, ec);
     if (ec || bytes > 256ull * 1024 * 1024 || !std::filesystem::is_regular_file(path, ec))
       return error("文件不存在、不是普通文件或超过256MiB", "path", "io_error");
-    if (p.integer("maxPoints") < 1 || p.integer("maxPoints") > 10000000 ||
-        !frameValid(p.text("frame")) || (p.choice("unit") != "m" && p.choice("unit") != "mm"))
-      return error("点数、帧或单位参数非法", "path", "bad_param");
+    if (!frameValid(p.text("frame")))
+      return error("输出参考帧非法", "frame", "bad_param");
     std::string extension = path.extension().u8string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

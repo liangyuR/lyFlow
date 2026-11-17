@@ -246,10 +246,6 @@ Status locate(const Data& input, const LocateOptions& options, LocateResult& res
               ExecContext& context) {
   if (context.cancelled())
     return cancelled();
-  const auto issues = validateLocateOptions(options);
-  if (!issues.empty())
-    return Status::Error(Phase::Execute, "bad_param", issues.front().status.message,
-                         issues.front().status.paramPath);
   profile_scene::ScanView scan;
   std::string why;
   if (!profile_scene::readScanPair(input, scan, why))

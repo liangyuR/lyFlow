@@ -11,8 +11,6 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
       return cancelledStatus();
     const auto* rootRecord = inputs.get("root").asRecord();
     const auto* measurement = inputs.get("flush").asMeasurement();
-    if (!rootRecord || !measurement || !inputs.get("metal").asLine2D())
-      return Status::Error(Phase::Execute, "type_mismatch", "汇总的输入类型不对", {}, "flush");
     const auto& context = rootRecord->data.at("context");
     const auto& root = checkedRecord(inputs.get("root"), "DtsRoot.v2", context);
     const auto& dome = checkedRecord(inputs.get("dome"), "DtsDome.v2", context);

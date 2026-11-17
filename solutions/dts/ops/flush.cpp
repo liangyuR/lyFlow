@@ -12,8 +12,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       return cancelledStatus();
     const auto* rootRecord = inputs.get("root").asRecord();
     const auto* metal = inputs.get("metal").asLine2D();
-    if (!rootRecord || rootRecord->type != "DtsRoot.v2" || !metal)
-      return Status::Error(Phase::Execute, "type_mismatch", "root / metal 类型不对", {}, "root");
+    if (rootRecord->type != "DtsRoot.v2")
+      return Status::Error(Phase::Execute, "type_mismatch", "root 需要 DtsRoot.v2", {}, "root");
     const auto& root =
         checkedRecord(inputs.get("root"), "DtsRoot.v2", rootRecord->data.at("context"));
     if (metal->unit != Unit2D::Meter ||

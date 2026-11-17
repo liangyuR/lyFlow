@@ -445,8 +445,7 @@ bool exactBundle(const Bundle* bundle, const char* kind, std::initializer_list<c
 }
 bool metricProfile(const Data& data, const Profile*& profile, std::string& why) {
   profile = data.asProfile();
-  return profile && validateProfile(*profile, why) && profile->descriptor.unit == "m" &&
-                 profile->descriptor.plane == "XY"
+  return profile && profile->descriptor.unit == "m" && profile->descriptor.plane == "XY"
              ? true
              : fail(why, "需要明确米制XY原生Profile");
 }
@@ -540,8 +539,6 @@ bool transformed(const Data& original, const Eigen::Matrix3f& pose, const std::s
   }
   output.cloud = std::make_shared<const PointCloud>(std::move(cloud));
   output.descriptor.frame = frame;
-  if (!validateProfile(output, why))
-    return false;
   result = Data::profile(std::move(output));
   return true;
 }
@@ -726,22 +723,15 @@ bool alignmentInfo(const Json& info, std::string& why) {
 bool optionsValid(const AlignmentOptions& options, std::string& why) {
   for (const auto v : {options.maxMatchingDist, options.maxFitnessDist, options.trustTranslation,
                        options.trustRotation, options.degenerateRatio})
-    if (!std::isfinite(v) || v < 0)
-      return fail(why, "配准距离、信赖域和退化阈值必须为有限非负数");
+    if (v < 0)
+      return fail(why, "配准距离、信赖域和退化阈值必须为非负数");
   if (options.maxMatchingDist <= 0 || options.maxFitnessDist <= 0 || options.maxIterations < 1 ||
       options.normalKnn < 1 || options.minScore < 0 || options.minScore > 100 ||
-      options.order < 0 || options.templateId.empty() || options.templateId.size() > 1024 ||
-      (options.initialPoseMode != "endpoint_midpoint" && options.initialPoseMode != "centroid" &&
-       options.initialPoseMode != "pca") ||
-      (options.roisFrom != "template" && options.roisFrom != "config"))
+      options.order < 0 || options.templateId.empty() || options.templateId.size() > 1024)
     return fail(why, "模板配准选项非法");
-  for (const auto& box : options.roisMm) {
-    for (const auto v : box)
-      if (!std::isfinite(v))
-        return fail(why, "模板框边界必须有限");
+  for (const auto& box : options.roisMm)
     if (box[0] > box[2] || box[1] > box[3])
       return fail(why, "模板框范围倒置");
-  }
   return true;
 }
 }
@@ -918,8 +908,6 @@ Status transformBusinessRois(const Record& alignment, const std::string& datumSi
     std::string why;
     if (alignment.type != "GapAlignment" && alignment.type != kAlignmentInfoType)
       return failure("输入不是模板配准结果", "alignment");
-    if (datumSide != "auto" && datumSide != "left" && datumSide != "right")
-      return failure("基准侧必须为auto、left或right", "", "bad_param");
     std::array<std::array<float, 4>, 4> bounds;
     Eigen::Matrix3f left, right;
     const auto& v = alignment.data;

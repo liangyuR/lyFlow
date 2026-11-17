@@ -72,8 +72,6 @@ Status flushPointLine(const Inputs& inputs, const ParamView& params, Outputs& ou
     return Status::Ok();
   const auto* base = inputs.get("baseLine").asLine2D();
   const auto* point = inputs.get("refPoint").asPoint2D();
-  if (!base || !point)
-    return failure("面差需要Line2D与Point2D", "baseLine");
   Sources sources;
   auto status = accept(inputs, "baseLine", "baseLineContext", sources);
   if (!status.ok)
@@ -122,8 +120,6 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
     return Status::Ok();
   const auto* left = inputs.get("left").asCircle2D();
   const auto* right = inputs.get("right").asCircle2D();
-  if (!left || !right)
-    return failure("圆间隙需要两个Circle2D", "left");
   Sources sources;
   auto status = accept(inputs, "left", "leftContext", sources);
   if (!status.ok)
@@ -176,8 +172,6 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
     return Status::Ok();
   const auto* a = inputs.get("a").asPoint2D();
   const auto* b = inputs.get("b").asPoint2D();
-  if (!a || !b)
-    return failure("位移分解需要两个Point2D", "a");
   Sources sources;
   auto status = accept(inputs, "a", "aContext", sources);
   if (!status.ok)

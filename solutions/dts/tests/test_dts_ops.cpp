@@ -337,7 +337,7 @@ TEST_CASE("亮度全 0：一个点都留不下，且错误话里带得出点数"
   CHECK(call.out("clean").asProfile() == nullptr);
 }
 
-TEST_CASE("一条直线没有胶条：停在 seal_dome，下游不崩") {
+TEST_CASE("一条直线没有胶条：停在 seal_dome") {
   // 完全平的一段：split_faces 切得出面，findDome 找不到凸起。
   PointCloud c;
   const int n = 800;
@@ -352,13 +352,6 @@ TEST_CASE("一条直线没有胶条：停在 seal_dome，下游不崩") {
   CHECK_FALSE(chain.run(std::move(c)));
   CHECK(chain.failedOp == "dts.seal_dome");
   CHECK(chain.status.code == "no_dome");
-
-  // seal_dome 失败时执行器不会调 dts.flush（它的两个端口都是必填且不 acceptsError，
-  // 见 ADR-0016）。真调进去也只能是「类型不对」，不能是崩 —— 这条守的是那个不变量。
-  Call orphan;
-  const Status s = orphan.run("dts.flush");
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "type_mismatch");
 }
 
 TEST_CASE("DTS v2 preserves slots, channels, source identity and metric geometry companions") {

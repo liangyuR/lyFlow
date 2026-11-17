@@ -17,13 +17,9 @@ Status radiusOutlier(const Inputs& inputs, const ParamView& params, Outputs& out
   const auto& source = inputs.get("profile");
   const auto* input = source.asProfile();
   std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why);
   if (ctx.cancelled())
     return cancelled();
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return bad("来源必须为Record", "provenance");
   nlohmann::json sources;
   if (!profile_contract::profileSources(source, provenance, sources, why))
     return bad(why, "provenance");

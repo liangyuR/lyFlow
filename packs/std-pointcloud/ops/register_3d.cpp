@@ -235,16 +235,6 @@ Solution icp(const PointCloud& source, const PointCloud& target,
   return solution;
 }
 
-bool positiveParameters(const ParamView& p) {
-  for (const char* key :
-       {"maxRmse", "maxCorrespondenceDistance", "translationTolerance", "rotationTolerance"})
-    if (!std::isfinite(p.number(key)) || p.number(key) <= 0)
-      return false;
-  return std::isfinite(p.number("minInlierRatio")) && p.number("minInlierRatio") > 0 &&
-         p.number("minInlierRatio") <= 1 && p.integer("maxIterations") >= 1 &&
-         p.integer("maxIterations") <= 10000;
-}
-
 } // namespace
 
 void registerRegistration3D(Registry& r) {
@@ -307,10 +297,6 @@ void registerRegistration3D(Registry& r) {
       Status s = inputs(in, p, source, target, initial);
       if (!s.ok)
         return s;
-      if (!positiveParameters(p))
-        return error("迭代或质量门限参数非法", "maxIterations", "bad_param");
-      if (p.choice("mode") != "point_to_point" && p.choice("mode") != "point_to_plane")
-        return error("未知残差模型", "mode", "bad_param");
       const bool normals = p.choice("mode") == "point_to_plane";
       if (normals && !target->hasNormals())
         return error("点面ICP需要目标法线", "target");

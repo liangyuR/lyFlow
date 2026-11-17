@@ -2,7 +2,6 @@
 #include "profile_measurement_ops.h"
 
 #include <algorithm>
-#include <cmath>
 #include <string>
 
 #include "lyflow_profile/features.h"
@@ -75,14 +74,11 @@ const Record* provenance(const ScanView& scan, const std::string& role) {
 }
 Status crop(const Data& input, const Record* origin, const Data& box, const Data& context,
             contract::SelectionResult& result, ExecContext& ctx) {
-  const auto* binding = context.asRecord();
-  if (!binding)
-    return bad("业务范围缺少内容绑定上下文", "rois");
   contract::SelectionOptions options;
   options.bounds = "open";
   options.mode = "compact";
   options.emptyPolicy = "error";
-  return contract::cropProfile(input, box, *binding, origin, options, result, ctx);
+  return contract::cropProfile(input, box, *context.asRecord(), origin, options, result, ctx);
 }
 Status fitRole(const ScanView& scan, const RoiView& rois, const ParamView& params,
                const Data& refLine, const Data& refContext, contract::RobustLineResult& result,
@@ -90,8 +86,6 @@ Status fitRole(const ScanView& scan, const RoiView& rois, const ParamView& param
   const auto* box = rois.role(params.choice("role"));
   const auto* context = rois.context(params.choice("role"));
   const auto* profile = scan.pick(params.choice("cloud"));
-  if (!box || !context || !profile)
-    return bad("角色或轮廓选择非法", "rois");
   contract::SelectionResult selected;
   if (const auto status =
           crop(*profile, provenance(scan, params.choice("cloud")), *box, *context, selected, ctx);
@@ -186,13 +180,9 @@ Status refPoint(const Inputs& in, const ParamView& params, Outputs& out, ExecCon
                              fit.indexMap, fit.quality, fit.provenance},
                             out, ctx);
   }
-  if (method != "selected_point" && method != "nearest_point")
-    return bad("参考点方法非法", "method");
   const auto* boxData = rois.role(params.choice("role"));
   const auto* boxContext = rois.context(params.choice("role"));
   const auto* input = scan.pick(params.choice("cloud"));
-  if (!boxData || !boxContext || !input)
-    return bad("角色或轮廓选择非法", "rois");
   contract::NearestInputs nearest;
   nearest.profile = *input;
   nearest.provenance = Data::record(*provenance(scan, params.choice("cloud")));
@@ -244,8 +234,6 @@ Status datumDirection(const Inputs& in, const ParamView& params, Outputs& out, E
   const auto role = params.choice("role");
   const auto* height = rois.role(role);
   const auto* heightContext = rois.context(role);
-  if (!height || !heightContext)
-    return bad("方向角色非法", "rois");
   const bool datumRight = rois.info->data["datumSide"] == "right";
   const bool right = role == "target" ? !datumRight : datumRight;
   const std::size_t side = right ? 3 : 2;

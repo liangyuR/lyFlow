@@ -44,8 +44,6 @@ Status assembleScan(const Inputs& inputs, const ParamView& params, Outputs& outp
     const auto* secondary = s.asProfile();
     const auto* measured = inputs.get("primary").asProfile();
     const auto* mergedOrigin = inputs.get("mergedProvenance").asRecord();
-    if (!primary || !secondary || !measured || !mergedOrigin)
-      return bad("组装需要原生传感器/量测轮廓及合并来源", "sensorPrimary");
     ScanMetadata metadata;
     metadata.sensorFrame = primary->descriptor.frame;
     metadata.measurementFrame = measured->descriptor.frame;
@@ -54,13 +52,13 @@ Status assembleScan(const Inputs& inputs, const ParamView& params, Outputs& outp
         {"taken", "both"}, {"evaluated", false}, {"exceeded", false}, {"onDisagree", "off"}};
     if (inputs.has("guardQuality")) {
       const auto* guard = inputs.get("guardQuality").asRecord();
-      if (!guard || !guardMatches(p, s, *guard, why))
-        return bad(why.empty() ? "guard来源类型非法" : why, "guardQuality");
+      if (!guardMatches(p, s, *guard, why))
+        return bad(why, "guardQuality");
       metadata.guard = guard->data;
     }
     if (inputs.has("cropStatus")) {
       const auto* crop = inputs.get("cropStatus").asRecord();
-      if (!crop || crop->type != "gap.RollCrop.v2")
+      if (crop->type != "gap.RollCrop.v2")
         return bad("裁剪状态必须为gap.RollCrop.v2", "cropStatus");
       metadata.crop = crop->data;
     }
@@ -72,7 +70,7 @@ Status assembleScan(const Inputs& inputs, const ParamView& params, Outputs& outp
                                        {"details", {{"declaredBy", "gap.make_scan_pair"}}}};
     if (inputs.has("sourceInfo")) {
       const auto* origin = inputs.get("sourceInfo").asRecord();
-      if (!origin || origin->type != "gap.ProfilePairSource.v2" || !origin->data.is_object() ||
+      if (origin->type != "gap.ProfilePairSource.v2" || !origin->data.is_object() ||
           origin->data.size() != 2 || !origin->data.contains("schemaVersion") ||
           !origin->data["schemaVersion"].is_number_integer() ||
           origin->data["schemaVersion"] != 2 || !origin->data.contains("origins"))
@@ -91,10 +89,7 @@ Status assembleScan(const Inputs& inputs, const ParamView& params, Outputs& outp
           std::make_pair("secondaryProvenance", &metadata.secondaryProvenance)}) {
       if (!inputs.has(entry.first))
         continue;
-      const auto* origin = inputs.get(entry.first).asRecord();
-      if (!origin)
-        return bad("轮廓来源必须为Record", entry.first);
-      *entry.second = *origin;
+      *entry.second = *inputs.get(entry.first).asRecord();
     }
     metadata.processing = {
         {"method", "assemble"},
@@ -137,8 +132,6 @@ Status assembleRois(const Inputs& inputs, const ParamView& params, Outputs& outp
   }
   if (inputs.has("info")) {
     const auto* info = inputs.get("info").asRecord();
-    if (!info)
-      return bad("需要完整gap.RoiInfo.v2业务来源", "info");
     if (params.choice("metadataMode") != "update_metadata" &&
         (inputs.has("overall") || inputs.has("overallContext") || inputs.has("cropStatus")))
       return bad("完整业务info往返不可同时覆盖独立窗口或裁剪状态", "info");
@@ -169,7 +162,7 @@ Status assembleRois(const Inputs& inputs, const ParamView& params, Outputs& outp
     const auto* context = inputs.get("overallContext").asRecord();
     ProfileDescriptor space, expected;
     std::string why;
-    if (!overall || !context || context->type != "profile.Geometry.v2" ||
+    if (context->type != "profile.Geometry.v2" ||
         !profile_contract::geometryMatchesPhysical(inputs.get("overall"), context, space, why) ||
         !profile_contract::geometryMatchesPhysical(fields.boxes[0], fields.contexts[0].asRecord(),
                                                    expected, why) ||
@@ -181,7 +174,7 @@ Status assembleRois(const Inputs& inputs, const ParamView& params, Outputs& outp
   }
   if (inputs.has("cropStatus")) {
     const auto* crop = inputs.get("cropStatus").asRecord();
-    if (!crop || crop->type != "gap.RollCrop.v2")
+    if (crop->type != "gap.RollCrop.v2")
       return bad("裁剪状态必须为gap.RollCrop.v2", "cropStatus");
     fields.info.data["cropStatus"] = crop->data;
   }
@@ -246,8 +239,6 @@ Status seamTowardGeometry(const RoiView& rois, Data& box, Record& context, ExecC
   ProfileDescriptor first;
   std::string why;
   for (std::size_t i = 2; i < 4; ++i) {
-    if (!rois.boxes[i] || !rois.contexts[i] || !rois.boxes[i]->asBox2D())
-      return bad("缺少两侧缝框及几何上下文", roles[i]);
     const auto* bound = rois.contexts[i]->asRecord();
     ProfileDescriptor space;
     Json parents;

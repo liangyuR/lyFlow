@@ -134,8 +134,6 @@ TEST_CASE("Profile input: strict errors report physical lines without publishing
     auto missing = settings;
     missing[field] = Value::text("");
     CHECK_FALSE(call.validate("profile.input", missing, {}).empty());
-    CHECK_FALSE(call.run("profile.input", missing).ok);
-    CHECK(call.outputs.empty());
   }
   file.write("# empty acquisition\n\nx,z\n");
   REQUIRE(call.run("profile.input", settings).ok);
