@@ -22,7 +22,7 @@ import {
 } from './page.mjs';
 
 // ------------------------------------------------------------ 合成剖面（毫米）
-// 与 solutions/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
+// 左板顶面 y=165，右板 y=164（高 1 mm），
 // 缝两侧各一段 R1 的圆角。x 步长 0.05 mm。
 
 export function profile(shiftMm) {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "7b36f8f2875a331ce6833d819bd34da4c708eb44",
+  "sourceRevision": "8ae3319665c7ced2715320f0c7e9ab9df6575a9c",
   "productVersion": "1.4.5",
   "nativeCount": 277,
   "pythonExampleCount": 8,
@@ -499,43 +499,37 @@
     "packs/std-metrology/ops/profile_dimensions.cpp": "873be9ad6e5a97005cbaa998e147f9711e4df4112c944aed965a64ae8b2f34f8",
     "packs/std-profile/ops/robust_features.cpp": "2ae8744a18bdeca7ff43d4a0e492e853d1cd438cb4ee96a700a4c52ed34bd0f2",
     "solutions/gap/ops/profile_scan.cpp": "4e8a11469c9ceedb3105d264cc5b9e54d569b4c17f18325dd1b798c7dd3e119b",
-    "solutions/gap/ops/common.cpp": "437416753610dcbafd745b0bf00772d3781a10badd5c8bf710044a10b443d39a",
+    "solutions/gap/ops/common.cpp": "68e126459b98516e79fed6d8ea4b6d2ca95a72369fd361febb4388e26108e2e5",
     "solutions/gap/ops/profile_migration.h": "fc30dde1a51b36fe2a247bdca1fcaf460a903f356d62ff41c70ec8259451a2be",
     "packs/std-profile/include/lyflow_profile/merge.h": "7cfb39c9ca3c789ba4e03f87820d57e33a93e67abec86925ef4b9db3ee70489d",
     "packs/std-profile/include/lyflow_profile/provenance.h": "9c4384ece0cac1e8633efe6ce9d230bed2d3cdf4414bb3fe0880060409950291",
     "solutions/gap/ops/profile_locate_template.h": "f2325f70a289e80e39f0475cfaa35b955ac7631ad95e37f420a6fbd363dc41d5",
     "core/cmake/release-identity.cmake": "bcd74051fe88f47aa6b75ebacc729a7b42a4b51ac4339ed8c7e1f8f29f608d41",
-    "solutions/gap/ops/offset.cpp": "007b9d24145e9476353d9c1ff5f484fc5b187ccbe77621a28295b2eabf3d13c0",
     "solutions/gap/ops/profile_circles.h": "ee4c4c52db0edfad2a5d9eb5ac691a5a47a4c74f82fdc216f70f86202c0ba43b",
     "solutions/gap/algo/gap_ml/OnnxRoiPredictor.hpp": "62d0f90bffe4fffbfefaa4c356b62913ed54bc6184717732b08b4d377390d11c",
     "packs/std-ml/include/lyflow_ml/runtime.h": "7dc06dc006b53fdeb8ee9d0cce4ae496241fe18663f8dd1434f1fe70608c7180",
-    "solutions/gap/ops/gap_fine.h": "b6bd5ea163f0ee2131f6878560fe57f0890edcf43fd9d6b199c31caa5fab7461",
-    "solutions/gap/ops/port_examples.cpp": "9fe7ee56e5ee2d43223fc35c33b038b8ae93769a20549b90ffc9187a6f0e5b16",
     "solutions/gap/ops/profile_guard.h": "49153fe91aa2d0e4c9997af100343a42d819faca3b77e9262cc1f028f4cc55fc",
     "packs/std-profile/ops/merge.cpp": "daf00f4fd1b4213a000b71f228dbf70568a806fee0d3557dae00fcd121a7852c",
     "packs/std-profile/include/lyflow_profile/features.h": "59d24ed0894c362e109f5833e964c4cee971efde5923195731fab54a7efe065c",
     "packs/std-pointcloud/include/lyflow_pcl/filters.h": "185667d793361380a7e9666f795543f57d3926f19bc152a0d8efd4f344451099",
     "solutions/gap/algo/gap_detection/GapDetection.cpp": "e816c2097907fa68e49d394e400ce865040a7848aee92487678867aa933131ad",
     "packs/std-ml/src/runtime_stats.h": "1d7bdc91ab633e614277bdecdea1a24535905ce2461d2628bec62e117e0766bf",
-    "solutions/gap/ops/register.cpp": "2b37fe6681ec965ffcc6425fb5be24a63e9af3a7f400450c28f0796fde804b1a",
-    "solutions/gap/ops/bundle_common.cpp": "5f59e26359e3960d1a903924b9778019bd39a3ae045652fadef30c56fffd1b41",
+    "solutions/gap/ops/register.cpp": "cb219fefcc294037bbff12f3c9920847a6e3a309544b06314a0166dfdf3a7ca6",
     "solutions/gap/ops/gap_pch.h": "d7a69aa335f47c8f03ae985ea1033c57008f0eb334b20e22b900f62a09ff7b7c",
     "solutions/gap/snippets/gap-circles.lyflow-snippet.json": "f2b656f367f96f1070817184a4bb8c8596b5d8d2adced3ef9f604a6d57836495",
-    "solutions/gap/ops/notch.cpp": "e692986fffff90c7773a4dcc9fd2e575fd245665da951c32635397993b362f62",
+    "solutions/gap/ops/notch.cpp": "095515e7d110dfef85b93fae4193e89a263616e5733940fd060edec519ed91ec",
     "solutions/gap/ops/profile_bundle_ops.h": "45f2270243c2d9425e56d06fd22cf03085102f32e90c6cae4544be9f5759737b",
     "solutions/gap/algo/gap_ml/RoiBoxes.cpp": "a34c4aa2ed6c3ad6b5bba8fe137c244a225f74640d5194dd63e945efe38470ee",
     "solutions/gap/algo/gap_io/Sha256.cpp": "176e294a1c2d4a81851acf1c988de3bee5003a6214909bdf54b0c1055875b0a9",
     "solutions/gap/ops/profile_scene.cpp": "f944f5e5e2236740f9f9875dc2eead5e8ee9f3b2d702b388d0d0b13111fef990",
     "solutions/gap/snippets/flush-line-end.lyflow-snippet.json": "33065300e7e1406e9851e2bc12de80c5c5660edf7188776abbbb4d0cd811bb5d",
-    "solutions/gap/ops/measure.cpp": "39b2e97919e247a9b0711cc33b707a2944d41f6a30c8740b946502573e47235b",
+    "solutions/gap/ops/measure.cpp": "68174b55a00371af0256f2929ba939dcef2008fd765c22bcb20592cf753afaa5",
     "solutions/gap/algo/gap_detection/Converter.hpp": "efc9f533fecea532e6a912fdb1b9e766eb0535c59ba233f52cdd73b4e44b894e",
-    "solutions/gap/ops/profile_inspection.h": "207367c859b8d0eaa9158c71d9aa3cad0004f75f1f36170709d0b94ec8b86157",
+    "solutions/gap/ops/profile_inspection.h": "a4eed7464691ee328795b9b8d2d60fbaea41f350eeb88c3578aa8d6ca350f901",
     "solutions/gap/algo/gap_detection/DetectionConfigurationAdapter.cpp": "69df277ab70b3b2aa870a55d4f7d9c19bf3776b814a30ede4f926ef588f891ae",
     "solutions/gap/algo/gap_detection/GapUtils.cpp": "2a01714816a47827989bd737f4a22a272f79e56fbf582bbbf0b6c07da709d3f8",
-    "solutions/gap/ops/io.cpp": "c5746f35a76bfaf4735c37101b55648df0ec53633f82b64e1ae226f302498f08",
     "solutions/gap/ops/profile_measurement_ops.h": "3b87b0c96cbcea59bfa3fe97c52ed3e0b08f8e9e40bfc5de6cb62651c895e414",
     "solutions/gap/algo/gap_detection/DetectionConfigurationAdapter.hpp": "44d1d48fa593888b6e3089f09600084837feb655b6e159c71afb9e2be6be1beb",
-    "solutions/gap/ops/bundle_ops.cpp": "17a5b778475936f4326762af5525d6a95759470b7a2b5fc6fef3d5b206f31c55",
     "solutions/gap/algo/domain/detection/DetectionConfiguration.hpp": "e5181c6cebece9fcb6cdcf7d26dad114908d76339223775c8fb936f03d50a4f5",
     "solutions/gap/ops/profile_bundle_ops.cpp": "3d4e14579322b56c30e9985220b3b961095569ce570963a0955f8a0df1d5b390",
     "solutions/gap/ops/profile_model_ops.h": "d8f0e21add10b4f9a01d8caaf132a13f211107cbf0ec3cd72c9fd2ffda05ac89",
@@ -545,14 +539,12 @@
     "solutions/gap/ops/profile_scan.h": "c0955d341a1c09554e21684106918e06746b20d517954569962db1980bb4f1dc",
     "solutions/gap/ops/profile_model.h": "2947eaf820d0e34fc5b780e03d3134e5d9c3a299c439e32ed7f6079da725cd98",
     "solutions/gap/snippets/measure-skeleton.lyflow-snippet.json": "91fb9f5e99b1fa0d585076953f76cb3804207c0f861daf2c2df8469caaa51b62",
-    "solutions/gap/ops/camera_guard.cpp": "52e2ebba7626312995b8161374f99dd72230db83436c9ddbc6ec51ffe17fb9c4",
     "solutions/gap/ops/profile_regions.h": "537488be8b470e19cf2107342772bb8af6de77d22eddda44e7be87eda75f079e",
     "solutions/gap/ops/profile_feature_bundle.cpp": "a19a9a4b03ce78975a766ae775944a0b59c16462c7077fb9cd578c8caaa3ed30",
     "packs/std-profile/ops/selection_regions.cpp": "92d98ac87518f888490d29dd422a993b787475501701104d4629da4a103d3145",
     "core/src/graph_contract_upgrade_gap.h": "d0771f77e673b19b0f6a36533d10828c6a7bce369315a0bab046f2fff4bd3e01",
-    "solutions/gap/ops/align.cpp": "9e99b0901077cfe4ff8b9760b5d4098295c85eb1c2d598153ca4d8c185c9cce0",
     "solutions/gap/algo/gap_core/MeasurementEngine.hpp": "775caa19b0c19992a7dd3e0aa729d1fcba4d7361a558d19902f515295cbbc284",
-    "solutions/gap/lyflow_op_pack.cmake": "cc0ff2d7a42a5f65a81254be3b6688f0c1430ae49b60f96ab8b11333c8c8f7a3",
+    "solutions/gap/lyflow_op_pack.cmake": "55d0f805d7f96b1e0d21d8fdedc1f5b6f71849ca0f0b5a365b90af172e09cc43",
     "solutions/gap/ops/profile_template.cpp": "46cddc026f4e6ef6d83926db8f39dd4d3d4596490059add474308aae4624e9d6",
     "packs/std-ml/src/session_cache.h": "218ecfeb9685a78a3bc2d86784fbe9c2c5dcf527612f380fd332a830e64ff5f8",
     "packs/std-profile/include/lyflow_profile/selection.h": "093ec0b39659545c51fb857ccd4b7502a9c74c9fade4bd7c02c41e56647671f2",
@@ -569,12 +561,12 @@
     "solutions/gap/algo/gap_io/Sha256.hpp": "5a40f20e06f87cac1825aae0dd74c8e3234c07896c72d8b0a3c5054d59cbd724",
     "packs/std-profile/ops/radius_outlier.cpp": "d81adb0b6b3cfe801dc5b89c585b7a7d0159d7e8c82f7d73f4548c1fd54e23dc",
     "solutions/gap/algo/gap_detection/Alignment.hpp": "3854188230f63314e951feedefd38844d50224501c6844c538f7d25757d577b5",
-    "solutions/gap/ops/fit.cpp": "85e82c980204ffebf057f6e9a0ebe937001e9cea28cc2ac0b3955575335cc404",
+    "solutions/gap/ops/fit.cpp": "732b841c6c7f98338cca5f2e61ae98d8eef06e7a38b8c1e1300b12a1322a5350",
     "solutions/gap/ops/profile_inspection.cpp": "9d0a2ae8ff6efd413a28a164a295f1730dfc270ff9b9d48e0611ec3022f48eea",
     "solutions/gap/ops/profile_measurement_ops.cpp": "b723d2080ddd95a784ab819bb2d8428732a8568e769bb8d86bb7f51ccd82d088",
     "solutions/gap/snippets/model-with-template-fallback.lyflow-snippet.json": "82ee1d65cd2924671d09ebfbc4746b5ba56c5df60a81cdf94d4b6dfd7c2b0630",
-    "solutions/gap/ops/gap_ops.h": "e1aebf0d8d544602115258afd7f02023a588363df3982623e2b961542ac603d9",
-    "solutions/gap/ops/import_standard_gap.cpp": "cfb967324af5d22bcb409b4f0e3a41365148704fd2d293a78df08a7fdc9e13ae",
+    "solutions/gap/ops/gap_ops.h": "dad20f0320f81b7ae80a97545f96a7b3fc8d976472465b7d0e85044e8311a9f1",
+    "solutions/gap/ops/import_standard_gap.cpp": "641a317cd13d0d8be346ce1299e69088d4c88f5cc85cba32d0b0eaa52ea76fa0",
     "core/cmake/scene-modules.cmake": "b0970644fc5cbf022af1c13ef4c45323fc62aebfc9c19a73f7faa4fd0363f1e9",
     "packs/std-geometry/ops/box_anchor.cpp": "3d8a03384ff551cb29ff126e725d0ad07d2bba956a441f5f40ec4e7a022b00f1",
     "solutions/gap/snippets/flush-selected-point.lyflow-snippet.json": "8ead02016af38ffefa71d72fb0ff4c787d20a95fecd9513c040326025c8159a8",
@@ -583,8 +575,7 @@
     "solutions/gap/algo/domain/detection/DetectionTypes.hpp": "6e686de118a52d2239e1129f3a2c51efbbbf38496d217a3dbec244f39df56017",
     "solutions/gap/algo/gap_ml/RoiFeatures.cpp": "ed4f7051f5d48f8a22349f93c9b39db0584284529f1c5bb731814e9d246270c2",
     "packs/std-pointcloud/include/lyflow_pcl/parallel.h": "391993517e17548aa9404caf3d4016dc5307a60ab4d9383cdc38f187c709587f",
-    "solutions/gap/ops/groove.cpp": "f534dfbea304726c4f9a410c02c74fc4bd41d823c105f097eba47fcca4493025",
-    "solutions/gap/ops/model_roi.cpp": "a00e2c70f49ff2f0212a18b5eaada205cb54fe3a7ab08ab776a437832c0e126d",
+    "solutions/gap/ops/groove.cpp": "5ae8b5aa4c5355c78ffc563c49a0f65f84007f0d2b9ecb500d446f473b2eb576",
     "solutions/gap/algo/gap_ml/RoiFeatures.hpp": "5b222c9dc88bd31c699f234fb1677230bbc2a5e585dd9e492894561e6f12a8a3",
     "solutions/gap/ops/snippets.cpp": "2b956c4bfe9d0c9042d328e78061e37edfe9165c7c9876189b42f1d333851f42",
     "solutions/gap/algo/domain/config/settings_values.hpp": "08e5d35c58b7b98dbb480a33165d15e1a20750f4a9c1520d4380d8276a65feb7",
@@ -597,9 +588,7 @@
     "solutions/gap/algo/gap_detection/Alignment.cpp": "1492b0a70f92bd87cf253f96bb8ae67e22b4f8c92f3d84c5cb65f777afe0f8cf",
     "solutions/gap/algo/std_bridge.hpp": "4d3e7717263e1354de9544462f7c7be4ccdc2b37a7c5c81cabd892e51e1f063a",
     "solutions/gap/snippets/backup-camera.lyflow-snippet.json": "65f0c1d3bb54973f067b2e45cc3217234ea7359ae7640bf768afe11030357fe7",
-    "solutions/gap/ops/geometry.cpp": "b18d039c315c11e0dff1c4a2019c3bef3f82039be6e3e3f6c8750a2e61e1ecab",
     "solutions/gap/ops/legacy_model_cache.cpp": "d47790e9d72a3f840e51411980749f4bd46eaf42a9c15ed6fe0c733c8be9d4ab",
-    "solutions/gap/ops/blocks.cpp": "8cb14230ebb87bc7839dec9b9f2b52e012e3dcfdeb30951a79781c2d24d1fb55",
     "solutions/gap/ops/profile_guard.cpp": "0b9a9e757a9fa76b598084248b49827d66ae7a6871c9c43e80e7a314c6f9f955",
     "solutions/gap/ops/profile_scene.h": "6a557c2d1499776809bd56a58551ff02265709cc56efa707339b73e7c5fba00d",
     "packs/std-pointcloud/src/filters.cpp": "c919d62ae0aff1ec054762274fadaa7b90849afdbb837c855c349fd7c5714e7f",
@@ -22250,7 +22239,7 @@
       "targetContract": "保既有Measurement上下限与无效判定，不把未知/invalid测量变为业务合格；只迁包不改算子契约。",
       "acceptance": "既有上下界/边界等于/valid=false Measurement判定和输出单位不变；不将未知状态显示为合格。",
       "prerequisites": ["M1", "gap.flush", "gap.gap"],
-      "source": "solutions/gap/ops/measure.cpp:443",
+      "source": "solutions/gap/ops/measure.cpp:228",
       "dependencies": [
         "solution-gap公开Profile/Geometry/Metrology和唯一场景typed helper；包必需gap-geometry/PCL，模型/模板/导入/兼容重依赖均独立可选，无OpenCV依赖。"
       ],
@@ -48855,27 +48844,16 @@
     "solutions/gap/algo/std_bridge.hpp",
     "solutions/gap/lyflow_op_pack.cmake",
     "solutions/gap/lyflow_pack_dependencies.cmake",
-    "solutions/gap/ops/align.cpp",
-    "solutions/gap/ops/blocks.cpp",
-    "solutions/gap/ops/bundle_common.cpp",
-    "solutions/gap/ops/bundle_ops.cpp",
-    "solutions/gap/ops/camera_guard.cpp",
     "solutions/gap/ops/common.cpp",
     "solutions/gap/ops/fit.cpp",
-    "solutions/gap/ops/gap_fine.h",
     "solutions/gap/ops/gap_ops.h",
     "solutions/gap/ops/gap_pch.h",
-    "solutions/gap/ops/geometry.cpp",
     "solutions/gap/ops/groove.cpp",
     "solutions/gap/ops/import_standard_gap.cpp",
-    "solutions/gap/ops/io.cpp",
     "solutions/gap/ops/legacy_model_cache.cpp",
     "solutions/gap/ops/measure.cpp",
     "solutions/gap/ops/measure_reference.cpp",
-    "solutions/gap/ops/model_roi.cpp",
     "solutions/gap/ops/notch.cpp",
-    "solutions/gap/ops/offset.cpp",
-    "solutions/gap/ops/port_examples.cpp",
     "solutions/gap/ops/profile_bundle_ops.cpp",
     "solutions/gap/ops/profile_bundle_ops.h",
     "solutions/gap/ops/profile_circles.cpp",
@@ -51385,7 +51363,7 @@
         }
       ],
       "note": "仅M4c场景/Profile/原子Bundle/显式图升级切片；14新增、精确8退役及31项迁包。manifest匹配不代表整个M4或M5–M7完成。",
-      "reviewedChange": "Codex绑定P2与400项独立矩阵复核：合法同义绑定只清新默认，原冲突/不安全单位/row/压缩原槽拒绝；真实共享子图双实例及全包838项通过。",
+      "reviewedChange": "删除corner质量记录中恒为false的alignmentApplied字段",
       "reviewedSourceChanges": [
         {
           "path": "core/CMakeLists.txt",
@@ -52358,12 +52336,144 @@
           "previousSha256": "e090bf1f08816ceb97e57286e3725447072efbfe26ce19a3c7322f12e7c26022",
           "sha256": "85774f9107e8f8faf1aad6a2e397fa804686663839d67e5872f2d72a943cd867",
           "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/lyflow_op_pack.cmake",
+          "previousSha256": "cc0ff2d7a42a5f65a81254be3b6688f0c1430ae49b60f96ab8b11333c8c8f7a3",
+          "sha256": "55d0f805d7f96b1e0d21d8fdedc1f5b6f71849ca0f0b5a365b90af172e09cc43",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/align.cpp",
+          "previousSha256": "9e99b0901077cfe4ff8b9760b5d4098295c85eb1c2d598153ca4d8c185c9cce0",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/blocks.cpp",
+          "previousSha256": "8cb14230ebb87bc7839dec9b9f2b52e012e3dcfdeb30951a79781c2d24d1fb55",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/bundle_common.cpp",
+          "previousSha256": "5f59e26359e3960d1a903924b9778019bd39a3ae045652fadef30c56fffd1b41",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/bundle_ops.cpp",
+          "previousSha256": "17a5b778475936f4326762af5525d6a95759470b7a2b5fc6fef3d5b206f31c55",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/camera_guard.cpp",
+          "previousSha256": "52e2ebba7626312995b8161374f99dd72230db83436c9ddbc6ec51ffe17fb9c4",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/common.cpp",
+          "previousSha256": "437416753610dcbafd745b0bf00772d3781a10badd5c8bf710044a10b443d39a",
+          "sha256": "68e126459b98516e79fed6d8ea4b6d2ca95a72369fd361febb4388e26108e2e5",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/fit.cpp",
+          "previousSha256": "85e82c980204ffebf057f6e9a0ebe937001e9cea28cc2ac0b3955575335cc404",
+          "sha256": "732b841c6c7f98338cca5f2e61ae98d8eef06e7a38b8c1e1300b12a1322a5350",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/gap_fine.h",
+          "previousSha256": "b6bd5ea163f0ee2131f6878560fe57f0890edcf43fd9d6b199c31caa5fab7461",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/gap_ops.h",
+          "previousSha256": "e1aebf0d8d544602115258afd7f02023a588363df3982623e2b961542ac603d9",
+          "sha256": "dad20f0320f81b7ae80a97545f96a7b3fc8d976472465b7d0e85044e8311a9f1",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/geometry.cpp",
+          "previousSha256": "b18d039c315c11e0dff1c4a2019c3bef3f82039be6e3e3f6c8750a2e61e1ecab",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/groove.cpp",
+          "previousSha256": "f534dfbea304726c4f9a410c02c74fc4bd41d823c105f097eba47fcca4493025",
+          "sha256": "5ae8b5aa4c5355c78ffc563c49a0f65f84007f0d2b9ecb500d446f473b2eb576",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/import_standard_gap.cpp",
+          "previousSha256": "cfb967324af5d22bcb409b4f0e3a41365148704fd2d293a78df08a7fdc9e13ae",
+          "sha256": "641a317cd13d0d8be346ce1299e69088d4c88f5cc85cba32d0b0eaa52ea76fa0",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/io.cpp",
+          "previousSha256": "c5746f35a76bfaf4735c37101b55648df0ec53633f82b64e1ae226f302498f08",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/measure.cpp",
+          "previousSha256": "39b2e97919e247a9b0711cc33b707a2944d41f6a30c8740b946502573e47235b",
+          "sha256": "637bc1c3e8f09d96b170110b2bf584e6e47be69fc4dab64292a4f34c0752e793",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/model_roi.cpp",
+          "previousSha256": "a00e2c70f49ff2f0212a18b5eaada205cb54fe3a7ab08ab776a437832c0e126d",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/notch.cpp",
+          "previousSha256": "e692986fffff90c7773a4dcc9fd2e575fd245665da951c32635397993b362f62",
+          "sha256": "095515e7d110dfef85b93fae4193e89a263616e5733940fd060edec519ed91ec",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/offset.cpp",
+          "previousSha256": "007b9d24145e9476353d9c1ff5f484fc5b187ccbe77621a28295b2eabf3d13c0",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/port_examples.cpp",
+          "previousSha256": "9fe7ee56e5ee2d43223fc35c33b038b8ae93769a20549b90ffc9187a6f0e5b16",
+          "sha256": null,
+          "kind": "removed"
+        },
+        {
+          "path": "solutions/gap/ops/profile_inspection.h",
+          "previousSha256": "207367c859b8d0eaa9158c71d9aa3cad0004f75f1f36170709d0b94ec8b86157",
+          "sha256": "a4eed7464691ee328795b9b8d2d60fbaea41f350eeb88c3578aa8d6ca350f901",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/register.cpp",
+          "previousSha256": "2b37fe6681ec965ffcc6425fb5be24a63e9af3a7f400450c28f0796fde804b1a",
+          "sha256": "cb219fefcc294037bbff12f3c9920847a6e3a309544b06314a0166dfdf3a7ca6",
+          "kind": "modified"
+        },
+        {
+          "path": "solutions/gap/ops/measure.cpp",
+          "previousSha256": "637bc1c3e8f09d96b170110b2bf584e6e47be69fc4dab64292a4f34c0752e793",
+          "sha256": "68174b55a00371af0256f2929ba939dcef2008fd765c22bcb20592cf753afaa5",
+          "kind": "modified"
         }
       ],
       "manifestEvidence": {
         "sha256": "5c95d6ae69bb598ad1cedcd67181454528f3fbc41fae62035822ae2b2beab6b5",
         "operatorCount": 277,
-        "path": "build/m4c-full/manifest.json"
+        "path": "build/core-gap/manifest.json"
       }
     }
   ],

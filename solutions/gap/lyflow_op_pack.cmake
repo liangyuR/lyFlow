@@ -1,7 +1,6 @@
 set(GAP_OP_SOURCES
   "${LYFLOW_PACK_DIR}/ops/register.cpp"
   "${LYFLOW_PACK_DIR}/ops/common.cpp"
-  "${LYFLOW_PACK_DIR}/ops/port_examples.cpp"
   "${LYFLOW_PACK_DIR}/ops/result_bundle.cpp"
   "${LYFLOW_PACK_DIR}/ops/snippets.cpp"
   "${LYFLOW_PACK_DIR}/ops/fit.cpp"

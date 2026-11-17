@@ -29,47 +29,6 @@ lyflow::Line2D segmentOf(const Eigen::Vector2f& start, const Eigen::Vector2f& en
   return seg;
 }
 
-Status flush(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
-  const lyflow::Point2D& ref = *inputs.get("refPoint").asPoint2D();
-  kernel::profile_dimensions::FlushOptions options;
-  options.signedDistance = params.flag("signed");
-  options.gain = params.number("scale");
-  options.offsetMm = params.number("offset");
-  kernel::profile_dimensions::FlushResult result;
-  std::string why;
-  if (!kernel::profile_dimensions::flushPointLine(base, ref, options, result, why))
-    return Status::Error(Phase::Execute, "invalid_geometry", why);
-  setMeasurement(outputs, "value", result.valueMm, true, {});
-  outputs.set("segment", Data::line2d(result.segment));
-  outputs.set("baseLine", Data::line2d(result.baseLine));
-  return Status::Ok();
-}
-
-Status gapValue(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  const lyflow::Circle2D& left = *inputs.get("left").asCircle2D();
-  const lyflow::Circle2D& right = *inputs.get("right").asCircle2D();
-  const bool definitionA = params.choice("definition") == "A";
-  const auto* base = inputs.get("baseLine").asLine2D();
-  if (definitionA && (!base || !base->hasSegment)) {
-    return Status::Error(Phase::Execute, "bad_input",
-                         "definition A 要的是带两个端点的基准线（与 ROI 框的交点）", {},
-                         "baseLine");
-  }
-  kernel::profile_dimensions::CircleGapOptions options;
-  options.definition = definitionA ? kernel::profile_dimensions::CircleGapDefinition::DatumTangents
-                                   : kernel::profile_dimensions::CircleGapDefinition::CenterLine;
-  options.offsetMm = params.number("offset");
-  kernel::profile_dimensions::CircleGapResult result;
-  std::string why;
-  if (!kernel::profile_dimensions::circleGap(left, right, base, options, result, why))
-    return Status::Error(Phase::Execute, "invalid_geometry", why);
-  setMeasurement(outputs, "value", result.valueMm, result.valid,
-                 result.crossed ? "两侧交叉，gap 取 NaN" : "");
-  outputs.set("segment", Data::line2d(result.segment));
-  return Status::Ok();
-}
-
 Status judge(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   lyflow::Measurement m = *inputs.get("value").asMeasurement();
   const double nominal = params.number("nominal");
@@ -118,7 +77,7 @@ std::string degText(double deg) {
 }
 
 Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                    ExecContext& ctx, const Point2D* explicitOrigin = nullptr) {
+                    ExecContext& ctx, const Point2D& explicitOrigin) {
   const lyflow::Line2D& left = *inputs.get("lineLeft").asLine2D();
   const lyflow::Line2D& right = *inputs.get("lineRight").asLine2D();
 
@@ -172,25 +131,7 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
     u = -u;
   const Eigen::Vector2f nrm(-u.y(), u.x());
 
-  // 金件顶点是模板坐标系里的常数（和四个业务 ROI 一样），用 ICP 变换搬到当前样本上。
-  Eigen::Vector2f origin;
-  if (explicitOrigin)
-    origin = Eigen::Vector2f(explicitOrigin->p[0], explicitOrigin->p[1]);
-  else
-    origin = Eigen::Vector2f(mmToM(params.number("originX")), mmToM(params.number("originY")));
-  bool aligned = false;
-  if (!explicitOrigin && inputs.has("alignment")) {
-    const lyflow::Record* rec = inputs.get("alignment").asRecord();
-    if (rec == nullptr || rec->type != "GapAlignment") {
-      return Status::Error(Phase::Execute, "bad_input", "输入不是 GapAlignment", {}, "alignment");
-    }
-    if (rec->data.contains("left") && rec->data["left"].contains("transform")) {
-      const Eigen::Matrix3f t = transformFromJson(rec->data["left"]["transform"]);
-      const Eigen::Vector3f q = t * Eigen::Vector3f(origin.x(), origin.y(), 1.0F);
-      origin = Eigen::Vector2f(q.x(), q.y());
-      aligned = true;
-    }
-  }
+  const Eigen::Vector2f origin(explicitOrigin.p[0], explicitOrigin.p[1]);
 
   const Eigen::Vector2f delta = vertex - origin;
   const double scale = params.number("scale");
@@ -221,7 +162,6 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
   quality.data["angleDeg"] = angleDeg;
   quality.data["baseDirection"] = {u.x(), u.y()};
   quality.data["scale"] = scale;
-  quality.data["alignmentApplied"] = aligned;
   outputs.set("quality", Data::record(std::move(quality)));
 
   ctx.log(LogLevel::Info, "corner: 顶点 (" + degText(mToMm(vertex.x())) + ", " +
@@ -240,109 +180,10 @@ Param numParam(const char* name, const char* label, double def, const char* doc)
   return p;
 }
 
-std::vector<Issue> validateGap(const ParamView& params, const std::set<std::string>& connected) {
-  std::vector<Issue> issues;
-  if (params.choice("definition") == "A" && !connected.count("baseLine")) {
-    issues.push_back(Issue::error("bad_param", "definition A 需要接基准线（baseLine）",
-                                  "definition", "baseLine"));
-  }
-  return issues;
-}
-
 } // namespace
 
-void registerFlush(Registry& r) {
-  OperatorDesc op;
-  op.id = "gap.flush";
-  op.version = "1.1.1";
-  op.label = "面差测量";
-  op.category = "间隙/测量";
-  op.keywords = {
-      "flush measurement", "flushness", "step height", "perpendicular distance", "段差", "高度差",
-      "垂直距离",          "flush"};
-  op.doc = "段差 = 参考点到基准线的带符号垂距 × scale + offset（参考点在基准线上方为正；"
-           "signed 关掉时取绝对值）。"
-           "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
-  op.inputs = {
-      Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
-      Port{"refPoint", "Point2D", "Ref Point", "参考面那一侧取到的点。", true},
-  };
-  op.outputs = {
-      Port{"value", "Measurement", "Value", "段差，毫米。", true},
-      Port{"segment", "Line2D", "Segment", "垂足到参考点的那一段。", true},
-      Port{"baseLine", "Line2D", "Base Line", "并进垂足之后的基准线段，gap definition A 用它。",
-           true},
-  };
-  Param flushScale;
-  flushScale.name = "scale";
-  flushScale.type = ParamType::Float;
-  flushScale.label = "Scale";
-  flushScale.doc = "读数增益：value = 垂距 × scale + offset。量的是垂距，要别的方向（比如水平开口）"
-                   "就用它折算，算子本身不知道该往哪个方向折 —— 罗石 点 7 要的是水平开口，而基准线"
-                   "倾斜 29°，水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
-  flushScale.def = Value::number(1.0);
-
-  Param flushSigned;
-  flushSigned.name = "signed";
-  flushSigned.type = ParamType::Bool;
-  flushSigned.label = "Signed";
-  flushSigned.doc =
-      "输出带符号的垂距：参考点在基准线上方（测量帧里 y 更小）为正、下方为负；基准线竖直时"
-      "右侧（x 更大）为正。符号只看参考点在哪一侧，与基准线拟合出来的方向正反无关。默认打开；"
-      "关掉取绝对值，会把「缝张开」和「缝收紧」折成同一个方向 —— 参考点几乎落在基准线上的"
-      "闭合缝尤其不能关。";
-  flushSigned.def = Value::boolean(true);
-
-  op.params = {numParam("offset", "Offset", 0.0, "加在距离上的偏置。"), flushScale, flushSigned};
-  op.capabilities = {false, true, true};
-  op.compute = &flush;
-  r.addOperator(std::move(op));
-}
-
-void registerGap(Registry& r) {
-  OperatorDesc op;
-  op.id = "gap.gap";
-  op.version = "1.0.1";
-  op.label = "间隙测量";
-  op.category = "间隙/测量";
-  op.keywords = {"gap measurement",
-                 "clearance measurement",
-                 "circle separation",
-                 "tangent distance",
-                 "缝隙宽度",
-                 "切线距离",
-                 "gap"};
-  op.doc =
-      "间隙。definition B 是两圆的圆心连线距离；definition A 是沿基准面方向的两条切线之间的"
-      "距离，需要接带两个端点的基准线定方向。\n"
-      "两侧交叉时不给负值：definition B 输出 NaN，definition A 报 invalid_geometry；要带符号的量"
-      "用 gap.flush 或 gap.point_offset。left 必须是 x 小的那一侧，接反读数直接交叉失效。";
-  op.inputs = {
-      Port{"left", "Circle2D", "Left", "左圆。", true},
-      Port{"right", "Circle2D", "Right", "右圆。", true},
-      Port{"baseLine", "Line2D", "Base Line", "definition A 必需：带端点的基准线。", false},
-  };
-  op.outputs = {
-      Port{"value", "Measurement", "Value", "间隙，毫米。", true},
-      Port{"segment", "Line2D", "Segment", "量到的那一段。", true},
-  };
-
-  Param definition;
-  definition.name = "definition";
-  definition.type = ParamType::Enum;
-  definition.label = "Definition";
-  definition.def = Value::text("B");
-  definition.options = {EnumOption{"B", "B（圆心连线）", ""}, EnumOption{"A", "A（切线距离）", ""}};
-
-  op.params = {definition, numParam("offset", "Offset", 0.0, "加在绝对值上的偏置。")};
-  op.capabilities = {false, true, true};
-  op.compute = &gapValue;
-  op.validate = &validateGap;
-  r.addOperator(std::move(op));
-}
-
 namespace profile_scene {
-std::vector<Param> cornerInspectionParams(bool legacyOrigin) {
+std::vector<Param> cornerInspectionParams() {
   Param scale;
   scale.name = "scale";
   scale.type = ParamType::Float;
@@ -366,76 +207,20 @@ std::vector<Param> cornerInspectionParams(bool legacyOrigin) {
   maxAngle.doc = "夹角上限，超出即判失败。";
   maxAngle.def = Value::number(160.0);
 
-  std::vector<Param> result = {
-      numParam("originX", "Origin X", 0.0, "金件顶点在模板坐标系里的 X，毫米。"),
-      numParam("originY", "Origin Y", 0.0, "金件顶点在模板坐标系里的 Y，毫米。"),
+  return {
       scale,
       numParam("gapOffset", "Gap Offset", 0.0, "加在间隙上的偏置，用它让金件读 0。"),
       numParam("flushOffset", "Flush Offset", 0.0, "加在段差上的偏置。"),
       minAngle,
       maxAngle,
   };
-  if (!legacyOrigin)
-    result.erase(result.begin(), result.begin() + 2);
-  return result;
 }
 namespace inspection_detail {
 Status cornerGeometry(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx,
                       const Point2D* origin) {
-  return cornerVertex(in, p, out, ctx, origin);
+  return cornerVertex(in, p, out, ctx, *origin);
 }
 }
-}
-
-void registerCornerVertex(Registry& r) {
-  OperatorDesc op;
-  op.id = "gap.corner_vertex";
-  op.version = "1.0.0";
-  op.label = "夹角接缝间隙测量";
-  op.category = "间隙/测量";
-  op.keywords = {"corner joint gap measurement",
-                 "virtual vertex displacement",
-                 "flank line intersection",
-                 "虚拟顶点",
-                 "翼面交点",
-                 "夹角接缝",
-                 "投影位移",
-                 "corner",
-                 "vertex",
-                 "夹角",
-                 "软装",
-                 "间隙"};
-  op.doc = "两件软装贴合成一个夹角时的间隙。两侧翼面各给一条拟合直线，取交点作虚拟顶点 V，"
-           "间隙 = V 相对金件顶点沿基准面方向的位移。相对「两侧圆拟合」的好处是 V 由几十个点的"
-           "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
-           "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
-           "gap.judge 的 patrol 模式只出值不判定。";
-  op.inputs = {
-      Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
-      Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
-      Port{"baseLine", "Line2D", "Base Line", "基准面直线，只取方向定 u。缺省用左翼面。", false},
-      withContract(Port{"alignment", "Record", "Alignment",
-                        "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。",
-                        false},
-                   {{"recordType", "GapAlignment"}}),
-  };
-  op.outputs = {
-      Port{"vertex", "Point2D", "Vertex", "两条翼面线的交点。", true},
-      Port{"gap", "Measurement", "Gap", "间隙，毫米。", true},
-      Port{"flush", "Measurement", "Flush", "段差，毫米。近 90° 夹角下不可观测。", true},
-      Port{"angle", "Measurement", "Angle", "两条翼面的夹角，度。", true},
-      Port{"segment", "Line2D", "Segment", "金件顶点到当前顶点的位移段。", true},
-      withExample(
-          Port{"quality", "Record", "Quality", "GapCornerQuality：顶点、位移分量、夹角。", true},
-          examples::cornerQuality()),
-  };
-
-  op.params = profile_scene::cornerInspectionParams(true);
-  op.capabilities = {false, true, true};
-  op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
-    return cornerVertex(in, p, out, ctx);
-  };
-  r.addOperator(std::move(op));
 }
 
 void registerJudge(Registry& r) {

@@ -13,7 +13,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "gap_fine.h"
+#include "gap_ops.h"
 
 namespace lyflow::packs::gap {
 namespace {

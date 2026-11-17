@@ -19,7 +19,7 @@ struct JointResult {
   Data baseLineContext, refLineContext, gapSegmentContext, flushSegmentContext, pointContext;
   Record quality, qualityBase, qualityRef;
 };
-std::vector<Param> cornerInspectionParams(bool legacyOrigin = false);
+std::vector<Param> cornerInspectionParams();
 std::vector<Param> grooveInspectionParams();
 std::vector<Param> notchInspectionParams();
 Status measureProfileCorner(const CornerInputs&, const ParamView&, CornerResult&, ExecContext&);
