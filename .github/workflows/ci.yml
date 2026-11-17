@@ -212,7 +212,77 @@ jobs:
           retention-days: 7
 
   native:
-    name: C++ / Rust：编译与单元测试
+    name: C++：编译与单元测试
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.16.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: 准备并校验轻量轮廓数学头文件
+        shell: pwsh
+        run: |
+          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
+          if ($LASTEXITCODE -ne 0) { throw 'Eigen 头文件准备失败' }
+          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps --verify-only --offline
+          if ($LASTEXITCODE -ne 0) { throw 'Eigen 离线清单校验失败' }
+
+      - name: C++ 配置（平台 / dts / 值与几何）
+        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=solution-dts;std-value;std-geometry;std-profile;std-metrology" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+
+      - name: Python SDK 与 worker 测试
+        shell: pwsh
+        run: |
+          python -m pip install -r scripts/requirements.txt
+          "LYFLOW_TEST_PYTHON=$((Get-Command python).Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE 'python'
+          python -B -m unittest discover -s python/tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python SDK/worker 测试失败' }
+
+      - name: C++ 编译
+        run: cmake --build build/core --config RelWithDebInfo --parallel
+
+      - name: C++ 单元测试（CTest / doctest）
+        run: ctest --test-dir build/core -C RelWithDebInfo --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-results.xml"
+
+      - name: M2轻量安装与独立公共核消费
+        shell: pwsh
+        run: |
+          cmake --install build/core --prefix build/m2-sdk-light
+          if ($LASTEXITCODE -ne 0) { throw 'M2轻量SDK安装失败' }
+          python tests/release/public_kernel_contract.py --sdk build/m2-sdk-light --runtime build/core/bin/lyflow_core.dll --output-dir build/m2-kernel-light
+          if ($LASTEXITCODE -ne 0) { throw 'M2轻量依赖或独立静态核消费失败' }
+
+      - name: 保存失败构建与测试诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-test-diagnostics
+          path: |
+            build/core/ctest-results.xml
+            build/core/Testing/Temporary/*.log
+            build/core/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  rust:
+    name: Rust：桌面应用 / CLI 编译与单元测试
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -264,39 +334,19 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/requirements.txt
 
-      - name: 准备并校验轻量轮廓数学头文件
-        shell: pwsh
-        run: |
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
-          if ($LASTEXITCODE -ne 0) { throw 'Eigen 头文件准备失败' }
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps --verify-only --offline
-          if ($LASTEXITCODE -ne 0) { throw 'Eigen 离线清单校验失败' }
-
-      - name: C++ 配置（平台 / dts / 值与几何）
-        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=solution-dts;std-value;std-geometry;std-profile;std-metrology" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
-
-      - name: Python SDK 与 worker 测试
+      - name: 准备 Python 与轻量轮廓数学头文件
         shell: pwsh
         run: |
           python -m pip install -r scripts/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Python 依赖安装失败' }
           "LYFLOW_TEST_PYTHON=$((Get-Command python).Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE 'python'
-          python -B -m unittest discover -s python/tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Python SDK/worker 测试失败' }
+          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
+          if ($LASTEXITCODE -ne 0) { throw 'Eigen 头文件准备失败' }
 
-      - name: C++ 编译
-        run: cmake --build build/core --config RelWithDebInfo --parallel
-
-      - name: C++ 单元测试（CTest / doctest）
-        run: ctest --test-dir build/core -C RelWithDebInfo --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-results.xml"
-
-      - name: M2轻量安装与独立公共核消费
-        shell: pwsh
+      - name: 编译 Rust 依赖的 core 运行库
         run: |
-          cmake --install build/core --prefix build/m2-sdk-light
-          if ($LASTEXITCODE -ne 0) { throw 'M2轻量SDK安装失败' }
-          python tests/release/public_kernel_contract.py --sdk build/m2-sdk-light --runtime build/core/bin/lyflow_core.dll --output-dir build/m2-kernel-light
-          if ($LASTEXITCODE -ne 0) { throw 'M2轻量依赖或独立静态核消费失败' }
+          cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=solution-dts;std-value;std-geometry;std-profile;std-metrology" -DBUILD_TESTING=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          cmake --build build/core --config RelWithDebInfo --target lyflow_core --parallel
 
       - name: Rust 编译（桌面应用与 CLI）
         run: cargo build --locked --manifest-path bridge/Cargo.toml
@@ -314,16 +364,12 @@ jobs:
           cargo test --locked --manifest-path bridge/Cargo.toml --test host 2>&1 | Tee-Object -FilePath build/ci/host-client-test.log
           if ($LASTEXITCODE -ne 0) { throw "Rust 宿主注入集成失败 (exit $LASTEXITCODE)" }
 
-      - name: 保存失败构建与测试诊断
+      - name: 保存失败测试诊断
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: native-test-diagnostics
-          path: |
-            build/core/ctest-results.xml
-            build/core/Testing/Temporary/*.log
-            build/core/CMakeFiles/CMakeConfigureLog.yaml
-            build/ci/*.log
+          name: rust-test-diagnostics
+          path: build/ci/*.log
           if-no-files-found: ignore
           retention-days: 7
 

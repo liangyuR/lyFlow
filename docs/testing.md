@@ -37,7 +37,7 @@ pnpm e2e --only m3:suitePanels,params_p4
 
 ## CI 的实际范围
 
-[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行以下六个 job，只做格式检查与单元测试，目标是普通 PR 5 分钟内完成。`fast` 是汇总检查，实际编译与单测由 `frontend`、`client` 执行。
+[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行以下七个 job（并行），只做格式检查与单元测试，目标是普通 PR 总耗时 5 分钟内。`fast` 是汇总检查，实际编译与单测由 `frontend`、`client` 执行。
 
 | job | runner | 内容 |
 |---|---|---|
@@ -45,12 +45,13 @@ pnpm e2e --only m3:suitePanels,params_p4
 | `client` | windows-2022 | 运行库 NuGet 契约测试、bridge/客户端/运行库探针的 Rust 格式检查、独立 Rust 客户端编译与单测。 |
 | `frontend` | windows-2022 | 编辑器 React 18/19 类型、桌面与 React 宿主构建、编辑器及共享可视化单测、MCP 类型/构建/单测。 |
 | `fast` | ubuntu-24.04 | 要求 `frontend` 与 `client` 都成功，不重复运行其测试。 |
-| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes` CLI/嵌入集成测试。 |
+| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；M2 轻量 SDK 安装与公共核消费。 |
+| `rust` | windows-2022 | 自行编译同组合的 `lyflow_core`（不含测试），再做 Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes`、`profiles`、`host` 集成测试。 |
 | `vision` | ubuntu-24.04 | 无 PCL 的值/几何/图像/度量包编译、算子自检及 CTest。 |
 
-`native` 与 `vision` 用 sccache 缓存编译结果，因此关闭了预编译头；源文件必须自己包含所需头文件，不能依赖 PCH。
+`native`、`rust` 与 `vision` 用 sccache 缓存编译结果，因此关闭了预编译头；源文件必须自己包含所需头文件，不能依赖 PCH。
 
-CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用同一 job 的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
+CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 编出的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
 
 日常 CI 不编译依赖 PCL/ORT 的包（std-pointcloud、std-ml、glue、solution-gap），也不执行 P1/P4 真实模型链、SDK 安装消费、CLI 交付契约、整套桌面/浏览器 e2e、完整真实数据评估或正式发包。改动这些包或交付链时，合并前须在本地运行对应入口（如 `pnpm check:gap`、`pnpm check:glue`，或带全部包与模型测试选项的 `scripts/build-core.ps1`），并在 PR 描述中记录结果。完整 `pnpm check` 与各专项入口仍应按改动范围运行。
 
