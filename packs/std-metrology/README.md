@@ -14,4 +14,4 @@
 
 各节点的测量定义不同，不能仅因都返回Measurement而互换。物理输入几何以米存储，毫米偏置及输出单位单独声明；新节点检查frame、plane、handedness和实际几何内容hash，像素不能直接参与物理度量。支持零位移显示段，不放宽既有v1几何校验。结果不附加业务合格判定。
 
-完整接口、补偿顺序及非法输入变化见[公共Profile算子](../../docs/profile-public-operators.md)和[逐算子审计](../../docs/operator-package-audit/std-metrology.md)。独立静态SDK消费及依赖边界见[公共内核](../../docs/public-kernels.md)。
+完整接口、补偿顺序及非法输入变化见[公共Profile算子](../../docs/profile-public-operators.md)和[逐算子审计](../../docs/operator-package-audit.md)。独立静态SDK消费及依赖边界见[公共内核](../../docs/public-kernels.md)。

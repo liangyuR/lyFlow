@@ -56,7 +56,6 @@ jobs:
       - name: 算子分包规划清单校验
         run: |
           python scripts/check-operator-package-audit.py
-          python tests/release/test_operator_package_audit.py
           python scripts/tests/test_operator_package_audit.py
           python tests/quality/test_module_graph.py
           python tests/quality/test_release_identity.py
