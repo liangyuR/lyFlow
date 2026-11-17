@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -55,6 +56,17 @@ class OperatorPackageLedger(unittest.TestCase):
         self.assertTrue(self.problems(exported=partial))
         self.assertEqual(self.problems(exported=partial, subset=True), [])
         self.assertTrue(self.problems(exported=dict(partial, **{'new.op': 'core'}), subset=True))
+
+    def test_conflicting_manifests_are_rejected(self):
+        first = self.ledger['operators'][0]['id']
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for index, pack in enumerate((self.manifest[first], 'elsewhere')):
+                path = Path(directory) / f'{index}.json'
+                path.write_text(json.dumps([{'id': first, 'pack': pack}]), encoding='utf-8')
+                paths.append(path)
+            with self.assertRaises(ValueError):
+                CHECK.manifest_operators(paths)
 
 
 if __name__ == '__main__':

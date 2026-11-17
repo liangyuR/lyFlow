@@ -34,7 +34,9 @@ def manifest_operators(paths):
     for path in paths:
         document = json.loads(path.read_text(encoding='utf-8-sig'))
         for op in document if isinstance(document, list) else document['operators']:
-            exported[op['id']] = op.get('pack', 'core').split('@')[0]
+            pack = op.get('pack', 'core').split('@')[0]
+            if exported.setdefault(op['id'], pack) != pack:
+                raise ValueError(f"{op['id']}: 多份 manifest 的包归属不一致（{exported[op['id']]} / {pack}）")
     return exported
 
 
@@ -79,6 +81,8 @@ def validate(data, example_ids, exported=None, subset=False):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--manifest', action='append', type=Path, default=[])
     parser.add_argument('--subset', action='store_true')
@@ -86,7 +90,11 @@ def main():
     if args.subset and not args.manifest:
         parser.error('--subset 需要 --manifest')
     data = json.loads(LEDGER.read_text(encoding='utf-8'))
-    exported = manifest_operators(args.manifest) if args.manifest else None
+    try:
+        exported = manifest_operators(args.manifest) if args.manifest else None
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
     problems = validate(data, python_example_ids(), exported, args.subset)
     for problem in problems:
         print(problem, file=sys.stderr)
