@@ -164,8 +164,7 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
   require(rule["measurement"]["plane"] == "XY" && frame != a["sensorFrame"],
           "GAP量测必须明确为不同于传感器帧的XY空间");
   const auto prefix = text(rule, "adapterIdPrefix");
-  require(prefix.find('/') == std::string::npos &&
-              prefix.find('.') == std::string::npos,
+  require(prefix.find('/') == std::string::npos && prefix.find('.') == std::string::npos,
           "GAP新增节点前缀不能含实例路径或参数分隔符");
   keys(rule["component"], {"style", "nodes"});
   require(rule["component"]["style"] == "blocks" || rule["component"]["style"] == "fine",
