@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "in_progress",
-  "sourceRevision": "8ae3319665c7ced2715320f0c7e9ab9df6575a9c",
+  "sourceRevision": "a4724d88a656d60631d9e965fa722a7e3ff29513",
   "productVersion": "1.4.5",
   "nativeCount": 277,
   "pythonExampleCount": 8,
@@ -285,7 +285,7 @@
     "packs/std-image/ops/image_segment.cpp": "0a6e956da67b248c1508fe9d533eaf859d642839efb70105cefe8506b50c899a",
     "packs/std-image/ops/image_tensor.cpp": "f21d9f93775781fbdddbab3a6dec29356902ba7ce21cce56192b988dbb93975e",
     "packs/std-image/ops/image_yolo.cpp": "68a471b8708c20357530ddb71d8a2f1bdb5c18b9afd5f30aa8a0219973faf295",
-    "packs/std-image/ops/io_image.cpp": "e8ac7050bc40017c306383f2ab2d7cd12054d845f6950c628296e2dad2969e2d",
+    "packs/std-image/ops/io_image.cpp": "ef47aed708de2112479258f2c7d71db5ccef7e0a1a5b5dc597b9d2d9b1114990",
     "packs/std-image/ops/load_calib.cpp": "13a9599974dcd43cac64addbd253a911ed6a4ffaf1a4a7c35c98914df55e853c",
     "packs/std-image/ops/ops.h": "43e76d8dfff478ebe0a3cf0c1156f46339599620199be8b81d30431d9757098e",
     "packs/std-image/ops/p1_common.h": "d36d059427a51d1b07ba813864534738ad06da17e5642ba68945e674b6f183d5",
@@ -38825,7 +38825,7 @@
       "targetModule": "image-io",
       "action": "retain",
       "wave": "M6",
-      "source": "packs/std-image/ops/io_image.cpp:153",
+      "source": "packs/std-image/ops/io_image.cpp:155",
       "dependencies": [
         "当前算法：OpenCV core/imgcodecs及其图像编解码传递库。",
         "目标：image-io显式能力，按支持格式交付许可证。"
@@ -38937,7 +38937,7 @@
       "targetModule": "image-io",
       "action": "retain",
       "wave": "M6",
-      "source": "packs/std-image/ops/io_image.cpp:204",
+      "source": "packs/std-image/ops/io_image.cpp:206",
       "dependencies": [
         "当前算法：OpenCV core/imgcodecs及其图像编解码传递库。",
         "目标：image-io显式能力，按支持格式交付许可证。"
@@ -51363,7 +51363,7 @@
         }
       ],
       "note": "仅M4c场景/Profile/原子Bundle/显式图升级切片；14新增、精确8退役及31项迁包。manifest匹配不代表整个M4或M5–M7完成。",
-      "reviewedChange": "删除corner质量记录中恒为false的alignmentApplied字段",
+      "reviewedChange": "io_image.cpp显式包含opencv2/imgcodecs.hpp，不再依赖预编译头",
       "reviewedSourceChanges": [
         {
           "path": "core/CMakeLists.txt",
@@ -52468,12 +52468,18 @@
           "previousSha256": "637bc1c3e8f09d96b170110b2bf584e6e47be69fc4dab64292a4f34c0752e793",
           "sha256": "68174b55a00371af0256f2929ba939dcef2008fd765c22bcb20592cf753afaa5",
           "kind": "modified"
+        },
+        {
+          "path": "packs/std-image/ops/io_image.cpp",
+          "previousSha256": "e8ac7050bc40017c306383f2ab2d7cd12054d845f6950c628296e2dad2969e2d",
+          "sha256": "ef47aed708de2112479258f2c7d71db5ccef7e0a1a5b5dc597b9d2d9b1114990",
+          "kind": "modified"
         }
       ],
       "manifestEvidence": {
         "sha256": "5c95d6ae69bb598ad1cedcd67181454528f3fbc41fae62035822ae2b2beab6b5",
         "operatorCount": 277,
-        "path": "build/core-gap/manifest.json"
+        "path": "build/audit/manifest.json"
       }
     }
   ],

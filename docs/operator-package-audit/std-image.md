@@ -988,7 +988,7 @@
 ## 223 · io.load_image
 
 - 当前：`std-image` / `1.0.0` / 加载图像。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/io_image.cpp:153](../../packs/std-image/ops/io_image.cpp#L153)。
+- 源码：[packs/std-image/ops/io_image.cpp:155](../../packs/std-image/ops/io_image.cpp#L155)。
 - 端口：`image:Image?` → `image:Image`。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前算法：OpenCV core/imgcodecs及其图像编解码传递库。；目标：image-io显式能力，按支持格式交付许可证。
@@ -1002,7 +1002,7 @@
 ## 224 · io.save_image
 
 - 当前：`std-image` / `1.0.0` / 保存图像。目标：`std-image`；保留并验边界；**M6**。
-- 源码：[packs/std-image/ops/io_image.cpp:204](../../packs/std-image/ops/io_image.cpp#L204)。
+- 源码：[packs/std-image/ops/io_image.cpp:206](../../packs/std-image/ops/io_image.cpp#L206)。
 - 端口：`image:Image` → 无。
 - 参数单位标注：参数未统一声明单位；以逐项契约及源码为准。
 - 依赖：当前算法：OpenCV core/imgcodecs及其图像编解码传递库。；目标：image-io显式能力，按支持格式交付许可证。

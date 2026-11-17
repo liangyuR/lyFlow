@@ -74,7 +74,7 @@
 
 ```powershell
 python scripts/check-operator-package-audit.py
-python scripts/check-operator-package-audit.py --manifest build/core-gap/manifest.json
+python scripts/check-operator-package-audit.py --manifest build/audit/manifest.json
 ```
 
 静态检查比较契约来源集合/指纹、ID、版本、包归属、端口、参数及本地文档链接；不能替代运行、SDK、算法或现场验收。全包manifest必须来自真实启用全部包的构建，轻量构建不构成全集证据。
@@ -82,7 +82,7 @@ python scripts/check-operator-package-audit.py --manifest build/core-gap/manifes
 审查实际源码差异后执行刷新，逐个传入变化路径：
 
 ```powershell
-python scripts/refresh-operator-package-audit.py --stage M4c --manifest build/core-gap/manifest.json --product-version 1.4.5 --reviewed-change "当前阶段公共契约、包归属及依赖边界逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>
+python scripts/refresh-operator-package-audit.py --stage M4c --manifest build/audit/manifest.json --product-version 1.4.5 --reviewed-change "当前阶段公共契约、包归属及依赖边界逐项复核" --reviewed-path <变化路径1> --reviewed-path <变化路径2>
 ```
 
 工具要求reviewed-path精确覆盖所有变化契约文件；拒绝漏审、虚增ID或缺少全包描述。M2仅允许明确定义的3项迁包，保持版本/端口/参数，并保留原包和源码历史。只刷新当前manifest快照、源码锚点、统计及逐项Markdown，不覆盖原有目标/依赖/约束。源码复核前后SHA256与真实manifest SHA256写入阶段ledger。重复运行且源码不变时可不传reviewed-path，保留先前复核证据；工具只将当前阶段设为validated_manifest，完成需另行验收后登记，先前阶段证据保持。
