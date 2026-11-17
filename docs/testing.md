@@ -37,7 +37,7 @@ pnpm e2e --only m3:suitePanels,params_p4
 
 ## CI 的实际范围
 
-[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行以下五个 job。`fast` 是汇总检查，实际编译与单测由 `frontend`、`client` 执行。
+[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行以下七个 job（并行），只做格式检查与单元测试，目标是普通 PR 总耗时 5 分钟内。`fast` 是汇总检查，实际编译与单测由 `frontend`、`client` 执行。
 
 | job | runner | 内容 |
 |---|---|---|
@@ -45,11 +45,15 @@ pnpm e2e --only m3:suitePanels,params_p4
 | `client` | windows-2022 | 运行库 NuGet 契约测试、bridge/客户端/运行库探针的 Rust 格式检查、独立 Rust 客户端编译与单测。 |
 | `frontend` | windows-2022 | 编辑器 React 18/19 类型、桌面与 React 宿主构建、编辑器及共享可视化单测、MCP 类型/构建/单测。 |
 | `fast` | ubuntu-24.04 | 要求 `frontend` 与 `client` 都成功，不重复运行其测试。 |
-| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes` CLI/嵌入集成测试。 |
+| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；M2 轻量 SDK 安装与公共核消费。 |
+| `rust` | windows-2022 | 自行编译同组合的 `lyflow_core`（不含测试），再做 Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes`、`profiles`、`host` 集成测试。 |
+| `vision` | ubuntu-24.04 | 无 PCL 的值/几何/图像/度量包编译、算子自检及 CTest。 |
 
-CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用同一 job 的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
+`native`、`rust` 与 `vision` 用 sccache 缓存编译结果，因此关闭了预编译头；源文件必须自己包含所需头文件，不能依赖 PCH。
 
-日常 CI 不执行整套桌面/浏览器 e2e、全部 SDK 安装消费、所有 feature/包组合、完整真实数据评估或正式发包。完整 `pnpm check` 与各专项入口仍应按改动范围运行。
+CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 编出的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
+
+日常 CI 不编译依赖 PCL/ORT 的包（std-pointcloud、std-ml、glue、solution-gap），也不执行 P1/P4 真实模型链、SDK 安装消费、CLI 交付契约、整套桌面/浏览器 e2e、完整真实数据评估或正式发包。改动这些包或交付链时，合并前须在本地运行对应入口（如 `pnpm check:gap`、`pnpm check:glue`，或带全部包与模型测试选项的 `scripts/build-core.ps1`），并在 PR 描述中记录结果。完整 `pnpm check` 与各专项入口仍应按改动范围运行。
 
 失败诊断上传到 Actions artifact，保留 7 天：前端、MCP、Rust 单测日志，以及 native 的 CTest JUnit、`Testing/Temporary/*.log` 和 CMake 配置日志。格式和编译错误也可直接查看失败步骤输出。
 
@@ -81,13 +85,13 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 
 ## P1 三维与真实模型门禁
 
-CI 的 `vision` 在 Linux 运行无PCL的值/几何/位姿/图像包；`vision-native` 在 Windows 使用发布组合同一固定PCL 1.15.1与OpenCV/ORT依赖，运行三维点云/配准和真实YOLOv8、YOLO11、YOLO26、YOLOX检测回归。该job只读恢复依赖缓存，不降级PCL版本或静默跳过重依赖。
+CI 的 `vision` 在 Linux 运行无PCL的值/几何/位姿/图像包。三维点云/配准和真实YOLOv8、YOLO11、YOLO26、YOLOX检测回归不在 CI 中运行，须在本地使用发布组合同一固定PCL 1.15.1与OpenCV/ORT依赖执行，不降级PCL版本或静默跳过重依赖。
 
 本地执行 `python scripts/fetch-p1-model-assets.py` 并按[示例说明](../examples/p1-detection-README.md)导出三种YOLO模型，配置 `-DLYFLOW_P1_MODEL_TESTS=ON`、`LYFLOW_P1_ASSETS=<资产目录>`。此选项默认关闭以保留离线开发；显式开启后缺模型或图片即失败。原有推理夹具另由 `tests/release/make_fixtures.py --output-dir build/p1-fixtures` 生成，测试时设置 `LYFLOW_TEST_ONNX_MODEL` 指向 `channels-6-to-8.onnx`。不使用“未配置模型”的日志代替真实推理验证。
 
 检测门禁比较执行器、C ABI和动态C++ SDK输出，对公开人像、猫图和空背景验证类别与有效空集合；点云/位姿有完整组合图与失败门限回归。公开数据验证不等于客户模型质量或现场节拍验收。
 
-若P1原生job在编译前报固定依赖缺包，先比对失败诊断中的 `environment.json` 和 `*abi_info.txt`。Windows runner 更新可能替换相同 MSVC toolset 目录中的编译器文件，改变 vcpkg 的实际编译器身份及整张依赖图 ABI；固定目录名不能证明既有二进制缓存仍适用。此时在可信 main 上运行现有 `Windows release` 手动入口，设置 `rebuild_deps=true`、`dependencies_only=true`，仅预热依赖并空目录验证 NuGet 恢复，再重跑失败的PR检查。不要降低PCL版本、跳过P1测试或向普通PR job开放依赖源码编译。
+若本地或发布构建在编译前报固定依赖缺包，先比对失败诊断中的 `environment.json` 和 `*abi_info.txt`。Windows runner 更新可能替换相同 MSVC toolset 目录中的编译器文件，改变 vcpkg 的实际编译器身份及整张依赖图 ABI；固定目录名不能证明既有二进制缓存仍适用。此时在可信 main 上运行现有 `Windows release` 手动入口，设置 `rebuild_deps=true`、`dependencies_only=true`，仅预热依赖并空目录验证 NuGet 恢复，再重跑失败的构建。不要降低PCL版本或跳过P1测试。
 
 
 ## P2 标定、形状与稳定依赖门禁
@@ -98,7 +102,7 @@ P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，�
 
 ## P2 分割、OCR、识码与标注门禁
 
-`-DLYFLOW_P4_MODEL_TESTS=ON`要求std-image和std-ml同时启用。先运行 `python scripts/fetch-p4-model-assets.py --output-dir build/p4-assets`，设置 `LYFLOW_P4_ASSETS` 为该目录；显式开启后模型/字典/图像缺失即失败，无新增跳过。Windows原生CI运行公开PPHumanSeg、PP-OCRv6检测/识别及配套方向模型，保留P1四模型检测门禁；Linux验证无PCL图像链及ZXing私有C++20静态后端。
+`-DLYFLOW_P4_MODEL_TESTS=ON`要求std-image和std-ml同时启用。先运行 `python scripts/fetch-p4-model-assets.py --output-dir build/p4-assets`，设置 `LYFLOW_P4_ASSETS` 为该目录；显式开启后模型/字典/图像缺失即失败，无新增跳过。本地 Windows 全量构建运行公开PPHumanSeg、PP-OCRv6检测/识别及配套方向模型和P1四模型检测；CI 的 Linux job 验证无PCL图像链及ZXing私有C++20静态后端。
 
 永久回归覆盖逐ROI掩膜复用的0/1/2次实际Run、unknown/类别冲突、中文多行/倒置/旋转OCR、合法零字节QR、增强前后反馈、原生重叠/孔洞标注、同尺寸文件更新和真实路径链接逃逸。准备脚本的离线、坏缓存、源归档和路径边界独立执行；来源和许可见[P4资产](p4-assets.md)。跨接口测试核对执行器、C ABI和动态C++ SDK的完整原生Tensor/图像，不以只检查manifest替代实际运行。
 
@@ -106,4 +110,4 @@ P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，�
 
 `core/tests/test_frames.cpp`覆盖所有原生载荷、来源身份与缓存独立所有权、坏归档/预算、FIFO容量/顺序/重置/取消。`core/tests/test_python.cpp`继续通过真实worker验证新直接几何/Tensor端口、版本错误与恢复。`python -B -m unittest discover -s python/tests -v`运行SDK侧测试。
 
-完整Windows视觉CI保留前阶段模型/SDK门禁，增加安装后的新CLI与C++17消费者：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。编辑器功能测试总数保持100以下，无新增跳过；查看器浏览器证据与样例见[P6指南](p6-examples.md)。
+安装后的新CLI与C++17消费者不在 CI 中运行，改动交付链时在本地执行：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。编辑器功能测试总数保持100以下，无新增跳过；查看器浏览器证据与样例见[P6指南](p6-examples.md)。
