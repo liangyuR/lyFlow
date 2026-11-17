@@ -47,18 +47,11 @@ ProfileDescriptor descriptor(const ParamView& p) {
 Status parameters(const ParamView& p) {
   if (p.choice("source") == "injected")
     return Status::Ok();
-  if (p.choice("source") != "file")
-    return Status::Error(Phase::Execute, "bad_param", "轮廓来源必须为injected或file", "source");
   std::string why;
   if (!validateProfileDescriptor(descriptor(p), why))
     return Status::Error(Phase::Execute, "bad_param", why);
   if (p.text("path").empty() || asciiLower(p.path("path").extension().u8string()) != ".csv")
     return Status::Error(Phase::Execute, "bad_param", "文件来源必须指定CSV v1的.csv路径", "path");
-  if (p.integer("maxFileBytes") < 1 || p.integer("maxFileBytes") > maxAllowedBytes)
-    return Status::Error(Phase::Execute, "bad_param", "文件字节预算必须在1至1GiB之间",
-                         "maxFileBytes");
-  if (p.integer("maxPoints") < 1 || p.integer("maxPoints") > maxAllowedPoints)
-    return Status::Error(Phase::Execute, "bad_param", "槽数预算必须在1至1600万之间", "maxPoints");
   return Status::Ok();
 }
 
@@ -86,9 +79,6 @@ bool number(std::string_view text, bool allowNan, float& result) {
 Status compute(const Inputs&, const ParamView& p, Outputs& out, ExecContext& ctx) {
   if (ctx.cancelled())
     return cancelled();
-  const auto valid = parameters(p);
-  if (!valid.ok)
-    return valid;
   if (p.choice("source") == "injected")
     return Status::Error(
         Phase::Execute, "missing_input",
@@ -201,14 +191,11 @@ Status compute(const Inputs&, const ParamView& p, Outputs& out, ExecContext& ctx
       return status;
   }
   description.sourceCount = indices.size();
-  Profile result;
-  std::string why;
-  if (!makeProfile(std::make_shared<const PointCloud>(std::move(cloud)), std::move(description),
-                   std::move(validity), std::move(indices), result, why))
-    return Status::Error(Phase::Execute, "bad_input", why, "path");
   if (ctx.cancelled())
     return cancelled();
-  out.set("profile", Data::profile(std::move(result)));
+  out.set("profile",
+          Data::profile(Profile{std::make_shared<const PointCloud>(std::move(cloud)),
+                                std::move(description), std::move(validity), std::move(indices)}));
   return Status::Ok();
 }
 

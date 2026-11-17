@@ -16,9 +16,6 @@ Status bad(const std::string& why, const char* port = "", const char* code = "ba
   return Status::Error(Phase::Execute, code, why, {}, port);
 }
 Status cancelled() { return bad("场景范围计算已取消", "", "cancelled"); }
-bool camera(const std::string& value) {
-  return value == "Both" || value == "Left" || value == "Right";
-}
 Box2D boxMm(const std::array<double, 4>& values) {
   Box2D box;
   box.min[0] = static_cast<float>(values[0]) / 1000.0F;
@@ -30,11 +27,6 @@ Box2D boxMm(const std::array<double, 4>& values) {
 bool inputProfile(const Data& data, const Record* provenance, Profile& metric, Json& sources,
                   std::string& why, ExecContext& context) {
   const auto* profile = data.asProfile();
-  if (!profile || !validateProfile(*profile, why)) {
-    if (why.empty())
-      why = "需要完整原生Profile";
-    return false;
-  }
   if (profile->descriptor.plane != "XY") {
     why = "场景范围只接受明确量测XY平面";
     return false;
@@ -105,9 +97,7 @@ std::optional<std::array<double, 4>> candidate(const Box2D& left, const Box2D& r
     reason = "disabled";
     return std::nullopt;
   }
-  if (!std::isfinite(options.halfWidth) || !std::isfinite(options.halfHeight) ||
-      options.halfWidth <= 0 || options.halfHeight <= 0 ||
-      !std::isfinite(options.maxRollBoxHeight) || options.maxRollBoxHeight <= 0) {
+  if (options.halfWidth <= 0 || options.halfHeight <= 0 || options.maxRollBoxHeight <= 0) {
     reason = "bad_config";
     return std::nullopt;
   }
@@ -204,8 +194,6 @@ OperatorDesc description(const char* id, const char* label) {
 Status overallRoi(const Data& primary, const Data& secondary, const Record* primaryProvenance,
                   const Record* secondaryProvenance, const OverallRoiOptions& options,
                   GeometryResult& result, ExecContext& context) {
-  if ((options.mode != "fixed" && options.mode != "auto_center") || !camera(options.usingCamera))
-    return bad("整体范围模式或逻辑相机选择非法", "", "bad_param");
   if (context.cancelled())
     return cancelled();
   Profile p, s;
@@ -217,9 +205,6 @@ Status overallRoi(const Data& primary, const Data& secondary, const Record* prim
   if (!unionSources(sources, other, why))
     return bad(why);
   const auto& roi = options.roiMm;
-  for (const float value : roi)
-    if (!std::isfinite(value))
-      return bad("范围边界必须有限", "", "bad_param");
   if (roi[0] > roi[2] || roi[1] > roi[3])
     return bad("范围边界倒置", "", "bad_param");
   std::array<double, 4> resolved{roi[0], roi[1], roi[2], roi[3]};
@@ -268,10 +253,8 @@ Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* 
     return cancelled();
   if ((heightAnchor != nullptr) != (heightContext != nullptr))
     return bad("高度锚框与上下文必须成对提供", "heightAnchor");
-  if ((options.side != "left" && options.side != "right") || !std::isfinite(options.startMm) ||
-      options.startMm < 0 || !std::isfinite(options.lengthMm) || options.lengthMm <= 0 ||
-      !std::isfinite(options.heightMm) || options.heightMm < 0)
-    return bad("基准窗口方向或毫米距离参数非法", "", "bad_param");
+  if (options.startMm < 0 || options.lengthMm <= 0 || options.heightMm < 0)
+    return bad("基准窗口毫米距离参数非法", "", "bad_param");
   Json sources, more;
   ProfileDescriptor space, other;
   std::string why;
@@ -315,8 +298,6 @@ Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gap
                         ExecContext& context) {
   if (context.cancelled())
     return cancelled();
-  if (!camera(options.usingCamera))
-    return bad("裁剪逻辑相机选择非法", "", "bad_param");
   ScanView view;
   std::string why;
   if (!readScanPair(scan, view, why))
@@ -465,8 +446,6 @@ void registerProfileRegionOps(Registry& registry) {
   overall.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
     const auto* a = in.get("primaryProvenance").asRecord();
     const auto* b = in.get("secondaryProvenance").asRecord();
-    if ((in.has("primaryProvenance") && !a) || (in.has("secondaryProvenance") && !b))
-      return bad("来源必须为Record");
     GeometryResult result;
     const auto status = overallRoi(
         in.get("primary"), in.get("secondary"), a, b,
@@ -492,8 +471,6 @@ void registerProfileRegionOps(Registry& registry) {
   datum.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
     const auto* a = in.get("anchorContext").asRecord();
     const auto* h = in.get("heightContext").asRecord();
-    if (!a || (in.has("heightContext") && !h))
-      return bad("缺少有效锚框上下文");
     GeometryResult result;
     auto status = datumWindow(in.get("anchor"), *a,
                               in.has("heightAnchor") ? &in.get("heightAnchor") : nullptr, h,
@@ -538,8 +515,6 @@ void registerProfileRegionOps(Registry& registry) {
   roll.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
     const auto* a = in.get("gapLeftContext").asRecord();
     const auto* b = in.get("gapRightContext").asRecord();
-    if (!a || !b)
-      return bad("需要双锚框上下文");
     RollCropResult result;
     auto status = rollAnchoredCrop(in.get("scan"), in.get("gapLeft"), *a, in.get("gapRight"), *b,
                                    {params.flag("enabled"), params.number("halfWidth"),

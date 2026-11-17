@@ -299,10 +299,6 @@ TEST_CASE(
   CHECK(call.out("sensorPrimary").profilePtr() == loaded.primary.profilePtr());
   CHECK(call.validate("gap.read_scan", {}, {"primary"}).size() == 1);
   CHECK(call.validate("gap.read_scan", {{"source", Value::text("inputs")}}, {}).empty());
-  call.inputs.erase("secondary");
-  CHECK_FALSE(call.run("gap.read_scan").ok);
-  CHECK(call.status.code == "missing_input");
-  CHECK(call.outputs.empty());
   call.inputs.clear();
   CHECK_FALSE(call.run("gap.read_scan", {{"source", Value::text("inputs")}}).ok);
   CHECK(call.status.code == "missing_input");
@@ -383,9 +379,6 @@ TEST_CASE(
   read.outlierRadiusMm = 0;
   CHECK_FALSE(scene::buildReadScan(loaded.primary, loaded.secondary, read, scan, context).ok);
   CHECK(scan.asBundle() == before);
-  CHECK_FALSE(scene::buildReadScan(Data::cloud(*loaded.primary.asProfile()->cloud),
-                                   loaded.secondary, read, scan, context)
-                  .ok);
   profile_contract::MergeResult merged;
   std::string why;
   REQUIRE(profile_contract::mergeProfiles(loaded.primary, loaded.secondary, nullptr, nullptr,

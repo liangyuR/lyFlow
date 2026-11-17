@@ -56,7 +56,7 @@ ProfileDescriptor descriptor(const ParamView& p) {
 
 Status fromCloud(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const auto cloud = in.get("cloud").cloudPtr();
-  if (!cloud || cloud->xyz.size() % 3 != 0 || !cloud->channelsConsistent())
+  if (cloud->xyz.size() % 3 != 0 || !cloud->channelsConsistent())
     return Status::Error(Phase::Execute, "bad_input", "点云坐标或通道长度不一致", {}, "cloud");
   const auto n = cloud->pointCount();
   if (n > std::numeric_limits<std::uint32_t>::max())
@@ -82,12 +82,9 @@ Status fromCloud(const Inputs& in, const ParamView& p, Outputs& out, ExecContext
 
 Status toCloud(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const auto* profile = in.get("profile").asProfile();
-  std::string why;
-  if (!profile || !validateProfile(*profile, why))
-    return Status::Error(Phase::Execute, "bad_input", why.empty() ? "需要有效Profile" : why, {},
-                         "profile");
   if (ctx.cancelled())
     return Status::Ok();
+  std::string why;
   Profile converted;
   if (!convertProfileUnit(*profile, p.choice("unit"), converted, why,
                           [&ctx] { return ctx.cancelled(); })) {
@@ -127,16 +124,13 @@ Status toCloud(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
 
 Status remapAxes(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const auto* input = in.get("profile").asProfile();
-  std::string why;
-  if (!input || !validateProfile(*input, why))
-    return Status::Error(Phase::Execute, "bad_input", why.empty() ? "需要有效Profile" : why, {},
-                         "profile");
   const auto& order = p.choice("axes");
   const auto signs = p.vec3("signs");
   for (float sign : signs)
     if (sign != 1 && sign != -1)
       return Status::Error(Phase::Execute, "bad_param", "轴符号只能为+1或-1", "signs");
   Profile result;
+  std::string why;
   if (!remapProfileAxes(*input, order, signs, p.text("targetFrame"), result, why,
                         [&ctx] { return ctx.cancelled(); }))
     return ctx.cancelled() ? Status::Ok()

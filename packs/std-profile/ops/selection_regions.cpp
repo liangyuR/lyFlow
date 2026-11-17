@@ -11,10 +11,6 @@
 namespace lyflow::packs::std_profile {
 namespace {
 using Json = nlohmann::json;
-Status bad(const std::string& message, const char* port = "profile",
-           const char* code = "bad_input") {
-  return Status::Error(Phase::Execute, code, message, {}, port);
-}
 Param choice(const char* name, const char* initial, std::initializer_list<const char*> values) {
   Param p;
   p.name = name;
@@ -29,26 +25,20 @@ Param choice(const char* name, const char* initial, std::initializer_list<const 
 Status select(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx,
               bool byBox) {
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return bad("来源必须为Record", "provenance");
   profile_contract::SelectionOptions options;
   options.mode = params.choice("mode");
   options.emptyPolicy = params.choice("emptyPolicy");
   profile_contract::SelectionResult result;
   Status status;
   if (byBox) {
-    const auto* context = inputs.get("boxContext").asRecord();
-    if (!context)
-      return bad("需要米制Box2D和有效上下文", "boxContext");
     options.bounds = params.choice("bounds");
-    status = profile_contract::cropProfile(inputs.get("profile"), inputs.get("box"), *context,
-                                           provenance, options, result, ctx);
+    status = profile_contract::cropProfile(inputs.get("profile"), inputs.get("box"),
+                                           *inputs.get("boxContext").asRecord(), provenance,
+                                           options, result, ctx);
   } else {
-    const auto* indices = inputs.get("indices").asIndices();
-    if (!indices)
-      return bad("需要原生Indices", "indices");
     options.invalidPolicy = params.choice("invalidPolicy");
-    status = profile_contract::selectProfileIndices(inputs.get("profile"), *indices, provenance,
+    status = profile_contract::selectProfileIndices(inputs.get("profile"),
+                                                    *inputs.get("indices").asIndices(), provenance,
                                                     options, result, ctx);
   }
   if (!status.ok)

@@ -35,10 +35,6 @@ Status sceneError(const std::exception& error, const char* port) {
 
 Status loadProfile(const Data& source, ActiveProfile& output, ExecContext& ctx) {
   const auto* native = source.asProfile();
-  std::string why;
-  if (!native || !validateProfile(*native, why))
-    return Status::Error(Phase::Execute, "bad_input", why.empty() ? "需要原生Profile" : why, {},
-                         "clean");
   if (native->descriptor.plane != "XZ" || native->descriptor.sampleOrder != "acquisition")
     return Status::Error(Phase::Execute, "bad_input", "DTS需要明确XZ平面和acquisition采样顺序", {},
                          "clean");

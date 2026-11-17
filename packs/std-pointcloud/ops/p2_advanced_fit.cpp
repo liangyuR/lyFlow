@@ -384,8 +384,6 @@ bool better(const algo::p2::CloudFitResult& candidate, const algo::p2::CloudFitR
 Status poseSearch(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const auto* source = in.get("source").asCloud();
   const auto* target = in.get("target").asCloud();
-  if (!source || !target)
-    return error("source/target必须为PointCloud", "source");
   if (source->pointCount() > 1024U * 1024U)
     return error("模型云超过1048576点", "source", "resource_limit");
   Status status = validate(*source, 3, "source");
@@ -394,25 +392,15 @@ Status poseSearch(const Inputs& in, const ParamView& p, Outputs& out, ExecContex
   if (!frameValid(p.text("sourceFrame")) || !frameValid(p.text("targetFrame")) ||
       p.text("id").empty() || p.text("id").size() > 1024)
     return error("源/目标帧和实例id必须显式有效", "sourceFrame", "bad_param");
-  if ((p.choice("searchMode") != "grid" && p.choice("searchMode") != "hierarchical") ||
-      (p.choice("composition") != "target" && p.choice("composition") != "source") ||
-      (p.choice("refinement") != "none" && p.choice("refinement") != "point_to_point" &&
-       p.choice("refinement") != "point_to_plane"))
-    return error("未知搜索、组合或精化模式", "searchMode", "bad_param");
-  if (p.integer("steps") < 3 || p.integer("steps") > 9 || p.integer("steps") % 2 == 0 ||
-      p.integer("levels") < 1 || p.integer("levels") > 8 || p.integer("maxEvaluations") < 1 ||
-      p.integer("maxEvaluations") > 4096)
-    return error("steps为3..9奇数、levels为1..8、maxEvaluations为1..4096", "steps", "bad_param");
+  if (p.integer("steps") % 2 == 0)
+    return error("steps必须为奇数", "steps", "bad_param");
   const auto& translation = p.raw().at("translationRadius").vecValue();
   const auto& rotation = p.raw().at("rotationRadius").vecValue();
-  if (translation.size() != 3 || rotation.size() != 3)
-    return error("translationRadius/rotationRadius必须有三分量", "translationRadius", "bad_param");
   V6 radius;
   std::size_t count = 1;
   for (int axis = 0; axis < 6; ++axis) {
     radius[axis] = axis < 3 ? translation[axis] : rotation[axis - 3];
-    if (!std::isfinite(radius[axis]) || radius[axis] < 0 ||
-        radius[axis] > (axis < 3 ? 1e6 : poses::kPi))
+    if (radius[axis] < 0 || radius[axis] > (axis < 3 ? 1e6 : poses::kPi))
       return error("平移半径须为[0,1e6]m、旋转半径为[0,pi]rad", "translationRadius", "bad_param");
     if (radius[axis] > 0)
       count *= static_cast<std::size_t>(p.integer("steps"));

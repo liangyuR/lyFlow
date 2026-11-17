@@ -73,7 +73,7 @@ bool exactBundle(const Bundle* bundle, const char* kind, std::initializer_list<c
 }
 bool profile(const Data& data, const Profile*& result, std::string& why) {
   result = data.asProfile();
-  return result && validateProfile(*result, why) ? true : fail(why, "场景字段需要有效原生Profile");
+  return result ? true : fail(why, "场景字段需要原生Profile");
 }
 bool subset(const Profile& input, const Profile& output, bool preserveAll, std::string& why) {
   if (profileDescriptorJson(input.descriptor) != profileDescriptorJson(output.descriptor))

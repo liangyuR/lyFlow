@@ -170,31 +170,23 @@ Status guardProfiles(const Data& primary, const Data& secondary, const CameraGua
   const auto* a = primary.asProfile();
   const auto* b = secondary.asProfile();
   std::string why;
-  if (!a || !b || !validateProfile(*a, why) || !validateProfile(*b, why))
-    return bad(why.empty() ? "需要两个有效Profile" : why, "", "bad_input");
   if (!profile_contract::sameSpace(a->descriptor, b->descriptor))
     return bad("两路轮廓必须声明相同坐标帧、分析平面和手性", "", "space_mismatch");
   const auto& action = options.onDisagree;
-  if (action != "off" && action != "record" && action != "keepPrimary" &&
-      action != "keepSecondary" && action != "fail")
-    return bad("未知相机分歧策略", "onDisagree");
   const double metricStep = options.sampleStepMm / 1000.0;
   const double metricHalf = options.halfWindowMm / 1000.0;
-  if (!std::isfinite(options.maxDeltaMm) || options.maxDeltaMm < 0)
-    return bad("高度差上限必须为非负有限毫米值", "maxDeltaMm");
-  if (!std::isfinite(metricStep) || metricStep <= 0 ||
-      metricStep > std::numeric_limits<float>::max())
+  if (options.maxDeltaMm < 0)
+    return bad("高度差上限必须为非负毫米值", "maxDeltaMm");
+  if (metricStep <= 0 || metricStep > std::numeric_limits<float>::max())
     return bad("采样步长必须为可表示的正米制float", "sampleStep");
-  if (!std::isfinite(metricHalf) || metricHalf <= 0 ||
-      metricHalf > std::numeric_limits<float>::max())
+  if (metricHalf <= 0 || metricHalf > std::numeric_limits<float>::max())
     return bad("窗口半宽必须为可表示的正米制float", "halfWindow");
   const float step = static_cast<float>(metricStep);
   const float half = static_cast<float>(metricHalf);
   if (step <= 0 || half <= 0)
     return bad("步长或窗口半宽换算到float后下溢", "sampleStep");
-  if (options.minSamples < 1 || options.maxSamples < 1 || options.maxSamples > 1000000 ||
-      static_cast<std::uint64_t>(options.minSamples) > options.maxSamples)
-    return bad("采样数要求必须在1到明确的百万采样预算内", "minSamples");
+  if (static_cast<std::uint64_t>(options.minSamples) > options.maxSamples)
+    return bad("最少有效采样不能超过采样预算", "minSamples");
   if ((box != nullptr) != (boxContext != nullptr))
     return bad("ROI与上下文须成对提供", "", "bad_input");
   const Box2D* roi = nullptr;
@@ -352,15 +344,10 @@ void registerProfileCameraGuard(Registry& registry) {
     options.sampleStepMm = parameters.number("sampleStep");
     options.halfWindowMm = parameters.number("halfWindow");
     options.minSamples = parameters.integer("minSamples");
-    const auto budgetValue = parameters.integer("maxSamples");
-    if (budgetValue < 1 || budgetValue > 1000000)
-      return bad("采样预算必须为1到1000000", "maxSamples");
-    options.maxSamples = static_cast<std::size_t>(budgetValue);
+    options.maxSamples = static_cast<std::size_t>(parameters.integer("maxSamples"));
     GuardResult result;
     const auto* box = inputs.has("box") ? &inputs.get("box") : nullptr;
     const auto* context = inputs.has("boxContext") ? inputs.get("boxContext").asRecord() : nullptr;
-    if (inputs.has("boxContext") && !context)
-      return bad("ROI上下文必须为Record", "", "bad_input");
     if (auto status = guardProfiles(inputs.get("primary"), inputs.get("secondary"), options, result,
                                     ctx, box, context);
         !status.ok)

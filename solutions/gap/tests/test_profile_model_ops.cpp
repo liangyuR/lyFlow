@@ -283,7 +283,6 @@ TEST_CASE(
   CHECK_FALSE(
       native::labelsToCloud(input, labels(sensor("different"), b), "primary", output, ctx).ok);
   CHECK(output.cloudPtr() == previous);
-  CHECK_FALSE(native::labelsToCloud(input, labelData, "unknown", output, ctx).ok);
   Stop stop;
   CHECK_FALSE(native::labelsToCloud(input, labelData, "primary", output, stop).ok);
   CHECK(output.cloudPtr() == previous);

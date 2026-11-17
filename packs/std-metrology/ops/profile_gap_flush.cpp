@@ -1,5 +1,3 @@
-#include <cmath>
-#include <limits>
 #include <utility>
 
 #include "lyflow/kernel/profile_analysis.h"
@@ -103,20 +101,14 @@ void registerProfileGapFlush(Registry& r) {
       "使用两个显式不相交横坐标区间拟合单扫描左右表面，分别报告采样边缘间距和同横坐标有符号面差。拒绝少点、竖直线、残差超限和超限外推；圆角/槽/斜投影缝型另用专用算法。";
   op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
     const auto* cloud = in.get("cloud").asCloud();
-    if (!cloud)
-      return error("需要单个PointCloud");
     Status s = validate(*cloud, 6);
     if (!s.ok)
       return s;
     const auto l = p.vec2("leftRange"), r = p.vec2("rightRange");
     const double x = p.number("referenceX"), maximum = p.number("maxResidual"),
                  extrapolation = p.number("maxExtrapolation");
-    if (!std::isfinite(l[0]) || !std::isfinite(l[1]) || !std::isfinite(r[0]) ||
-        !std::isfinite(r[1]) || l[0] >= l[1] || l[1] >= r[0] || r[0] >= r[1] || !std::isfinite(x) ||
-        !std::isfinite(maximum) || maximum <= 0 || !std::isfinite(extrapolation) ||
-        extrapolation < 0 || !frameValid(p.text("frame")) ||
-        (p.choice("plane") != "xy" && p.choice("plane") != "xz" && p.choice("plane") != "yz"))
-      return error("剖面区间/外推/质量参数非法", "leftRange", "bad_param");
+    if (l[0] >= l[1] || l[1] >= r[0] || r[0] >= r[1] || !frameValid(p.text("frame")))
+      return error("剖面区间或参考帧非法", "leftRange", "bad_param");
     const auto indices = axes(p.choice("plane"));
     LineFit a, b;
     if (!fitLine(*cloud, indices.first, indices.second, l[0], l[1], a,

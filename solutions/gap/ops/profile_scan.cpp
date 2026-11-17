@@ -44,10 +44,6 @@ fs::path prefixFile(const fs::path& directory, const std::string& prefix, std::e
 }
 bool resolve(const ProfilePairOptions& options, fs::path& primary, fs::path& secondary,
              std::string& why) {
-  if (options.source != "files" && options.source != "dir") {
-    why = "文件来源必须显式为files或dir";
-    return false;
-  }
   std::error_code error;
   if (options.source == "files") {
     primary = options.primaryFile;
@@ -84,8 +80,6 @@ bool selected(const Data& source, const std::vector<std::int32_t>& keep, Data& r
     output.validity.push_back(input.validity[slot]);
     output.sourceIndices.push_back(input.sourceIndices[slot]);
   }
-  if (!validateProfile(output, why))
-    return false;
   result = Data::profile(std::move(output));
   return true;
 }
@@ -257,8 +251,6 @@ Status loadCallback(const Inputs&, const ParamView& params, Outputs& outputs,
 }
 Status readCallback(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                     ExecContext& context) {
-  if (inputs.has("primary") != inputs.has("secondary"))
-    return failure("primary和secondary必须同时连接或注入", "missing_input", "primary");
   LoadedProfilePair loaded;
   Json origins;
   if (inputs.has("primary")) {
@@ -273,9 +265,8 @@ Status readCallback(const Inputs& inputs, const ParamView& params, Outputs& outp
   }
   if (inputs.has("sourceInfo")) {
     const auto* sourceInfo = inputs.get("sourceInfo").asRecord();
-    if (!sourceInfo || sourceInfo->type != "gap.ProfilePairSource.v2" ||
-        !sourceInfo->data.is_object() || sourceInfo->data.size() != 2 ||
-        !sourceInfo->data.contains("schemaVersion") ||
+    if (sourceInfo->type != "gap.ProfilePairSource.v2" || !sourceInfo->data.is_object() ||
+        sourceInfo->data.size() != 2 || !sourceInfo->data.contains("schemaVersion") ||
         !sourceInfo->data["schemaVersion"].is_number_integer() ||
         sourceInfo->data["schemaVersion"] != 2 || !sourceInfo->data.contains("origins"))
       return failure("需要原始配对来源gap.ProfilePairSource.v2", "bad_input", "sourceInfo");
@@ -289,7 +280,7 @@ Status readCallback(const Inputs& inputs, const ParamView& params, Outputs& outp
   options.origins = origins;
   if (inputs.has("guardQuality")) {
     const auto* guard = inputs.get("guardQuality").asRecord();
-    if (!guard || guard->type != "gap.CameraGuard.v2")
+    if (guard->type != "gap.CameraGuard.v2")
       return failure("需要实际gap.CameraGuard.v2质量记录", "bad_input", "guardQuality");
     options.guard = guard->data;
     if (origins.is_object() && options.guard.is_object() && options.guard.contains("taken")) {
@@ -315,11 +306,10 @@ Status readCallback(const Inputs& inputs, const ParamView& params, Outputs& outp
 Status loadProfilePair(const ProfilePairOptions& options, LoadedProfilePair& result,
                        ExecContext& context) {
   try {
-    if ((options.layout != "sensor" && options.layout != "profile") ||
-        (options.unit != "m" && options.unit != "mm") || !name(options.fileFrame) ||
+    if ((options.unit != "m" && options.unit != "mm") || !name(options.fileFrame) ||
         !name(options.sensorFrame) ||
         (options.handedness != "right" && options.handedness != "reflected"))
-      return failure("文件布局、单位、原始帧、传感器帧与手性必须明确声明", "bad_param");
+      return failure("文件单位、原始帧、传感器帧与手性必须明确声明", "bad_param");
     if (context.cancelled())
       return cancelled();
     fs::path primary, secondary;
@@ -354,9 +344,6 @@ Status buildReadScan(const Data& sensorPrimary, const Data& sensorSecondary,
   const auto* primary = sensorPrimary.asProfile();
   const auto* secondary = sensorSecondary.asProfile();
   std::string why;
-  if (!primary || !validateProfile(*primary, why) || !secondary ||
-      !validateProfile(*secondary, why))
-    return failure(why.empty() ? "双路输入必须为完整Profile，不接受缺少来源映射的裸云" : why);
   if (primary->descriptor.frame != secondary->descriptor.frame || !name(options.measurementFrame) ||
       options.measurementFrame == primary->descriptor.frame || primary->descriptor.plane != "XZ" ||
       secondary->descriptor.plane != "XZ")

@@ -139,38 +139,25 @@ Selection selection(const Data& source, const Json& context, const std::vector<i
 
 Status lineParameters(const ParamView& params, features::LineOptions& options) {
   const double threshold = params.number("distanceThreshold");
-  if (!std::isfinite(threshold) || threshold <= 0 ||
-      threshold > std::numeric_limits<float>::max() || static_cast<float>(threshold) == 0)
+  if (threshold <= 0 || threshold > std::numeric_limits<float>::max() ||
+      static_cast<float>(threshold) == 0)
     return parameter("内点距离门限必须为可表示的正米制值", "distanceThreshold");
   options.fit.distThresh = static_cast<float>(threshold);
-  const auto segment = params.integer("segmentPoints"), minimum = params.integer("minInliers");
-  if (segment < 0)
-    return parameter("局部重拟合样本数不能为负", "segmentPoints");
-  if (minimum < 0)
-    return parameter("最少内点数不能为负", "minInliers");
-  options.segmentPoints = static_cast<std::size_t>(segment);
-  options.minInliers = static_cast<std::size_t>(minimum);
+  options.segmentPoints = static_cast<std::size_t>(params.integer("segmentPoints"));
+  options.minInliers = static_cast<std::size_t>(params.integer("minInliers"));
   const auto type = params.choice("lineType");
-  if (type != "fit" && type != "vertical" && type != "horizontal")
-    return parameter("直线拟合方向模式非法", "lineType");
   options.type = type == "fit"        ? features::LineType::Free
                  : type == "vertical" ? features::LineType::Vertical
                                       : features::LineType::Horizontal;
   const auto mode = params.choice("dirMode");
-  if (mode != "free" && mode != "band" && mode != "fixed")
-    return parameter("方向约束模式非法", "dirMode");
   options.directionMode = mode == "free"   ? features::DirectionMode::Free
                           : mode == "band" ? features::DirectionMode::Band
                                            : features::DirectionMode::Fixed;
   options.nominalDeg = params.number("dirNominalDeg");
   options.toleranceDeg = params.number("dirTolDeg");
-  if (!std::isfinite(options.nominalDeg))
-    return parameter("相对标称角必须有限", "dirNominalDeg");
-  if (!std::isfinite(options.toleranceDeg) || options.toleranceDeg < 0)
-    return parameter("方向带宽必须为非负有限角度", "dirTolDeg");
+  if (options.toleranceDeg < 0)
+    return parameter("方向带宽必须为非负角度", "dirTolDeg");
   const auto ends = params.choice("endpoints");
-  if (ends != "roi_intersection" && ends != "inlier_ends")
-    return parameter("端点模式非法", "endpoints");
   options.endpoints = ends == "inlier_ends" ? features::Endpoints::InlierEnds
                                             : features::Endpoints::RoiIntersection;
   return Status::Ok();
@@ -183,13 +170,9 @@ Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outpu
   const auto& source = inputs.get("profile");
   const auto* input = source.asProfile();
   std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why);
   features::LineOptions options;
   if (auto status = lineParameters(params, options); !status.ok)
     return status;
-  if (!inputs.get("box").asBox2D())
-    return bad("需要米制拟合ROI", "box");
   if (!inputs.get("toward").asPoint2D() && !inputs.get("toward").asBox2D())
     return bad("需要米制局部选择参考点或参考框", "toward");
   if (inputs.get("toward").asBox2D()) {
@@ -204,8 +187,6 @@ Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outpu
     const auto context = profile_contract::context(source);
     const auto* provenance =
         inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-    if (inputs.has("provenance") && !provenance)
-      return bad("来源必须为Record", "provenance");
     Json sources;
     Record rebound;
     if (!profile_contract::profileSources(source, provenance, sources, why) ||
@@ -218,8 +199,6 @@ Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outpu
         !status.ok)
       return status;
     if (inputs.has("refLine")) {
-      if (!inputs.get("refLine").asLine2D())
-        return bad("需要方向参考直线", "refLine");
       if (auto status =
               samePhysical(inputs, "refLine", "refLineContext", input->descriptor, sources);
           !status.ok)
@@ -307,38 +286,39 @@ Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outpu
   }
 }
 
-Status circleParameters(const ParamView& params, robust::Circle2DFitOptions& options) {
+Status circleParameters(const ParamView& params) {
   const double threshold = params.number("distanceThreshold");
-  if (!std::isfinite(threshold) || threshold <= 0 ||
-      threshold > std::numeric_limits<float>::max() || static_cast<float>(threshold) == 0)
+  if (threshold <= 0 || threshold > std::numeric_limits<float>::max() ||
+      static_cast<float>(threshold) == 0)
     return parameter("内点距离门限必须为可表示的正米制值", "distanceThreshold");
-  options.distThresh = static_cast<float>(threshold);
+  const double minRadius = params.number("minRadius"), maxRadius = params.number("maxRadius");
+  if (minRadius <= 0)
+    return parameter("最小半径必须为正米制值", "minRadius");
+  if (maxRadius < minRadius || maxRadius > std::numeric_limits<float>::max())
+    return parameter("最大半径必须不小于最小半径且可表示", "maxRadius");
+  const auto mode = params.choice("radiusMode");
+  if (mode == "fixed" && (params.number("fixedRadius") <= 0 ||
+                          params.number("fixedRadius") > std::numeric_limits<float>::max()))
+    return parameter("固定半径必须为可表示的正米制值", "fixedRadius");
+  if (mode == "prior") {
+    if (params.number("radiusPrior") <= 0 ||
+        params.number("radiusPrior") > std::numeric_limits<float>::max())
+      return parameter("先验半径必须为可表示的正米制值", "radiusPrior");
+    if (params.number("radiusPriorSigma") <= 0)
+      return parameter("半径先验标准差必须为正米制值", "radiusPriorSigma");
+  }
+  return Status::Ok();
+}
+robust::Circle2DFitOptions circleOptions(const ParamView& params) {
+  robust::Circle2DFitOptions options;
+  options.distThresh = static_cast<float>(params.number("distanceThreshold"));
   options.minRadius = params.number("minRadius");
   options.maxRadius = params.number("maxRadius");
-  if (!std::isfinite(options.minRadius) || options.minRadius <= 0)
-    return parameter("最小半径必须为正有限米制值", "minRadius");
-  if (!std::isfinite(options.maxRadius) || options.maxRadius < options.minRadius ||
-      options.maxRadius > std::numeric_limits<float>::max())
-    return parameter("最大半径必须有限且不小于最小半径", "maxRadius");
-  const auto mode = params.choice("radiusMode");
-  if (mode != "free" && mode != "fixed" && mode != "prior")
-    return parameter("半径拟合模式非法", "radiusMode");
-  if (mode == "fixed" &&
-      (!std::isfinite(params.number("fixedRadius")) || params.number("fixedRadius") <= 0 ||
-       params.number("fixedRadius") > std::numeric_limits<float>::max()))
-    return parameter("固定半径必须为正有限米制值", "fixedRadius");
-  if (mode == "prior") {
+  if (params.choice("radiusMode") == "prior") {
     options.radiusPrior = params.number("radiusPrior");
     options.radiusPriorSigma = params.number("radiusPriorSigma");
-    if (!std::isfinite(options.radiusPrior) || options.radiusPrior <= 0 ||
-        options.radiusPrior > std::numeric_limits<float>::max())
-      return parameter("先验半径必须为正有限米制值", "radiusPrior");
-    if (!std::isfinite(options.radiusPriorSigma) || options.radiusPriorSigma <= 0)
-      return parameter("半径先验标准差必须为正有限米制值", "radiusPriorSigma");
   }
-  if (params.integer("minInliers") < 3)
-    return parameter("圆拟合至少需要三个内点", "minInliers");
-  return Status::Ok();
+  return options;
 }
 const char* outcome(robust::Circle2DRadiusOutcome value) {
   switch (value) {
@@ -361,14 +341,8 @@ Status fitCircleCore(const Inputs& inputs, const ParamView& params, Outputs& out
   const auto& source = inputs.get("profile");
   const auto* input = source.asProfile();
   std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why);
-  robust::Circle2DFitOptions options;
-  if (auto status = circleParameters(params, options); !status.ok)
-    return status;
+  const auto options = circleOptions(params);
   const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  if (inputs.has("provenance") && !provenance)
-    return bad("来源必须为Record", "provenance");
   Json sources;
   Record rebound;
   if (!profile_contract::profileSources(source, provenance, sources, why) ||
@@ -608,8 +582,7 @@ void registerRobustProfileFeatures(Registry& registry) {
   op.params = profile_contract::robustCircleParams();
   op.compute = &fitCircle;
   op.validate = [](const ParamView& params, const std::set<std::string>&) {
-    robust::Circle2DFitOptions options;
-    const auto status = circleParameters(params, options);
+    const auto status = circleParameters(params);
     if (status.ok)
       return std::vector<Issue>{};
     return std::vector<Issue>{
@@ -620,44 +593,12 @@ void registerRobustProfileFeatures(Registry& registry) {
 } // namespace lyflow::packs::std_profile
 
 namespace lyflow::profile_contract {
-namespace {
-Status parameterTypes(const ParamView& parameters, const std::vector<Param>& descriptions) {
-  for (const auto& parameter : descriptions) {
-    const auto found = parameters.raw().find(parameter.name);
-    if (found == parameters.raw().end())
-      return Status::Error(Phase::Execute, "bad_param",
-                           "缺少公共拟合参数；请使用共享参数工厂补齐默认值", parameter.name);
-    const auto& value = found->second;
-    if ((parameter.type == ParamType::Enum && value.kind() != Value::Kind::String) ||
-        (parameter.type == ParamType::Float && value.kind() != Value::Kind::Float &&
-         value.kind() != Value::Kind::Int) ||
-        (parameter.type == ParamType::Int && value.kind() != Value::Kind::Float &&
-         value.kind() != Value::Kind::Int))
-      return Status::Error(Phase::Execute, "bad_param", "公共拟合参数类型不符", parameter.name);
-    if (parameter.type == ParamType::Int && value.kind() == Value::Kind::Float) {
-      const double count = value.floatValue();
-      if (!std::isfinite(count) || std::floor(count) != count ||
-          count >= static_cast<double>(std::numeric_limits<std::int64_t>::max()) ||
-          count < static_cast<double>(std::numeric_limits<std::int64_t>::min()))
-        return Status::Error(Phase::Execute, "bad_param", "拟合计数必须为int64范围内的整数",
-                             parameter.name);
-    }
-  }
-  return Status::Ok();
-}
-}
 std::vector<Param> robustLineParams() { return packs::std_profile::lineParameterDescriptions(); }
 std::vector<Param> robustCircleParams() {
   return packs::std_profile::circleParameterDescriptions();
 }
 Status fitRobustLine(const RobustLineInputs& input, const ParamView& parameters,
                      RobustLineResult& out, ExecContext& ctx) {
-  if (!input.profile.asProfile() || !input.box.asBox2D() || !input.boxContext.asRecord() ||
-      (!input.toward.asPoint2D() && !input.toward.asBox2D()) || !input.towardContext.asRecord())
-    return Status::Error(Phase::Execute, "bad_input",
-                         "直线拟合需要Profile、ROI、toward及其完整上下文");
-  if (auto status = parameterTypes(parameters, robustLineParams()); !status.ok)
-    return status;
   std::unordered_map<std::string, Data> inputs{{"profile", input.profile},
                                                {"box", input.box},
                                                {"boxContext", input.boxContext},
@@ -692,10 +633,6 @@ Status fitRobustLine(const RobustLineInputs& input, const ParamView& parameters,
 }
 Status fitRobustCircle(const RobustCircleInputs& input, const ParamView& parameters,
                        RobustCircleResult& out, ExecContext& ctx) {
-  if (!input.profile.asProfile())
-    return Status::Error(Phase::Execute, "bad_input", "圆拟合需要完整Profile");
-  if (auto status = parameterTypes(parameters, robustCircleParams()); !status.ok)
-    return status;
   std::unordered_map<std::string, Data> inputs{{"profile", input.profile}};
   if (input.provenance.kind() != Data::Kind::None)
     inputs.emplace("provenance", input.provenance);

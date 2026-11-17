@@ -26,10 +26,6 @@ inline bool mergeProfiles(const Data& aData, const Data& bData, const Record* aP
   const auto stopped = [&] { return cancelled && cancelled(); };
   const auto* a = aData.asProfile();
   const auto* b = bData.asProfile();
-  if (!a || !validateProfile(*a, why))
-    return failure(why.empty() ? "需要有效Profile" : why);
-  if (!b || !validateProfile(*b, why))
-    return failure(why.empty() ? "需要有效Profile" : why, "b");
   nlohmann::json sources;
   if (!profile_contract::profileSources(aData, aProvenance, sources, why))
     return failure(why, "aProvenance");
@@ -42,8 +38,6 @@ inline bool mergeProfiles(const Data& aData, const Data& bData, const Record* aP
       std::numeric_limits<std::uint32_t>::max())
     return failure("合并原始索引空间超过uint32预算", "b");
   const auto policy = options.channelPolicy;
-  if (policy != "require_equal" && policy != "intersection")
-    return failure("未知合并通道策略", "channelPolicy", "bad_param");
   const auto& ac = *a->cloud;
   const auto& bc = *b->cloud;
   const bool nonempty = a->pointCount() && b->pointCount();

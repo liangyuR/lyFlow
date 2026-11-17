@@ -36,9 +36,6 @@ bool workCoordinate(float input, double scale, float& output) {
 
 Status clean(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const auto* input = inputs.get("profile").asProfile();
-  std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why, "profile");
   if (ctx.cancelled())
     return cancelled();
   const std::size_t n = input->pointCount();
@@ -48,10 +45,6 @@ Status clean(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   const auto minimum = params.integer("minValidPoints");
   const double minIntensity = params.number("minIntensity");
   const std::string& mode = params.choice("mode");
-  if (width < 1 || width > std::numeric_limits<int>::max() || minimum < 1 ||
-      minimum > std::numeric_limits<int>::max() || !std::isfinite(minIntensity) ||
-      minIntensity < 0 || (mode != "preserve_slots" && mode != "compact"))
-    return Status::Error(Phase::Execute, "bad_param", "清洗参数超出支持范围");
 
   const auto axes = planeAxes(input->descriptor);
   const double scale = input->descriptor.unit == "m" ? 1000.0 : 1.0;
@@ -97,13 +90,11 @@ Status clean(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
       if (validity[slot] && width > 1)
         cloud.xyz[3 * i + axes.second] = static_cast<float>(smoothed[slot] / scale);
     }
-    Profile result;
-    if (!makeProfile(std::make_shared<const PointCloud>(std::move(cloud)), input->descriptor,
-                     std::move(selectedValidity), std::move(selectedSources), result, why))
-      return bad(why, "profile");
     if (ctx.cancelled())
       return cancelled();
-    outputs.set("clean", Data::profile(std::move(result)));
+    outputs.set("clean", Data::profile(Profile{std::make_shared<const PointCloud>(std::move(cloud)),
+                                               input->descriptor, std::move(selectedValidity),
+                                               std::move(selectedSources)}));
     return Status::Ok();
   } catch (const kp::Cancelled&) {
     return cancelled();
@@ -120,9 +111,6 @@ nlohmann::json faceJson(const kp::Face& f) {
 Status split(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const Data& source = inputs.get("clean");
   const auto* input = source.asProfile();
-  std::string why;
-  if (!input || !validateProfile(*input, why))
-    return bad(why.empty() ? "需要有效Profile" : why, "clean");
   if (input->descriptor.sampleOrder != "acquisition")
     return bad("分片需要明确的acquisition采样列序，不能推断未知顺序", "clean");
   if (ctx.cancelled())
@@ -153,11 +141,6 @@ Status split(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   fp.angleBreakDeg = params.number("angleBreakDeg");
   fp.minLenMm = params.number("minLenMm");
   const double gap = params.number("gapMm"), jump = params.number("jumpMm");
-  for (const double value : {gap, jump, fp.fitLenMm, fp.maxRmsMm, fp.angleBreakDeg, fp.minLenMm})
-    if (!std::isfinite(value) || value < 0)
-      return Status::Error(Phase::Execute, "bad_param", "分片参数必须为有限非负数");
-  if (minimum < 3 || minimum > std::numeric_limits<int>::max())
-    return Status::Error(Phase::Execute, "bad_param", "minPoints超出支持范围", "minPoints");
   try {
     const auto stop = [&ctx] { return ctx.cancelled(); };
     const auto pieces = kp::splitPieces(active, gap, jump, static_cast<int>(minimum), stop);

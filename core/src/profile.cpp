@@ -141,8 +141,6 @@ bool convertProfileUnit(const Profile& input, const std::string& targetUnit, Pro
                         std::string& why, const std::function<bool()>& cancelled) {
   if (cancelled && cancelled())
     return fail(why, "Profile单位转换已取消");
-  if (!validateProfile(input, why))
-    return false;
   if (targetUnit != "m" && targetUnit != "mm")
     return fail(why, "Profile目标单位必须为m/mm");
   Profile result = input;
@@ -176,8 +174,6 @@ bool remapProfileAxes(const Profile& input, const std::string& order,
                       Profile& out, std::string& why, const std::function<bool()>& cancelled) {
   if (cancelled && cancelled())
     return fail(why, "Profile换轴已取消");
-  if (!validateProfile(input, why))
-    return false;
   if (order.size() != 3 ||
       std::set<char>(order.begin(), order.end()) != std::set<char>{'X', 'Y', 'Z'})
     return fail(why, "轴映射必须为XYZ的完整排列");
@@ -216,8 +212,6 @@ bool remapProfileAxes(const Profile& input, const std::string& order,
     }
   }
   result.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  if (!validateProfile(result, why))
-    return false;
   if (cancelled && cancelled())
     return fail(why, "Profile换轴已取消");
   out = std::move(result);

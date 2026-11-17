@@ -598,6 +598,23 @@ std::vector<std::string> attachUnplanned(const Plan& full, const std::string& ru
   return out;
 }
 
+/// 载荷自洽检查，空串表示通过。顶层输出与 Bundle 字段走同一道。
+std::string payloadProblem(const Data& d) {
+  if (const PointCloud* c = d.asCloud(); c && !c->channelsConsistent())
+    return "点云通道长度不一致（intensity/normals/rgb 必须为空或与点数对齐）";
+  if (d.kind() == Data::Kind::Profile) {
+    const auto* profile = d.asProfile();
+    if (!profile)
+      return "Profile缓冲为空";
+    std::string why;
+    if (!validateProfile(*profile, why))
+      return why;
+  }
+  if (const Image* img = d.asImage(); img && !img->consistent())
+    return "图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）";
+  return {};
+}
+
 // ------------------------------------------------------------------- 调度器
 
 enum class Verdict { Ok, Failed, Cancelled };
@@ -1259,6 +1276,15 @@ private:
     }
   }
 
+  static Status payloadError(const PlanNode& node, const std::string& port,
+                             const std::string& field, const std::string& problem) {
+    // 宿主注入的（provided）是调用方给错了，不是 core 或算子的 bug
+    return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
+                         std::string(node.provided ? "注入的" : "") + "输出端口 '" + port + "'" +
+                             field + "：" + problem,
+                         {}, port);
+  }
+
   Status checkOutputs(const PlanNode& node, std::unordered_map<std::string, Data>& values,
                       bool bypassed) const {
     for (const Port& p : node.op->outputs) {
@@ -1287,6 +1313,11 @@ private:
           return Status::Error(Phase::Execute, "contract_violation",
                                "输出端口 '" + p.name + "'：" + problem, {}, p.name);
         }
+        for (const auto& field : it->second.asBundle()->fields) {
+          const std::string fieldProblem = payloadProblem(field.second);
+          if (!fieldProblem.empty())
+            return payloadError(node, p.name, " 字段 '" + field.first + "'", fieldProblem);
+        }
         continue;
       }
       if (expected != Data::Kind::None && it->second.kind() != expected) {
@@ -1295,31 +1326,9 @@ private:
                                  it->second.typeName(),
                              {}, p.name);
       }
-      if (const PointCloud* c = it->second.asCloud()) {
-        if (!c->channelsConsistent()) {
-          return Status::Error(Phase::Execute, "internal",
-                               std::string("输出端口 '") + p.name +
-                                   "' 的点云通道长度不一致（intensity/normals/rgb "
-                                   "必须为空或与点数对齐）",
-                               {}, p.name);
-        }
-      }
-      if (it->second.kind() == Data::Kind::Profile) {
-        std::string why;
-        const auto* profile = it->second.asProfile();
-        if (!profile || !validateProfile(*profile, why))
-          return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
-                               profile ? why : "Profile缓冲为空", {}, p.name);
-      }
-      if (const Image* img = it->second.asImage()) {
-        if (!img->consistent()) {
-          // 宿主注入的（provided）是调用方给错了，不是 core 或算子的 bug
-          return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
-                               std::string(node.provided ? "注入的" : "") + "输出端口 '" + p.name +
-                                   "' 的图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）",
-                               {}, p.name);
-        }
-      }
+      const std::string problem = payloadProblem(it->second);
+      if (!problem.empty())
+        return payloadError(node, p.name, "", problem);
     }
     return Status::Ok();
   }

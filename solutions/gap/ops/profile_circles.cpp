@@ -2,7 +2,6 @@
 #include "profile_circles.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <set>
 
@@ -47,18 +46,6 @@ Status physical(const Data& geometry, const Data& context, const ProfileDescript
   return Status::Ok();
 }
 Status parameterValuesValid(const ParamView& parameters) {
-  for (const auto& parameter : circlePairParams()) {
-    if (parameter.type == ParamType::Float && !std::isfinite(parameters.number(parameter.name)))
-      return Status::Error(Phase::Execute, "bad_param", "圆拟合数值参数必须有限", parameter.name);
-    if (parameter.type == ParamType::Enum) {
-      const auto value = parameters.choice(parameter.name);
-      const bool found =
-          std::any_of(parameter.options.begin(), parameter.options.end(),
-                      [&](const EnumOption& option) { return option.value == value; });
-      if (!found)
-        return Status::Error(Phase::Execute, "bad_param", "圆拟合枚举参数非法", parameter.name);
-    }
-  }
   for (const auto* name : {"distThresh", "retryDistance"}) {
     const double value = parameters.number(name) / 1000.0;
     if (value < 0 || (std::string(name) == "distThresh" && value == 0) ||
@@ -78,21 +65,6 @@ Status parameterValuesValid(const ParamView& parameters) {
                            prefix + "RadiusMin");
   }
 
-  return Status::Ok();
-}
-Status parametersValid(const ParamView& parameters, const CirclePairInputs& inputs) {
-  std::set<std::string> connected;
-  if (present(inputs.refLine))
-    connected.insert("refLine");
-  if (present(inputs.refLineContext))
-    connected.insert("refLineContext");
-  if (present(inputs.refLineRight))
-    connected.insert("refLineRight");
-  if (present(inputs.refLineRightContext))
-    connected.insert("refLineRightContext");
-  for (const auto& issue : validateCirclePairParams(parameters, connected))
-    if (issue.severity == Severity::Error)
-      return issue.status;
   return Status::Ok();
 }
 bool working(const Profile& input, PointCloud& result, ExecContext& ctx, std::string& why) {
@@ -141,15 +113,11 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
   std::string why;
   for (std::size_t i = 0; i < sources.size(); ++i) {
     const auto* profile = sources[i]->asProfile();
-    if (!profile || !validateProfile(*profile, why))
-      return bad(why.empty() ? "需要三路有效Profile" : why);
     if (profile->pointCount() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
       return bad("输入轮廓超过原槽索引范围", "merged", "budget_exceeded");
     if (i && !profile_contract::sameSpace(sources[0]->asProfile()->descriptor, profile->descriptor))
       return bad("三路轮廓必须在同一明确物理空间");
     provenance[i] = provenanceData[i]->asRecord();
-    if ((i == 0 || present(*provenanceData[i])) && !provenance[i])
-      return bad("merged必须有来源记录；可选相机来源也必须为Record", "mergedProvenance");
     Json parents;
     if (!profile_contract::profileSources(*sources[i], provenance[i], parents, why) ||
         !joinSources(geometrySources, parents, why))
@@ -157,8 +125,6 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
   }
   const auto& space = inputs.merged.asProfile()->descriptor;
   for (std::size_t i = 0; i < 2; ++i) {
-    if (!inputs.boxes[i].asBox2D())
-      return bad("需要米制左右ROI", i ? "boxRight" : "boxLeft");
     if (auto status = physical(inputs.boxes[i], inputs.boxContexts[i], space, geometrySources,
                                i ? "boxRightContext" : "boxLeftContext");
         !status.ok)
@@ -170,17 +136,12 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
   for (std::size_t i = 0; i < 2; ++i) {
     if (present(*lines[i]) != present(*lineContexts[i]))
       return bad("参考线与上下文须成对提供", "refLineContext");
-    if (present(*lines[i])) {
-      if (!lines[i]->asLine2D())
-        return bad("参考几何必须为Line2D", "refLine");
+    if (present(*lines[i]))
       if (auto status = physical(*lines[i], *lineContexts[i], space, geometrySources,
                                  i ? "refLineRightContext" : "refLineContext");
           !status.ok)
         return status;
-    }
   }
-  if (auto status = parametersValid(parameters, inputs); !status.ok)
-    return status;
   std::unordered_map<std::string, Data> cloudInputs;
   const std::array<const char*, 3> names{"merged", "primary", "secondary"};
   for (std::size_t i = 0; i < 3; ++i) {
@@ -230,8 +191,6 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
       selected.sourceIndices.push_back(profile->sourceIndices[slot]);
     }
     selected.cloud = std::make_shared<const PointCloud>(profile->cloud->select(slots));
-    if (!validateProfile(selected, why))
-      return bad(why);
     result.profiles[side] = Data::profile(std::move(selected));
     Record rebound, extended;
     if (!profile_contract::rebindProvenance(original, result.profiles[side],

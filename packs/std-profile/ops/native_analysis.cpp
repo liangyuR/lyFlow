@@ -1,4 +1,3 @@
-#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -88,21 +87,15 @@ Status fitLine(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
   const auto& data = in.get("profile");
   const auto* input = data.asProfile();
   std::string why;
-  if (!input || !validateProfile(*input, why))
-    return failure(why.empty() ? "需要有效Profile" : why);
   const auto selected = p.choice("invalidPolicy");
-  if (selected != "reject" && selected != "valid_only")
-    return badParam("无效槽策略非法", "invalidPolicy");
   const double maximum = p.number("maxResidual");
-  if (!std::isfinite(maximum) || maximum <= 0)
-    return badParam("拟合残差门限必须为正有限数", "maxResidual");
   double lower = -std::numeric_limits<double>::infinity();
   double upper = std::numeric_limits<double>::infinity();
   if (p.flag("rangeEnabled")) {
     const auto range = p.vec2("range");
     lower = range[0];
     upper = range[1];
-    if (!std::isfinite(lower) || !std::isfinite(upper) || lower >= upper)
+    if (lower >= upper)
       return badParam("拟合闭区间非法", "range");
   }
   analysis::CloudChannels active;
@@ -138,12 +131,9 @@ Status fitLine(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
 Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   const auto commonFrame = p.text("commonFrame"), outputFrame = p.text("outputFrame");
   const auto targetPlane = p.choice("targetPlane"), selected = p.choice("invalidPolicy");
-  if (selected != "reject" && selected != "valid_only")
-    return badParam("无效槽策略非法", "invalidPolicy");
   analysis::Matrix4 common = analysis::identityMatrix();
   if (in.has("commonToOutput")) {
-    const auto* transform = in.get("commonToOutput").asTransform();
-    if (!transform || !analysis::rigidMatrix(*transform, common))
+    if (!analysis::rigidMatrix(*in.get("commonToOutput").asTransform(), common))
       return failure("公共帧变换必须为刚体", "commonToOutput");
   } else if (commonFrame != outputFrame) {
     return failure("不同输出帧需要commonToOutput", "commonToOutput");
@@ -162,8 +152,6 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     const auto* input = sourceData.asProfile();
     const auto* transform = in.get(source.second).asTransform();
     std::string why;
-    if (!input || !validateProfile(*input, why))
-      return failure(why.empty() ? "需要有效Profile" : why, source.first);
     ProfileDescriptor target = input->descriptor;
     target.frame = commonFrame;
     if (!validateProfileDescriptor(target, why))
@@ -174,7 +162,7 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     if (!validateProfileDescriptor(target, why))
       return badParam(why, "outputFrame");
     analysis::Matrix4 sensor;
-    if (!transform || !analysis::rigidMatrix(*transform, sensor))
+    if (!analysis::rigidMatrix(*transform, sensor))
       return failure("已知刚体外参无效", source.second);
     analysis::CloudChannels active, moved;
     Profile metric;
@@ -203,8 +191,6 @@ Status transformPair(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     }
     metric.cloud = std::make_shared<const PointCloud>(std::move(cloud));
     metric.descriptor = std::move(target);
-    if (!validateProfile(metric, why))
-      return failure(why, source.first);
     auto data = Data::profile(std::move(metric));
     const std::string prefix = source.first;
     metadata[prefix + "Frame"] = input->descriptor.frame;

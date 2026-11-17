@@ -2,7 +2,6 @@
 #include "profile_inspection.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 
 #include "lyflow/profile.h"
@@ -29,29 +28,11 @@ bool join(Json& into, const Json& from, std::string& why) {
 }
 Status parametersValid(const ParamView& parameters, const std::vector<Param>& descriptions) {
   for (const auto& parameter : descriptions) {
-    const auto found = parameters.raw().find(parameter.name);
-    if (found == parameters.raw().end())
-      return Status::Error(Phase::Execute, "bad_param", "缺少场景参数，请用共享工厂补齐默认值",
-                           parameter.name);
-    const auto& value = found->second;
-    if (parameter.type == ParamType::Enum) {
-      if (value.kind() != Value::Kind::String ||
-          std::none_of(
-              parameter.options.begin(), parameter.options.end(),
-              [&](const EnumOption& option) { return option.value == value.stringValue(); }))
-        return Status::Error(Phase::Execute, "bad_param", "场景枚举参数非法", parameter.name);
-    } else {
-      if (value.kind() != Value::Kind::Int && value.kind() != Value::Kind::Float)
-        return Status::Error(Phase::Execute, "bad_param", "场景数值参数类型不符", parameter.name);
-      const double number = parameters.number(parameter.name);
-      if (!std::isfinite(number))
-        return Status::Error(Phase::Execute, "bad_param", "场景数值参数必须有限", parameter.name);
-      if (parameter.type == ParamType::Int &&
-          (std::floor(number) != number || number > std::numeric_limits<int>::max() ||
-           number < std::numeric_limits<int>::min()))
-        return Status::Error(Phase::Execute, "bad_param", "场景计数必须在int范围内",
-                             parameter.name);
-    }
+    if (parameter.type != ParamType::Int)
+      continue;
+    const double number = parameters.number(parameter.name);
+    if (number > std::numeric_limits<int>::max() || number < std::numeric_limits<int>::min())
+      return Status::Error(Phase::Execute, "bad_param", "场景计数必须在int范围内", parameter.name);
   }
   if (parameters.has("lineDistThresh") && !(parameters.number("lineDistThresh") > 0))
     return Status::Error(Phase::Execute, "bad_param", "拟合门限必须为正", "lineDistThresh");
@@ -129,8 +110,6 @@ Status measureJoint(const JointInputs& input, const ParamView& parameters, Joint
   std::string why;
   for (int i = 0; i < 2; ++i) {
     const auto* profile = profiles[i]->asProfile();
-    if (!profile || !validateProfile(*profile, why))
-      return bad(why.empty() ? "需要完整原生Profile" : why, names[i]);
     if (i &&
         !profile_contract::sameSpace(input.primary.asProfile()->descriptor, profile->descriptor))
       return bad("两路轮廓必须处于相同物理空间", names[i]);
@@ -138,8 +117,7 @@ Status measureJoint(const JointInputs& input, const ParamView& parameters, Joint
       return bad("轮廓超过拟合索引预算", names[i], "budget_exceeded");
     Json parents;
     const auto* provenance = records[i]->asRecord();
-    if ((present(*records[i]) && !provenance) ||
-        !profile_contract::profileSources(*profiles[i], provenance, parents, why) ||
+    if (!profile_contract::profileSources(*profiles[i], provenance, parents, why) ||
         !join(sources, parents, why))
       return bad(why.empty() ? "轮廓来源必须为绑定当前Profile的Record" : why, names[i]);
     Record bound;
@@ -249,8 +227,6 @@ Status measureProfileCorner(const CornerInputs& input, const ParamView& paramete
     return cancelled();
   if (auto status = parametersValid(parameters, cornerInspectionParams()); !status.ok)
     return status;
-  if (!input.lineLeft.asLine2D() || !input.lineRight.asLine2D() || !input.origin.asPoint2D())
-    return bad("夹角测量需要两条翼面线与显式米制原点", "origin");
   Json sources = Json::array();
   ProfileDescriptor space, current;
   if (auto status = physical(input.lineLeft, input.lineLeftContext, nullptr, sources, space,
@@ -270,8 +246,6 @@ Status measureProfileCorner(const CornerInputs& input, const ParamView& paramete
   if (present(input.baseLine) != present(input.baseLineContext))
     return bad("基准线与上下文须成对提供", "baseLineContext");
   if (present(input.baseLine)) {
-    if (!input.baseLine.asLine2D())
-      return bad("基准线必须为Line2D", "baseLine");
     if (auto status = physical(input.baseLine, input.baseLineContext, &space, sources, current,
                                "baseLineContext");
         !status.ok)

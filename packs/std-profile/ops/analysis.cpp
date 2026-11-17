@@ -1,4 +1,3 @@
-#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -78,15 +77,11 @@ void registerProfileAnalysis(Registry& r) {
       "单条扫描的二维正交最小二乘直线分析；重合/各向同性/少点或残差超限拒绝。无隐式双相机ScanPair、无业务缝型推断。多特征圆/圆弧和复杂SignalEvaluator模式另行组合。";
   op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
     const auto* cloud = in.get("cloud").asCloud();
-    if (!cloud)
-      return error("需要单个PointCloud");
     Status s = validate(*cloud, 3);
     if (!s.ok)
       return s;
-    if (!frameValid(p.text("frame")) || !std::isfinite(p.number("maxResidual")) ||
-        p.number("maxResidual") <= 0 ||
-        (p.choice("plane") != "xy" && p.choice("plane") != "xz" && p.choice("plane") != "yz"))
-      return error("剖面参数非法", "plane", "bad_param");
+    if (!frameValid(p.text("frame")))
+      return error("参考帧必须非空且有界", "frame", "bad_param");
     const auto indices = axes(p.choice("plane"));
     LineFit line;
     if (!fitLine(*cloud, indices.first, indices.second, -std::numeric_limits<double>::infinity(),
@@ -129,8 +124,7 @@ void registerProfileAnalysis(Registry& r) {
         return error("参考帧必须非空且有界", key, "bad_param");
     Matrix4 common = identityMatrix();
     if (in.has("commonToOutput")) {
-      const auto* value = in.get("commonToOutput").asTransform();
-      if (!value || !rigidMatrix(*value, common))
+      if (!rigidMatrix(*in.get("commonToOutput").asTransform(), common))
         return error("公共帧变换必须为刚体", "commonToOutput");
     } else if (p.text("commonFrame") != p.text("outputFrame")) {
       return error("不同输出帧需要commonToOutput", "commonToOutput");
@@ -141,7 +135,7 @@ void registerProfileAnalysis(Registry& r) {
       const auto* cloud = in.get(pair.first).asCloud();
       const auto* value = in.get(pair.second).asTransform();
       Matrix4 matrix;
-      if (!cloud || !value || !rigidMatrix(*value, matrix))
+      if (!rigidMatrix(*value, matrix))
         return error("点云或已知刚体外参无效", pair.first);
       Status s = validate(*cloud);
       if (!s.ok)

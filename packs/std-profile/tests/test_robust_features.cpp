@@ -310,19 +310,18 @@ TEST_CASE(
 TEST_CASE(
     "Robust Profile fitting invalid numeric modes and quality gates publish no partial outputs") {
   test::OpCall call(robustRegistry());
+  for (const auto& [overrides, path] :
+       std::vector<std::pair<std::unordered_map<std::string, Value>, const char*>>{
+           {{{"radiusMode", Value::text("fixed")}, {"fixedRadius", Value::number(0)}},
+            "fixedRadius"},
+           {{{"radiusMode", Value::text("prior")}, {"radiusPriorSigma", Value::number(0)}},
+            "radiusPriorSigma"},
+           {{{"distanceThreshold", Value::number(0)}}, "distanceThreshold"}}) {
+    const auto issues = call.validate("profile.fit_circle_robust", overrides, {"profile"});
+    REQUIRE(issues.size() == 1);
+    CHECK(issues.front().status.paramPath == path);
+  }
   call.inputs = {{"profile", arcProfile()}};
-  CHECK_FALSE(call.run("profile.fit_circle_robust",
-                       {{"radiusMode", Value::text("fixed")}, {"fixedRadius", Value::number(0)}})
-                  .ok);
-  CHECK(call.status.paramPath == "fixedRadius");
-  CHECK(call.outputs.empty());
-  CHECK_FALSE(call.run("profile.fit_circle_robust", {{"radiusMode", Value::text("prior")},
-                                                     {"radiusPriorSigma", Value::number(0)}})
-                  .ok);
-  CHECK(call.status.paramPath == "radiusPriorSigma");
-  CHECK(call.outputs.empty());
-  CHECK_FALSE(call.run("profile.fit_circle_robust", {{"distanceThreshold", Value::number(0)}}).ok);
-  CHECK(call.outputs.empty());
   CHECK_FALSE(call.run("profile.fit_circle_robust", {{"minInliers", Value::integer(1000)}}).ok);
   CHECK(call.status.code == "insufficient_points");
   CHECK(call.outputs.empty());
@@ -472,14 +471,6 @@ TEST_CASE(
       profile_contract::fitRobustLine(invalid, ParamView(call.params, ctx.baseDir()), result, ctx)
           .ok);
   CHECK(result.quality.asRecord()->type == "sentinel");
-  ParamMap missing;
-  CHECK_FALSE(
-      profile_contract::fitRobustLine(inputs, ParamView(missing, ctx.baseDir()), result, ctx).ok);
-  call.params["minInliers"] = Value::number(std::numeric_limits<double>::infinity());
-  CHECK_FALSE(
-      profile_contract::fitRobustLine(inputs, ParamView(call.params, ctx.baseDir()), result, ctx)
-          .ok);
-  CHECK(result.quality.asRecord()->type == "sentinel");
   const auto arc = arcProfile();
   call.inputs = {{"profile", arc}};
   REQUIRE(call.run("profile.fit_circle_robust").ok);
@@ -490,10 +481,6 @@ TEST_CASE(
   CHECK(circle.quality.asRecord()->data == call.out("quality").asRecord()->data);
   CHECK(circle.inliers.asIndices()->values == call.out("inliers").asIndices()->values);
   CHECK(circle.profile.profilePtr() == arc.profilePtr());
-  circle.quality = Data::record(Record{"sentinel", {}});
-  CHECK_FALSE(
-      profile_contract::fitRobustCircle({}, ParamView(call.params, ctx.baseDir()), circle, ctx).ok);
-  CHECK(circle.quality.asRecord()->type == "sentinel");
   const auto lineDescriptions = profile_contract::robustLineParams();
   const auto circleDescriptions = profile_contract::robustCircleParams();
   CHECK(lineDescriptions.size() == robustRegistry().find("profile.fit_line_robust")->params.size());

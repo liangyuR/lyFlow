@@ -358,6 +358,28 @@ TEST_CASE("Profile Bundle frame binding validates fields and fingerprints full p
                                          invalidInputs))[0]["code"] == "bad_input");
   Session invalidRun(graph, {}, {}, true, 1, false, invalidInputs);
   CHECK(invalidRun.wait().runStatus() == "error");
+  if (!registry.find("test.emit_invalid_profile_carrier")) {
+    OperatorDesc op;
+    op.id = "test.emit_invalid_profile_carrier";
+    op.version = "1.0.0";
+    op.label = "Invalid Profile Carrier";
+    op.category = "Test";
+    op.outputs = {Port{"out", "Bundle<test.ProfileCarrier>", "Out", "", true}};
+    op.compute = [](const Inputs&, const ParamView&, Outputs& out, ExecContext&) {
+      auto profile = holeProfile();
+      profile.validity[777] = 1;
+      Bundle bundle("test.ProfileCarrier");
+      bundle.set("profile", Data::profile(std::move(profile)));
+      out.set("out", Data::bundle(std::move(bundle)));
+      return Status::Ok();
+    };
+    registry.addOperator(std::move(op));
+  }
+  const auto emitted = runGraph(makeGraph({{"e", "test.emit_invalid_profile_carrier"}}, {}));
+  const auto emitError = emitted.nodeEvent("e", "error");
+  CHECK(emitError["error"]["code"] == "internal");
+  CHECK(emitError["error"]["message"].get<std::string>().find("字段 'profile'") !=
+        std::string::npos);
   Bundle nested("test.ProfileCarrier");
   nested.set("profile", wrap(input));
   invalidInputs[0].data = Data::bundle(std::move(nested));

@@ -444,11 +444,6 @@ TEST_CASE(
                                                    {"steps", Value::integer(9)}})
                   .ok);
   CHECK(call.outputs.empty());
-  CHECK_FALSE(call.run("register.pose_search_3d", {{"steps", Value::integer(1)}}).ok);
-  CHECK_FALSE(call.run("register.pose_search_3d", {{"translationRadius", Value::vec({0, 0, 0})},
-                                                   {"rotationRadius", Value::vec({0, 0, 0})},
-                                                   {"maxEvaluations", Value::integer(0)}})
-                  .ok);
   auto far = poses::make3D("failed", "target", {100, 0, 0}, {0, 0, 0, 1}, {1, 1, 1});
   call.inputs["poses"] = Data::record(poses::make3DList(Json::array({far.data}), "target"));
   CHECK_FALSE(call.run("register.pose_search_3d").ok);

@@ -32,13 +32,8 @@ Status boxes(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ct
     const double spacing = p.number("wireSpacing"), angle = p.number("minVisibleAngle");
     const auto eyeValues = p.vec3("viewPoint"), color = p.vec3("color");
     Vec3 eye(eyeValues[0], eyeValues[1], eyeValues[2]);
-    if ((mode != "surface" && mode != "volume") ||
-        (coordinates != "pose" && coordinates != "local") || count < 1 || count > 10000 ||
-        seed < 0 || seed > 2147483647 || !std::isfinite(spacing) || spacing <= 0 ||
-        !std::isfinite(angle) || angle < 0 || angle > 89 || !eye.allFinite())
-      return error("采样、坐标、数量、种子、间距或观察参数非法", "sampling", "bad_param");
     for (double value : color)
-      if (!std::isfinite(value) || value < 0 || value > 255 || value != std::floor(value))
+      if (value < 0 || value > 255 || value != std::floor(value))
         return error("RGB颜色需要0..255整数", "color", "bad_param");
     if (mode == "volume" && p.flag("visibleOnly"))
       return error("体积采样无可见面概念", "visibleOnly", "bad_param");
