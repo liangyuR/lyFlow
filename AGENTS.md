@@ -1,5 +1,10 @@
 # 项目协作规则
 
+## 协作
+
+- 遇到缺少资料、决断不明确时，及时询问，避免大幅偏离目标。
+- Claude 优先使用 Sonnet、Opus 进行编码及各类任务。
+
 ## GitHub 仓库与发布
 
 - `liangyuR/lyFlow` 与 `liangyuR/ly-gluesight` 均托管在 GitHub，使用 GitHub PR、Actions 和 Releases，不走 Bitbucket 流程，也不使用 `bitbucket-pr` 技能。
@@ -39,7 +44,7 @@
 
 ### 测试
 
-- 写或改测试前先读 `docs/testing.md`，在能覆盖行为的最低一层测，增删测试同步更新该文件的地图与数字。
+- 写或改测试前先读 `docs/testing.md`：已有覆盖优先复用（表驱动加一行、SUBCASE、同一流程里补断言），不重复新建；在能覆盖行为的最低一层测，能在低一层测的不放 e2e；增删测试同步更新该文件的地图与数字。
 - release/e2e 层不断言算法数值（内点数、槽号、具体读数）；同一判据不在内核、包、SDK 三层重复。
 - fixture 只保留必要变体，不提交仅 id/name 不同的副本；不写拿 fixture 自身字段比常量的断言，不在测试里写死产品版本号。
 - 场景测试放在对应 solution 的 `tests/` 下，不放 `core/tests`。
