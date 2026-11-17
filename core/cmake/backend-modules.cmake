@@ -161,4 +161,3 @@ lyflow_declare_module(NAME ml-runtime TARGET lyflow_ml_runtime SETUP lyflow_setu
 lyflow_declare_module(NAME opencv-support TARGET lyflow_opencv_support SETUP lyflow_setup_opencv_support REQUIRES data-contract)
 lyflow_declare_module(NAME marker-dictionary TARGET lyflow_marker_dictionary SETUP lyflow_configure_marker_dictionary)
 lyflow_declare_module(NAME barcode-cpu TARGET lyflow_barcode_backend SETUP lyflow_configure_barcode_cpu)
-include("${CMAKE_CURRENT_LIST_DIR}/scene-modules.cmake")

@@ -47,8 +47,6 @@ endif()
 if(TARGET lyflow_gap_model)
   list(APPEND _gap_links lyflow_gap_model)
   list(APPEND _gap_defines LYFLOW_GAP_MODEL=1)
-  set_property(SOURCE "${LYFLOW_PACK_DIR}/tests/test_profile_model_ops.cpp" APPEND
-    PROPERTY COMPILE_DEFINITIONS LYFLOW_GAP_MODEL=1)
 endif()
 if(TARGET lyflow_gap_import)
   list(APPEND GAP_OP_SOURCES "${LYFLOW_PACK_DIR}/ops/import_standard_gap.cpp")
@@ -111,3 +109,13 @@ lyflow_op_pack(
   DEFINES ${_gap_defines}
   OPTIONS /wd4275
 )
+
+install(FILES "${LYFLOW_PACK_DIR}/../../docs/gap-profile-migration.md" DESTINATION docs)
+install(FILES "${LYFLOW_PACK_DIR}/README.md" DESTINATION examples/gap)
+install(DIRECTORY "${LYFLOW_PACK_DIR}/snippets/"
+        DESTINATION examples/gap/snippets FILES_MATCHING PATTERN "*.lyflow-snippet.json"
+        PATTERN "model-with-template-fallback.lyflow-snippet.json" EXCLUDE)
+if(TARGET lyflow_gap_model AND TARGET lyflow_gap_template)
+  install(FILES "${LYFLOW_PACK_DIR}/snippets/model-with-template-fallback.lyflow-snippet.json"
+          DESTINATION examples/gap/snippets)
+endif()

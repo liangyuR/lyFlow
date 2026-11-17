@@ -233,7 +233,7 @@ mypack/
 lyflow_pack_dependencies(NAME mypack DEFAULT ON MODULES geometry-kernel)
 ```
 
-`MODULES` 是共享目标依赖，`PACKS` 是必须显式启用的算子包依赖。配置器先拓扑排序并创建模块，再注册所选包，不再维护“优先 include 哪个包”的表。外部包可提供同名声明文件；没有声明的旧外部包仍走兼容路径，新增共享依赖应使用声明式入口。后端模块实现位于 `core/cmake/backend-modules.cmake`，公共静态核位于 `core/cmake/kernel-modules.cmake`。
+`MODULES` 是共享目标依赖，`PACKS` 是必须显式启用的算子包依赖。配置器先拓扑排序并创建模块，再注册所选包，不再维护“优先 include 哪个包”的表。外部包可提供同名声明文件；没有声明的旧外部包仍走兼容路径，新增共享依赖应使用声明式入口。后端模块实现位于 `core/cmake/backend-modules.cmake`，公共静态核位于 `core/cmake/kernel-modules.cmake`。只供某个仓库内包使用的模块（如 solution-gap 的 `gap-*`）放在该包目录的 `lyflow_modules.cmake`，配置器扫描包目录时一并读取，core 不再列出它们的源码。
 
 ### 要 PCL 的包
 

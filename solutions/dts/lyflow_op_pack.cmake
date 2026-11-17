@@ -11,3 +11,7 @@ lyflow_op_pack(
   INCLUDES     "${LYFLOW_PACK_DIR}"
   LINK lyflow_profile_kernel lyflow_profile_contract lyflow_metrology_kernel
 )
+
+install(DIRECTORY "${LYFLOW_PACK_DIR}/graphs/" DESTINATION examples/dts)
+install(FILES "${LYFLOW_PACK_DIR}/README.md" DESTINATION examples/dts)
+install(FILES "${LYFLOW_PACK_DIR}/../../docs/dts-profile-migration.md" DESTINATION docs)
