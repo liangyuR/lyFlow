@@ -56,7 +56,6 @@ jobs:
       - name: 算子分包规划清单校验
         run: |
           python scripts/check-operator-package-audit.py
-          python tests/release/test_operator_package_audit.py
           python scripts/tests/test_operator_package_audit.py
           python tests/quality/test_module_graph.py
           python tests/quality/test_release_identity.py
@@ -261,6 +260,14 @@ jobs:
       - name: C++ 单元测试（CTest / doctest）
         run: ctest --test-dir build/core -C RelWithDebInfo --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-results.xml"
 
+      - name: 算子分包清单与本组合注册一致
+        shell: pwsh
+        run: |
+          ./build/core/bin/lyflow-dump-manifest.exe | Set-Content -LiteralPath build/core/operator-manifest.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw '算子描述导出失败' }
+          python scripts/check-operator-package-audit.py --manifest build/core/operator-manifest.json --subset
+          if ($LASTEXITCODE -ne 0) { throw '分包清单与注册不一致' }
+
       - name: M2轻量安装与独立公共核消费
         shell: pwsh
         run: |
@@ -437,6 +444,8 @@ jobs:
         run: |
           cmake --build build/vision --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 4
           build/vision/bin/lyflow-dump-manifest --check
+          build/vision/bin/lyflow-dump-manifest > build/vision/operator-manifest.json
+          python scripts/check-operator-package-audit.py --manifest build/vision/operator-manifest.json --subset
           sccache --show-stats
 
       - name: 验证数值、几何、图像和完整链
