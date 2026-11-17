@@ -377,4 +377,18 @@ struct ImporterDesc {
   ImportFn fn = nullptr;
 };
 
+/// 一条图级迁移规则：把旧契约的图改写成新契约（`lyflow migrate` 离线执行，加载与运行时不调用）。
+/// level 是规则作用的那一层图（顶层，或 rule.scope.subgraph 指定的子图定义）；
+/// outer 在 level 为子图时指向整份图（规则可同步改写外层的绑定），否则为空。
+/// 不满足前提时抛 std::invalid_argument。
+using GraphMigrateFn = void (*)(nlohmann::json& level, const nlohmann::json& rule,
+                                nlohmann::json* outer);
+
+/// rule.kind 等于 kind 的规则交给 fn。
+struct GraphMigrationDesc {
+  std::string kind;
+  std::string pack;
+  GraphMigrateFn fn = nullptr;
+};
+
 } // namespace lyflow

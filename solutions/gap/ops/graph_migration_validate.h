@@ -7,7 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace lyflow::gap_contract_upgrade {
+namespace lyflow::packs::gap::graph_migration_rules {
 namespace detail {
 using Json = nlohmann::json;
 inline void require(bool condition, const std::string& why) {
@@ -23,8 +23,7 @@ inline std::string text(const Json& object, const char* field) {
   require(object.is_object() && object.contains(field) && object[field].is_string(),
           std::string("GAP升级字段必须为字符串: ") + field);
   const auto result = object[field].get<std::string>();
-  require(!result.empty() && result.size() <= 1024 && result.find('\0') == std::string::npos,
-          std::string("GAP升级字段必须非空、不含NUL且最多1024字节: ") + field);
+  require(!result.empty(), std::string("GAP升级字段必须非空: ") + field);
   return result;
 }
 inline const std::map<std::string, std::string>& versions() {
@@ -165,15 +164,13 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
   require(rule["measurement"]["plane"] == "XY" && frame != a["sensorFrame"],
           "GAP量测必须明确为不同于传感器帧的XY空间");
   const auto prefix = text(rule, "adapterIdPrefix");
-  require(prefix.size() <= 128 && prefix.find('/') == std::string::npos &&
-              prefix.find('.') == std::string::npos,
-          "GAP新增节点前缀最多128字节且不能含实例路径或参数分隔符");
+  require(prefix.find('/') == std::string::npos && prefix.find('.') == std::string::npos,
+          "GAP新增节点前缀不能含实例路径或参数分隔符");
   keys(rule["component"], {"style", "nodes"});
   require(rule["component"]["style"] == "blocks" || rule["component"]["style"] == "fine",
           "GAP升级组件必须明确blocks或fine模板");
   const auto& selected = rule["component"]["nodes"];
-  require(selected.is_array() && !selected.empty() && selected.size() <= 4096,
-          "GAP升级需要明确1到4096项的完整组件节点");
+  require(selected.is_array() && !selected.empty(), "GAP升级需要明确的完整组件节点");
   require(graph.contains("nodes") && graph["nodes"].is_array() && graph.contains("edges") &&
               graph["edges"].is_array(),
           "GAP整图升级需要完整nodes/edges");
@@ -192,7 +189,7 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
     const auto version = text(node, "opVersion");
     const auto found = versions().find(op);
     require(found != versions().end() && found->second == version,
-            "GAP组件算子不在PR66精确版本白名单: " + id + " " + op + "@" + version);
+            "GAP组件算子不是已知的旧版本: " + id + " " + op + "@" + version);
     require(!node.contains("params") || node["params"].is_object(), "GAP组件参数必须为对象: " + id);
     enabled(node);
     require(id.rfind(prefix + "_", 0) != 0, "GAP新增节点前缀已被组件占用: " + id);
@@ -256,82 +253,13 @@ inline void validate(const nlohmann::json& graph, const nlohmann::json& rule,
     if (to == sourceId && (tp == "primary" || tp == "secondary"))
       throw std::invalid_argument("GAP文件来源被裸云输入覆盖，不能推测原槽: " + id);
   }
-  require(rule.dump().size() <= 128 * 1024, "GAP升级请求超过128KiB预算");
 }
 
-} // namespace lyflow::gap_contract_upgrade
+} // namespace lyflow::packs::gap::graph_migration_rules
 
-#include "graph_contract_upgrade_gap_rewrite.h"
+#include "graph_migration_rewrite.h"
 
-namespace lyflow::gap_contract_upgrade {
-inline bool applied(const nlohmann::json& graph, const nlohmann::json& rule) {
-  try {
-    const auto* level = &graph;
-    if (rule.contains("scope"))
-      level = &graph.at("subgraphs").at(rule.at("scope").at("subgraph").get<std::string>());
-    const auto source = rule.at("source").at("node");
-    bool found = false;
-    for (const auto& id : rule.at("component").at("nodes")) {
-      const auto node = std::find_if(level->at("nodes").begin(), level->at("nodes").end(),
-                                     [&](const auto& value) { return value.at("id") == id; });
-      if (node == level->at("nodes").end())
-        return false;
-      const auto op = node->at("op").template get<std::string>();
-      const auto version = node->at("opVersion").template get<std::string>();
-      if (id == source)
-        found = op == rule.at("source").at("op") && version == "2.0.0";
-      const std::map<std::string, std::string> known{{"gap.load_profile_pair", "2.0.0"},
-                                                     {"gap.read_scan", "2.0.0"},
-                                                     {"gap.camera_guard", "2.0.0"},
-                                                     {"gap.locate_template", "3.0.0"},
-                                                     {"gap.locate_model", "2.0.0"},
-                                                     {"gap.role_line", "2.0.0"},
-                                                     {"gap.ref_point", "2.0.0"},
-                                                     {"gap.datum_direction", "2.0.0"},
-                                                     {"gap.seam_circles", "2.0.0"},
-                                                     {"gap.split_location", "1.0.0"},
-                                                     {"gap.split_line_feature", "1.0.0"},
-                                                     {"gap.split_reference_feature", "1.0.0"},
-                                                     {"gap.result_bundle", "3.0.0"},
-                                                     {"gap.judge", "1.0.0"},
-                                                     {"metrology.flush_point_line", "1.0.0"},
-                                                     {"metrology.circle_gap", "1.0.0"},
-                                                     {"metrology.point_offset", "1.0.0"},
-                                                     {"profile.remap_axes", "1.0.0"},
-                                                     {"profile.filter_validity", "1.0.0"},
-                                                     {"profile.merge", "1.0.0"},
-                                                     {"profile.radius_outlier", "1.0.0"},
-                                                     {"profile.crop_box", "1.0.0"},
-                                                     {"profile.fit_line_robust", "1.0.0"},
-                                                     {"profile.nearest_sample", "1.0.0"},
-                                                     {"profile.nearest_to_line", "1.0.0"},
-                                                     {"gap.overall_roi", "2.0.0"},
-                                                     {"gap.datum_window", "2.0.0"},
-                                                     {"gap.make_scan_pair", "2.0.0"},
-                                                     {"gap.split_scan_pair", "2.0.0"},
-                                                     {"gap.make_roi_set", "2.0.0"},
-                                                     {"gap.split_roi_set", "2.0.0"},
-                                                     {"gap.load_template", "2.0.0"},
-                                                     {"gap.align_template", "2.0.0"},
-                                                     {"gap.select_alignment", "2.0.0"},
-                                                     {"gap.business_rois", "2.0.0"},
-                                                     {"gap.profile_tensor", "2.0.0"},
-                                                     {"gap.infer_profile", "1.0.0"},
-                                                     {"gap.labels_from_logits", "2.0.0"},
-                                                     {"gap.roi_from_labels", "2.0.0"},
-                                                     {"gap.labels_to_cloud", "2.0.0"},
-                                                     {"gap.roll_anchored_crop", "2.0.0"},
-                                                     {"gap.fit_gap_circles", "2.0.0"},
-                                                     {"flow.fallback", "1.0.0"}};
-      const auto expected = known.find(op);
-      if (expected == known.end() || expected->second != version)
-        return false;
-    }
-    return found;
-  } catch (const nlohmann::json::exception&) {
-    return false;
-  }
-}
+namespace lyflow::packs::gap::graph_migration_rules {
 inline void upgrade(nlohmann::json& graph, const nlohmann::json& rule,
                     nlohmann::json* outer = nullptr) {
   validate(graph, rule, outer);

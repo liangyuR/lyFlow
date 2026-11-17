@@ -17,6 +17,7 @@
 #include "exec/result_store.h"
 #include "runtime_frames.h"
 #include "lyflow/cloud_io.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
 #include "lyflow/profile.h"
@@ -786,6 +787,25 @@ char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   } catch (...) {
     return dup(std::string("[]"));
   }
+}
+
+char* lyflow_migrate(const char* graph_json, const char* request_json) {
+  lyflow::Diagnostics d;
+  try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
+    const auto graph = nlohmann::json::parse(fromC(graph_json));
+    const std::string requestText = fromC(request_json);
+    const auto request = requestText.empty() ? graph.value("contractUpgrade", nlohmann::json())
+                                             : nlohmann::json::parse(requestText);
+    nlohmann::json migrated;
+    lyflow::GraphMigrationError error;
+    if (lyflow::migrateGraph(registry(), graph, request, migrated, error))
+      return dup(migrated.dump());
+    d.error(error.nodeId, lyflow::Phase::Validate, "migration_failed", error.message);
+  } catch (const std::exception& e) {
+    d.error("", lyflow::Phase::Validate, "bad_input", std::string("迁移输入无法解析: ") + e.what());
+  }
+  return dup(d.toJson());
 }
 
 char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,

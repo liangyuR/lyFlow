@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace lyflow::gap_contract_upgrade::detail {
+namespace lyflow::packs::gap::graph_migration_rules::detail {
 struct GapSignal {
   Json value, context, provenance, feature;
   std::string kind, featureKind;

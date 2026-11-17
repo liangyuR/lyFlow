@@ -186,45 +186,6 @@ function applyMigrationEdits(d: GraphDoc, nodeId: string, edits: MigrationEdits)
   }
 }
 
-function retireContractUpgrade(d: GraphDoc, update: MigrationAction['graphUpdate']): boolean {
-  const retirement = update?.contractUpgradeRetirement;
-  if (!retirement || !d.contractUpgrade || !valueEquals(d.contractUpgrade, retirement.request))
-    return false;
-  const same = (a: PortRef, b: PortRef) => a.node === b.node && a.port === b.port;
-  for (const required of retirement.requirements) {
-    const source = d.nodes.find((n) => n.id === required.source.node);
-    const adapter = d.nodes.find((n) => n.id === required.adapter.id);
-    const from = { node: required.source.node, port: required.source.port };
-    const middle = { node: required.adapter.id, port: required.port };
-    if (
-      source?.op !== required.source.op ||
-      source.opVersion !== required.source.opVersion ||
-      adapter?.op !== required.adapter.op ||
-      adapter.opVersion !== required.adapter.opVersion ||
-      (adapter.bypass !== undefined && adapter.bypass !== false) ||
-      !valueEquals(adapter.params ?? {}, required.adapter.params) ||
-      !d.nodes.some((n) => n.id === required.target.node) ||
-      d.edges.some((e) => same(e.from, from) && same(e.to, required.target)) ||
-      d.edges.filter((e) => same(e.from, from) && same(e.to, middle)).length !== 1 ||
-      d.edges.filter((e) => same(e.from, middle) && same(e.to, required.target)).length !== 1
-    )
-      return false;
-  }
-  if (d.meta !== undefined && (!d.meta || typeof d.meta !== 'object' || Array.isArray(d.meta)))
-    return false;
-  const history = d.meta?.contractUpgradeHistory;
-  if (history !== undefined && !Array.isArray(history)) return false;
-  d.meta ??= {};
-  const entries = (history ?? []) as unknown[];
-  d.meta.contractUpgradeHistory = entries.some((entry) =>
-    valueEquals(entry, retirement.historyEntry),
-  )
-    ? entries
-    : [...entries, plain(retirement.historyEntry)];
-  delete d.contractUpgrade;
-  return true;
-}
-
 /** immer 的 draft 在 recipe 结束后就失效，抄进新对象之前先取出一份普通数据。
  *  manifest 里的声明也深拷一份：不拷的话 autoFreeze 会把 manifest store 里那份一起冻上。 */
 function plain<T>(x: T): T {
@@ -625,9 +586,8 @@ function emitCommitted(change: CommittedChange): void {
 
 export const TOPOLOGY_LOCKED = '拓扑已锁定';
 
-/** 迁移动作是否替换整图或改连线：拓扑锁着时这种整条不写回。 */
+/** 迁移动作是否改连线：拓扑锁着时这种整条不写回。 */
 function migrationTouchesTopology(a: MigrationAction): boolean {
-  if (a.graphUpdate?.contractUpgradeReplacement) return true;
   const e = a.edits;
   return !!e && e.removeEdges.length + e.addNodes.length + e.addEdges.length > 0;
 }
@@ -1537,7 +1497,6 @@ export const useGraphStore = create<GraphState>((set, get) => {
       let changed = 0;
       transact(actions.length === 1 ? '迁移 1 个节点' : `迁移 ${actions.length} 个节点`, (d) => {
         const touched = new Set<GraphNode>();
-        let graphChanged = false;
         const apply = (nodes: GraphNode[], action: MigrationAction) => {
           for (const node of nodes) {
             if (node.id !== action.nodeId) continue;
@@ -1549,36 +1508,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
           }
         };
         for (const action of actions) {
-          const replacement = action.graphUpdate?.contractUpgradeReplacement;
-          if (replacement) {
-            if (valueEquals(d, replacement.before)) {
-              for (const key of Object.keys(d))
-                delete (d as unknown as Record<string, unknown>)[key];
-              Object.assign(d, plain(replacement.after));
-              graphChanged = true;
-            }
-            continue;
-          }
-          const source = d.nodes.find((node) => node.id === action.nodeId);
-          const pendingRules = d.contractUpgrade?.rules;
-          if (
-            source &&
-            Array.isArray(pendingRules) &&
-            pendingRules.some((rule) => !('scope' in rule) && rule.source?.node === source.id) &&
-            (source.op !== action.op || source.opVersion !== action.opVersion)
-          )
-            continue;
           apply(d.nodes, action);
           for (const def of Object.values(d.subgraphs ?? {})) apply(def.nodes, action);
+          // 连线改写只落在顶层（ADR-0025）：与 lyflow migrate --write 同一套语义
           if (action.edits && d.nodes.some((n) => n.id === action.nodeId)) {
             applyMigrationEdits(d, action.nodeId, action.edits);
           }
-          graphChanged = retireContractUpgrade(d, action.graphUpdate) || graphChanged;
         }
-        for (const action of actions) {
-          graphChanged = retireContractUpgrade(d, action.graphUpdate) || graphChanged;
-        }
-        changed = touched.size || (graphChanged ? 1 : 0);
+        changed = touched.size;
         if (relayout && actions.some((a) => (a.edits?.addNodes.length ?? 0) > 0)) {
           for (const m of relayout(current(d) as GraphDoc)) {
             const node = d.nodes.find((n) => n.id === m.id);

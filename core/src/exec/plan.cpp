@@ -250,7 +250,7 @@ struct NodeMigration {
   std::vector<std::string> notes;
   /// 要出迁移诊断：主版本升了、算子改了名，或者没打 opVersion 的节点真的被改了。
   bool migrated = false;
-  /// 链断了或迁移函数抛了：报 version_mismatch。
+  /// 链断了报 version_mismatch；迁移函数抛了报 migration_required（附 failureReason）。
   bool broken = false;
   std::string failureReason;
   TopologyEdit edits;
@@ -560,25 +560,6 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   out.nodes.clear();
   out.outputs.clear();
   out.ok = false;
-  for (const auto& node : input.nodes) {
-    const auto* current = registry.find(node.op);
-    if (node.op == "dts.profile_clean" || node.op == "dts.split_faces") {
-      diags.error(
-          node.id, Phase::Validate, "migration_required",
-          "旧DTS轮廓须显式dtsProfile.v1全链升级；请使用lyflow migrate的--profile-source/--profile-frame/--profile-source-id参数，子图使用<定义ID>/<节点ID>，库图直接迁移图资产");
-      return false;
-    }
-    if (current && current->version == "2.0.0" &&
-        (node.opVersion == "1.0.0" || node.opVersion.empty()) &&
-        (node.op == "dts.seal_dome" || node.op == "dts.pick_metal" || node.op == "dts.seal_root" ||
-         node.op == "dts.flush" || node.op == "dts.profile_bundle")) {
-      diags.error(
-          node.id, Phase::Validate, "migration_required",
-          "DTS v1消费链须显式dtsProfile.v1全链升级，声明unit=mm、plane=XZ、sampleOrder=acquisition，禁止仅升级算子主版本；请使用lyflow migrate的--profile-source/--profile-frame/--profile-source-id参数");
-      return false;
-    }
-  }
-
   // -- 迁移链先整体跑一遍（ADR-0025）：拓扑改动落在副本上，插进来的节点和其他节点一样
   //    走下面的逐节点校验。拓扑迁移只看原图的入边，节点之间互不影响。
   std::unordered_map<std::string, NodeMigration> migrations;
@@ -642,7 +623,10 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     const RawNode& rn = graph.nodes[i];
     const OperatorDesc* op = registry.find(rn.op);
     if (!op) {
-      fail(i, "unknown_op", "当前 core 没有注册算子 '" + rn.op + "'");
+      if (const auto* hint = registry.retiredOperatorHint(rn.op))
+        fail(i, "migration_required", "算子 '" + rn.op + "' 已退役：" + *hint);
+      else
+        fail(i, "unknown_op", "当前 core 没有注册算子 '" + rn.op + "'");
       continue;
     }
     prepared[i].op = op;
@@ -668,12 +652,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
                    " 还新，无法降级");
         } else if (saved.major < current.major) {
           if (mig == migrations.end() || mig->second.broken) {
-            fail(i, "version_mismatch",
+            const bool hookFailed = mig != migrations.end() && !mig->second.failureReason.empty();
+            fail(i, hookFailed ? "migration_required" : "version_mismatch",
                  "此节点存于 " + op->id + " v" + rn.opVersion + "，当前是 v" + op->version +
-                     "（主版本不同，迁移未完成）" +
-                     (mig != migrations.end() && !mig->second.failureReason.empty()
-                          ? "：" + mig->second.failureReason
-                          : "：算子没有提供完整的迁移链"));
+                     "（主版本不同，迁移未完成）：" +
+                     (hookFailed ? mig->second.failureReason : "算子没有提供完整的迁移链"));
           }
         } else if (saved.minor != current.minor) {
           diags.warn(rn.id, Phase::Validate, "version_mismatch",

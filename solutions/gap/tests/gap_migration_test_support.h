@@ -4,14 +4,19 @@
 #include <fstream>
 
 #include "helpers.h"
+#include "lyflow/graph_migration.h"
 
-namespace lyflow::test::gap_upgrade {
+namespace lyflow::test::gap_migration {
 using Json = nlohmann::json;
-inline Json legacyGaps() {
-  std::ifstream input(std::filesystem::path(__FILE__).parent_path() / "fixtures" /
-                      "contract-upgrade" / "gap-standard-v1.json");
+inline Json gapFixture(const char* name) {
+  std::ifstream input(std::filesystem::path(__FILE__).parent_path() / "fixtures" / name);
   REQUIRE(input.good());
   return Json::parse(input);
+}
+inline Json legacyGaps() { return gapFixture("gap-standard-v1.json"); }
+inline bool migrate(const Json& graph, const Json& request, Json& migrated,
+                    GraphMigrationError& error) {
+  return migrateGraph(ensureRegistry(), graph, request, migrated, error);
 }
 inline Json gapRequest(const Json& graph, const std::string& style = "blocks") {
   Json nodes = Json::array();
@@ -92,4 +97,4 @@ inline void renameNodes(Json& graph, Json& request) {
   for (auto& id : rule["component"]["nodes"])
     id = "renamed_" + id.get<std::string>();
 }
-}
+} // namespace lyflow::test::gap_migration

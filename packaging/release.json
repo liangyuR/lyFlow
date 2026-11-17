@@ -34,7 +34,7 @@
     "docs/profile-public-operators.md",
     "include/lyflow/profile.h",
     "include/nlohmann/json.hpp",
-    "include/lyflow/graph_contract_upgrade.h",
+    "include/lyflow/graph_migration.h",
     "examples/m1-profile-adapters.lyflow.json",
     "examples/embed_profile.cpp",
     "docs/profile-data-contract.md",

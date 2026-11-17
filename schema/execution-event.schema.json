@@ -636,7 +636,7 @@
         },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | contract_violation | recursive_subgraph | cycle | io | cancelled | upstream_failed | upstream_not_ready | internal。upstream_not_ready 只出现在单节点运行里（node-run R2）：上游还没有当前 cacheKey 的结果。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | migration_required | bypassed_no_source | output_not_written | contract_violation | recursive_subgraph | cycle | io | cancelled | upstream_failed | upstream_not_ready | internal。upstream_not_ready 只出现在单节点运行里（node-run R2）：上游还没有当前 cacheKey 的结果。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
         "message": {
           "type": "string"

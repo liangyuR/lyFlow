@@ -418,6 +418,22 @@ void Registry::addImporter(ImporterDesc importer) {
   importers_.push_back(std::move(importer));
 }
 
+void Registry::addGraphMigration(GraphMigrationDesc migration) {
+  if (migration.pack.empty())
+    migration.pack = currentPack_;
+  for (auto& existing : graphMigrations_) {
+    if (existing.kind == migration.kind) {
+      existing = std::move(migration);
+      return;
+    }
+  }
+  graphMigrations_.push_back(std::move(migration));
+}
+
+void Registry::addRetiredOperator(std::string id, std::string hint) {
+  retiredOperators_[std::move(id)] = std::move(hint);
+}
+
 void Registry::addSnippet(SnippetDesc snippet) {
   if (snippet.pack.empty())
     snippet.pack = currentPack_;
@@ -435,6 +451,8 @@ void Registry::clear() {
   bundles_.clear();
   operators_.clear();
   importers_.clear();
+  graphMigrations_.clear();
+  retiredOperators_.clear();
   snippets_.clear();
   builtinCount_ = 0;
   libraryOperators_.clear();
@@ -457,6 +475,19 @@ const ImporterDesc* Registry::findImporter(const std::string& kind) const {
       return &i;
   }
   return nullptr;
+}
+
+const GraphMigrationDesc* Registry::findGraphMigration(const std::string& kind) const {
+  for (const auto& m : graphMigrations_) {
+    if (m.kind == kind)
+      return &m;
+  }
+  return nullptr;
+}
+
+const std::string* Registry::retiredOperatorHint(const std::string& id) const {
+  const auto it = retiredOperators_.find(id);
+  return it == retiredOperators_.end() ? nullptr : &it->second;
 }
 
 const PortType* Registry::findType(const std::string& name) const {
@@ -839,6 +870,10 @@ std::vector<std::string> Registry::validate() const {
       fail("importer '" + i.kind + "' has no function");
     if (!importerKinds.insert(i.kind).second)
       fail("duplicate importer kind: " + i.kind);
+  }
+  for (const auto& m : graphMigrations_) {
+    if (m.kind.empty() || !m.fn)
+      fail("graph migration '" + m.kind + "' has no kind or function");
   }
 
   for (const auto& s : snippets_) {

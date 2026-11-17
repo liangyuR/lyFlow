@@ -14,7 +14,7 @@
 | 选择门禁步骤 | `pwsh -NoProfile -File scripts/check.ps1 -Steps frontend,mcp` | 可选步骤为 core、manifest、schema、bridge、client、cli、sdk、frontend、mcp；不给 `-Steps` 则全部运行。 |
 | C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算法数值、执行语义和 C ABI 契约的主要入口。 |
 | Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量首次与重复读取 `valueJson()` 计时，不代表整图耗时。 |
-| 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 24 个文件、94 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
+| 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 25 个文件、96 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
 | 编辑器类型 | `pnpm --filter @lyflow/editor typecheck` | 同时检查 React 18 与 React 19 类型契约。 |
 | 共享可视化 | `pnpm --filter @lyflow/visualization test` | 图像、点云等共享可视化逻辑。 |
 | Python SDK 与 worker | `python -B -m unittest discover -s python/tests -v` | Python 3.11 及以上与 NumPy；检查节点发现、数据交换和 worker 行为。 |
@@ -66,6 +66,7 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 | 行为 | 主要位置 |
 |---|---|
 | 算法数值、端口数据、C ABI、执行计划、缓存、取消与子图 | `core/tests/`、各 `packs/*/tests/`。领域数值测试保留原判据和容差。 |
+| 算子分包清单（字段、Python 示例 ID、与 manifest 的 ID 及包归属一致） | `scripts/tests/test_operator_package_audit.py` 测检查脚本本身；CI 的 `quality` 检查清单，`native`、`vision` 用各自 manifest 以 `--subset` 核对。 |
 | Rust 封送、IPC、命令行选项/退出码、宿主及跨进程缓存 | `bridge/src/*/tests.rs`、`bridge/tests/`；客户端在 `crates/lyflow-client/`。 |
 | 图动作、撤销、端口兼容、自动连线、参数、配方与搜索 | `packages/editor/test/graph-params*.test.mjs`、`typecheck.test.mjs`、`param-values.test.mjs`、`recipes.test.mjs`、`search.test.mjs`。 |
 | 标签快照、异步操作归属、宿主文档通知及备份恢复 | `packages/editor/test/flow-tabs.test.mjs`、`flow-backup.test.mjs`、`autosave.test.mjs`。 |

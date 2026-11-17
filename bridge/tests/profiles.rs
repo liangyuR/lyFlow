@@ -216,104 +216,123 @@ fn cli_dump_profile_preserves_source_slots_and_descriptor() {
 }
 
 #[test]
-fn cli_preserves_contract_upgrade_until_native_validation() {
-    let path = std::env::temp_dir().join(format!(
-        "lyflow-upgrade-forwarding-{}.lyflow.json",
-        std::process::id()
-    ));
-    for request in [
-        serde_json::json!({"schemaVersion":999,"rules":[]}),
-        Value::Null,
-        serde_json::json!([]),
-    ] {
-        let graph = serde_json::json!({"schemaVersion":1,"id":"upgrade-forwarding","nodes":[{"id":"n","op":"value.number","params":{}}],"edges":[],"contractUpgrade":request});
-        std::fs::write(&path, graph.to_string()).unwrap();
-        let result = std::process::Command::new(env!("CARGO_BIN_EXE_lyflow"))
-            .arg("plan")
-            .arg(&path)
+fn cli_requires_offline_migration_for_contract_upgrade_requests() {
+    let dir = std::env::temp_dir().join(format!("lyflow-upgrade-offline-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("graph.lyflow.json");
+    let lyflow = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_lyflow"))
+            .args(args)
             .env_remove("LYFLOW_CACHE_DIR")
             .output()
-            .unwrap();
-        assert!(
-            !result.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let diagnostics: Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(diagnostics[0]["code"], "bad_input");
-    }
-    let mut graph: Value = serde_json::from_str(include_str!(
-        "../../core/tests/fixtures/contract-upgrade/dts-mm.lyflow.json"
-    ))
-    .unwrap();
-    let request = graph["contractUpgrade"].clone();
-    let migrate = |document: &Value| {
-        let before = document.to_string();
-        std::fs::write(&path, &before).unwrap();
-        let result = std::process::Command::new(env!("CARGO_BIN_EXE_lyflow"))
-            .arg("migrate")
-            .arg(&path)
-            .arg("--write")
-            .env_remove("LYFLOW_CACHE_DIR")
-            .output()
-            .unwrap();
-        assert!(!result.status.success());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-        let response: Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert!(response["diagnostics"]
-            .as_array()
             .unwrap()
-            .iter()
-            .any(|diagnostic| {
-                diagnostic["code"] == "migration_required"
-                    && diagnostic["message"].as_str().is_some_and(|message| {
-                        message.contains("dtsProfile.v1") && message.contains("--profile-frame")
-                    })
-            }));
-        let core = core_ffi::core().unwrap();
-        let native: Value = serde_json::from_str(&core.validate(&before, "").unwrap()).unwrap();
-        let migrations: Vec<Value> = native
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|item| item["kind"] == "migration")
-            .cloned()
-            .collect();
-        let mut saved: lyflow_lib::graph::GraphDoc =
-            serde_json::from_value(document.clone()).unwrap();
-        for action in &migrations {
-            assert!(saved.apply_migration(action));
-        }
-        std::fs::write(&path, serde_json::to_string(&saved).unwrap()).unwrap();
-        json!({"migrations":migrations})
     };
-    assert_eq!(migrate(&graph)["migrations"].as_array().unwrap().len(), 1);
-    graph = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert!(graph.get("contractUpgrade").is_none());
-    assert_eq!(
-        graph["meta"]["contractUpgradeHistory"][0]["request"],
-        request
-    );
-    assert!(graph["edges"]
+    let stdout = |result: &std::process::Output| -> Value {
+        let text = String::from_utf8_lossy(&result.stdout);
+        serde_json::from_str(text.lines().next().unwrap_or_default())
+            .unwrap_or_else(|_| panic!("{text}\n{}", String::from_utf8_lossy(&result.stderr)))
+    };
+    let graph_arg = path.to_string_lossy().into_owned();
+    for request in [
+        json!({"schemaVersion":999,"rules":[]}),
+        Value::Null,
+        json!([]),
+    ] {
+        let graph = json!({"schemaVersion":1,"id":"upgrade-forwarding","nodes":[{"id":"n","op":"value.number","params":{}}],"edges":[],"contractUpgrade":request});
+        let before = graph.to_string();
+        std::fs::write(&path, &before).unwrap();
+        for command in ["plan", "validate"] {
+            let result = lyflow(&[command, &graph_arg]);
+            assert!(!result.status.success(), "{command} accepted {request}");
+            let diagnostics = stdout(&result);
+            assert!(
+                diagnostics.as_array().unwrap().iter().any(|d| {
+                    d["code"] == "migration_required" && d["nodeId"].as_str() == Some("")
+                }),
+                "{command}: {diagnostics}"
+            );
+        }
+        let migrated = lyflow(&["migrate", &graph_arg, "--write"]);
+        assert!(!migrated.status.success(), "migrate accepted {request}");
+        assert!(stdout(&migrated)["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["severity"] == "error"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    // dts-mm 自带的 dtsGeometry 请求能执行，但旧 DTS 节点还缺 dtsProfile.v1 证据：整体失败，文件不动
+    let dts_mm = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../solutions/dts/tests/fixtures/dts-mm.lyflow.json"),
+    )
+    .unwrap();
+    std::fs::write(&path, &dts_mm).unwrap();
+    let result = lyflow(&["migrate", &graph_arg, "--write"]);
+    assert!(!result.status.success());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), dts_mm);
+    assert!(stdout(&result)["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|edge| edge["id"] == "metric-edge"));
-    graph["nodes"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|node| node["id"] != "metric");
-    graph["edges"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|edge| edge["from"]["node"] != "metric" && edge["to"]["node"] != "metric");
-    assert!(migrate(&graph)["migrations"].as_array().unwrap().is_empty());
-    graph["subgraphs"] = serde_json::json!({"inside":{"nodes":graph["nodes"],"edges":graph["edges"],"inputs":[],"outputs":[],"params":[]}});
-    graph["nodes"] = serde_json::json!([{"id":"group","op":"sub:inside","params":{}}]);
-    graph["edges"] = serde_json::json!([]);
-    assert!(migrate(&graph)["migrations"].as_array().unwrap().is_empty());
-    let _ = std::fs::remove_file(path);
+        .any(|d| d["code"] == "migration_required"
+            && d["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("dtsProfile.v1"))));
+
+    // 带着证据的显式请求：迁移后不再有 contractUpgrade，也不写任何迁移历史
+    let profile = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../solutions/dts/tests/fixtures/dts-profile-v1.lyflow.json"),
+    )
+    .unwrap();
+    std::fs::write(&path, &profile).unwrap();
+    let request_path = dir.join("request.json");
+    std::fs::write(
+        &request_path,
+        json!({"schemaVersion":1,"rules":[{"kind":"dtsProfile.v1",
+            "source":{"node":"n_in","op":"dts.profile_in","opVersion":"1.0.0","port":"profile"},
+            "profile":{"frame":"scan","sourceId":"scanner","unit":"mm","plane":"XZ","handedness":"right","sampleOrder":"acquisition"},
+            "adapterId":"n_in_profile_contract"}]})
+        .to_string(),
+    )
+    .unwrap();
+    let request_arg = request_path.to_string_lossy().into_owned();
+    let preview = lyflow(&["migrate", &graph_arg, "--request", &request_arg]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    assert_eq!(stdout(&preview)["graphMigrated"], true);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), profile);
+    let written = lyflow(&["migrate", &graph_arg, "--request", &request_arg, "--write"]);
+    assert!(
+        written.status.success(),
+        "{}",
+        String::from_utf8_lossy(&written.stderr)
+    );
+    let graph: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(graph.get("contractUpgrade").is_none());
+    assert!(graph["meta"].get("contractUpgradeHistory").is_none());
+    let validated = lyflow(&["validate", &graph_arg]);
+    assert!(
+        validated.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&validated.stdout),
+        String::from_utf8_lossy(&validated.stderr)
+    );
+    for command in ["plan", "validate"] {
+        let result = lyflow(&[command, &graph_arg]);
+        let text = String::from_utf8_lossy(&result.stdout);
+        assert!(!text.contains("migration_required"), "{command}: {text}");
+        assert!(
+            !text.contains("\"kind\":\"migration\""),
+            "{command}: {text}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 fn lypr_fixture() -> Vec<u8> {

@@ -60,10 +60,6 @@ std::string Diagnostics::toJson() const {
         w.key("edits");
         w.raw(d.migration->editsJson);
       }
-      if (!d.migration->graphUpdateJson.empty()) {
-        w.key("graphUpdate");
-        w.raw(d.migration->graphUpdateJson);
-      }
     }
     w.endObject();
   }

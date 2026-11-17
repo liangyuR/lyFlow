@@ -1,4 +1,5 @@
 #include "lyflow/calibration.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
 
@@ -42,5 +43,23 @@ void registerPlaneCalibUpgrade(Registry& r) {
     return Status::Ok();
   };
   r.addOperator(std::move(op));
+  // 旧图离线迁移：在旧标定生产者到消费者的连线上插入本算子，帧与缺失单位由请求显式给出。
+  r.addGraphMigration(
+      {"planeCalib.v1", {}, [](nlohmann::json& graph, const nlohmann::json& rule, nlohmann::json*) {
+         using namespace graph_migration;
+         keys(rule,
+              {"kind", "source", "target", "adapterId", "missingUnit", "imageFrame", "planeFrame"});
+         const auto& source = rule.at("source");
+         require((text(source, "op") == "image.load_calib" ||
+                  text(source, "op") == "image.board_calib") &&
+                     text(source, "port") == "calib" && text(source, "opVersion") == "1.0.0",
+                 "planeCalib.v1 只接受旧标定生产者的 calib 端口");
+         const auto unit = text(rule, "missingUnit");
+         require(unit == "m" || unit == "mm", "missingUnit 必须明确为 m 或 mm");
+         insertEdgeAdapter(graph, rule, "image.upgrade_plane_calib", "calib",
+                           {{"missingUnit", unit},
+                            {"imageFrame", text(rule, "imageFrame")},
+                            {"planeFrame", text(rule, "planeFrame")}});
+       }});
 }
 } // namespace lyflow::packs::std_image

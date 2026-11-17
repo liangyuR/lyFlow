@@ -449,6 +449,11 @@ LYFLOW_API char* lyflow_effective_params_inputs_ex(
 // 可用的 kind 见 manifest 的 importers 段。base_dir 可为 NULL。
 LYFLOW_API char* lyflow_import(const char* kind, const char* text, const char* base_dir);
 
+// 离线图迁移（`lyflow migrate`）：按 request_json（{"schemaVersion":1,"rules":[...]}）改写图，
+// 规则由各包注册。request_json 为 NULL 或空串时使用图自身的 contractUpgrade 字段。
+// 成功返回迁移后的 GraphDoc（'{' 开头，不含 contractUpgrade），失败返回诊断数组（'[' 开头）。
+LYFLOW_API char* lyflow_migrate(const char* graph_json, const char* request_json);
+
 // 把某个输出整份写到磁盘（PCD/PLY 按扩展名）。CLI 的 `lyflow dump` 用它 ——
 // 写盘格式的知识留在 core。返回空串 = 成功，否则是一句人话的失败原因。
 // v15：图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局、整张 level 0，docs/http-transport.md）；
