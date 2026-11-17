@@ -173,7 +173,6 @@ TEST_CASE("native scene corner preserves float geometry and explicit origin with
   CHECK(profile_contract::geometryMatchesPhysical(result.vertex, result.vertexContext.asRecord(),
                                                   descriptor, why));
   CHECK(result.quality.data.at("originMode") == "explicit_metric_point");
-  CHECK(result.quality.data.at("alignmentApplied") == false);
   const auto before = result.quality.data;
   input.origin = Data::point2d(Point2D{});
   CHECK_FALSE(

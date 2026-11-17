@@ -162,7 +162,6 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
   quality.data["angleDeg"] = angleDeg;
   quality.data["baseDirection"] = {u.x(), u.y()};
   quality.data["scale"] = scale;
-  quality.data["alignmentApplied"] = false;
   outputs.set("quality", Data::record(std::move(quality)));
 
   ctx.log(LogLevel::Info, "corner: 顶点 (" + degText(mToMm(vertex.x())) + ", " +
