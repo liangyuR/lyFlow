@@ -9,6 +9,8 @@
 #include <system_error>
 #include <vector>
 
+#include <opencv2/imgcodecs.hpp>
+
 #include "ops.h"
 #include "params.h"
 

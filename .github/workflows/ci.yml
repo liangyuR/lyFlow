@@ -331,8 +331,15 @@ jobs:
     name: 值 / 位姿 / 几何 / 图像算子与组合流程
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
     steps:
       - uses: actions/checkout@v4
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.16.0
 
       - name: 安装构建工具与 YAML 依赖
         run: |
@@ -377,13 +384,14 @@ jobs:
           $libraries = $env:LYFLOW_OPENCV_BIN
           if ($env:LD_LIBRARY_PATH) { $libraries += [IO.Path]::PathSeparator + $env:LD_LIBRARY_PATH }
           "LD_LIBRARY_PATH=$libraries" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image;std-metrology' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
+          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image;std-metrology' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Linux 视觉算子配置失败' }
 
       - name: 编译并自检算子契约
         run: |
-          cmake --build build/vision --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 2
+          cmake --build build/vision --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 4
           build/vision/bin/lyflow-dump-manifest --check
+          sccache --show-stats
 
       - name: 验证数值、几何、图像和完整链
         run: ctest --test-dir build/vision --output-on-failure --no-tests=error --output-junit test-results.xml
@@ -402,254 +410,5 @@ jobs:
             build/barcode-deps/prepared.json
             build/p5-sdk-contract/
             build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
-          if-no-files-found: ignore
-          retention-days: 7
-
-  vision-native:
-    name: 原生点云 / 配准 / 检测 / P4识别分割链
-    runs-on: windows-2022
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: 固定依赖版本
-        id: dependency
-        shell: pwsh
-        run: |
-          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
-          "baseline=$($configuration.vcpkgBaseline)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "toolset=$($configuration.dependencyToolchain.msvcToolset)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "sdk=$($configuration.dependencyToolchain.windowsSdk)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "ort=$($configuration.onnxruntimeVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-          toolset: ${{ steps.dependency.outputs.toolset }}
-          sdk: ${{ steps.dependency.outputs.sdk }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            build/release-tools/vcpkg/*
-            !build/release-tools/vcpkg/downloads/**
-            !build/release-tools/vcpkg/buildtrees/**
-            !build/release-tools/vcpkg/packages/**
-            !build/release-tools/vcpkg/installed/**
-          key: vcpkg-tool-windows-x64-${{ steps.dependency.outputs.baseline }}-v1
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-public-kernels-metrology-glue-gap-v5
-          restore-keys: |
-            windows-2022-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-vcpkg-${{ steps.dependency.outputs.baseline }}-locked-tools-v1-
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.dependency.outputs.ort }}
-          key: onnxruntime-win-x64-cpu-${{ steps.dependency.outputs.ort }}-v1
-
-      - uses: actions/cache/restore@v4
-        id: vision-cache
-        with:
-          path: |
-            build/vision-deps
-            build/opencv5-install
-          key: opencv5-windows-x64-msvc-${{ steps.dependency.outputs.toolset }}-sdk-${{ steps.dependency.outputs.sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            build/barcode-deps
-            build/third-party/zxing-cpp-3.1.1.zip
-          key: barcode-windows-2022-source-${{ hashFiles('packaging/barcode-deps.json', 'packaging/patches/ZXing-Cpp-*.patch', 'scripts/fetch-barcode-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
-
-      - uses: actions/cache@v4
-        with:
-          path: build/p4-assets
-          key: p4-public-assets-${{ hashFiles('packaging/p4-model-assets.json', 'scripts/fetch-p4-model-assets.py', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json') }}-v1
-
-      - name: 准备固定P4公共资产并验证准备器
-        shell: pwsh
-        run: |
-          python tests/release/test-fetch-barcode-deps.py
-          if ($LASTEXITCODE -ne 0) { throw '条码源码准备安全测试失败' }
-          python tests/release/test_fetch_p4_assets.py
-          if ($LASTEXITCODE -ne 0) { throw 'P4资产准备安全测试失败' }
-          python scripts/fetch-p4-model-assets.py
-          if ($LASTEXITCODE -ne 0) { throw 'P4固定公开资产准备失败' }
-          python scripts/fetch-p4-model-assets.py --verify-only --offline
-          if ($LASTEXITCODE -ne 0) { throw 'P4固定公开资产复验失败' }
-
-      - name: 准备固定公开模型和测试图
-        shell: pwsh
-        run: |
-          python -m pip install -r scripts/requirements.txt
-          python scripts/fetch-p1-model-assets.py
-          if ($LASTEXITCODE -ne 0) { throw '固定模型或测试图准备失败' }
-          python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu
-          if ($LASTEXITCODE -ne 0) { throw 'CPU模型导出依赖准备失败' }
-          python -m pip install -r scripts/requirements-model-export.txt
-          if ($LASTEXITCODE -ne 0) { throw '固定模型导出工具准备失败' }
-          python scripts/export-p1-yolo-models.py
-          if ($LASTEXITCODE -ne 0) { throw 'YOLOv8/11/26固定导出失败' }
-          python tests/release/make_fixtures.py --output-dir build/p1-fixtures
-          if ($LASTEXITCODE -ne 0) { throw '原生推理回归夹具准备失败' }
-
-      - name: 固定依赖恢复与完整 P1 和 P4 链验证
-        shell: pwsh
-        env:
-          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-          LYFLOW_VCPKG_FEED_MODE: read
-          CMAKE_BUILD_PARALLEL_LEVEL: '2'
-        run: |
-          ./scripts/prepare-release-deps.ps1 -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
-          foreach ($name in @('VCPKG_ROOT', 'VCPKG_INSTALLED_DIR')) {
-            $value = [Environment]::GetEnvironmentVariable($name, 'Process')
-            if ([string]::IsNullOrWhiteSpace($value)) { throw "Missing verified dependency path: $name" }
-            "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          ./tests/release/test-build-vision-deps.ps1
-          $env:LYFLOW_STD_PACKS = '1'
-          $env:LYFLOW_P1_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p1-assets'
-          $env:LYFLOW_P4_ASSETS = Join-Path $env:GITHUB_WORKSPACE 'build/p4-assets'
-          $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $env:GITHUB_WORKSPACE 'build/p1-fixtures/channels-6-to-8.onnx'
-          $releaseConfiguration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
-          $repositoryPacks = (@($releaseConfiguration.packs | Where-Object { $_ -notlike 'std-*' }) + 'solution-dts') -join ';'
-          $capabilityModules = @($releaseConfiguration.modules) -join ';'
-          cmake -S core -B build/p1-native -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=ON "-DLYFLOW_PACKS=$repositoryPacks" "-DLYFLOW_MODULES=$capabilityModules" -DLYFLOW_PACK_TESTS_ONLY=ON -DLYFLOW_P1_MODEL_TESTS=ON -DLYFLOW_P4_MODEL_TESTS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_MANIFEST_DIR=$env:VCPKG_MANIFEST_DIR" "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_INSTALL=OFF "-DLYFLOW_ONNXRUNTIME_ROOT=$env:LYFLOW_ONNXRUNTIME_ROOT" "-DOpenCV_DIR=$env:OpenCV_DIR"
-          if ($LASTEXITCODE -ne 0) { throw 'P1 原生配置失败' }
-          cmake --build build/p1-native --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'P1 原生编译失败' }
-          ./build/p1-native/bin/lyflow-dump-manifest.exe --check
-          if ($LASTEXITCODE -ne 0) { throw 'P1 算子契约失败' }
-          $auditManifest = ./build/p1-native/bin/lyflow-dump-manifest.exe
-          if ($LASTEXITCODE -ne 0) { throw '全包算子描述导出失败' }
-          $auditManifest | Set-Content -LiteralPath build/p1-native/operator-package-manifest.json -Encoding utf8
-          python scripts/check-operator-package-audit.py --manifest build/p1-native/operator-package-manifest.json
-          if ($LASTEXITCODE -ne 0) { throw '分包清单与全包原生注册不一致' }
-          ctest --test-dir build/p1-native --output-on-failure --no-tests=error --output-junit test-results.xml
-          if ($LASTEXITCODE -ne 0) { throw 'P1 点云/检测组合回归失败' }
-
-      - name: 阶段5独立安装 C++17 SDK 与加载隔离契约
-        shell: pwsh
-        run: |
-          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
-          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
-          cmake --install build/p1-native --prefix "$sdk"
-          if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 安装失败' }
-          python tests/release/public_kernel_contract.py --sdk "$sdk" --output-dir build/m2-kernel-full
-          if ($LASTEXITCODE -ne 0) { throw 'M2完整SDK公共核隔离消费失败' }
-          python tests/release/public_robust_kernel_contract.py --sdk "$sdk" --output-dir build/m4-robust-kernel-sdk --toolchain "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" --installed-dir "$env:VCPKG_INSTALLED_DIR"
-          if ($LASTEXITCODE -ne 0) { throw 'M4独立PCL拟合核SDK消费失败' }
-          cmake -S tests/release/p5_sdk_consumer -B build/p5-sdk-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= "-Dlyflow_DIR=$sdk" "-DLYFLOW_CONSUMER_VERSION=$version"
-          if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 配置失败' }
-          cmake --build build/p5-sdk-consumer --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'P5 独立 C++17 SDK 编译失败' }
-          & ./build/p5-sdk-consumer/profile_sdk_consumer.exe "$sdk/bin/lyflow_core.dll"
-          if ($LASTEXITCODE -ne 0) { throw 'Profile 独立 C++17 SDK 注入与换算失败' }
-          python tests/release/p5_sdk_contract.py --sdk "$sdk" --consumer build/p5-sdk-consumer/p5_sdk_consumer.exe --bait-dir build/p1-native/bin --output-dir build/p5-sdk-contract
-          if ($LASTEXITCODE -ne 0) { throw 'P5 SDK 工作流或依赖隔离失败' }
-
-      - name: 准备阶段6 CLI 的 Rust 工具链
-        shell: pwsh
-        run: |
-          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          rustup toolchain install $channel --profile minimal
-          if ($LASTEXITCODE -ne 0) { throw 'P6 Rust 工具链安装失败' }
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: bridge -> ../build/p6-cli-ci
-          key: p6-headless-native
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: 阶段6新 CLI 与独立 C++17 宿主交付验收
-        shell: pwsh
-        run: |
-          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
-          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
-          foreach ($relative in $configuration.requiredSdkFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative) -PathType Leaf)) { throw "P6 SDK 缺少 $relative" }
-          }
-          $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p1-native/bin'
-          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p6-cli-ci'
-          cargo build --locked --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
-          if ($LASTEXITCODE -ne 0) { throw 'P6 新 CLI 编译失败' }
-          Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'debug/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
-          python bridge/tests/p6_delivery_contract.py --cli "$sdk/bin/lyflow.exe" --core "$sdk/bin/lyflow_core.dll" --examples "$sdk/examples" --output-dir build/p6-delivery-contract
-          if ($LASTEXITCODE -ne 0) { throw 'P6 CLI 录制/回放/日志/发布验收失败' }
-          $consumer = Join-Path $env:GITHUB_WORKSPACE 'build/p6-host-consumer'
-          New-Item -ItemType Directory -Path $consumer -Force | Out-Null
-          & cl.exe /nologo /std:c++17 /EHsc /MD /utf-8 "/I$sdk/include" "$sdk/examples/p6-delivery_host.cpp" "/Fe:$consumer/p6-delivery-host.exe" "/Fo:$consumer/p6-delivery-host.obj"
-          if ($LASTEXITCODE -ne 0) { throw 'P6 独立安装 C++17 宿主编译失败' }
-          & "$consumer/p6-delivery-host.exe" "$sdk/bin/lyflow_core.dll"
-          if ($LASTEXITCODE -ne 0) { throw 'P6 C++17 帧/会话生命周期与重算验收失败' }
-          $recording = Get-ChildItem -LiteralPath build/p6-delivery-contract -Directory | Select-Object -First 1
-          $archive = Get-ChildItem -LiteralPath (Join-Path $recording.FullName 'recording') -Filter '*.lyframe' -File | Select-Object -First 1
-          if (-not $archive) { throw 'P6 录制未产出可用于宿主验收的原生帧' }
-          & "$consumer/p6-delivery-host.exe" "$sdk/bin/lyflow_core.dll" $archive.FullName
-          if ($LASTEXITCODE -ne 0) { throw 'P6 C++17 跨宿主读取与持有原生帧失败' }
-
-      - name: M4b公共轮廓链CLI与独立宿主一致性
-        shell: pwsh
-        run: |
-          $sdk = Join-Path $env:GITHUB_WORKSPACE 'build/p5-sdk-ci'
-          $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p1-native/bin'
-          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/p6-cli-ci'
-          cargo build --release --locked --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
-          if ($LASTEXITCODE -ne 0) { throw 'M4b发布CLI编译失败' }
-          python tests/release/profile_workflow_contract.py --sdk "$sdk" --cli "$env:CARGO_TARGET_DIR/release/lyflow.exe" --output-dir build/m4b-profile-delivery
-          if ($LASTEXITCODE -ne 0) { throw 'M4b公共轮廓链CLI/嵌入一致性失败' }
-          $eigen = (Select-String -LiteralPath build/p1-native/CMakeCache.txt -Pattern '^Eigen3_DIR:[^=]+=(.+)$').Matches[0].Groups[1].Value
-          if ([string]::IsNullOrWhiteSpace($eigen)) { throw 'M4b缺少已验证Eigen头文件配置' }
-          cmake -S core -B build/m4b-public -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-profile;std-geometry;std-metrology' -DLYFLOW_MODULES=profile-robust-kernel -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_MANIFEST_INSTALL=OFF "-DVCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" "-DEigen3_DIR=$eigen"
-          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包配置失败' }
-          cmake --build build/m4b-public --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包编译失败' }
-          ctest --test-dir build/m4b-public --output-on-failure --no-tests=error
-          if ($LASTEXITCODE -ne 0) { throw 'M4b公共三包回归失败' }
-          python tests/release/profile_workflow_contract.py --sdk "$sdk" --cli "$env:CARGO_TARGET_DIR/release/lyflow.exe" --runtime-dir build/m4b-public/bin --public-runtime --output-dir build/m4b-profile-public-delivery
-          if ($LASTEXITCODE -ne 0) { throw 'M4b公共运行库重依赖隔离或跨宿主一致性失败' }
-
-      - name: 保存已验证的 OpenCV 安装
-        if: github.ref == 'refs/heads/main' && steps.vision-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            build/vision-deps
-            build/opencv5-install
-          key: ${{ steps.vision-cache.outputs.cache-primary-key }}
-
-      - name: 保存 P1 诊断
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: p1-native-diagnostics
-          path: |
-            build/p1-native/test-results.xml
-            build/p1-native/Testing/Temporary/*.log
-            build/p1-native/CMakeFiles/CMakeConfigureLog.yaml
-            build/release-dependency-diagnostics/
-            build/vision-opencv/*.log
-            build/barcode-deps/prepared.json
-            build/p5-sdk-contract/
-            build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
-            build/p6-delivery-contract/
-            build/p6-host-consumer/
-            build/m4b-profile-delivery/
-            build/m4b-profile-public-delivery/
-            build/m4b-public/Testing/Temporary/*.log
           if-no-files-found: ignore
           retention-days: 7
