@@ -13,7 +13,7 @@ lyflow dump examples/m3-native-profile.lyflow.json clean:clean build/m3-clean.ly
 
 文件源使用严格 CSV v1：所声明平面的两个坐标，可加第三列强度。首个非空、非注释行可为 `x,z,intensity` 等对应平面的精确小写表头。空行及 `#` 整行注释不计槽；缺强度补 1，NaN 坐标保槽并标无效，Inf、溢出、空字段及错误文本带物理行号失败。全部坐标声明必须显式提供，`sourceCount` 等于数据行数。`profile.clean` 的保槽模式保留无效槽原始载荷；拟合显式选择 `valid_only` 后只在工作缓冲中选择有效点。
 
-`embed_profile.cpp` 通过安装 SDK 的 `lyflow::client` 独立编译。它向 `profile.input` 注入含 NaN 槽、有限无效槽、非连续源索引及强度/法线/RGB 的原生 Profile，释放调用方数组后运行同类清洗、拟合、米制量测链，并验证单位换算和坏输入拒绝。成功时输出一行 `lyflow.ProfileSdkAcceptance.v1` JSON。此示例无相机、PLC 或现场标定数据。
+`embed_profile.cpp` 通过安装 SDK 的 `lyflow::client` 独立编译。它向 `profile.input` 注入含 NaN 槽、有限无效槽、非连续源索引及强度/法线/RGB 的原生 Profile，释放调用方数组后运行同类清洗、拟合、米制量测链，检查导出单位与量测结果为有限米制值，并验证坏输入拒绝。成功时输出一行 `lyflow.ProfileSdkAcceptance.v1` JSON。此示例无相机、PLC 或现场标定数据。
 
 ```powershell
 profile_sdk_consumer.exe C:/installed-lyflow/bin/lyflow_core.dll

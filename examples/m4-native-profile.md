@@ -12,7 +12,7 @@ lyflow run examples/m4-native-profile.lyflow.json --outputs --summary --no-cache
 
 预期 `flush`、`dy`、`distance` 均约为 `0.002 m`；正面差方向显式设为分析平面第二轴。原 Profile 仍为 16 槽、14 有效槽、毫米单位；拟合的唯一内点和最终内点权重数均为 13；锚点最近样本的原槽号及 `sourceIndex` 均为 15。`weightedInliers` 是最终内点及质量统计的多重权重，不表示 RANSAC 的内部求解抽样轨迹。完整索引数组保留在原生载荷，`profile.Selection.v2` 只给出原 cloud.id 及计数。
 
-`embed_profile_workflow.cpp` 使用安装 SDK 的 header-only C++ 客户端，加载同一张图与 CSV，检查共享原 Profile、原槽/索引绑定、原始单位和三项米制读数。它不静态链接运行库或 PCL。
+`embed_profile_workflow.cpp` 使用安装 SDK 的 header-only C++ 客户端，加载同一张图与 CSV，检查共享原 Profile、原槽/索引绑定、原始单位，以及三项读数为有效有限米制值。它不静态链接运行库或 PCL。
 
 ```powershell
 profile-workflow-consumer.exe C:/installed-lyflow/bin/lyflow_core.dll C:/installed-lyflow/examples/m4-native-profile.lyflow.json

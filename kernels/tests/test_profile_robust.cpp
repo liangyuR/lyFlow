@@ -60,6 +60,16 @@ TEST_CASE("Robust Profile kernel: competing traces select the upper supported su
   REQUIRE(robust::fitLine(samples(points), repeated));
   CHECK(repeated.coefficients == fit.coefficients);
   CHECK(repeated.inliers == fit.inliers);
+  std::vector<robust::Point> sloped{{nan, nan, nan}};
+  for (int i = 0; i < 96; ++i)
+    sloped.push_back({i * 0.001F, 0.25F * (i * 0.001F) + 0.01F, 0});
+  sloped.push_back({0.04F, -0.02F, 0});
+  robust::Line2DFitOptions tight;
+  tight.distThresh = 0.00001F;
+  REQUIRE(robust::fitLine(samples(sloped), fit, tight));
+  CHECK(fit.inliers.size() == 96);
+  CHECK(fit.coefficients[4] / fit.coefficients[3] == doctest::Approx(0.25).epsilon(1e-5));
+  CHECK(fit.coefficients[1] - 0.25F * fit.coefficients[0] == doctest::Approx(0.01).epsilon(1e-6));
 }
 
 TEST_CASE("Robust Profile kernel: axis retries retain original slots after rejection") {
@@ -76,6 +86,8 @@ TEST_CASE("Robust Profile kernel: axis retries retain original slots after rejec
   CHECK(fit.inliers.back() == 56);
   REQUIRE(robust::fitAxisLine(samples(points), false, fit));
   CHECK(std::fabs(fit.coefficients[3]) > std::fabs(fit.coefficients[4]));
+  CHECK(std::fabs(fit.coefficients[1]) < 1e-6F);
+  CHECK(std::fabs(fit.coefficients[4]) < 1e-6F);
   CHECK(fit.inliers.size() == 41);
 }
 
@@ -96,10 +108,26 @@ TEST_CASE("Robust Profile kernel: free circle RANSAC is deterministic without op
 }
 
 TEST_CASE("Robust Profile kernel: radius limits retain valid RANSAC arcs after refinement") {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  std::vector<robust::Point> full{{nan, nan, nan}, {-0.03F, 0.04F, 0}};
+  for (int i = 0; i < 96; ++i) {
+    const double angle = i * 2.0 * 3.14159265358979323846 / 96.0;
+    full.push_back({static_cast<float>(0.01 + 0.005 * std::cos(angle)),
+                    static_cast<float>(0.02 + 0.005 * std::sin(angle)), 0});
+  }
   robust::Circle2DFitOptions options;
+  options.distThresh = 0.00001F;
+  options.minRadius = 0.004;
+  options.maxRadius = 0.006;
+  robust::CircleFit fit;
+  REQUIRE(robust::fitCircle(samples(full), fit, options));
+  CHECK(fit.report.radius == robust::Circle2DRadiusOutcome::Free);
+  CHECK(fit.coefficients[0] == doctest::Approx(0.01).epsilon(2e-6));
+  CHECK(fit.coefficients[1] == doctest::Approx(0.02).epsilon(2e-6));
+  CHECK(fit.coefficients[2] == doctest::Approx(0.005).epsilon(2e-6));
+  options = {};
   options.minRadius = 0.003;
   options.maxRadius = 0.004;
-  robust::CircleFit fit;
   const auto upper = noisyArc(0.005, 20, 60, 70, 0.000012, 7);
   REQUIRE(robust::fitCircle(samples(upper), fit, options));
   CHECK(fit.report.radius == robust::Circle2DRadiusOutcome::ClampedMax);
