@@ -53,22 +53,15 @@ Data circle(float x, float y, float radius) {
   result.radius = radius;
   return Data::circle2d(result);
 }
-Data contextV1(const Data& geometry, const Data& profile) {
-  return Data::record(
-      Record{"profile.Geometry.v1", profile_contract::geometryContext(profile, geometry)});
-}
-Data contextV2(const Data& geometry, const Data& a, const Data& b) {
-  const auto sources = nlohmann::json::array(
-      {profile_contract::context(a), profile_contract::context(b), profile_contract::context(a)});
-  return Data::record(Record{"profile.Geometry.v2", profile_contract::geometryContextV2FromSources(
-                                                        geometry, sources, "declared")});
+Data context(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
 }
 void attachFlush(test::OpCall& call, const Data& a, const Data& b) {
   const auto base = line(), reference = point(0.004F, -0.003F);
   call.inputs = {{"baseLine", base},
-                 {"baseLineContext", contextV1(base, a)},
+                 {"baseLineContext", context(a)},
                  {"refPoint", reference},
-                 {"refPointContext", contextV2(reference, b, a)}};
+                 {"refPointContext", context(b)}};
 }
 void attachGap(test::OpCall& call, const Data& a, const Data& b, bool crossed = false) {
   const auto left = circle(0, 0, crossed ? 0.003F : 0.001F);
@@ -78,29 +71,21 @@ void attachGap(test::OpCall& call, const Data& a, const Data& b, bool crossed = 
   base.start[0] = 0;
   base.end[0] = 0.02F;
   const auto datum = Data::line2d(base);
-  call.inputs = {{"left", left},      {"leftContext", contextV2(left, a, a)},
-                 {"right", right},    {"rightContext", contextV2(right, b, a)},
-                 {"baseLine", datum}, {"baseLineContext", contextV1(datum, a)}};
+  call.inputs = {{"left", left},      {"leftContext", context(a)},
+                 {"right", right},    {"rightContext", context(b)},
+                 {"baseLine", datum}, {"baseLineContext", context(a)}};
 }
 void attachOffset(test::OpCall& call, const Data& a, const Data& b, bool same = false) {
   const auto start = point(0.001F, 0.002F), end = same ? start : point(0.004F, -0.002F);
-  call.inputs = {{"a", start},
-                 {"aContext", contextV1(start, a)},
-                 {"b", end},
-                 {"bContext", contextV2(end, b, a)}};
+  call.inputs = {{"a", start}, {"aContext", context(a)}, {"b", end}, {"bContext", context(b)}};
 }
-void checkContext(const Data& geometry, const Data& context) {
+void checkContext(const Data& context) {
   const auto* record = context.asRecord();
   REQUIRE(record);
-  CHECK(record->type == "profile.Geometry.v2");
-  CHECK(record->data["sources"].size() == 2);
-  ProfileDescriptor descriptor;
-  std::string why;
-  REQUIRE_MESSAGE(profile_contract::geometryMatchesPhysical(geometry, record, descriptor, why),
-                  why);
-  CHECK(descriptor.frame == "measurement");
-  CHECK(descriptor.plane == "XY");
-  CHECK(descriptor.handedness == "right");
+  CHECK(record->type == "profile.Geometry.v3");
+  CHECK(record->data["frame"] == "measurement");
+  CHECK(record->data["plane"] == "XY");
+  CHECK(record->data["handedness"] == "right");
 }
 struct PollContext final : ExecContext {
   mutable int calls = 0;
@@ -115,7 +100,7 @@ struct PollContext final : ExecContext {
 } // namespace
 
 TEST_CASE(
-    "Profile dimension operators merge v1 and v2 sources while flush keeps abs gain offset order") {
+    "Profile dimension operators accept mixed-unit sources while flush keeps abs gain offset order") {
   const auto a = source("A", "mm"), b = source("B");
   for (const auto* unit : {"m", "mm"}) {
     test::OpCall call(dimensionsRegistry());
@@ -139,11 +124,11 @@ TEST_CASE(
     CHECK(call.out("foot").asPoint2D()->p[1] == 0);
     CHECK(call.out("baseLine").asLine2D()->end[0] == 0.004F);
     CHECK(call.inputs["baseLine"].valueJson() == beforeBase);
-    checkContext(call.out("foot"), call.out("footContext"));
-    checkContext(call.out("segment"), call.out("segmentContext"));
-    checkContext(call.out("baseLine"), call.out("baseLineContext"));
+    checkContext(call.out("footContext"));
+    checkContext(call.out("segmentContext"));
+    checkContext(call.out("baseLineContext"));
     const auto& quality = call.out("quality").asRecord()->data;
-    CHECK(quality["sources"].size() == 2);
+    CHECK(quality["frame"] == "measurement");
     CHECK(quality["valueMm"].get<double>() == doctest::Approx(-5.5).epsilon(1e-6));
   }
 }
@@ -159,14 +144,13 @@ TEST_CASE(
               .ok);
   CHECK(call.out("value").asMeasurement()->ok);
   CHECK(call.out("value").asMeasurement()->value == doctest::Approx(7.25).epsilon(1e-6));
-  checkContext(call.out("segment"), call.out("segmentContext"));
+  checkContext(call.out("segmentContext"));
   REQUIRE(call.run("metrology.circle_gap", {{"definition", Value::text("center_line")},
                                             {"offsetMm", Value::number(0.25)},
                                             {"outputUnit", Value::text("m")}})
               .ok);
   CHECK(call.out("value").asMeasurement()->value ==
         doctest::Approx((std::sqrt(116.) - 3 + 0.25) * 0.001).epsilon(1e-6));
-  CHECK(call.out("quality").asRecord()->data["sources"].size() == 2);
   call.inputs.erase("baseLine");
   call.inputs.erase("baseLineContext");
   CHECK(call.validate("metrology.circle_gap", {{"definition", Value::text("datum_tangents")}},
@@ -196,7 +180,7 @@ TEST_CASE(
   CHECK(call.out("quality").asRecord()->data["crossed"] == true);
   CHECK(call.out("quality").asRecord()->data["valid"] == false);
   CHECK(call.out("quality").asRecord()->data["valueMm"].is_null());
-  checkContext(call.out("segment"), call.out("segmentContext"));
+  checkContext(call.out("segmentContext"));
 }
 
 TEST_CASE(
@@ -218,7 +202,7 @@ TEST_CASE(
     CHECK(call.out("dy").asMeasurement()->value == doctest::Approx(12.25 * scale).epsilon(1e-6));
     CHECK(call.out("distance").asMeasurement()->value == doctest::Approx(5 * scale).epsilon(1e-6));
     CHECK(call.out("distance").asMeasurement()->unit == unit);
-    checkContext(call.out("segment"), call.out("segmentContext"));
+    checkContext(call.out("segmentContext"));
   }
   attachOffset(call, a, b, true);
   REQUIRE_MESSAGE(call.run("metrology.point_offset").ok, call.status.message);
@@ -233,11 +217,11 @@ TEST_CASE(
   CHECK(segment->hasSegment);
   CHECK(segment->start[0] == segment->end[0]);
   CHECK(segment->start[1] == segment->end[1]);
-  checkContext(call.out("segment"), call.out("segmentContext"));
+  checkContext(call.out("segmentContext"));
 }
 
 TEST_CASE(
-    "Profile dimension operators reject mismatched physical spaces and altered geometry before publishing") {
+    "Profile dimension operators reject mismatched physical spaces and malformed contexts before publishing") {
   const auto a = source("A"), b = source("B", "mm");
   for (const auto* mismatch : {"frame", "plane", "handedness"}) {
     const auto different =
@@ -246,26 +230,22 @@ TEST_CASE(
                std::string(mismatch) == "handedness" ? "reflected" : "right");
     test::OpCall call(dimensionsRegistry());
     attachFlush(call, a, a);
-    call.inputs["refPointContext"] = contextV2(call.inputs["refPoint"], different, different);
+    call.inputs["refPointContext"] = context(different);
     CHECK_FALSE(call.run("metrology.flush_point_line").ok);
     CHECK(call.outputs.empty());
     attachOffset(call, a, a);
-    call.inputs["bContext"] = contextV2(call.inputs["b"], different, different);
+    call.inputs["bContext"] = context(different);
     CHECK_FALSE(call.run("metrology.point_offset").ok);
     CHECK(call.outputs.empty());
     attachGap(call, a, a);
-    call.inputs["rightContext"] = contextV2(call.inputs["right"], different, different);
+    call.inputs["rightContext"] = context(different);
     CHECK_FALSE(call.run("metrology.circle_gap").ok);
     CHECK(call.outputs.empty());
   }
   test::OpCall call(dimensionsRegistry());
-  attachOffset(call, a, b);
-  call.inputs["b"] = point(0.9F, 0.8F);
-  CHECK_FALSE(call.run("metrology.point_offset").ok);
-  CHECK(call.outputs.empty());
   attachGap(call, a, b);
   auto broken = *call.inputs["leftContext"].asRecord();
-  broken.data["sources"][0]["profileHash"] = "bad";
+  broken.data["sources"] = nlohmann::json::array();
   call.inputs["leftContext"] = Data::record(broken);
   CHECK_FALSE(call.run("metrology.circle_gap").ok);
   CHECK(call.outputs.empty());

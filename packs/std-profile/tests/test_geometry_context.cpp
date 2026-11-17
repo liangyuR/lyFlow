@@ -8,16 +8,8 @@
 using namespace lyflow;
 
 namespace {
-Data source(const char* id, const char* unit = "m") {
-  PointCloud cloud;
-  cloud.push(0.01F, 0.02F, 0);
-  cloud.push(0.03F, 0.04F, 0);
-  Profile profile;
-  std::string why;
-  REQUIRE(makeProfile(std::make_shared<const PointCloud>(cloud),
-                      {1, "measurement", unit, "XY", "right", "acquisition", id, 8}, {1, 1}, {1, 7},
-                      profile, why));
-  return Data::profile(std::move(profile));
+ProfileDescriptor space() {
+  return {1, "measurement", "m", "XY", "right", "acquisition", "scan-A", 8};
 }
 std::vector<Data> shapes() {
   Point2D point;
@@ -41,113 +33,69 @@ std::vector<Data> shapes() {
 }
 }
 
-TEST_CASE("Physical geometry context binds four metric shapes and retains the v1 contract") {
-  const auto profile = source("scan-A");
-  const auto geometry = shapes();
-  for (const auto& shape : geometry) {
-    Record record{"profile.Geometry.v2", profile_contract::geometryContextV2(profile, shape)};
-    ProfileDescriptor descriptor;
+TEST_CASE("Geometry context carries only the physical space of four metric shapes") {
+  const auto record = profile_contract::geometryContext(space());
+  CHECK(record.type == "profile.Geometry.v3");
+  CHECK(record.data == nlohmann::json{{"schemaVersion", 3},
+                                      {"frame", "measurement"},
+                                      {"plane", "XY"},
+                                      {"handedness", "right"}});
+  for (const auto& shape : shapes()) {
+    ProfileDescriptor parsed;
     std::string why;
-    nlohmann::json sources;
-    REQUIRE(profile_contract::geometryMatchesPhysical(shape, &record, descriptor, why, &sources));
-    CHECK(descriptor.sourceId == "scan-A");
-    CHECK(descriptor.frame == "measurement");
-    CHECK(sources == nlohmann::json::array({profile_contract::context(profile)}));
-    CHECK(record.data["geometryType"] == shape.typeName());
-    CHECK(record.data["geometryUnit"] == "m");
-    CHECK(record.data["relation"] == "derived");
+    REQUIRE(profile_contract::geometrySpace(shape, &record, parsed, why));
+    CHECK(profile_contract::sameSpace(parsed, space()));
+    CHECK(profile_contract::geometryInSpace(shape, &record, space(), why));
   }
-  for (std::size_t i = 0; i < 2; ++i) {
-    Record legacy{"profile.Geometry.v1", profile_contract::geometryContext(profile, geometry[i])};
-    ProfileDescriptor descriptor;
-    std::string why;
-    REQUIRE(profile_contract::geometryMatchesPhysical(geometry[i], &legacy, descriptor, why));
-    CHECK(legacy.data["schemaVersion"] == 1);
-  }
-  CHECK_THROWS_AS(profile_contract::geometryContext(profile, geometry[2]), std::invalid_argument);
-  auto pixel = *geometry[0].asPoint2D();
-  pixel.unit = Unit2D::Pixel;
-  CHECK_THROWS_AS(profile_contract::geometryContextV2(profile, Data::point2d(pixel)),
-                  std::invalid_argument);
-}
-
-TEST_CASE("Derived geometry retains all physical sources and checks spatial compatibility") {
-  const auto a = source("scan-A", "mm"), b = source("scan-B");
-  const auto contextA = profile_contract::context(a), contextB = profile_contract::context(b);
-  const auto shape = shapes()[2];
-  Record record{"profile.Geometry.v2",
-                profile_contract::geometryContextV2FromSources(
-                    shape, nlohmann::json::array({contextA, contextB, contextA}))};
-  ProfileDescriptor descriptor;
-  std::string why;
-  nlohmann::json sources;
-  REQUIRE(profile_contract::geometryMatchesPhysical(shape, &record, descriptor, why, &sources));
-  CHECK(sources == nlohmann::json::array({contextA, contextB}));
-  CHECK(descriptor.unit == "mm");
-  const auto original = record;
   for (const char* field : {"frame", "plane", "handedness"}) {
-    auto invalid = contextB;
-    invalid["descriptor"][field] = std::string(field) == "plane"        ? "XZ"
-                                   : std::string(field) == "handedness" ? "reflected"
-                                                                        : "other-frame";
-    CHECK_THROWS_AS(profile_contract::geometryContextV2FromSources(
-                        shape, nlohmann::json::array({contextA, invalid})),
-                    std::invalid_argument);
+    auto other = space();
+    if (std::string(field) == "frame")
+      other.frame = "other-frame";
+    if (std::string(field) == "plane")
+      other.plane = "XZ";
+    if (std::string(field) == "handedness")
+      other.handedness = "reflected";
+    std::string why;
+    CHECK_FALSE(profile_contract::geometryInSpace(shapes()[0], &record, other, why));
   }
-  auto changed = *shape.asCircle2D();
-  changed.radius *= 2;
-  descriptor.frame = "sentinel";
-  sources = "sentinel";
-  CHECK_FALSE(profile_contract::geometryMatchesPhysical(Data::circle2d(changed), &record,
-                                                        descriptor, why, &sources));
-  CHECK(descriptor.frame == "sentinel");
-  CHECK(sources == "sentinel");
-  CHECK(record.data == original.data);
 }
 
-TEST_CASE("Geometry contexts reject malformed provenance and preserve zero-length measurements") {
-  const auto profile = source("scan-A");
-  const auto shape = shapes()[1];
-  const Record original{"profile.Geometry.v2", profile_contract::geometryContextV2(profile, shape)};
-  ProfileDescriptor descriptor;
+TEST_CASE("Geometry context rejects malformed records and invalid metric content") {
+  const auto original = profile_contract::geometryContext(space());
+  const auto point = shapes()[0];
+  ProfileDescriptor parsed;
   std::string why;
-  for (const char* mutation : {"version", "type", "extra", "duplicate", "relation", "empty"}) {
+  for (const char* mutation : {"type", "version", "extra", "missing", "frame"}) {
     auto record = original;
     const std::string which = mutation;
-    if (which == "version")
-      record.data["schemaVersion"] = 3;
     if (which == "type")
-      record.data["geometryType"] = "Circle2D";
+      record.type = "profile.Geometry.v2";
+    if (which == "version")
+      record.data["schemaVersion"] = 2;
     if (which == "extra")
-      record.data["unreviewed"] = true;
-    if (which == "duplicate")
-      record.data["sources"].push_back(record.data["sources"][0]);
-    if (which == "relation")
-      record.data["relation"] = "observed-by-guess";
-    if (which == "empty")
-      record.data["sources"] = nlohmann::json::array();
-    CHECK_FALSE(profile_contract::geometryMatchesPhysical(shape, &record, descriptor, why));
+      record.data["unit"] = "m";
+    if (which == "missing")
+      record.data.erase("handedness");
+    if (which == "frame")
+      record.data["frame"] = 1;
+    CHECK_FALSE(profile_contract::geometrySpace(point, &record, parsed, why));
   }
-  auto line = *shape.asLine2D();
+  CHECK_FALSE(profile_contract::geometrySpace(point, nullptr, parsed, why));
+  auto pixel = *point.asPoint2D();
+  pixel.unit = Unit2D::Pixel;
+  CHECK_FALSE(profile_contract::geometrySpace(Data::point2d(pixel), &original, parsed, why));
+  auto line = *shapes()[1].asLine2D();
   line.hasSegment = true;
   line.start[0] = line.end[0] = 0.01F;
   line.start[1] = line.end[1] = 0.02F;
-  const auto segment = Data::line2d(line);
-  Record zero{"profile.Geometry.v2", profile_contract::geometryContextV2(profile, segment)};
-  CHECK(profile_contract::geometryMatchesPhysical(segment, &zero, descriptor, why));
-  CHECK_FALSE(profile_contract::validLine(segment, why));
+  CHECK_FALSE(profile_contract::validGeometry(Data::line2d(line), why));
+  line.hasSegment = false;
   line.dir[0] = line.dir[1] = 0;
-  CHECK_THROWS_AS(profile_contract::geometryContextV2(profile, Data::line2d(line)),
-                  std::invalid_argument);
+  CHECK_FALSE(profile_contract::validGeometry(Data::line2d(line), why));
   auto circle = *shapes()[2].asCircle2D();
   circle.radius = std::numeric_limits<float>::infinity();
-  CHECK_THROWS_AS(profile_contract::geometryContextV2(profile, Data::circle2d(circle)),
-                  std::invalid_argument);
-  nlohmann::json many = nlohmann::json::array();
-  for (int i = 0; i < 65; ++i) {
-    const auto id = "scan-" + std::to_string(i);
-    many.push_back(profile_contract::context(source(id.c_str())));
-  }
-  CHECK_THROWS_AS(profile_contract::geometryContextV2FromSources(shape, many),
-                  std::invalid_argument);
+  CHECK_FALSE(profile_contract::validGeometry(Data::circle2d(circle), why));
+  auto box = *shapes()[3].asBox2D();
+  box.min[0] = 1;
+  CHECK_FALSE(profile_contract::validGeometry(Data::box2d(box), why));
 }

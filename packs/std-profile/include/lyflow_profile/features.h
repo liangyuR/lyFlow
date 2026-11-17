@@ -13,7 +13,6 @@ struct RobustLineInputs {
   Data towardContext;
   Data refLine;
   Data refLineContext;
-  Data provenance;
 };
 struct RobustLineResult {
   Data profile;
@@ -25,11 +24,9 @@ struct RobustLineResult {
   Data weightedInliers;
   Data indexMap;
   Data quality;
-  Data provenance;
 };
 struct RobustCircleInputs {
   Data profile;
-  Data provenance;
 };
 struct RobustCircleResult {
   Data profile;
@@ -39,21 +36,18 @@ struct RobustCircleResult {
   Data weightedInliers;
   Data indexMap;
   Data quality;
-  Data provenance;
 };
 enum class NearestReference { Point, Line };
 struct NearestInputs {
   Data profile;
   Data reference;
   Data referenceContext;
-  Data provenance;
 };
 struct NearestResult {
   Data profile;
   Data point;
   Data pointContext;
   Data selection;
-  Data provenance;
 };
 std::vector<Param> robustLineParams();
 std::vector<Param> robustCircleParams();

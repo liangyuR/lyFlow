@@ -20,9 +20,6 @@ struct CirclePairInputs {
   Data merged;
   Data primary;
   Data secondary;
-  Data mergedProvenance;
-  Data primaryProvenance;
-  Data secondaryProvenance;
   std::array<Data, 2> boxes;
   std::array<Data, 2> boxContexts;
   Data refLine;
@@ -34,7 +31,6 @@ struct CirclePairResult {
   std::array<Data, 2> circles;
   std::array<Data, 2> contexts;
   std::array<Data, 2> profiles;
-  std::array<Data, 2> provenances;
   std::array<Data, 2> inliers;
   Record quality;
 };

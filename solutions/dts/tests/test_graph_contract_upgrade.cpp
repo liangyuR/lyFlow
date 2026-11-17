@@ -55,12 +55,13 @@ TEST_CASE(
   GraphMigrationError error;
   REQUIRE_MESSAGE(migrate(graph, graph["contractUpgrade"], upgraded, error), error.message);
   CHECK(upgraded["nodes"].size() == graph["nodes"].size() + 1);
-  CHECK(upgraded["edges"].size() == graph["edges"].size() + 2);
+  CHECK(upgraded["edges"].size() == graph["edges"].size() - 1);
   CHECK(node(upgraded, "n_clean")["op"] == "profile.clean");
   CHECK(node(upgraded, "n_clean")["params"]["mode"] == "preserve_slots");
   CHECK(node(upgraded, "n_faces")["op"] == "profile.split_faces");
+  CHECK(node(upgraded, "n_faces")["opVersion"] == "2.0.0");
   CHECK(node(upgraded, "n_faces")["params"]["minPoints"] == 15);
-  CHECK(node(upgraded, "n_metal")["opVersion"] == "2.0.0");
+  CHECK(node(upgraded, "n_metal")["opVersion"] == "3.0.0");
   CHECK(node(upgraded, "n_metal")["params"]["angleToApexDeg"] == -120);
   CHECK(node(upgraded, "n_in") == node(graph, "n_in"));
   CHECK(node(upgraded, "declared_profile")["op"] == "profile.from_cloud");
@@ -137,7 +138,7 @@ TEST_CASE("DTS Profile migration carries an earlier geometry bridge to the v2 co
   CHECK(node(upgraded, "root_metric")["opVersion"] == "2.0.0");
   CHECK(node(upgraded, "root_metric")["params"]["sourceContract"] == "dts.geometry.v2");
   CHECK(node(upgraded, "root_metric")["params"]["sourceOp"] == "dts.seal_root");
-  CHECK(node(upgraded, "n_root")["opVersion"] == "2.0.0");
+  CHECK(node(upgraded, "n_root")["opVersion"] == "3.0.0");
   CHECK_FALSE(upgraded["meta"].contains("contractUpgradeHistory"));
 }
 
@@ -169,7 +170,7 @@ TEST_CASE("DTS Profile migration subgraph scope preserves interfaces and binding
   CHECK(level["params"] == inner["params"]);
   CHECK_FALSE(node(level, "n_clean")["params"].contains("smoothPoints"));
   CHECK(node(level, "n_clean")["op"] == "profile.clean");
-  CHECK(node(level, "n_bundle")["opVersion"] == "2.0.0");
+  CHECK(node(level, "n_bundle")["opVersion"] == "3.0.0");
 }
 
 TEST_CASE(
@@ -199,7 +200,7 @@ TEST_CASE(
   CHECK(node(upgraded, "other_n_clean")["op"] == "profile.clean");
   CHECK(node(upgraded, "other_profile")["params"]["sourceId"] == "other-scanner");
   CHECK(upgraded["nodes"].size() == 18);
-  CHECK(upgraded["edges"].size() == 44);
+  CHECK(upgraded["edges"].size() == 38);
 }
 
 TEST_CASE(

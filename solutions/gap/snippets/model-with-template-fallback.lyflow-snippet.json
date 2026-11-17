@@ -3,7 +3,7 @@
   "id": "gap.locate_model_template_fallback",
   "label": "模型定位 + 模板回退",
   "category": "间隙",
-  "doc": "模型与模板定位并联，ScanPair 与 RoiSet 经 Location 原子选择；模型分支失败才调度模板，保留真实物理来源，避免单独回退角色框与轮廓。连接 read_scan 的完整原槽场景，并配置模型和模板参数。",
+  "doc": "模型与模板定位并联，ScanPair 与 RoiSet 经 Location 原子选择；模型分支失败才调度模板，角色框与轮廓整体回退，不会单独混用。连接 read_scan 的完整原槽场景，并配置模型和模板参数。",
   "nodes": [
     {
       "id": "model",
@@ -15,7 +15,7 @@
         },
         "title": "模型定位"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "3.0.0"
     },
     {
       "id": "template",
@@ -27,7 +27,7 @@
         },
         "title": "模板定位（备用）"
       },
-      "opVersion": "3.0.0"
+      "opVersion": "4.0.0"
     },
     {
       "id": "modelLocation",
@@ -39,7 +39,7 @@
         },
         "title": "模型定位结果"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     },
     {
       "id": "templateLocation",
@@ -51,7 +51,7 @@
         },
         "title": "模板定位结果"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     },
     {
       "id": "choice",
@@ -75,7 +75,7 @@
         },
         "title": "选中的定位场景"
       },
-      "opVersion": "1.0.0"
+      "opVersion": "2.0.0"
     }
   ],
   "edges": [

@@ -10,19 +10,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   try {
     if (ctx.cancelled())
       return cancelledStatus();
-    const auto* rootRecord = inputs.get("root").asRecord();
-    const auto* metal = inputs.get("metal").asLine2D();
-    if (rootRecord->type != "DtsRoot.v2")
-      return Status::Error(Phase::Execute, "type_mismatch", "root 需要 DtsRoot.v2", {}, "root");
-    const auto& root =
-        checkedRecord(inputs.get("root"), "DtsRoot.v2", rootRecord->data.at("context"));
-    if (metal->unit != Unit2D::Meter ||
-        root.at("metalGeometryHash") != profile_contract::geometryHash(inputs.get("metal")))
-      throw std::invalid_argument("米制钣金基准线与根部依赖的几何指纹不匹配");
+    const auto& root = checkedRecord(inputs.get("root"), "DtsRoot.v3");
     const Line2D mm = lineMillimeters(root.at("metalLineMm"));
-    if (profile_contract::geometryHash(Data::line2d(metricGeometry(mm))) !=
-        root.at("metalGeometryHash"))
-      throw std::invalid_argument("根部保存的毫米基准线与米制几何不匹配");
     const double rx = number(root, "x"), rz = number(root, "z");
     const double normalSign = mm.dir[0] >= 0 ? 1.0 : -1.0;
     const double businessSign = (params.choice("sealBulge") == "+z" ? 1.0 : -1.0) *
@@ -33,7 +22,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
             {rx, rz}, {mm.point[0], mm.point[1]}, {mm.dir[0], mm.dir[1]},
             {-mm.dir[1] * normalSign * businessSign, mm.dir[0] * normalSign * businessSign},
             kernel::metrology::DirectionPolicy::DeclaredUnit, result, why))
-      return Status::Error(Phase::Execute, "bad_input", why, {}, "metal");
+      return Status::Error(Phase::Execute, "bad_input", why, {}, "root");
     Measurement measurement;
     measurement.value = result.distance;
     measurement.ok = std::isfinite(result.distance);
@@ -44,17 +33,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     foot.p[0] = static_cast<float>(result.foot[0]);
     foot.p[1] = static_cast<float>(result.foot[1]);
     const Data geometry = Data::point2d(metricGeometry(foot));
-    nlohmann::json info{{"schemaVersion", 2},
-                        {"workingUnit", "mm"},
-                        {"context", root.at("context")},
-                        {"valueMm", result.distance},
-                        {"footMm", {foot.p[0], foot.p[1]}},
-                        {"footGeometryHash", profile_contract::geometryHash(geometry)}};
+    nlohmann::json info = sceneRecord();
+    info["footMm"] = {foot.p[0], foot.p[1]};
     if (ctx.cancelled())
       return cancelledStatus();
     outputs.set("flush", Data::measurement(measurement));
     outputs.set("foot", geometry);
-    outputs.set("footInfo", Data::record(Record{"DtsFlush.v2", std::move(info)}));
+    outputs.set("footInfo", Data::record(Record{"DtsFlush.v3", std::move(info)}));
     return Status::Ok();
   } catch (const std::exception& error) {
     return sceneError(error, "root");
@@ -66,8 +51,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "dts.flush";
-  op.version = "2.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr}};
+  op.version = "3.0.0";
+  op.migrations = {
+      {1, requireGraphMigration, nullptr},
+      {2, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+         return profile_contract::retireInputs(inputs, {"metal"});
+       }}};
   op.label = "胶条面差测量";
   op.category = "DTS/面差";
   op.keywords = {"seal flush measurement",
@@ -80,12 +69,10 @@ void registerFlush(Registry& r) {
                  "垂距"};
   op.doc = "胶条底部到基准线的垂距。判定不在这里做 —— 标准表按 (段号, 站位号) 存在库里，\n"
            "图拿不到也不该拿，所以 verdict / 公差留空。";
-  op.inputs = {Port{"root", "Record", "Root", "胶条底部。", true},
-               Port{"metal", "Line2D", "Metal", "钣金基准线。", true}};
-  op.outputs = {
-      Port{"flush", "Measurement", "Flush", "面差，单位 mm。", true},
-      Port{"foot", "Point2D", "Foot", "米制垂足，给视图画那条虚线。", true},
-      Port{"footInfo", "Record", "Foot Info", "DtsFlush.v2原毫米垂足、面差与配套指纹。", true}};
+  op.inputs = {Port{"root", "Record", "Root", "胶条底部，含挑面时的毫米基准线。", true}};
+  op.outputs = {Port{"flush", "Measurement", "Flush", "面差，单位 mm。", true},
+                Port{"foot", "Point2D", "Foot", "米制垂足，给视图画那条虚线。", true},
+                Port{"footInfo", "Record", "Foot Info", "DtsFlush.v3毫米垂足。", true}};
 
   Param bulge;
   bulge.name = "sealBulge";

@@ -4,7 +4,7 @@ file(GLOB DTS_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         solution-dts
-  VERSION      0.1.0
+  VERSION      0.2.0
   DEFAULT      OFF
   SOURCES      ${DTS_SOURCES}
   TEST_SOURCES ${DTS_TESTS}

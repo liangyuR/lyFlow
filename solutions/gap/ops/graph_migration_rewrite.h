@@ -10,9 +10,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "lyflow/registry.h"
+
 namespace lyflow::packs::gap::graph_migration_rules::detail {
 struct GapSignal {
-  Json value, context, provenance, feature;
+  Json value, context, feature;
   std::string kind, featureKind;
   std::string featureField;
   Json choice;
@@ -130,38 +132,30 @@ private:
     if (value.value.is_object())
       wire(value.context, id, context ? context : std::string(target ? target : port) + "Context");
   }
-  void profileInput(const std::string& id, const char* port, const char* target = nullptr,
-                    const char* origin = "provenance") {
-    const auto value = pass(id, port, target);
-    if (value.provenance.is_object())
-      wire(value.provenance, id, origin);
+  static std::string version(const std::string& op) {
+    const auto* desc = ensureRegistry().find(op);
+    require(desc != nullptr, "GAP升级需要当前运行库提供算子: " + op);
+    return desc->version;
   }
-  std::string add(const std::string& op, const std::string& version,
-                  const Json& params = Json::object()) {
+  std::string add(const std::string& op, const Json& params = Json::object()) {
     const auto id = prefix_ + "_node_" + std::to_string(nextNode_++);
     require(occupied_.insert(id).second, "GAP新增节点ID已被占用: " + id);
-    additions_.push_back({{"id", id}, {"op", op}, {"opVersion", version}, {"params", params}});
+    additions_.push_back({{"id", id}, {"op", op}, {"opVersion", version(op)}, {"params", params}});
     return id;
   }
-  void replace(const Json& old, const std::string& op, const std::string& version,
-               const Json& params) {
+  void replace(const Json& old, const std::string& op, const Json& params) {
     auto value = old;
     value["op"] = op;
-    value["opVersion"] = version;
+    value["opVersion"] = version(op);
     value["params"] = params;
     replacements_[old.at("id").get<std::string>()] = std::move(value);
   }
   void output(const std::string& id, const std::string& oldPort, const std::string& newPort,
               const std::string& kind, const std::string& context = {},
-              const std::string& provenance = {}, const Json& feature = Json(),
-              const std::string& featureKind = {}) {
+              const Json& feature = Json(), const std::string& featureKind = {}) {
     signals_[endpoint(id, oldPort).dump()] = {endpoint(id, newPort),
                                               context.empty() ? Json() : endpoint(id, context),
-                                              provenance.empty() ? Json()
-                                                                 : endpoint(id, provenance),
-                                              feature,
-                                              kind,
-                                              featureKind};
+                                              feature, kind, featureKind};
   }
   void allowed(const Json& params, std::initializer_list<const char*> fields) const {
     const std::set<std::string> names(fields.begin(), fields.end());
@@ -291,11 +285,11 @@ private:
     }
   }
   void location(const std::string& id) {
-    const auto maker = add("gap.make_location", "1.0.0");
+    const auto maker = add("gap.make_location");
     wire(endpoint(id, "scan"), maker, "scan");
     wire(endpoint(id, "rois"), maker, "rois");
-    output(id, "scan", "scan", "scan", {}, {}, endpoint(maker, "location"), "location");
-    output(id, "rois", "rois", "rois", {}, {}, endpoint(maker, "location"), "location");
+    output(id, "scan", "scan", "scan", {}, endpoint(maker, "location"), "location");
+    output(id, "rois", "rois", "rois", {}, endpoint(maker, "location"), "location");
   }
   void fineSources() {
     if (!loadId_.empty())
@@ -344,12 +338,11 @@ private:
     if (!rawScene_.is_null())
       return rawScene_;
     fineSources();
-    const auto node = add("gap.make_scan_pair", "2.0.0", {{"stage", "raw"}});
+    const auto node = add("gap.make_scan_pair", {{"stage", "raw"}});
     scanSources(node);
     wire(endpoint(frames_[0], "profile"), node, "primary");
     wire(endpoint(frames_[1], "profile"), node, "secondary");
     wire(endpoint(mergedRoot_.at("node"), "profile"), node, "merged");
-    wire(endpoint(mergedRoot_.at("node"), "provenance"), node, "mergedProvenance");
     rawScene_ = endpoint(node, "scan");
     return rawScene_;
   }
@@ -370,9 +363,9 @@ private:
     return endpoint(match, "scan");
   }
   Json lineFeature(const std::string& id) {
-    const auto node = add("gap.make_line_feature", "1.0.0");
+    const auto node = add("gap.make_line_feature");
     for (const auto* field : {"profile", "line", "lineContext", "innerEnd", "pointContext",
-                              "inliers", "weightedInliers", "quality", "provenance"})
+                              "inliers", "weightedInliers", "quality"})
       wire(endpoint(id, field), node, field);
     return endpoint(node, "feature");
   }
@@ -402,12 +395,11 @@ private:
     std::string split;
     const auto existing = fallbacks_.find(pair);
     if (existing == fallbacks_.end()) {
-      replace(old, "flow.fallback", "1.0.0", Json::object());
+      replace(old, "flow.fallback", Json::object());
       wire(a.feature, id, "a");
       wire(b.feature, id, "b");
       selected = endpoint(id, "out");
-      split = add("gap.split_" + a.featureKind,
-                  a.featureKind == "roi_set" || a.featureKind == "scan_pair" ? "2.0.0" : "1.0.0");
+      split = add("gap.split_" + a.featureKind);
       wire(selected, split,
            a.featureKind == "location"    ? "location"
            : a.featureKind == "scan_pair" ? "scan"
@@ -417,9 +409,7 @@ private:
     } else {
       selected = existing->second;
       split = id;
-      replace(old, "gap.split_" + a.featureKind,
-              a.featureKind == "roi_set" || a.featureKind == "scan_pair" ? "2.0.0" : "1.0.0",
-              Json::object());
+      replace(old, "gap.split_" + a.featureKind, Json::object());
       wire(selected, split,
            a.featureKind == "location"    ? "location"
            : a.featureKind == "scan_pair" ? "scan"
@@ -427,7 +417,7 @@ private:
                                           : "feature");
     }
     signals_[endpoint(id, "choice").dump()] = {
-        endpoint(selected.at("node"), "choice"), {}, {}, {}, "record", {}};
+        endpoint(selected.at("node"), "choice"), {}, {}, "record", {}};
     const auto field = [&](const GapSignal& value) {
       if (value.kind == "scan" || value.kind == "rois")
         return value.kind;
@@ -444,7 +434,7 @@ private:
         return std::string("quality");
       throw std::invalid_argument("GAP未知fallback输出角色: " + id);
     }(a);
-    GapSignal result{endpoint(split, field), {}, {}, selected, a.kind, a.featureKind};
+    GapSignal result{endpoint(split, field), {}, selected, a.kind, a.featureKind};
     if ((a.kind == "scan" && a.featureKind == "scan_pair") ||
         (a.kind == "rois" && a.featureKind == "roi_set"))
       result.value = selected;
@@ -452,8 +442,6 @@ private:
       result.context = endpoint(split, a.kind == "line" ? "lineContext" : "pointContext");
     if (a.kind == "box")
       result.context = endpoint(split, field + "Context");
-    if (a.kind == "profile")
-      result.provenance = endpoint(split, field + "Provenance");
     result.featureField = a.featureField;
     result.choice = endpoint(selected.at("node"), "choice");
     if (a.kind == "box")
@@ -488,7 +476,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "gap.load_profile_pair") {
     allowed(p, {"source", "dir", "primaryFile", "secondaryFile", "primaryPrefix", "secondaryPrefix",
                 "layout", "dropNonFinite"});
-    replace(old, op, "2.0.0", fileParameters(p));
+    replace(old, op, fileParameters(p));
     rename(id, "dropNonFinite", "dropNonFinite", true);
     for (const auto* role : {"primary", "secondary"})
       output(id, role, role, "sensor");
@@ -519,7 +507,7 @@ inline void GapRewrite::rewrite(const Json& old) {
         wire(endpoint(from, "sourceInfo"), id, "sourceInfo");
       }
     }
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     output(id, "scan", "scan", "scan");
     return;
   }
@@ -529,7 +517,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     require(a.kind == "sensor" && b.kind == "sensor", "GAP guard必须位于原始传感器路径");
     if (has(id, "box"))
       boundInput(id, "box");
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     for (const auto* role : {"primary", "secondary"})
       output(id, role, role, "sensor");
     output(id, "quality", "quality", "record");
@@ -538,7 +526,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "gap.to_measurement_frame") {
     allowed(p, {});
     require(pass(id, "cloud", "profile").kind == "sensor", "GAP换轴必须消费完整原始传感器Profile");
-    replace(old, "profile.remap_axes", "1.0.0",
+    replace(old, "profile.remap_axes",
             {{"axes", "XZY"},
              {"signs", {1, 1, 1}},
              {"targetFrame", rule_.at("measurement").at("frame")}});
@@ -546,10 +534,10 @@ inline void GapRewrite::rewrite(const Json& old) {
     fineSources();
     const auto load = originals_.at(loadId_).value("params", Json::object());
     if (load.value("dropNonFinite", true)) {
-      const auto compact = add("profile.filter_validity", "1.0.0", {{"mode", "compact"}});
+      const auto compact = add("profile.filter_validity", {{"mode", "compact"}});
       wire(endpoint(id, "profile"), compact, "profile");
       signals_[endpoint(id, "cloud").dump()] = {
-          endpoint(compact, "profile"), {}, endpoint(compact, "provenance"), {}, "profile", {}};
+          endpoint(compact, "profile"), {}, {}, "profile", {}};
     }
     return;
   }
@@ -562,18 +550,17 @@ inline void GapRewrite::rewrite(const Json& old) {
     p.erase("keepOrganized");
     rename(id, "keepOrganized", "keepOrganized", true);
     replace(old, op == "gap.drop_non_finite" ? "profile.filter_validity" : "profile.radius_outlier",
-            "1.0.0", op == "gap.drop_non_finite" ? Json{{"mode", "compact"}} : p);
-    profileInput(id, "cloud", "profile");
-    output(id, "cloud", "profile", "profile", {}, "provenance");
+            op == "gap.drop_non_finite" ? Json{{"mode", "compact"}} : p);
+    pass(id, "cloud", "profile");
+    output(id, "cloud", "profile", "profile");
     return;
   }
   if (op == "util.merge") {
     allowed(p, {});
     fineSources();
-    replace(old, "profile.merge", "1.0.0",
-            {{"roleA", "secondary"}, {"roleB", "primary"}, {"channelPolicy", "intersection"}});
-    profileInput(id, "a", nullptr, "aProvenance");
-    profileInput(id, "b", nullptr, "bProvenance");
+    replace(old, "profile.merge", {{"channelPolicy", "intersection"}});
+    pass(id, "a");
+    pass(id, "b");
     const auto a = incoming_.at(endpoint(id, "a").dump()).at("from");
     const auto b = incoming_.at(endpoint(id, "b").dump()).at("from");
     auto frame = [&](Json ref) {
@@ -584,20 +571,20 @@ inline void GapRewrite::rewrite(const Json& old) {
     };
     require(frame(a) == frames_[1] && frame(b) == frames_[0],
             "GAP已知合并必须secondary先、primary后，不能猜测逻辑角色");
-    output(id, "cloud", "profile", "profile", {}, "provenance");
+    output(id, "cloud", "profile", "profile");
     return;
   }
   if (op == "gap.overall_roi") {
     allowed(p, {"roi", "mode", "usingCamera"});
-    replace(old, op, "2.0.0", p);
-    profileInput(id, "primary", nullptr, "primaryProvenance");
-    profileInput(id, "secondary", nullptr, "secondaryProvenance");
+    replace(old, op, p);
+    pass(id, "primary");
+    pass(id, "secondary");
     output(id, "box", "box", "box", "context");
     return;
   }
   if (op == "gap.datum_window") {
     allowed(p, {"side", "startMm", "lengthMm", "heightMm"});
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     boundInput(id, "anchor");
     if (has(id, "heightAnchor"))
       boundInput(id, "heightAnchor", nullptr, true, "heightContext");
@@ -610,31 +597,30 @@ inline void GapRewrite::rewrite(const Json& old) {
     rename(id, "invert", "invert", true);
     rename(id, "bounds", "bounds");
     replace(
-        old, "profile.crop_box", "1.0.0",
+        old, "profile.crop_box",
         {{"bounds", p.value("bounds", "closed")}, {"mode", "compact"}, {"emptyPolicy", "allow"}});
-    profileInput(id, "cloud", "profile");
+    pass(id, "cloud", "profile");
     boundInput(id, "box");
-    output(id, "cloud", "profile", "profile", {}, "provenance");
+    output(id, "cloud", "profile", "profile");
     attachProfileScene(id, "cloud");
     return;
   }
   if (op == "gap.make_scan_pair") {
     allowed(p, {});
-    replace(old, op, "2.0.0", {{"stage", "processed"}});
+    replace(old, op, {{"stage", "processed"}});
     scanSources(id);
-    profileInput(id, "primary", nullptr, "primaryProvenance");
-    profileInput(id, "secondary", nullptr, "secondaryProvenance");
-    profileInput(id, "merged", nullptr, "mergedProvenance");
-    output(id, "scan", "scan", "scan", {}, {}, endpoint(id, "scan"), "scan_pair");
+    for (const auto* role : {"primary", "secondary", "merged"})
+      pass(id, role);
+    output(id, "scan", "scan", "scan", {}, endpoint(id, "scan"), "scan_pair");
     return;
   }
   if (op == "gap.split_scan_pair" || op == "gap.split_roi_set") {
     allowed(p, {});
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     if (op == "gap.split_scan_pair") {
       pass(id, "scan");
       for (const auto* role : {"primary", "secondary", "merged"})
-        output(id, role, role, "profile", {}, std::string(role) + "Provenance");
+        output(id, role, role, "profile");
     } else {
       pass(id, "rois");
       for (const auto* role : {"datum", "target", "seamLeft", "seamRight", "seam"})
@@ -648,7 +634,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     if (rule_.contains("templates"))
       for (const auto* name : {"unit", "fileFrame", "templateFrame", "handedness"})
         p[name] = rule_.at("templates").at(name);
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     output(id, "left", "left", "template");
     output(id, "right", "right", "template");
     return;
@@ -661,13 +647,13 @@ inline void GapRewrite::rewrite(const Json& old) {
             "GAP配准需要同一完整模板对及已声明量测轮廓");
     wire(sceneForMerged(incoming_.at(endpoint(id, "cloud").dump()).at("from")), id, "scan");
     wire(endpoint(left.value.at("node"), "templates"), id, "templates");
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     output(id, "alignment", "alignment", "alignment");
     return;
   }
   if (op == "gap.select_alignment") {
     allowed(p, {"minScore"});
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     for (const auto* name : {"a", "b", "c", "d"})
       if (has(id, name))
         pass(id, name);
@@ -676,7 +662,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     return;
   }
   if (op == "gap.business_rois" || op == "gap.roi_from_labels") {
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     if (op == "gap.business_rois")
       pass(id, "alignment");
     else {
@@ -691,8 +677,7 @@ inline void GapRewrite::rewrite(const Json& old) {
         pass(id, "backdrop");
     }
     for (const auto* role : {"flushBase", "flushRef", "gapLeft", "gapRight", "seam"}) {
-      output(id, role, role, "box", std::string(role) + "Context", {}, endpoint(id, "rois"),
-             "roi_set");
+      output(id, role, role, "box", std::string(role) + "Context", endpoint(id, "rois"), "roi_set");
       signals_.at(endpoint(id, role).dump()).featureField =
           std::string(role) == "flushBase"  ? "datum"
           : std::string(role) == "flushRef" ? "target"
@@ -700,7 +685,7 @@ inline void GapRewrite::rewrite(const Json& old) {
           : std::string(role) == "gapRight" ? "seamRight"
                                             : "seam";
     }
-    output(id, "rois", "rois", "rois", {}, {}, endpoint(id, "rois"), "roi_set");
+    output(id, "rois", "rois", "rois", {}, endpoint(id, "rois"), "roi_set");
     return;
   }
   if (op == "gap.make_roi_set") {
@@ -736,7 +721,7 @@ inline void GapRewrite::rewrite(const Json& old) {
             "GAP区域侧的动态生产者覆盖不能与旧make_roi_set静态声明混用");
     require(!fromTemplate || has(id, "alignment"),
             "GAP模板区域缺少旧make_roi_set实际配准来源，无法证明source/自动侧声明等价");
-    const auto split = add("gap.split_roi_set", "2.0.0");
+    const auto split = add("gap.split_roi_set");
     wire(endpoint(producer, "rois"), split, "rois");
     wire(endpoint(split, "info"), id, "info");
     if (has(id, "alignment")) {
@@ -750,10 +735,10 @@ inline void GapRewrite::rewrite(const Json& old) {
       boundInput(id, "overall");
     if (has(id, "cropStatus"))
       pass(id, "cropStatus");
-    replace(old, op, "2.0.0", {{"metadataMode", "update_metadata"}});
+    replace(old, op, {{"metadataMode", "update_metadata"}});
     rename(id, "source", "source", true);
     rename(id, "datumSide", "datumSide", true);
-    output(id, "rois", "rois", "rois", {}, {}, endpoint(id, "rois"), "roi_set");
+    output(id, "rois", "rois", "rois", {}, endpoint(id, "rois"), "roi_set");
     return;
   }
   if (op == "gap.profile_tensor") {
@@ -761,7 +746,7 @@ inline void GapRewrite::rewrite(const Json& old) {
     fineSources();
     require(!originals_.at(loadId_).value("params", Json::object()).value("dropNonFinite", true),
             "GAP模型需要明确保留原始槽，拒绝已启用或未声明dropNonFinite=false的旧来源");
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     require(pass(id, "primary").kind == "sensor" && pass(id, "secondary").kind == "sensor",
             "GAP模型张量只能使用原始sensor槽");
     output(id, "tensor", "tensor", "tensor");
@@ -769,7 +754,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "ml.onnx_run") {
     allowed(p, {"modelPath"});
-    replace(old, "gap.infer_profile", "1.0.0", p);
+    replace(old, "gap.infer_profile", p);
     const auto tensor = pass(id, "input");
     const auto producer =
         incoming_.at(endpoint(id, "input").dump()).at("from").at("node").get<std::string>();
@@ -780,13 +765,12 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "gap.labels_from_logits") {
     allowed(p, {});
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     pass(id, "tensor");
     const auto inference =
         incoming_.at(endpoint(id, "tensor").dump()).at("from").at("node").get<std::string>();
     require(originals_.at(inference).at("op") == "ml.onnx_run", "GAP标签只接受实际已知推理路径");
     const auto tensor = incoming_.at(endpoint(inference, "input").dump()).at("from");
-    wire(signal(tensor).value, id, "modelInput");
     for (const auto* role : {"primary", "secondary"})
       wire(signal(incoming_.at(endpoint(tensor.at("node"), role).dump()).at("from")).value, id,
            role);
@@ -796,7 +780,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "gap.labels_to_cloud") {
     allowed(p, {"row"});
     rename(id, "row", "row", true);
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     input(id, "cloud");
     fineSources();
     const auto row = p.value("row", std::string("primary"));
@@ -812,25 +796,21 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "gap.roll_anchored_crop") {
     const auto primary = input(id, "primary"), secondary = input(id, "secondary"),
                merged = input(id, "merged");
-    const auto scan = add("gap.make_scan_pair", "2.0.0", {{"stage", "processed"}});
+    const auto scan = add("gap.make_scan_pair", {{"stage", "processed"}});
     scanSources(scan);
     const std::array<GapSignal, 3> values{primary, secondary, merged};
     const std::array<const char*, 3> roles{"primary", "secondary", "merged"};
-    for (std::size_t i = 0; i < 3; ++i) {
+    for (std::size_t i = 0; i < 3; ++i)
       wire(values[i].value, scan, roles[i]);
-      if (values[i].provenance.is_object())
-        wire(values[i].provenance, scan, std::string(roles[i]) + "Provenance");
-    }
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     wire(endpoint(scan, "scan"), id, "scan");
     boundInput(id, "gapLeft");
     boundInput(id, "gapRight");
-    const auto split = add("gap.split_scan_pair", "2.0.0");
+    const auto split = add("gap.split_scan_pair");
     wire(endpoint(id, "scan"), split, "scan");
     for (const auto* role : roles) {
       signals_[endpoint(id, role).dump()] = {
-          endpoint(split, role), {},        endpoint(split, std::string(role) + "Provenance"),
-          endpoint(id, "scan"),  "profile", "scan_pair"};
+          endpoint(split, role), {}, endpoint(id, "scan"), "profile", "scan_pair"};
       signals_.at(endpoint(id, role).dump()).featureField = role;
     }
     output(id, "window", "window", "box", "windowContext");
@@ -843,8 +823,8 @@ inline void GapRewrite::rewrite(const Json& old) {
     p["distanceThreshold"] = p.value("distThresh", .1) / 1000.0;
     p.erase("distThresh");
     rename(id, "distThresh", "distanceThreshold", true);
-    replace(old, "profile.fit_line_robust", "1.0.0", p);
-    profileInput(id, "cloud", "profile");
+    replace(old, "profile.fit_line_robust", p);
+    pass(id, "cloud", "profile");
     boundInput(id, "box");
     boundInput(id, "toward");
     if (has(id, "refLine"))
@@ -856,18 +836,17 @@ inline void GapRewrite::rewrite(const Json& old) {
     Json feature;
     const auto featureKind = reference ? "reference_feature" : "line_feature";
     if (reference) {
-      const auto maker = add("gap.make_reference_feature", "1.0.0", {{"method", "line_end"}});
-      for (const auto* field :
-           {"profile", "line", "lineContext", "pointContext", "quality", "provenance"})
+      const auto maker = add("gap.make_reference_feature", {{"method", "line_end"}});
+      for (const auto* field : {"profile", "line", "lineContext", "pointContext", "quality"})
         wire(endpoint(id, field), maker, field);
       wire(endpoint(id, "innerEnd"), maker, "point");
       wire(endpoint(id, "indexMap"), maker, "selection");
       feature = endpoint(maker, "feature");
     } else
       feature = lineFeature(id);
-    output(id, "line", "line", "line", "lineContext", {}, feature, featureKind);
-    output(id, "innerEnd", "innerEnd", "point", "pointContext", {}, feature, featureKind);
-    output(id, "quality", "quality", "quality", {}, {}, feature, featureKind);
+    output(id, "line", "line", "line", "lineContext", feature, featureKind);
+    output(id, "innerEnd", "innerEnd", "point", "pointContext", feature, featureKind);
+    output(id, "quality", "quality", "quality", {}, feature, featureKind);
     return;
   }
   if (op == "gap.selected_point" || op == "gap.nearest_to_line") {
@@ -875,32 +854,26 @@ inline void GapRewrite::rewrite(const Json& old) {
     const auto profile = input(id, "cloud");
     require(profile.kind == "profile", "GAP选点需要已声明真实轮廓");
     replace(old, op == "gap.selected_point" ? "profile.nearest_sample" : "profile.nearest_to_line",
-            "1.0.0", p);
+            p);
     wire(profile.value, id, "profile");
-    if (profile.provenance.is_object())
-      wire(profile.provenance, id, "provenance");
     if (op == "gap.selected_point") {
       const auto box = input(id, "box");
-      const auto anchor = add("geometry.box_anchor", "1.0.0", {{"anchor", "minimum"}});
+      const auto anchor = add("geometry.box_anchor", {{"anchor", "minimum"}});
       wire(box.value, anchor, "box");
-      const auto binding = add("profile.bind_geometry", "1.0.0",
+      const auto binding = add("profile.bind_geometry",
                                {{"frame", rule_.at("measurement").at("frame")}, {"plane", "XY"}});
       wire(profile.value, binding, "profile");
-      if (profile.provenance.is_object())
-        wire(profile.provenance, binding, "provenance");
       wire(endpoint(anchor, "point"), binding, "geometry");
-      wire(box.value, binding, "referenceGeometry");
-      wire(box.context, binding, "referenceContext");
       wire(endpoint(binding, "geometry"), id, "anchor");
       wire(endpoint(binding, "context"), id, "anchorContext");
     } else
       boundInput(id, "line");
     const auto feature =
-        add("gap.make_reference_feature", "1.0.0",
+        add("gap.make_reference_feature",
             {{"method", op == "gap.selected_point" ? "selected_point" : "nearest_point"}});
-    for (const auto* field : {"profile", "point", "pointContext", "selection", "provenance"})
+    for (const auto* field : {"profile", "point", "pointContext", "selection"})
       wire(endpoint(id, field), feature, field);
-    output(id, "point", "point", "point", "pointContext", {}, endpoint(feature, "feature"),
+    output(id, "point", "point", "point", "pointContext", endpoint(feature, "feature"),
            "reference_feature");
     return;
   }
@@ -928,7 +901,7 @@ inline void GapRewrite::rewrite(const Json& old) {
                                    std::make_pair("handedness", "templateHandedness")})
           p[fields.second] = rule_.at("templates").at(fields.first);
     }
-    replace(old, op, op == "gap.locate_template" ? "3.0.0" : "2.0.0", p);
+    replace(old, op, p);
     location(id);
     if (op == "gap.locate_template")
       output(id, "alignment", "alignment", "alignment");
@@ -944,14 +917,13 @@ inline void GapRewrite::rewrite(const Json& old) {
       boundInput(id, "refLine");
     if (has(id, "baseLine"))
       boundInput(id, "baseLine");
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     const auto kind = op == "gap.ref_point" ? "reference_feature" : "line_feature";
     const auto feature = endpoint(id, "feature");
-    output(id, "line", "line", "line", "lineContext", {}, feature, kind);
+    output(id, "line", "line", "line", "lineContext", feature, kind);
     output(id, op == "gap.ref_point" ? "point" : "innerEnd",
-           op == "gap.ref_point" ? "point" : "innerEnd", "point", "pointContext", {}, feature,
-           kind);
-    output(id, "quality", "quality", "quality", {}, {}, feature, kind);
+           op == "gap.ref_point" ? "point" : "innerEnd", "point", "pointContext", feature, kind);
+    output(id, "quality", "quality", "quality", {}, feature, kind);
     if (op == "gap.datum_direction")
       output(id, "window", "window", "box", "windowContext");
     return;
@@ -962,7 +934,7 @@ inline void GapRewrite::rewrite(const Json& old) {
               "GAP双圆需要同源场景");
     else {
       for (const auto* role : {"primary", "secondary", "merged"})
-        profileInput(id, role, nullptr, (std::string(role) + "Provenance").c_str());
+        pass(id, role);
       boundInput(id, "boxLeft");
       boundInput(id, "boxRight");
     }
@@ -970,19 +942,19 @@ inline void GapRewrite::rewrite(const Json& old) {
       boundInput(id, "refLine");
     if (has(id, "refLineRight"))
       boundInput(id, "refLineRight");
-    replace(old, op, "2.0.0", p);
+    replace(old, op, p);
     Json feature = endpoint(id, "feature");
     if (op == "gap.fit_gap_circles") {
-      const auto maker = add("gap.make_circle_pair", "1.0.0");
+      const auto maker = add("gap.make_circle_pair");
       for (const auto* side : {"left", "right"})
-        for (const auto* suffix : {"", "Context", "Profile", "Provenance", "Inliers"})
+        for (const auto* suffix : {"", "Context", "Profile", "Inliers"})
           wire(endpoint(id, std::string(side) + suffix), maker, std::string(side) + suffix);
       wire(endpoint(id, "quality"), maker, "quality");
       feature = endpoint(maker, "feature");
     }
     for (const auto* side : {"left", "right"})
-      output(id, side, side, "circle", std::string(side) + "Context", {}, feature, "circle_pair");
-    output(id, "quality", "quality", "quality", {}, {}, feature, "circle_pair");
+      output(id, side, side, "circle", std::string(side) + "Context", feature, "circle_pair");
+    output(id, "quality", "quality", "quality", {}, feature, "circle_pair");
     return;
   }
   if (op == "gap.flush") {
@@ -993,7 +965,7 @@ inline void GapRewrite::rewrite(const Json& old) {
                 {"signed", p.value("signed", true)},
                 {"signConvention", "canonical_axis"},
                 {"outputUnit", "mm"}};
-    replace(old, "metrology.flush_point_line", "1.0.0", target);
+    replace(old, "metrology.flush_point_line", target);
     boundInput(id, "baseLine");
     boundInput(id, "refPoint");
     rename(id, "scale", "gain");
@@ -1014,7 +986,7 @@ inline void GapRewrite::rewrite(const Json& old) {
             "GAP旧间隙的双圆不是同一个完整原子拟合结果，拒绝混配质量来源");
     const auto definition = p.value("definition", std::string("B"));
     require(definition == "A" || definition == "B", "GAP旧圆间隙定义必须为A或B");
-    replace(old, "metrology.circle_gap", "1.0.0",
+    replace(old, "metrology.circle_gap",
             {{"definition", definition == "A" ? "datum_tangents" : "center_line"},
              {"offsetMm", p.value("offset", 0.0)},
              {"outputUnit", "mm"}});
@@ -1030,7 +1002,7 @@ inline void GapRewrite::rewrite(const Json& old) {
   }
   if (op == "gap.point_offset") {
     allowed(p, {"absDx", "absDy", "scaleDx", "scaleDy", "dxOffset", "dyOffset"});
-    replace(old, "metrology.point_offset", "1.0.0",
+    replace(old, "metrology.point_offset",
             {{"absDx", p.value("absDx", false)},
              {"absDy", p.value("absDy", false)},
              {"gainDx", p.value("scaleDx", 1.0)},
@@ -1054,12 +1026,12 @@ inline void GapRewrite::rewrite(const Json& old) {
   if (op == "gap.judge") {
     allowed(p, {"nominal", "upper", "lower"});
     pass(id, "value");
-    replace(old, op, "1.0.0", p);
+    replace(old, op, p);
     output(id, "value", "value", "measurement");
     return;
   }
   if (op == "gap.result_bundle") {
-    replace(old, op, "3.0.0", p);
+    replace(old, op, p);
     const auto measuredFrom = [&](const char* port) -> const std::array<GapSignal, 2>& {
       const auto source =
           incoming_.at(endpoint(id, port).dump()).at("from").at("node").get<std::string>();
@@ -1083,7 +1055,7 @@ inline void GapRewrite::rewrite(const Json& old) {
         (scan.choice.is_object() || rois.choice.is_object())) {
       require(scan.choice.is_object() && rois.choice.is_object(),
               "GAP旧细粒度定位必须同时声明实际scan与roi的fallback选择");
-      const auto location = add("gap.make_location", "1.0.0");
+      const auto location = add("gap.make_location");
       wire(scan.value, location, "scan");
       wire(rois.value, location, "rois");
       wire(scan.choice, location, "scanChoice");
@@ -1091,7 +1063,7 @@ inline void GapRewrite::rewrite(const Json& old) {
       for (const auto& choice : boxChoices_)
         if (choice.first != "seam")
           wire(choice.second, location, choice.first + "Choice");
-      const auto split = add("gap.split_location", "1.0.0");
+      const auto split = add("gap.split_location");
       wire(endpoint(location, "location"), split, "location");
       wire(endpoint(split, "scan"), id, "scan");
       wire(endpoint(split, "rois"), id, "rois");

@@ -12,7 +12,7 @@ struct CornerResult {
   Record quality;
 };
 struct JointInputs {
-  Data primary, secondary, primaryProvenance, secondaryProvenance;
+  Data primary, secondary;
 };
 struct JointResult {
   Data gap, flush, baseLine, refLine, gapSegment, flushSegment, feature;

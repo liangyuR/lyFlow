@@ -66,23 +66,14 @@ Data scan(bool denoised) {
         view.merged->asProfile()->sourceIndices[i] != 190)
       indices.values.push_back(static_cast<std::int32_t>(i));
   profile_contract::SelectionResult selected;
-  REQUIRE(profile_contract::selectProfileIndices(*view.merged, indices, view.mergedProvenance, {},
-                                                 selected, context)
-              .ok);
+  REQUIRE(profile_contract::selectProfileIndices(*view.merged, indices, {}, selected, context).ok);
   const auto& old = view.info->data;
-  scene::ScanMetadata metadata{old["sensorFrame"],
-                               old["measurementFrame"],
-                               "processed",
-                               old["guard"],
-                               old["crop"],
-                               old["origins"],
-                               old["processing"],
-                               view.primaryProvenance,
-                               view.secondaryProvenance};
+  scene::ScanMetadata metadata{
+      old["sensorFrame"], old["measurementFrame"], "processed",      old["guard"],
+      old["crop"],        old["origins"],          old["processing"]};
   Data output;
   REQUIRE(scene::makeScanPair(*view.sensorPrimary, *view.sensorSecondary, *view.primary,
-                              *view.secondary, selected.profile, selected.provenance, metadata,
-                              output, why));
+                              *view.secondary, selected.profile, metadata, output, why));
   return output;
 }
 struct Fixture {
@@ -143,7 +134,7 @@ ParamMap defaults() {
 }
 }
 TEST_CASE(
-    "Locate template crops existing denoised merged and preserves actual scan lineage and chosen slot") {
+    "Locate template crops existing denoised merged and preserves sensor slots and chosen slot") {
   Fixture fixture;
   const auto input = scan(true);
   const auto settings = fixture.options();
@@ -185,17 +176,15 @@ TEST_CASE(
   CHECK(alignment.info->data["templateId"] == "z-primary");
   CHECK(alignment.info->data["order"] == 0);
   CHECK(alignment.info->data["roisFrom"] == "config");
-  CHECK(profile_contract::context(*alignment.target) == profile_contract::context(*output.merged));
+  CHECK(alignment.target->asProfile()->cloud.get() == output.merged->asProfile()->cloud.get());
   scene::RoiView rois;
   REQUIRE(scene::readRoiSet(result.rois, rois, why));
   CHECK(rois.info->data["source"] == "config");
   CHECK(rois.info->data["cropStatus"] == output.info->data["crop"]);
   CHECK(rois.info->data["overallMm"][0].get<double>() == doctest::Approx(-15));
-  for (const auto& record : rois.contexts)
-    for (const auto& source : record->asRecord()->data["sources"])
-      CHECK(source["descriptor"]["frame"] == "measurement-frame");
-  CHECK(profile_contract::context(*original.sensorPrimary) ==
-        profile_contract::context(*input.asBundle()->field("sensorPrimary")));
+  for (std::size_t i = 0; i < 4; ++i)
+    CHECK(profile_contract::geometryInSpace(*rois.boxes[i], rois.contexts[i]->asRecord(),
+                                            output.merged->asProfile()->descriptor, why));
 }
 TEST_CASE(
     "Locate template slot contract validates enabled geometry and binds independent defaults without Registry") {
@@ -255,9 +244,9 @@ TEST_CASE(
   native::registerProfileLocateTemplate(registry);
   const auto* op = registry.find("gap.locate_template");
   REQUIRE(op);
-  CHECK(op->version == "3.0.0");
-  CHECK(op->inputs[0].type == "Bundle<gap.ScanPair.v2>");
-  CHECK(op->outputs[2].type == "Bundle<gap.Alignment.v2>");
+  CHECK(op->version == "4.0.0");
+  CHECK(op->inputs[0].type == "Bundle<gap.ScanPair.v3>");
+  CHECK(op->outputs[2].type == "Bundle<gap.Alignment.v3>");
   CHECK(op->params.size() == values.size());
 }
 TEST_CASE("Locate template auto center and failure cancellation keep outputs atomic") {

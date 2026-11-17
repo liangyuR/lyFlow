@@ -252,8 +252,7 @@ Status locate(const Data& input, const LocateOptions& options, LocateResult& res
     return failure(why);
   profile_scene::GeometryResult overall;
   auto status =
-      profile_scene::overallRoi(*scan.primary, *scan.secondary, &scan.primaryProvenance,
-                                &scan.secondaryProvenance, options.overall, overall, context);
+      profile_scene::overallRoi(*scan.primary, *scan.secondary, options.overall, overall, context);
   if (!status.ok)
     return status;
   profile_contract::SelectionOptions selection;
@@ -262,11 +261,9 @@ Status locate(const Data& input, const LocateOptions& options, LocateResult& res
   selection.emptyPolicy = "allow";
   std::array<profile_contract::SelectionResult, 3> crops;
   const Data* profiles[3] = {scan.primary, scan.secondary, scan.merged};
-  const Record* origins[3] = {&scan.primaryProvenance, &scan.secondaryProvenance,
-                              scan.mergedProvenance};
   for (std::size_t i = 0; i < 3; ++i) {
-    status = profile_contract::cropProfile(*profiles[i], overall.box, overall.context, origins[i],
-                                           selection, crops[i], context);
+    status = profile_contract::cropProfile(*profiles[i], overall.box, &overall.context, selection,
+                                           crops[i], context);
     if (!status.ok)
       return status;
   }
@@ -293,13 +290,11 @@ Status locate(const Data& input, const LocateOptions& options, LocateResult& res
                                        previous["origins"],
                                        {{"method", "template"},
                                         {"status", "complete"},
-                                        {"details", {{"overall", overall.status.data}}}},
-                                       crops[0].provenance,
-                                       crops[1].provenance};
+                                        {"details", {{"overall", overall.status.data}}}}};
   LocateResult candidate;
   if (!profile_scene::makeScanPair(*scan.sensorPrimary, *scan.sensorSecondary, crops[0].profile,
-                                   crops[1].profile, crops[2].profile, crops[2].provenance,
-                                   metadata, candidate.scan, why))
+                                   crops[1].profile, crops[2].profile, metadata, candidate.scan,
+                                   why))
     return failure(why);
   std::vector<Data> candidates;
   std::int64_t order = 0;
@@ -349,17 +344,18 @@ Status locate(const Data& input, const LocateOptions& options, LocateResult& res
 void registerProfileLocateTemplate(Registry& registry) {
   OperatorDesc op;
   op.id = "gap.locate_template";
-  op.version = "3.0.0";
+  op.version = "4.0.0";
   declareGapGraphUpgrade(op, 2);
+  op.migrations.push_back({3, nullptr, &profile_contract::keepInputs});
   op.label = "模板区域定位";
   op.category = "间隙/场景";
   op.keywords = {"template localization", "2D ICP", "模板定位", "多模板"};
   op.doc =
-      "按整体框分别裁剪双路与已有合并轮廓，再逐启用模板配准并按原候选规则选择。保留传感器原槽与真实量测来源，输出版本2场景、角色框和原生配准结果。";
-  op.inputs = {{"scan", "Bundle<gap.ScanPair.v2>", "扫描场景", "原生轮廓及已有merged来源。", true}};
-  op.outputs = {{"scan", "Bundle<gap.ScanPair.v2>", "定位场景", "实际整体框裁剪后的轮廓。", true},
-                {"rois", "Bundle<gap.RoiSet.v2>", "角色区域", "带量测来源的四角色框。", true},
-                {"alignment", "Bundle<gap.Alignment.v2>", "选中配准",
+      "按整体框分别裁剪双路与已有合并轮廓，再逐启用模板配准并按原候选规则选择。保留传感器原槽，输出场景、角色框和原生配准结果。";
+  op.inputs = {{"scan", "Bundle<gap.ScanPair.v3>", "扫描场景", "原生轮廓及已有merged。", true}};
+  op.outputs = {{"scan", "Bundle<gap.ScanPair.v3>", "定位场景", "实际整体框裁剪后的轮廓。", true},
+                {"rois", "Bundle<gap.RoiSet.v3>", "角色区域", "量测空间四角色框。", true},
+                {"alignment", "Bundle<gap.Alignment.v3>", "选中配准",
                  "实际应用矩阵后的模板与候选记录。", true}};
   op.params = locateParameters();
   op.capabilities = {true, false, true};

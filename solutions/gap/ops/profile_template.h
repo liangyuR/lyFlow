@@ -9,10 +9,10 @@
 #include "profile_scene.h"
 
 namespace lyflow::packs::gap::profile_template {
-inline constexpr const char* kTemplatePairKind = "gap.TemplatePair.v2";
-inline constexpr const char* kTemplateInfoType = "gap.TemplateInfo.v2";
-inline constexpr const char* kAlignmentKind = "gap.Alignment.v2";
-inline constexpr const char* kAlignmentInfoType = "gap.AlignmentInfo.v2";
+inline constexpr const char* kTemplatePairKind = "gap.TemplatePair.v3";
+inline constexpr const char* kTemplateInfoType = "gap.TemplateInfo.v3";
+inline constexpr const char* kAlignmentKind = "gap.Alignment.v3";
+inline constexpr const char* kAlignmentInfoType = "gap.AlignmentInfo.v3";
 
 struct TemplateLoadOptions {
   std::filesystem::path dir;
@@ -38,9 +38,6 @@ struct TemplateView {
 };
 struct AlignmentView {
   const Data* target = nullptr;
-  const Record* targetProvenance = nullptr;
-  const Data* templateLeft = nullptr;
-  const Data* templateRight = nullptr;
   const Data* alignedLeft = nullptr;
   const Data* alignedRight = nullptr;
   const Record* info = nullptr;
@@ -54,8 +51,7 @@ std::vector<Param> selectionParameters();
 std::vector<Param> businessRoiParameters();
 std::string templateFingerprint(const TemplateLoadOptions& options);
 
-bool makeTemplatePair(const Data& left, const Data& right, const nlohmann::json& origins,
-                      Data& result, std::string& why);
+Data makeTemplatePair(const Data& left, const Data& right, const nlohmann::json& origins);
 bool readTemplatePair(const Data& data, TemplateView& result, std::string& why);
 Status loadTemplatePair(const TemplateLoadOptions& options, Data& result, ExecContext& context);
 Status alignClouds(const PointCloud& target, const PointCloud& left, const PointCloud& right,

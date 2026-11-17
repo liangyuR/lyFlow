@@ -525,9 +525,6 @@ struct Tail {
 struct BoundRef {
   Ref value, context;
 };
-struct ProfileRef {
-  Ref value, provenance;
-};
 void wire(Builder& g, const Ref& source, const std::string& target, const std::string& port) {
   if (!source.empty())
     g.edge(source.node, source.port, target, port);
@@ -536,12 +533,6 @@ void wireBound(Builder& g, const BoundRef& source, const std::string& target,
                const std::string& value, const std::string& context) {
   wire(g, source.value, target, value);
   wire(g, source.context, target, context);
-}
-void wireProfile(Builder& g, const ProfileRef& source, const std::string& target,
-                 const std::string& profile = "profile",
-                 const std::string& provenance = "provenance") {
-  wire(g, source.value, target, profile);
-  wire(g, source.provenance, target, provenance);
 }
 Ref fallbackOf(Builder& g, const std::string& id, const Ref& a, const Ref& b, int column, int row,
                const char* title) {
@@ -559,7 +550,7 @@ std::string splitFeature(Builder& g, const Ref& feature, const std::string& id, 
 Ref makeLine(Builder& g, const std::string& fit, const std::string& id, int column, int row) {
   const auto node = g.node(id, "gap.make_line_feature", nullptr, column, row, "组完整直线特征");
   for (const auto* port : {"profile", "line", "lineContext", "innerEnd", "pointContext", "inliers",
-                           "weightedInliers", "quality", "provenance"})
+                           "weightedInliers", "quality"})
     g.edge(fit, port, node, port);
   return {node, "feature"};
 }
@@ -567,7 +558,7 @@ Ref makeReference(Builder& g, const std::string& source, const std::string& id,
                   const std::string& method, int column, int row) {
   const auto node = g.node(id, "gap.make_reference_feature", {{"method", method}}, column, row,
                            "组完整参考点特征");
-  for (const auto* port : {"profile", "pointContext", "provenance"})
+  for (const auto* port : {"profile", "pointContext"})
     g.edge(source, port, node, port);
   g.edge(source, method == "line_end" ? "innerEnd" : "point", node, "point");
   g.edge(source, method == "line_end" ? "indexMap" : "selection", node, "selection");
@@ -597,7 +588,7 @@ Located fallbackLocation(Builder& g, const Located& model, const Located& backup
 }
 struct SceneFields {
   Ref scan, sensorPrimary, sensorSecondary;
-  ProfileRef primary, secondary, merged;
+  Ref primary, secondary, merged;
   Ref sourceInfo, guardQuality;
 };
 SceneFields splitScan(Builder& g, const Ref& scan, const std::string& id, int column, int row) {
@@ -606,9 +597,9 @@ SceneFields splitScan(Builder& g, const Ref& scan, const std::string& id, int co
   return {scan,
           {node, "sensorPrimary"},
           {node, "sensorSecondary"},
-          {{node, "primary"}, {node, "primaryProvenance"}},
-          {{node, "secondary"}, {node, "secondaryProvenance"}},
-          {{node, "merged"}, {node, "mergedProvenance"}},
+          {node, "primary"},
+          {node, "secondary"},
+          {node, "merged"},
           {},
           {}};
 }
@@ -641,21 +632,21 @@ Ref updateRois(Builder& g, const RoiFields& fields, const BoundRef& overall, con
   wire(g, cropStatus, node, "cropStatus");
   return {node, "rois"};
 }
-ProfileRef crop(Builder& g, const ProfileRef& profile, const BoundRef& box, const std::string& id,
-                int column, int row, bool allowEmpty = false) {
+Ref crop(Builder& g, const Ref& profile, const BoundRef& box, const std::string& id, int column,
+         int row, bool allowEmpty = false) {
   const auto node = g.node(
       id, "profile.crop_box",
       {{"bounds", "open"}, {"mode", "compact"}, {"emptyPolicy", allowEmpty ? "allow" : "error"}},
       column, row, "原生轮廓开区间裁剪");
-  wireProfile(g, profile, node);
+  wire(g, profile, node, "profile");
   wireBound(g, box, node, "box", "boxContext");
-  return {{node, "profile"}, {node, "provenance"}};
+  return {node, "profile"};
 }
-std::string fitLine(Builder& g, const ProfileRef& profile, const BoundRef& box,
-                    const BoundRef& toward, const BoundRef& reference, const nlohmann::json& params,
-                    const std::string& id, int column, int row) {
+std::string fitLine(Builder& g, const Ref& profile, const BoundRef& box, const BoundRef& toward,
+                    const BoundRef& reference, const nlohmann::json& params, const std::string& id,
+                    int column, int row) {
   const auto node = g.node(id, "profile.fit_line_robust", params, column, row, "公共轮廓直线拟合");
-  wireProfile(g, profile, node);
+  wire(g, profile, node, "profile");
   wireBound(g, box, node, "box", "boxContext");
   wireBound(g, toward, node, "toward", "towardContext");
   wireBound(g, reference, node, "refLine", "refLineContext");
@@ -740,22 +731,18 @@ SceneFields readScene(Builder& g, const Config& c, Tail& tail, bool fine) {
                               "压缩有效secondary槽");
   g.edge(frameP, "profile", finiteP, "profile");
   g.edge(frameS, "profile", finiteS, "profile");
-  const auto merge =
-      g.node("n_merge", "profile.merge",
-             {{"roleA", "secondary"}, {"roleB", "primary"}, {"channelPolicy", "intersection"}}, 3,
-             3, "按真实双源区间合并");
+  const auto merge = g.node("n_merge", "profile.merge", {{"channelPolicy", "intersection"}}, 3, 3,
+                            "按真实双源区间合并");
   g.edge(finiteS, "profile", merge, "a");
   g.edge(finiteP, "profile", merge, "b");
-  g.edge(finiteS, "provenance", merge, "aProvenance");
-  g.edge(finiteP, "provenance", merge, "bProvenance");
-  ProfileRef merged{{merge, "profile"}, {merge, "provenance"}};
+  Ref merged{merge, "profile"};
   if (c.usingRemoval) {
     const auto node = g.node("n_filter", "profile.radius_outlier",
                              {{"radius", numberOr(c.filter, "filter_radius", .4) / 1000.0},
                               {"minNeighbors", intOr(c.filter, "filter_neighbors", 5)}},
                              4, 3, "合并轮廓原槽去噪");
-    wireProfile(g, merged, node);
-    merged = {{node, "profile"}, {node, "provenance"}};
+    wire(g, merged, node, "profile");
+    merged = {node, "profile"};
   }
   const auto set =
       g.node("n_raw_scan", "gap.make_scan_pair", {{"stage", "raw"}}, 4, 1, "组原生采集与量测场景");
@@ -763,7 +750,7 @@ SceneFields readScene(Builder& g, const Config& c, Tail& tail, bool fine) {
   wire(g, s, set, "sensorSecondary");
   g.edge(frameP, "profile", set, "primary");
   g.edge(frameS, "profile", set, "secondary");
-  wireProfile(g, merged, set, "merged", "mergedProvenance");
+  wire(g, merged, set, "merged");
   wire(g, sourceInfo, set, "sourceInfo");
   wire(g, guardQuality, set, "guardQuality");
   auto fields = splitScan(g, {set, "scan"}, "n_raw_fields", 5, 1);
@@ -780,7 +767,7 @@ std::string datumRole(const Config& c) {
              : "";
 }
 BoundRef fineDatum(Builder& g, const Config& c, const std::string& prefix, const RoiFields& rois,
-                   const ProfileRef& cloud, int row) {
+                   const Ref& cloud, int row) {
   const auto cfg = child(c.flush, "base_direction");
   const auto& anchor = rois.boxes[c.anchorKind == "gap_left" ? 2 : 3];
   const auto& height = rois.boxes[c.heightKind == "flush_base" ? 0 : 1];
@@ -825,7 +812,7 @@ FlushChain fineFlush(Builder& g, const Config& c, const std::string& prefix, con
   const auto fields = splitScan(g, at.scan, prefix + "n_measure_scan", 7, row + 2);
   const auto rois = splitRois(g, at.rois, prefix + "n_measure_rois", 7, row + 3);
   const auto base = crop(g, fields.merged, rois.boxes[0], prefix + "n_crop_flushBase", 8, row);
-  ProfileRef reference;
+  Ref reference;
   if (c.refType != "selected point")
     reference = crop(g, fields.merged, rois.boxes[1], prefix + "n_crop_flushRef", 8, row + 1);
   const auto datum =
@@ -844,13 +831,12 @@ FlushChain fineFlush(Builder& g, const Config& c, const std::string& prefix, con
     wire(g, rois.boxes[1].value, anchor, "box");
     const auto bind = g.node(prefix + "n_reference_anchor_context", "profile.bind_geometry",
                              {{"frame", "gap.measurement"}, {"plane", "XY"}}, 9, row + 1,
-                             "锚点绑定实际轮廓和角色框来源");
-    wireProfile(g, fields.merged, bind);
+                             "锚点声明为轮廓量测空间");
+    wire(g, fields.merged, bind, "profile");
     g.edge(anchor, "point", bind, "geometry");
-    wireBound(g, rois.boxes[1], bind, "referenceGeometry", "referenceContext");
     const auto nearest = g.node(prefix + "n_sel_ref", "profile.nearest_sample", nullptr, 10,
                                 row + 1, "在完整轮廓选择最接近框最小角的原槽");
-    wireProfile(g, fields.merged, nearest);
+    wire(g, fields.merged, nearest, "profile");
     g.edge(bind, "geometry", nearest, "anchor");
     g.edge(bind, "context", nearest, "anchorContext");
     point =
@@ -858,7 +844,7 @@ FlushChain fineFlush(Builder& g, const Config& c, const std::string& prefix, con
   } else {
     const auto nearest = g.node(prefix + "n_near_ref", "profile.nearest_to_line", nullptr, 10,
                                 row + 1, "在参考ROI选择无限线最近样本");
-    wireProfile(g, reference, nearest);
+    wire(g, reference, nearest, "profile");
     g.edge(fitted, "line", nearest, "line");
     g.edge(fitted, "lineContext", nearest, "lineContext");
     point = makeReference(g, nearest, prefix + "n_reference_feature", "nearest_point", 11, row + 1);
@@ -950,8 +936,8 @@ Located templateBranch(Builder& g, const Config& c, const SceneFields& raw, Tail
                                {"mode", textOr(c.common, "overall_roi_mode", "fixed")},
                                {"usingCamera", c.usingCamera}},
                               column, row, "实际整体窗口");
-  wireProfile(g, raw.primary, overall, "primary", "primaryProvenance");
-  wireProfile(g, raw.secondary, overall, "secondary", "secondaryProvenance");
+  wire(g, raw.primary, overall, "primary");
+  wire(g, raw.secondary, overall, "secondary");
   const BoundRef window{{overall, "box"}, {overall, "context"}};
   const auto primary = crop(g, raw.primary, window, prefix + "n_crop_p", column + 1, row - 1, true),
              secondary =
@@ -961,9 +947,9 @@ Located templateBranch(Builder& g, const Config& c, const SceneFields& raw, Tail
                            column + 2, row, "组整体框裁剪场景");
   wire(g, raw.sensorPrimary, scan, "sensorPrimary");
   wire(g, raw.sensorSecondary, scan, "sensorSecondary");
-  wireProfile(g, primary, scan, "primary", "primaryProvenance");
-  wireProfile(g, secondary, scan, "secondary", "secondaryProvenance");
-  wireProfile(g, merged, scan, "merged", "mergedProvenance");
+  wire(g, primary, scan, "primary");
+  wire(g, secondary, scan, "secondary");
+  wire(g, merged, scan, "merged");
   wire(g, raw.sourceInfo, scan, "sourceInfo");
   wire(g, raw.guardQuality, scan, "guardQuality");
   std::vector<std::string> alignments;
@@ -1023,9 +1009,8 @@ Located modelBranch(Builder& g, const Config& c, const SceneFields& raw, Tail& t
   g.edge(tensor, "tensor", infer, "input");
   tail.modelPathBinds.push_back(infer + ".modelPath");
   const auto labels =
-      g.node("n_seg", "gap.labels_from_logits", nullptr, 3, 6, "绑定actual sensor与特征输入的标签");
+      g.node("n_seg", "gap.labels_from_logits", nullptr, 3, 6, "绑定实际传感器的标签");
   g.edge(infer, "output", labels, "tensor");
-  g.edge(tensor, "tensor", labels, "modelInput");
   wire(g, raw.sensorPrimary, labels, "primary");
   wire(g, raw.sensorSecondary, labels, "secondary");
   const auto color =
@@ -1038,20 +1023,18 @@ Located modelBranch(Builder& g, const Config& c, const SceneFields& raw, Tail& t
   g.edge(labels, "labels", boxes, "labels");
   g.edge(color, "cloud", boxes, "backdrop");
   const auto finiteP = g.node("n_model_valid_primary", "profile.filter_validity",
-                              {{"mode", "compact"}}, 4, 9, "保留primary有效原槽与来源");
+                              {{"mode", "compact"}}, 4, 9, "保留primary有效原槽");
   const auto finiteS = g.node("n_model_valid_secondary", "profile.filter_validity",
-                              {{"mode", "compact"}}, 4, 10, "保留secondary有效原槽与来源");
-  wireProfile(g, raw.primary, finiteP);
-  wireProfile(g, raw.secondary, finiteS);
+                              {{"mode", "compact"}}, 4, 10, "保留secondary有效原槽");
+  wire(g, raw.primary, finiteP, "profile");
+  wire(g, raw.secondary, finiteS, "profile");
   const auto prepared = g.node("n_model_processed", "gap.make_scan_pair", {{"stage", "processed"}},
                                5, 9, "组模型测量前处理场景");
   wire(g, raw.sensorPrimary, prepared, "sensorPrimary");
   wire(g, raw.sensorSecondary, prepared, "sensorSecondary");
   g.edge(finiteP, "profile", prepared, "primary");
   g.edge(finiteS, "profile", prepared, "secondary");
-  g.edge(finiteP, "provenance", prepared, "primaryProvenance");
-  g.edge(finiteS, "provenance", prepared, "secondaryProvenance");
-  wireProfile(g, raw.merged, prepared, "merged", "mergedProvenance");
+  wire(g, raw.merged, prepared, "merged");
   wire(g, raw.sourceInfo, prepared, "sourceInfo");
   wire(g, raw.guardQuality, prepared, "guardQuality");
   const auto roll =
@@ -1075,9 +1058,9 @@ Ref circleFeature(Builder& g, const Config& c, const Located& at, const FlushCha
   if (fine) {
     const auto scan = splitScan(g, at.scan, prefix + "n_circle_scan", 9, row + 2);
     const auto boxes = splitRois(g, at.rois, prefix + "n_circle_rois", 9, row + 3);
-    wireProfile(g, scan.primary, node, "primary", "primaryProvenance");
-    wireProfile(g, scan.secondary, node, "secondary", "secondaryProvenance");
-    wireProfile(g, scan.merged, node, "merged", "mergedProvenance");
+    wire(g, scan.primary, node, "primary");
+    wire(g, scan.secondary, node, "secondary");
+    wire(g, scan.merged, node, "merged");
     wireBound(g, boxes.boxes[2], node, "boxLeft", "boxLeftContext");
     wireBound(g, boxes.boxes[3], node, "boxRight", "boxRightContext");
   } else {
@@ -1091,9 +1074,8 @@ Ref circleFeature(Builder& g, const Config& c, const Located& at, const FlushCha
     return {node, "feature"};
   const auto make = g.node(prefix + "n_circle_feature", "gap.make_circle_pair", nullptr, 12, row,
                            "组完整双圆特征");
-  for (const auto* port :
-       {"left", "right", "leftContext", "rightContext", "leftProfile", "rightProfile",
-        "leftProvenance", "rightProvenance", "leftInliers", "rightInliers", "quality"})
+  for (const auto* port : {"left", "right", "leftContext", "rightContext", "leftProfile",
+                           "rightProfile", "leftInliers", "rightInliers", "quality"})
     g.edge(node, port, make, port);
   return {make, "feature"};
 }
@@ -1197,10 +1179,10 @@ Status buildPipeline(const Config& c, bool fine, std::string& graphJson) {
                            : blockFlush(g, c, "b_", byTemplate, "roi_intersection", 10);
       at = fallbackLocation(g, byModel, byTemplate);
       const auto line = fallbackOf(g, "n_fb_line", modelFlush.lineFeature,
-                                   templateFlush.lineFeature, 11, 5, "原子回退直线与来源质量");
+                                   templateFlush.lineFeature, 11, 5, "原子回退直线与质量");
       const auto reference =
           fallbackOf(g, "n_fb_reference", modelFlush.referenceFeature,
-                     templateFlush.referenceFeature, 11, 6, "原子回退参考点与来源质量");
+                     templateFlush.referenceFeature, 11, 6, "原子回退参考点与质量");
       flush = splitFlush(g, line, reference, "n_selected_", 5);
     }
     circles = circleFeature(g, c, at, flush, "", fine, tail, 3);

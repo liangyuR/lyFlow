@@ -23,7 +23,5 @@ struct GuardResult {
 Status guardProfiles(const Data& primary, const Data& secondary, const CameraGuardOptions& options,
                      GuardResult& out, ExecContext& ctx, const Data* box = nullptr,
                      const Record* boxContext = nullptr);
-bool guardMatches(const Data& primary, const Data& secondary, const Record& quality,
-                  std::string& why);
 void registerProfileCameraGuard(Registry& registry);
 }

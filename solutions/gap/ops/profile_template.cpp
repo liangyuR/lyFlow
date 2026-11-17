@@ -12,9 +12,8 @@
 #include "algo/cloud2d.h"
 #include "gap_detection/Alignment.hpp"
 #include "gap_detection/GapUtils.hpp"
-#include "lyflow/hash.h"
 #include "lyflow/profile.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 #include "profile_scan.h"
 
 namespace lyflow::packs::gap::profile_template {
@@ -435,32 +434,11 @@ bool keys(const Json& data, std::initializer_list<const char*> names) {
       return false;
   return true;
 }
-bool exactBundle(const Bundle* bundle, const char* kind, std::initializer_list<const char*> names) {
-  if (!bundle || bundle->kind != kind || bundle->fields.size() != names.size())
-    return false;
-  for (const auto* name : names)
-    if (!bundle->field(name))
-      return false;
-  return true;
-}
 bool metricProfile(const Data& data, const Profile*& profile, std::string& why) {
   profile = data.asProfile();
   return profile && profile->descriptor.unit == "m" && profile->descriptor.plane == "XY"
              ? true
              : fail(why, "需要明确米制XY原生Profile");
-}
-std::string bindingHash(Json value) {
-  value.erase("bindingHash");
-  HashBuilder hash;
-  hash.add("gap-template-contract/v2");
-  hash.add(value.dump());
-  return hash.hex();
-}
-std::string recordHash(const Record& record) {
-  HashBuilder hash;
-  hash.add(record.type);
-  hash.add(record.data.dump());
-  return hash.hex();
 }
 std::string fileStamp(const std::filesystem::path& path) {
   std::error_code error;
@@ -542,26 +520,6 @@ bool transformed(const Data& original, const Eigen::Matrix3f& pose, const std::s
   result = Data::profile(std::move(output));
   return true;
 }
-bool sideValid(const Json& value, std::string& why) {
-  Eigen::Matrix3f transform;
-  if (!keys(value,
-            {"transform", "score", "success", "bidirectional", "degenerateRatio",
-             "degenerateLocked", "trustTranslationMm", "trustRotationDeg", "trustClamped"}) ||
-      !matrix(value["transform"], transform, why) || !value["success"].is_boolean() ||
-      !value["bidirectional"].is_boolean() || !value["degenerateLocked"].is_boolean() ||
-      !value["trustClamped"].is_boolean())
-    return fail(why, "配准侧结果或刚体矩阵非法");
-  if ((value["score"].is_null() && value["success"] != false) ||
-      (!value["score"].is_null() &&
-       (!value["score"].is_number() || !std::isfinite(value["score"].get<double>()))))
-    return fail(why, "配准侧分数必须为有限数值；未执行且失败的一侧可明确null");
-  for (const auto* name : {"degenerateRatio", "trustTranslationMm", "trustRotationDeg"})
-    if (!value[name].is_null() &&
-        (!value[name].is_number() || !std::isfinite(value[name].get<double>())))
-      return fail(why, "配准质量必须为有限数值或明确null");
-  return true;
-}
-
 bool rois(const Json& value, std::array<std::array<float, 4>, 4>& result, std::string& why) {
   constexpr std::array<const char*, 4> names{"flushBase", "gapLeft", "flushRef", "gapRight"};
   if (!keys(value, {"flushBase", "gapLeft", "flushRef", "gapRight"}))
@@ -587,64 +545,23 @@ std::string templateFingerprint(const TemplateLoadOptions& options) {
     return {};
   return fileStamp(options.dir / options.left) + "|" + fileStamp(options.dir / options.right);
 }
-bool makeTemplatePair(const Data& left, const Data& right, const Json& origins, Data& result,
-                      std::string& why) {
-  try {
-    const Profile *a = nullptr, *b = nullptr;
-    if (!metricProfile(left, a, why) || !metricProfile(right, b, why) ||
-        !profile_contract::sameSpace(a->descriptor, b->descriptor) ||
-        std::find(a->validity.begin(), a->validity.end(), 1) == a->validity.end() ||
-        std::find(b->validity.begin(), b->validity.end(), 1) == b->validity.end())
-      return fail(why, "模板需要同空间且包含有效观测的米制XY Profile");
-    if (!keys(origins, {"left", "right"}) || origins.dump().size() > 32768)
-      return fail(why, "模板需要有界的实际双路来源");
-    for (const auto& item : {std::make_pair("left", a), std::make_pair("right", b)}) {
-      const auto& origin = origins[item.first];
-      if (!keys(origin, {"kind", "sourceId", "details"}) ||
-          (origin["kind"] != "file" && origin["kind"] != "injected_profile" &&
-           origin["kind"] != "profile_declaration") ||
-          origin["sourceId"] != item.second->descriptor.sourceId || !origin["details"].is_object())
-        return fail(why, "模板来源不得用逻辑角色改写物理源身份");
-    }
-    Json info{{"schemaVersion", 2},
-              {"templateFrame", a->descriptor.frame},
-              {"contexts", {profile_contract::context(left), profile_contract::context(right)}},
-              {"origins", origins}};
-    info["bindingHash"] = bindingHash(info);
-    Bundle bundle(kTemplatePairKind);
-    bundle.set("left", left)
-        .set("right", right)
-        .set("info", Data::record({kTemplateInfoType, info}));
-    result = Data::bundle(std::move(bundle));
-    why.clear();
-    return true;
-  } catch (const Json::exception&) {
-    return fail(why, "模板来源或元数据类型非法");
-  }
+Data makeTemplatePair(const Data& left, const Data& right, const Json& origins) {
+  Bundle bundle(kTemplatePairKind);
+  bundle.set("left", left)
+      .set("right", right)
+      .set("info", Data::record({kTemplateInfoType,
+                                 {{"schemaVersion", 3},
+                                  {"templateFrame", left.asProfile()->descriptor.frame},
+                                  {"origins", origins}}}));
+  return Data::bundle(std::move(bundle));
 }
 bool readTemplatePair(const Data& data, TemplateView& result, std::string& why) {
-  try {
-    const auto* bundle = data.asBundle();
-    if (!exactBundle(bundle, kTemplatePairKind, {"left", "right", "info"}))
-      return fail(why, "需要完整gap.TemplatePair.v2");
-    const auto* info = bundle->field("info")->asRecord();
-    if (!info || info->type != kTemplateInfoType ||
-        !keys(info->data,
-              {"schemaVersion", "templateFrame", "contexts", "origins", "bindingHash"}) ||
-        !info->data["schemaVersion"].is_number_integer() || info->data["schemaVersion"] != 2 ||
-        !info->data["contexts"].is_array() || info->data["contexts"].size() != 2)
-      return fail(why, "模板版本或来源字段非法");
-    Data expected;
-    if (!makeTemplatePair(*bundle->field("left"), *bundle->field("right"), info->data["origins"],
-                          expected, why) ||
-        expected.asBundle()->field("info")->asRecord()->data != info->data)
-      return fail(why, "模板原槽或通道与绑定信息不匹配");
-    result = {bundle->field("left"), bundle->field("right"), info};
-    why.clear();
-    return true;
-  } catch (const Json::exception&) {
-    return fail(why, "模板信息类型或编码非法");
-  }
+  const auto* bundle = data.asBundle();
+  if (!bundle || bundle->kind != kTemplatePairKind)
+    return fail(why, "需要gap.TemplatePair.v3");
+  result = {bundle->field("left"), bundle->field("right"), bundle->field("info")->asRecord()};
+  why.clear();
+  return true;
 }
 Status loadTemplatePair(const TemplateLoadOptions& options, Data& result, ExecContext& context) {
   if (options.dir.empty())
@@ -670,56 +587,22 @@ Status loadTemplatePair(const TemplateLoadOptions& options, Data& result, ExecCo
   std::size_t index = 0;
   for (const auto& item : {std::make_tuple("left", "primary", &loaded.primary),
                            std::make_tuple("right", "secondary", &loaded.secondary)}) {
-    Profile axes, converted, fileProfile;
+    Profile axes, converted;
     const auto stop = [&context] { return context.cancelled(); };
     if (!remapProfileAxes(*std::get<2>(item)->asProfile(), "XZY", {1, 1, 1}, options.templateFrame,
                           axes, why, stop) ||
-        !convertProfileUnit(axes, "m", converted, why, stop) ||
-        !remapProfileAxes(*std::get<2>(item)->asProfile(),
-                          options.layout == "profile" ? "XZY" : "XYZ", {1, 1, 1}, options.fileFrame,
-                          fileProfile, why, stop))
+        !convertProfileUnit(axes, "m", converted, why, stop))
       return context.cancelled() ? cancelled() : failure(why);
     metric[index++] = Data::profile(std::move(converted));
-    auto origin = loaded.sourceInfo.data["origins"][std::get<1>(item)];
-    origin["details"]["fileContext"] =
-        profile_contract::context(Data::profile(std::move(fileProfile)));
-    origins[std::get<0>(item)] = std::move(origin);
+    origins[std::get<0>(item)] = loaded.sourceInfo.data["origins"][std::get<1>(item)];
   }
-  Data candidate;
-  if (!makeTemplatePair(metric[0], metric[1], origins, candidate, why))
-    return failure(why, "templates", "io");
   if (context.cancelled())
     return cancelled();
-  result = std::move(candidate);
+  result = makeTemplatePair(metric[0], metric[1], origins);
   return Status::Ok();
 }
 
 namespace {
-bool alignmentInfo(const Json& info, std::string& why) {
-  if (!keys(info, {"templateId", "order", "minScore", "globalCoarse", "globalSucceeded",
-                   "globalScore", "mirrored", "left", "right", "rois", "roisFrom", "schemaVersion",
-                   "targetContext", "templateContexts", "alignedContexts", "templateInfo",
-                   "targetProvenanceHash", "invalidSlots", "bindingHash"}) ||
-      !info["schemaVersion"].is_number_integer() || info["schemaVersion"] != 2 ||
-      !info["templateId"].is_string() || info["templateId"].get_ref<const std::string&>().empty() ||
-      info["templateId"].get_ref<const std::string&>().size() > 1024 ||
-      !info["order"].is_number_integer() || info["order"] < 0 ||
-      !info["minScore"].is_number_integer() || info["minScore"] < 0 || info["minScore"] > 100 ||
-      !info["globalCoarse"].is_boolean() || !info["globalSucceeded"].is_boolean() ||
-      !info["mirrored"].is_boolean() ||
-      (info["roisFrom"] != "template" && info["roisFrom"] != "config") ||
-      info["invalidSlots"] != "preserved_si_untransformed_not_observations" ||
-      !info["templateContexts"].is_array() || info["templateContexts"].size() != 2 ||
-      !info["alignedContexts"].is_array() || info["alignedContexts"].size() != 2 ||
-      !info["targetProvenanceHash"].is_string() || info["bindingHash"] != bindingHash(info) ||
-      !sideValid(info["left"], why) || !sideValid(info["right"], why))
-    return fail(why, "需要有界且完整绑定的版本2模板配准信息");
-  if (!info["globalScore"].is_null() &&
-      (!info["globalScore"].is_number() || !std::isfinite(info["globalScore"].get<double>())))
-    return fail(why, "全局ICP分必须为有限数值或明确null");
-  std::array<std::array<float, 4>, 4> bounds;
-  return rois(info["rois"], bounds, why) && info.dump().size() <= 131072;
-}
 bool optionsValid(const AlignmentOptions& options, std::string& why) {
   for (const auto v : {options.maxMatchingDist, options.maxFitnessDist, options.trustTranslation,
                        options.trustRotation, options.degenerateRatio})
@@ -736,68 +619,13 @@ bool optionsValid(const AlignmentOptions& options, std::string& why) {
 }
 }
 bool readAlignment(const Data& data, AlignmentView& result, std::string& why) {
-  try {
-    const auto* bundle = data.asBundle();
-    if (!exactBundle(bundle, kAlignmentKind,
-                     {"target", "targetProvenance", "templateLeft", "templateRight", "alignedLeft",
-                      "alignedRight", "info"}))
-      return fail(why, "需要完整gap.Alignment.v2原生Bundle");
-    const auto* info = bundle->field("info")->asRecord();
-    const auto* provenance = bundle->field("targetProvenance")->asRecord();
-    if (!info || info->type != kAlignmentInfoType || !provenance || !alignmentInfo(info->data, why))
-      return fail(why, "模板配准来源字段非法");
-    const auto& v = info->data;
-    const Profile *target = nullptr, *left = nullptr, *right = nullptr;
-    if (!metricProfile(*bundle->field("target"), target, why) ||
-        !metricProfile(*bundle->field("templateLeft"), left, why) ||
-        !metricProfile(*bundle->field("templateRight"), right, why) ||
-        !profile_contract::matches(*bundle->field("target"), v["targetContext"], why) ||
-        !profile_contract::matches(*bundle->field("templateLeft"), v["templateContexts"][0], why) ||
-        !profile_contract::matches(*bundle->field("templateRight"), v["templateContexts"][1],
-                                   why) ||
-        left->descriptor.handedness != target->descriptor.handedness ||
-        right->descriptor.handedness != target->descriptor.handedness ||
-        v["targetProvenanceHash"] != recordHash(*provenance))
-      return fail(why, "配准当前载荷与原始模板或扫描来源不匹配");
-    Json sources;
-    if (!profile_contract::profileSources(*bundle->field("target"), provenance, sources, why))
-      return false;
-    Bundle templates(kTemplatePairKind);
-    templates.set("left", *bundle->field("templateLeft"))
-        .set("right", *bundle->field("templateRight"))
-        .set("info", Data::record({kTemplateInfoType, v["templateInfo"]}));
-    TemplateView templateView;
-    if (!readTemplatePair(Data::bundle(std::move(templates)), templateView, why))
-      return false;
-    std::size_t index = 0;
-    for (const auto& pair : {std::make_tuple("left", "templateLeft", "alignedLeft"),
-                             std::make_tuple("right", "templateRight", "alignedRight")}) {
-      Eigen::Matrix3f pose;
-      Data moved;
-      const auto* aligned = bundle->field(std::get<2>(pair));
-      const Profile* alignedProfile = nullptr;
-      if (!matrix(v[std::get<0>(pair)]["transform"], pose, why) ||
-          !transformed(*bundle->field(std::get<1>(pair)), pose, target->descriptor.frame, moved,
-                       why) ||
-          !metricProfile(*aligned, alignedProfile, why) ||
-          !profile_contract::sameSpace(target->descriptor, alignedProfile->descriptor) ||
-          !profile_contract::matches(*aligned, v["alignedContexts"][index], why) ||
-          profile_contract::context(moved) != v["alignedContexts"][index])
-        return fail(why, "配准后模板必须实际应用刚体矩阵并保留原槽与通道");
-      ++index;
-    }
-    result = {bundle->field("target"),
-              provenance,
-              bundle->field("templateLeft"),
-              bundle->field("templateRight"),
-              bundle->field("alignedLeft"),
-              bundle->field("alignedRight"),
-              info};
-    why.clear();
-    return true;
-  } catch (const Json::exception&) {
-    return fail(why, "配准信息字段类型或编码非法");
-  }
+  const auto* bundle = data.asBundle();
+  if (!bundle || bundle->kind != kAlignmentKind)
+    return fail(why, "需要gap.Alignment.v3");
+  result = {bundle->field("target"), bundle->field("alignedLeft"), bundle->field("alignedRight"),
+            bundle->field("info")->asRecord()};
+  why.clear();
+  return true;
 }
 Status align(const Data& scan, const Data& templates, const AlignmentOptions& options, Data& result,
              ExecContext& context) {
@@ -836,31 +664,15 @@ Status align(const Data& scan, const Data& templates, const AlignmentOptions& op
   for (const auto* side : {"left", "right"})
     if (info[side]["score"].is_number() && !std::isfinite(info[side]["score"].get<double>()))
       info[side]["score"] = nullptr;
-  info["schemaVersion"] = 2;
-  info["targetContext"] = profile_contract::context(*scanView.merged);
-  info["templateContexts"] = {profile_contract::context(*templateView.left),
-                              profile_contract::context(*templateView.right)};
-  info["alignedContexts"] = {profile_contract::context(aligned[0]),
-                             profile_contract::context(aligned[1])};
-  info["templateInfo"] = templateView.info->data;
-  info["targetProvenanceHash"] = recordHash(*scanView.mergedProvenance);
-  info["invalidSlots"] = "preserved_si_untransformed_not_observations";
-  info["bindingHash"] = bindingHash(info);
+  info["schemaVersion"] = 3;
   Bundle candidate(kAlignmentKind);
   candidate.set("target", *scanView.merged)
-      .set("targetProvenance", Data::record(*scanView.mergedProvenance))
-      .set("templateLeft", *templateView.left)
-      .set("templateRight", *templateView.right)
       .set("alignedLeft", aligned[0])
       .set("alignedRight", aligned[1])
       .set("info", Data::record({kAlignmentInfoType, info}));
-  Data output = Data::bundle(std::move(candidate));
-  AlignmentView checked;
-  if (!readAlignment(output, checked, why))
-    return failure(why, "alignment", "invalid_result");
   if (context.cancelled())
     return cancelled();
-  result = std::move(output);
+  result = Data::bundle(std::move(candidate));
   return Status::Ok();
 }
 Status select(const std::vector<Data>& candidates, int minScore, Data& result,
@@ -870,17 +682,12 @@ Status select(const std::vector<Data>& candidates, int minScore, Data& result,
   if (candidates.empty() || candidates.size() > 4 || minScore < 0 || minScore > 100)
     return failure("需要1到4个候选和0到100的最低分", "a");
   std::vector<::detection::utils::TemplateIcpScore> scores;
-  Json target;
   std::string why;
   for (const auto& candidate : candidates) {
     AlignmentView view;
     if (!readAlignment(candidate, view, why))
       return failure(why, "alignment");
     const auto& v = view.info->data;
-    if (target.is_null())
-      target = v["targetContext"];
-    else if (target != v["targetContext"])
-      return failure("配准候选不属于同一实际扫描载荷", "alignment");
     ::detection::utils::TemplateIcpScore score;
     score.id = v["templateId"].get<std::string>();
     score.left = v["left"]["score"].is_null() ? std::numeric_limits<double>::quiet_NaN()
@@ -939,7 +746,7 @@ Status transformBusinessRois(const Record& alignment, const std::string& datumSi
       moved[i].min[1] = center.y() - halfH;
       moved[i].max[0] = center.x() + halfW;
       moved[i].max[1] = center.y() + halfH;
-      if (!profile_contract::validGeometryV2(Data::box2d(moved[i]), why))
+      if (!profile_contract::validGeometry(Data::box2d(moved[i]), why))
         return failure(why, "alignment", "invalid_result");
     }
     const double lx = .5 * (static_cast<double>(moved[1].min[0]) + moved[1].max[0]);
@@ -949,7 +756,7 @@ Status transformBusinessRois(const Record& alignment, const std::string& datumSi
     Box2D seamBox;
     seamBox.min[0] = seamBox.max[0] = static_cast<float>((lx + rx) * .5);
     seamBox.min[1] = seamBox.max[1] = static_cast<float>((ly + ry) * .5);
-    if (!profile_contract::validGeometryV2(Data::box2d(seamBox), why))
+    if (!profile_contract::validGeometry(Data::box2d(seamBox), why))
       return failure(why, "alignment", "invalid_result");
     boxes = moved;
     seam = seamBox;
@@ -973,50 +780,16 @@ Status businessRois(const Data& alignment, const std::string& datumSide,
   const auto status = transformBusinessRois(*view.info, datumSide, oldBoxes, seamBox, resolved);
   if (!status.ok)
     return status;
-  Json sourceContexts;
-  if (!profile_contract::profileSources(*view.target, view.targetProvenance, sourceContexts, why))
-    return failure(why, "alignment");
-  const bool right = resolved == "right";
-  const Data* roles[4] = {right ? view.alignedRight : view.alignedLeft,
-                          right ? view.alignedLeft : view.alignedRight, view.alignedLeft,
-                          view.alignedRight};
+  const auto space = profile_contract::geometryContext(view.target->asProfile()->descriptor);
   constexpr std::array<std::size_t, 4> mapping{0, 2, 1, 3};
   profile_scene::RoiFields candidate;
   for (std::size_t i = 0; i < 4; ++i) {
-    auto sources = sourceContexts;
-    sources.push_back(profile_contract::context(*roles[i]));
     candidate.boxes[i] = Data::box2d(oldBoxes[mapping[i]]);
-    ProfileDescriptor sourceSpace;
-    Json unique = Json::array();
-    for (const auto& source : sources)
-      if (std::find(unique.begin(), unique.end(), source) == unique.end())
-        unique.push_back(source);
-    if (!profile_contract::geometrySources(unique, sourceSpace, why))
-      return failure(why, "alignment");
-    const auto info = profile_contract::geometryContextV2FromSources(candidate.boxes[i], unique);
-    if (info.is_null())
-      return failure("模板角色框来源超过预算或空间不一致", "alignment");
-    candidate.contexts[i] = Data::record({"profile.Geometry.v2", info});
+    candidate.contexts[i] = Data::record(space);
   }
-  auto seamSources = sourceContexts;
-  seamSources.push_back(profile_contract::context(*view.alignedLeft));
-  seamSources.push_back(profile_contract::context(*view.alignedRight));
-  Data candidateSeam = Data::box2d(seamBox);
-  ProfileDescriptor seamSpace;
-  Json uniqueSeam = Json::array();
-  for (const auto& source : seamSources)
-    if (std::find(uniqueSeam.begin(), uniqueSeam.end(), source) == uniqueSeam.end())
-      uniqueSeam.push_back(source);
-  if (!profile_contract::geometrySources(uniqueSeam, seamSpace, why))
-    return failure(why, "alignment");
-  const auto candidateSeamInfo =
-      profile_contract::geometryContextV2FromSources(candidateSeam, uniqueSeam);
-  if (candidateSeamInfo.is_null())
-    return failure("缝方向框来源超过预算或空间不一致", "alignment");
-  Data candidateSeamContext = Data::record({"profile.Geometry.v2", candidateSeamInfo});
   const auto source = view.info->data["roisFrom"];
   candidate.info = {profile_scene::kRoiInfoType,
-                    {{"schemaVersion", 2},
+                    {{"schemaVersion", 3},
                      {"datumSide", resolved},
                      {"source", source},
                      {"roisFrom", source},
@@ -1027,14 +800,11 @@ Status businessRois(const Data& alignment, const std::string& datumSide,
                       {{"method", "template"},
                        {"status", "complete"},
                        {"details", {{"templateId", view.info->data["templateId"]}}}}}}};
-  Data checked;
-  if (!profile_scene::makeRoiSet(candidate, checked, why))
-    return failure(why, "alignment", "invalid_result");
   if (context.cancelled())
     return cancelled();
   result = std::move(candidate);
-  seam = std::move(candidateSeam);
-  seamContext = std::move(candidateSeamContext);
+  seam = Data::box2d(seamBox);
+  seamContext = Data::record(space);
   return Status::Ok();
 }
 
@@ -1084,28 +854,26 @@ void registerProfileTemplateOps(Registry& registry) {
                       "",
                       {{"left", "Profile", "左模板XY米制完整原槽。"},
                        {"right", "Profile", "右模板XY米制完整原槽。"},
-                       {"info", "Record", "gap.TemplateInfo.v2文件及原始模板上下文。"}}});
+                       {"info", "Record", "gap.TemplateInfo.v3模板帧与文件或宿主来源。"}}});
   registry.addBundle({kAlignmentKind,
                       "原生模板配准",
-                      "实际扫描、原模板、已变换模板和来源绑定。",
+                      "实际扫描、已变换模板和配准记录。",
                       "",
                       {{"target", "Profile", "实际量测帧扫描轮廓。"},
-                       {"targetProvenance", "Record", "扫描采样与引用来源。"},
-                       {"templateLeft", "Profile", "原模板帧左轮廓。"},
-                       {"templateRight", "Profile", "原模板帧右轮廓。"},
                        {"alignedLeft", "Profile", "实际变换后的量测帧左模板。"},
                        {"alignedRight", "Profile", "实际变换后的量测帧右模板。"},
-                       {"info", "Record", "gap.AlignmentInfo.v2矩阵、候选与内容绑定。"}}});
+                       {"info", "Record", "gap.AlignmentInfo.v3矩阵、候选与模板框。"}}});
   OperatorDesc load;
   load.id = "gap.load_template";
-  load.version = "2.0.0";
+  load.version = "3.0.0";
   declareGapGraphUpgrade(load);
+  load.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   load.label = "模板轮廓读取";
   load.category = "间隙/输入";
   load.keywords = {"template", "模板", "PCD", "profile"};
   load.doc = "读取保留有效掩码、原槽索引及全部支持通道的模板对，显式转换为模板XY米制坐标。";
   load.outputs = {
-      {"templates", "Bundle<gap.TemplatePair.v2>", "模板对", "完整模板来源契约。", true},
+      {"templates", "Bundle<gap.TemplatePair.v3>", "模板对", "模板轮廓与文件或宿主来源。", true},
       {"left", "Profile", "左模板", "原生左模板视图。", true},
       {"right", "Profile", "右模板", "原生右模板视图。", true}};
   load.params = loadParameters();
@@ -1126,17 +894,18 @@ void registerProfileTemplateOps(Registry& registry) {
   registry.addOperator(std::move(load));
   OperatorDesc operation;
   operation.id = "gap.align_template";
-  operation.version = "2.0.0";
+  operation.version = "3.0.0";
   declareGapGraphUpgrade(operation);
+  operation.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   operation.label = "模板配准";
   operation.category = "间隙/配准";
   operation.keywords = {"template registration", "2D ICP", "模板对齐", "二维刚体配准"};
   operation.doc =
-      "复用全局粗配、左右ICP、双向重试、退化锁定与信赖域策略；实际变换模板原槽并生成量测坐标来源。";
+      "复用全局粗配、左右ICP、双向重试、退化锁定与信赖域策略；实际变换模板原槽到量测坐标。";
   operation.inputs = {
-      {"scan", "Bundle<gap.ScanPair.v2>", "扫描轮廓对", "实际扫描来源。", true},
-      {"templates", "Bundle<gap.TemplatePair.v2>", "模板对", "明确模板来源。", true}};
-  operation.outputs = {{"alignment", "Bundle<gap.Alignment.v2>", "配准结果",
+      {"scan", "Bundle<gap.ScanPair.v3>", "扫描轮廓对", "实际扫描来源。", true},
+      {"templates", "Bundle<gap.TemplatePair.v3>", "模板对", "明确模板来源。", true}};
+  operation.outputs = {{"alignment", "Bundle<gap.Alignment.v3>", "配准结果",
                         "矩阵、原模板和实际已变换轮廓。", true}};
   operation.params = alignmentParameters();
   for (auto& parameter : operation.params)
@@ -1155,18 +924,19 @@ void registerProfileTemplateOps(Registry& registry) {
   registry.addOperator(std::move(operation));
   OperatorDesc selection;
   selection.id = "gap.select_alignment";
-  selection.version = "2.0.0";
+  selection.version = "3.0.0";
   declareGapGraphUpgrade(selection);
+  selection.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   selection.label = "配准结果选择";
   selection.category = "间隙/配准";
   selection.keywords = {"alignment selection", "best ICP", "模板优选", "配准评分"};
   selection.doc =
       "只接受同一实际扫描的1到4个候选，按最低侧分、均值、配置顺序及模板标识确定最优；全部低分时明确失败。";
-  selection.inputs = {{"a", "Bundle<gap.Alignment.v2>", "候选A", "", true},
-                      {"b", "Bundle<gap.Alignment.v2>", "候选B", "", false},
-                      {"c", "Bundle<gap.Alignment.v2>", "候选C", "", false},
-                      {"d", "Bundle<gap.Alignment.v2>", "候选D", "", false}};
-  selection.outputs = {{"alignment", "Bundle<gap.Alignment.v2>", "选中配准", "", true}};
+  selection.inputs = {{"a", "Bundle<gap.Alignment.v3>", "候选A", "", true},
+                      {"b", "Bundle<gap.Alignment.v3>", "候选B", "", false},
+                      {"c", "Bundle<gap.Alignment.v3>", "候选C", "", false},
+                      {"d", "Bundle<gap.Alignment.v3>", "候选D", "", false}};
+  selection.outputs = {{"alignment", "Bundle<gap.Alignment.v3>", "选中配准", "", true}};
   selection.params = selectionParameters();
   selection.capabilities = {true, true, true};
   selection.compute = [](const Inputs& inputs, const ParamView& params, Outputs& outputs,
@@ -1184,19 +954,19 @@ void registerProfileTemplateOps(Registry& registry) {
   registry.addOperator(std::move(selection));
   OperatorDesc roi;
   roi.id = "gap.business_rois";
-  roi.version = "2.0.0";
+  roi.version = "3.0.0";
   declareGapGraphUpgrade(roi);
+  roi.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   roi.label = "业务区域定位";
   roi.category = "间隙/配准";
   roi.keywords = {"business ROI", "模板框", "基准面", "间隙"};
-  roi.doc =
-      "按左右配准矩阵移动业务框中心并保持原宽高，各框同时携带扫描和实际已变换模板的量测坐标来源。";
-  roi.inputs = {{"alignment", "Bundle<gap.Alignment.v2>", "配准结果", "", true}};
-  roi.outputs = {{"rois", "Bundle<gap.RoiSet.v2>", "业务区域集", "", true}};
+  roi.doc = "按左右配准矩阵移动业务框中心并保持原宽高，各框携带扫描所在量测空间。";
+  roi.inputs = {{"alignment", "Bundle<gap.Alignment.v3>", "配准结果", "", true}};
+  roi.outputs = {{"rois", "Bundle<gap.RoiSet.v3>", "业务区域集", "", true}};
   for (const auto* name : {"flushBase", "gapLeft", "flushRef", "gapRight", "seam"}) {
     roi.outputs.push_back({name, "Box2D", name, "米制业务区域。", true});
-    roi.outputs.push_back({std::string(name) + "Context", "Record", std::string(name) + "来源",
-                           "profile.Geometry.v2。", true});
+    roi.outputs.push_back({std::string(name) + "Context", "Record", std::string(name) + "空间",
+                           "profile.Geometry.v3。", true});
   }
   roi.params = businessRoiParameters();
   roi.capabilities = {true, true, true};

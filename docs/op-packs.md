@@ -26,8 +26,8 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
 | `std-geometry`   | 0.7.0  | ON      | 39项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
-| `std-metrology`  | 0.3.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
-| `std-profile`    | 0.4.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
+| `std-metrology`  | 0.4.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
+| `std-profile`    | 0.5.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
 | `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.3.1  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
 | `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |

@@ -5,7 +5,7 @@
 
 #include "helpers.h"
 #include "lyflow/profile.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/merge.h"
 #include "ops/profile_circles.h"
 #include "ops/profile_measurement_ops.h"
 
@@ -57,29 +57,12 @@ scene::CirclePairInputs fixture(int pCount = 40, int sCount = 60, double shift =
   inputs.primary = profile(pCount, "physical-A", 1000, 0, .0035, unit, plane);
   inputs.secondary =
       profile(sCount, "physical-B", 2000, shift, rightMoved ? .0045 : .0035, unit, plane);
-  Profile merged = *inputs.secondary.asProfile();
-  PointCloud cloud = *merged.cloud;
-  PointCloud identity;
-  cloud.id = identity.id;
-  const auto* primary = inputs.primary.asProfile();
-  cloud.xyz.insert(cloud.xyz.end(), primary->cloud->xyz.begin(), primary->cloud->xyz.end());
-  cloud.intensity.insert(cloud.intensity.end(), primary->cloud->intensity.begin(),
-                         primary->cloud->intensity.end());
-  cloud.normals.insert(cloud.normals.end(), primary->cloud->normals.begin(),
-                       primary->cloud->normals.end());
-  cloud.rgb.insert(cloud.rgb.end(), primary->cloud->rgb.begin(), primary->cloud->rgb.end());
-  merged.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  merged.validity.insert(merged.validity.end(), primary->validity.begin(), primary->validity.end());
-  for (auto index : primary->sourceIndices)
-    merged.sourceIndices.push_back(
-        static_cast<std::uint32_t>(inputs.secondary.asProfile()->descriptor.sourceCount + index));
-  Record provenance;
+  profile_contract::MergeResult merged;
   std::string why;
-  REQUIRE_MESSAGE(profile_contract::makeCompositeProvenance(
-                      inputs.secondary, inputs.primary, nullptr, nullptr, "secondary", "primary",
-                      "require_equal", merged, provenance, why),
+  REQUIRE_MESSAGE(profile_contract::mergeProfiles(inputs.secondary, inputs.primary, "require_equal",
+                                                  merged, why),
                   why);
-  inputs.merged = Data::profile(std::move(merged));
+  inputs.merged = merged.profile;
   if (sparse) {
     const auto full = inputs.merged;
     Profile subset = *full.asProfile();
@@ -90,11 +73,7 @@ scene::CirclePairInputs fixture(int pCount = 40, int sCount = 60, double shift =
     for (auto slot : slots)
       subset.sourceIndices.push_back(full.asProfile()->sourceIndices[slot]);
     inputs.merged = Data::profile(std::move(subset));
-    Record rebound;
-    REQUIRE(profile_contract::rebindProvenance(full, inputs.merged, &provenance, rebound, why));
-    provenance = std::move(rebound);
   }
-  inputs.mergedProvenance = Data::record(std::move(provenance));
   for (int side = 0; side < 2; ++side) {
     Box2D box;
     box.min[0] = side ? .001F : -.006F;
@@ -102,9 +81,8 @@ scene::CirclePairInputs fixture(int pCount = 40, int sCount = 60, double shift =
     box.min[1] = -.004F;
     box.max[1] = .002F;
     inputs.boxes[side] = Data::box2d(box);
-    inputs.boxContexts[side] = Data::record(
-        Record{"profile.Geometry.v2",
-               profile_contract::geometryContextV2(inputs.merged, inputs.boxes[side])});
+    inputs.boxContexts[side] =
+        Data::record(profile_contract::geometryContext(inputs.merged.asProfile()->descriptor));
   }
   return inputs;
 }
@@ -195,13 +173,11 @@ void checkOutput(const scene::CirclePairInputs& inputs, const scene::CirclePairR
               parent.asProfile()->cloud->normals[3 * sourceSlot + axis]);
       }
     }
-    Json sources;
     std::string why;
-    CHECK(profile_contract::profileSources(result.profiles[side],
-                                           result.provenances[side].asRecord(), sources, why));
     ProfileDescriptor descriptor;
-    CHECK(profile_contract::geometryMatchesPhysical(
-        result.circles[side], result.contexts[side].asRecord(), descriptor, why));
+    CHECK(profile_contract::geometrySpace(result.circles[side], result.contexts[side].asRecord(),
+                                          descriptor, why));
+    CHECK(profile_contract::sameSpace(descriptor, native->descriptor));
   }
 }
 struct Poll final : ExecContext {
@@ -329,7 +305,7 @@ TEST_CASE(
   for (const auto& item : cases) {
     CAPTURE(item.name);
     auto inputs = fixture(item.primary, item.secondary, item.shift, item.sparse, item.moved);
-    const auto before = profile_contract::context(inputs.merged);
+    const auto before = inputs.merged.valueJson();
     auto parameters = defaults(item.params);
     test::StubContext ctx;
     scene::CirclePairResult result;
@@ -352,7 +328,7 @@ TEST_CASE(
       CHECK(std::memcmp(a->center, b->center, sizeof(a->center)) == 0);
       CHECK(std::memcmp(&a->radius, &b->radius, sizeof(float)) == 0);
     }
-    CHECK(profile_contract::context(inputs.merged) == before);
+    CHECK(inputs.merged.valueJson() == before);
   }
 }
 TEST_CASE("Native scene circle pair carries masks metric views and constraint reference contexts") {
@@ -369,8 +345,7 @@ TEST_CASE("Native scene circle pair carries masks metric views and constraint re
       Line2D line;
       inputs.refLine = Data::line2d(line);
       inputs.refLineContext =
-          Data::record(Record{"profile.Geometry.v2",
-                              profile_contract::geometryContextV2(inputs.merged, inputs.refLine)});
+          Data::record(profile_contract::geometryContext(inputs.merged.asProfile()->descriptor));
       auto parameters = defaults({{"leftCamera", Value::text("Primary")},
                                   {"leftCenterAbove", Value::number(.5)},
                                   {"leftCenterTol", Value::number(.3)},
@@ -404,12 +379,6 @@ TEST_CASE(
   CHECK_FALSE(
       scene::fitProfileGapCircles(wrong, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
   CHECK(result.quality.type == "sentinel");
-  wrong = inputs;
-  auto forged = *wrong.mergedProvenance.asRecord();
-  forged.data["profileContext"]["profileHash"] = std::string(32, '0');
-  wrong.mergedProvenance = Data::record(forged);
-  CHECK_FALSE(
-      scene::fitProfileGapCircles(wrong, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
   wrong = inputs;
   wrong.refLine = Data::line2d(Line2D{});
   CHECK_FALSE(
@@ -445,20 +414,23 @@ TEST_CASE("Native scene circle pair and shared legacy helper publish nothing on 
   CHECK(values.empty());
 }
 
-TEST_CASE("Native scene circle registration exposes complete typed profiles contexts and lineage") {
+TEST_CASE("Native scene circle registration exposes complete typed profiles and contexts") {
   const auto inputs = fixture();
   Registry registry;
   scene::registerProfileGapCircles(registry);
   test::OpCall call(registry);
-  call.inputs = {{"merged", inputs.merged},       {"primary", inputs.primary},
-                 {"secondary", inputs.secondary}, {"mergedProvenance", inputs.mergedProvenance},
-                 {"boxLeft", inputs.boxes[0]},    {"boxLeftContext", inputs.boxContexts[0]},
-                 {"boxRight", inputs.boxes[1]},   {"boxRightContext", inputs.boxContexts[1]}};
+  call.inputs = {{"merged", inputs.merged},
+                 {"primary", inputs.primary},
+                 {"secondary", inputs.secondary},
+                 {"boxLeft", inputs.boxes[0]},
+                 {"boxLeftContext", inputs.boxContexts[0]},
+                 {"boxRight", inputs.boxes[1]},
+                 {"boxRightContext", inputs.boxContexts[1]}};
   REQUIRE_MESSAGE(call.run("gap.fit_gap_circles").ok, call.status.message);
-  CHECK(call.outputs.size() == 11);
+  CHECK(call.outputs.size() == 9);
   REQUIRE(call.out("leftProfile").asProfile());
   REQUIRE(call.out("rightProfile").asProfile());
-  CHECK(call.out("quality").asRecord()->type == "gap.CircleFitPair.v2");
+  CHECK(call.out("quality").asRecord()->type == "gap.CircleFitPair.v3");
   CHECK(call.out("leftInliers").asIndices()->sourceCloudId ==
         call.out("leftProfile").asProfile()->cloud->id);
   CHECK(call.out("rightInliers").asIndices()->sourceCloudId ==
@@ -488,24 +460,17 @@ struct Call {
     input.merged = profileCloud(*inputs.at("merged").asCloud(), "explicit-merged-fixture");
     input.primary = profileCloud(*inputs.at("primary").asCloud(), "explicit-primary-fixture");
     input.secondary = profileCloud(*inputs.at("secondary").asCloud(), "explicit-secondary-fixture");
-    Record provenance;
-    std::string why;
-    REQUIRE(
-        profile_contract::rebindProvenance(input.merged, input.merged, nullptr, provenance, why));
-    input.mergedProvenance = Data::record(provenance);
-    auto bound = [&](const Data& geometry) {
-      return Data::record(Record{"profile.Geometry.v2",
-                                 profile_contract::geometryContextV2(input.merged, geometry)});
-    };
+    const auto bound =
+        Data::record(profile_contract::geometryContext(input.merged.asProfile()->descriptor));
     input.boxes = {inputs.at("boxLeft"), inputs.at("boxRight")};
-    input.boxContexts = {bound(input.boxes[0]), bound(input.boxes[1])};
+    input.boxContexts = {bound, bound};
     if (inputs.count("refLine")) {
       input.refLine = inputs.at("refLine");
-      input.refLineContext = bound(input.refLine);
+      input.refLineContext = bound;
     }
     if (inputs.count("refLineRight")) {
       input.refLineRight = inputs.at("refLineRight");
-      input.refLineRightContext = bound(input.refLineRight);
+      input.refLineRightContext = bound;
     }
     const auto parameters = defaults(overrides);
     test::StubContext ctx;
@@ -525,7 +490,7 @@ struct Call {
     scene::registerProfileGapCircles(registry);
     const auto parameters = defaults(overrides);
     test::StubContext ctx;
-    for (const auto* field : {"mergedProvenance", "boxLeftContext", "boxRightContext"})
+    for (const auto* field : {"boxLeftContext", "boxRightContext"})
       connected.insert(field);
     if (connected.count("refLine"))
       connected.insert("refLineContext");

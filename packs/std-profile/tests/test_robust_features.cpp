@@ -9,7 +9,6 @@
 #include "lyflow/profile.h"
 #include "lyflow_profile/context.h"
 #include "lyflow_profile/features.h"
-#include "lyflow_profile/provenance.h"
 
 namespace lyflow::packs::std_profile {
 void registerRobustProfileFeatures(Registry&);
@@ -76,11 +75,8 @@ Data arcProfile(const char* unit = "m", const char* plane = "XY", bool masks = f
   }
   return profileOf(points, unit, plane, masks);
 }
-Data context(const Data& profile, const Data& geometry, bool v1 = false) {
-  return Data::record(
-      Record{v1 ? "profile.Geometry.v1" : "profile.Geometry.v2",
-             v1 ? profile_contract::geometryContext(profile, geometry)
-                : profile_contract::geometryContextV2(profile, geometry, "declared")});
+Data context(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
 }
 void attachLine(test::OpCall& call, const Data& profile, bool reference = false) {
   Box2D bounds;
@@ -94,13 +90,13 @@ void attachLine(test::OpCall& call, const Data& profile, bool reference = false)
   const auto box = Data::box2d(bounds), point = Data::point2d(toward);
   call.inputs = {{"profile", profile},
                  {"box", box},
-                 {"boxContext", context(profile, box)},
+                 {"boxContext", context(profile)},
                  {"toward", point},
-                 {"towardContext", context(profile, point, true)}};
+                 {"towardContext", context(profile)}};
   if (reference) {
     const auto line = Data::line2d(Line2D{});
     call.inputs["refLine"] = line;
-    call.inputs["refLineContext"] = context(profile, line);
+    call.inputs["refLineContext"] = context(profile);
   }
 }
 void checkSelection(test::OpCall& call, const Data& source) {
@@ -117,9 +113,8 @@ void checkSelection(test::OpCall& call, const Data& source) {
   CHECK(std::adjacent_find(unique->values.begin(), unique->values.end()) == unique->values.end());
   const auto* map = call.out("indexMap").asRecord();
   REQUIRE(map);
-  CHECK(map->type == "profile.Selection.v1");
-  CHECK(map->data.size() == 7);
-  CHECK(map->data["context"] == profile_contract::context(source));
+  CHECK(map->type == "profile.Selection.v2");
+  CHECK(map->data.size() == 6);
   CHECK(map->data["sourceCloudId"] == std::to_string(input->cloud->id));
   CHECK(map->data["indexSpace"] == "profile_slots");
   CHECK(map->data["indexCount"] == unique->values.size());
@@ -145,7 +140,6 @@ TEST_CASE("Robust Profile line operators preserve source slots across metric uni
       CAPTURE(unit);
       CAPTURE(plane);
       const auto source = lineProfile(unit, plane, true);
-      const auto before = profile_contract::context(source);
       test::OpCall call(robustRegistry());
       attachLine(call, source);
       REQUIRE_MESSAGE(
@@ -157,7 +151,6 @@ TEST_CASE("Robust Profile line operators preserve source slots across metric uni
       CHECK(std::find(indices->values.begin(), indices->values.end(), 2) == indices->values.end());
       CHECK(std::find(indices->values.begin(), indices->values.end(), 7) == indices->values.end());
       CHECK(call.out("profile").asProfile()->sourceIndices[3] == 10);
-      CHECK(profile_contract::context(source) == before);
       const auto& line = *call.out("line").asLine2D();
       CHECK(line.unit == Unit2D::Meter);
       CHECK(line.dir[1] / line.dir[0] == doctest::Approx(0.1).epsilon(1e-4));
@@ -165,14 +158,12 @@ TEST_CASE("Robust Profile line operators preserve source slots across metric uni
       REQUIRE(point);
       CHECK(point->p[0] == doctest::Approx(0.015).epsilon(1e-5));
       CHECK(point->p[1] == doctest::Approx(0.0035).epsilon(1e-5));
-      ProfileDescriptor descriptor;
       std::string why;
-      REQUIRE(profile_contract::geometryMatchesPhysical(
-          call.out("line"), call.out("lineContext").asRecord(), descriptor, why));
-      CHECK(descriptor.frame == "measurement");
-      CHECK(descriptor.plane == plane);
-      REQUIRE(profile_contract::geometryMatchesPhysical(
-          call.out("innerEnd"), call.out("pointContext").asRecord(), descriptor, why));
+      CHECK(profile_contract::geometryInSpace(call.out("line"), call.out("lineContext").asRecord(),
+                                              source.asProfile()->descriptor, why));
+      CHECK(profile_contract::geometryInSpace(call.out("innerEnd"),
+                                              call.out("pointContext").asRecord(),
+                                              source.asProfile()->descriptor, why));
       const auto& quality = call.out("quality").asRecord()->data;
       CHECK(quality["uniqueInlierCount"] == 14);
       CHECK(quality["weightedInlierCount"] == 14);
@@ -222,7 +213,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Robust Profile geometry inputs reject frame plane handedness and content mismatches atomically") {
+    "Robust Profile geometry inputs reject frame plane handedness and unit mismatches atomically") {
   const auto source = lineProfile();
   for (const auto* field : {"frame", "plane", "handedness"}) {
     CAPTURE(field);
@@ -236,7 +227,7 @@ TEST_CASE(
     const auto other = Data::profile(changed);
     test::OpCall call(robustRegistry());
     attachLine(call, source);
-    call.inputs["boxContext"] = context(other, call.inputs["box"]);
+    call.inputs["boxContext"] = context(other);
     CHECK_FALSE(call.run("profile.fit_line_robust").ok);
     CHECK(call.outputs.empty());
     CHECK(call.status.portName == "boxContext");
@@ -244,7 +235,7 @@ TEST_CASE(
   test::OpCall call(robustRegistry());
   attachLine(call, source);
   auto point = *call.inputs["toward"].asPoint2D();
-  point.p[0] += 1;
+  point.unit = Unit2D::Pixel;
   call.inputs["toward"] = Data::point2d(point);
   CHECK_FALSE(call.run("profile.fit_line_robust").ok);
   CHECK(call.outputs.empty());
@@ -262,7 +253,6 @@ TEST_CASE(
   for (const auto* unit : {"m", "mm"}) {
     for (const auto* plane : {"XY", "XZ"}) {
       const auto source = arcProfile(unit, plane, true);
-      const auto before = profile_contract::context(source);
       for (const auto* mode : {"free", "fixed", "prior"}) {
         CAPTURE(unit);
         CAPTURE(plane);
@@ -293,12 +283,10 @@ TEST_CASE(
         if (std::string(mode) == "prior")
           CHECK(quality["radiusOutcome"] != "free");
         CHECK(quality["uniqueInlierCount"] == quality["weightedInlierCount"]);
-        CHECK(profile_contract::context(source) == before);
-        ProfileDescriptor descriptor;
         std::string why;
-        REQUIRE(profile_contract::geometryMatchesPhysical(
-            call.out("circle"), call.out("circleContext").asRecord(), descriptor, why));
-        CHECK(descriptor.plane == plane);
+        CHECK(profile_contract::geometryInSpace(call.out("circle"),
+                                                call.out("circleContext").asRecord(),
+                                                source.asProfile()->descriptor, why));
         const auto& indices = call.out("inliers").asIndices()->values;
         CHECK(std::find(indices.begin(), indices.end(), 2) == indices.end());
         CHECK(std::find(indices.begin(), indices.end(), 7) == indices.end());
@@ -360,7 +348,7 @@ TEST_CASE("Robust Profile cancellation before final publication preserves an emp
   }
 }
 
-TEST_CASE("Robust Profile box toward preserves the original double center and strict context") {
+TEST_CASE("Robust Profile box toward preserves the original double center") {
   const float upper = std::nextafter(1.0F, 2.0F);
   const auto source = profileOf({{upper, 0}, {1, 0}, {1.1F, 0}});
   test::OpCall call(robustRegistry());
@@ -371,67 +359,21 @@ TEST_CASE("Robust Profile box toward preserves the original double center and st
   toward.min[1] = toward.max[1] = 0;
   const auto box = Data::box2d(toward);
   call.inputs["toward"] = box;
-  call.inputs["towardContext"] = context(source, box);
+  call.inputs["towardContext"] = context(source);
   const std::unordered_map<std::string, Value> options{{"dirMode", Value::text("fixed")},
                                                        {"segmentPoints", Value::integer(0)},
                                                        {"endpoints", Value::text("inlier_ends")}};
   REQUIRE_MESSAGE(call.run("profile.fit_line_robust", options).ok, call.status.message);
   CHECK(call.out("innerEnd").asPoint2D()->p[0] == upper);
-  const auto provenance = call.out("provenance");
-  REQUIRE(provenance.asRecord());
-  std::string why;
-  nlohmann::json sources;
-  CHECK(profile_contract::profileSources(source, provenance.asRecord(), sources, why));
   Point2D point;
   point.p[0] = 1;
-  const auto rounded = Data::point2d(point);
-  call.inputs["toward"] = rounded;
-  call.inputs["towardContext"] = context(source, rounded, true);
+  call.inputs["toward"] = Data::point2d(point);
   REQUIRE(call.run("profile.fit_line_robust", options).ok);
   CHECK(call.out("innerEnd").asPoint2D()->p[0] == 1.0F);
-  call.inputs["toward"] = box;
-  CHECK_FALSE(call.run("profile.fit_line_robust", options).ok);
-  CHECK(call.outputs.empty());
-  call.inputs["towardContext"] = context(source, box);
-  toward.max[0] = 2;
+  toward.min[0] = 2;
   call.inputs["toward"] = Data::box2d(toward);
   CHECK_FALSE(call.run("profile.fit_line_robust", options).ok);
   CHECK(call.outputs.empty());
-}
-
-TEST_CASE(
-    "Robust Profile fit provenance is bound to the exact input and preserved in geometry sources") {
-  for (const bool circle : {false, true}) {
-    const auto source = circle ? arcProfile() : lineProfile();
-    Record provenance;
-    std::string why;
-    REQUIRE(profile_contract::rebindProvenance(source, source, nullptr, provenance, why));
-    auto reference = *source.asProfile();
-    reference.descriptor.sourceId = "external-ROI";
-    const auto referenceData = Data::profile(std::move(reference));
-    Record extended;
-    REQUIRE(profile_contract::extendProvenanceSources(
-        source, provenance, nlohmann::json::array({profile_contract::context(referenceData)}),
-        extended, why));
-    test::OpCall call(robustRegistry());
-    if (circle)
-      call.inputs = {{"profile", source}};
-    else
-      attachLine(call, source);
-    call.inputs["provenance"] = Data::record(extended);
-    const char* id = circle ? "profile.fit_circle_robust" : "profile.fit_line_robust";
-    REQUIRE_MESSAGE(call.run(id).ok, call.status.message);
-    const auto& sources =
-        call.out(circle ? "circleContext" : "lineContext").asRecord()->data["sources"];
-    CHECK(std::find(sources.begin(), sources.end(), profile_contract::context(referenceData)) !=
-          sources.end());
-    CHECK(call.out("provenance").asRecord()->data["profileContext"] ==
-          profile_contract::context(source));
-    extended.data["profileContext"]["profileHash"] = std::string(32, '0');
-    call.inputs["provenance"] = Data::record(extended);
-    CHECK_FALSE(call.run(id).ok);
-    CHECK(call.outputs.empty());
-  }
 }
 
 TEST_CASE(
@@ -475,9 +417,9 @@ TEST_CASE(
   call.inputs = {{"profile", arc}};
   REQUIRE(call.run("profile.fit_circle_robust").ok);
   profile_contract::RobustCircleResult circle;
-  REQUIRE(profile_contract::fitRobustCircle({arc, {}}, ParamView(call.params, ctx.baseDir()),
-                                            circle, ctx)
-              .ok);
+  REQUIRE(
+      profile_contract::fitRobustCircle({arc}, ParamView(call.params, ctx.baseDir()), circle, ctx)
+          .ok);
   CHECK(circle.quality.asRecord()->data == call.out("quality").asRecord()->data);
   CHECK(circle.inliers.asIndices()->values == call.out("inliers").asIndices()->values);
   CHECK(circle.profile.profilePtr() == arc.profilePtr());
@@ -496,13 +438,13 @@ TEST_CASE(
     const auto box = Data::box2d(roi), anchor = Data::box2d(toward);
     call.inputs = {{"profile", profile},
                    {"box", box},
-                   {"boxContext", context(profile, box)},
+                   {"boxContext", context(profile)},
                    {"toward", anchor},
-                   {"towardContext", context(profile, anchor)}};
+                   {"towardContext", context(profile)}};
     if (reference) {
       const auto line = Data::line2d(*reference);
       call.inputs["refLine"] = line;
-      call.inputs["refLineContext"] = context(profile, line);
+      call.inputs["refLineContext"] = context(profile);
     }
   };
   SUBCASE("legacy:77 toward selection is independent of ascending or descending slots") {

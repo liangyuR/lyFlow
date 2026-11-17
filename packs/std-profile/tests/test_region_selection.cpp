@@ -4,7 +4,6 @@
 #include "helpers.h"
 #include "lyflow/profile.h"
 #include "lyflow_profile/context.h"
-#include "lyflow_profile/provenance.h"
 
 namespace lyflow::packs::std_profile {
 void registerProfileRegionSelection(Registry&);
@@ -47,9 +46,8 @@ Data box() {
   b.max[0] = b.max[1] = .004F;
   return Data::box2d(b);
 }
-Data context(const Data& p, const Data& geometry) {
-  return Data::record(
-      Record{"profile.Geometry.v2", profile_contract::geometryContextV2(p, geometry)});
+Data context(const Data& p) {
+  return Data::record(profile_contract::geometryContext(p.asProfile()->descriptor));
 }
 struct Poll final : ExecContext {
   mutable int count = 0;
@@ -75,9 +73,8 @@ TEST_CASE("Profile ROI keeps source slots and all channels with explicit metric 
         p = Data::profile(std::move(value));
       }
       const auto b = box();
-      const auto before = profile_contract::context(p);
       test::OpCall call(regionRegistry());
-      call.inputs = {{"profile", p}, {"box", b}, {"boxContext", context(p, b)}};
+      call.inputs = {{"profile", p}, {"box", b}, {"boxContext", context(p)}};
       REQUIRE_MESSAGE(call.run("profile.crop_box").ok, call.status.message);
       CHECK(call.out("selected").asIndices()->values == std::vector<std::int32_t>{0, 3, 4});
       CHECK(call.out("selected").asIndices()->sourceCloudId == p.asProfile()->cloud->id);
@@ -88,11 +85,6 @@ TEST_CASE("Profile ROI keeps source slots and all channels with explicit metric 
       CHECK(selected->cloud->intensity == std::vector<float>{0, 3, 4});
       CHECK(selected->cloud->rgb == std::vector<std::uint8_t>{0, 20, 30, 3, 20, 30, 4, 20, 30});
       CHECK(selected->cloud->normals.size() == 9);
-      REQUIRE(call.out("provenance").asRecord());
-      nlohmann::json sources;
-      std::string why;
-      CHECK(profile_contract::profileSources(call.out("profile"), call.out("provenance").asRecord(),
-                                             sources, why));
       REQUIRE(call.run("profile.crop_box", {{"bounds", Value::text("open")}}).ok);
       CHECK(call.out("selected").asIndices()->values == std::vector<std::int32_t>{3});
       REQUIRE(call.run("profile.crop_box",
@@ -100,7 +92,6 @@ TEST_CASE("Profile ROI keeps source slots and all channels with explicit metric 
                   .ok);
       CHECK(call.out("profile").asProfile()->cloud == p.asProfile()->cloud);
       CHECK(call.out("profile").asProfile()->validity == std::vector<std::uint8_t>{0, 0, 0, 1, 0});
-      CHECK(profile_contract::context(p) == before);
     }
   }
 }
@@ -130,19 +121,19 @@ TEST_CASE(
   CHECK(call.out("profile").asProfile()->pointCount() == 0);
   CHECK(call.out("profile").asProfile()->descriptor.sourceCount == 50);
 }
-TEST_CASE(
-    "Profile regions reject wrong geometry and provenance and publish nothing on cancellation") {
+TEST_CASE("Profile regions reject wrong geometry or space and publish nothing on cancellation") {
   const auto p = source(), b = box();
   test::OpCall call(regionRegistry());
-  call.inputs = {{"profile", p}, {"box", b}, {"boxContext", context(p, b)}};
+  call.inputs = {{"profile", p}, {"box", b}, {"boxContext", context(p)}};
   REQUIRE(call.run("profile.crop_box").ok);
-  const auto validProvenance = call.out("provenance");
-  call.inputs["provenance"] = validProvenance;
+  auto otherSpace = *p.asProfile();
+  otherSpace.descriptor.handedness = "right";
+  call.inputs["boxContext"] = context(Data::profile(std::move(otherSpace)));
   CHECK_FALSE(call.run("profile.crop_box").ok);
   CHECK(call.outputs.empty());
-  call.inputs.erase("provenance");
+  call.inputs["boxContext"] = context(p);
   auto wrong = *b.asBox2D();
-  wrong.max[0] = 3;
+  wrong.unit = Unit2D::Pixel;
   call.inputs["box"] = Data::box2d(wrong);
   CHECK_FALSE(call.run("profile.crop_box").ok);
   CHECK(call.outputs.empty());
@@ -162,82 +153,4 @@ TEST_CASE(
   CHECK_FALSE(
       op->compute(Inputs(call.inputs), ParamView(parameters, stopped.base), out, stopped).ok);
   CHECK(values.empty());
-}
-
-TEST_CASE(
-    "Composite Profile selections preserve physical segment identity and ROI reference sources") {
-  const auto a = source();
-  auto bProfile = *source().asProfile();
-  bProfile.descriptor.sourceId = "physical-B";
-  const auto b = Data::profile(std::move(bProfile));
-  auto cProfile = *source("XZ", "m").asProfile();
-  cProfile.descriptor.sourceId = "physical-ROI";
-  const auto c = Data::profile(std::move(cProfile));
-  Profile merged = *a.asProfile();
-  auto cloud = *merged.cloud;
-  const auto& other = *b.asProfile()->cloud;
-  cloud.xyz.insert(cloud.xyz.end(), other.xyz.begin(), other.xyz.end());
-  cloud.intensity.insert(cloud.intensity.end(), other.intensity.begin(), other.intensity.end());
-  cloud.normals.insert(cloud.normals.end(), other.normals.begin(), other.normals.end());
-  cloud.rgb.insert(cloud.rgb.end(), other.rgb.begin(), other.rgb.end());
-  merged.cloud = std::make_shared<const PointCloud>(std::move(cloud));
-  merged.validity.insert(merged.validity.end(), b.asProfile()->validity.begin(),
-                         b.asProfile()->validity.end());
-  for (auto slot : b.asProfile()->sourceIndices)
-    merged.sourceIndices.push_back(slot + 50);
-  Record provenance;
-  std::string why;
-  REQUIRE_MESSAGE(profile_contract::makeCompositeProvenance(a, b, nullptr, nullptr, "secondary",
-                                                            "primary", "require_equal", merged,
-                                                            provenance, why),
-                  why);
-  const auto paired = Data::profile(std::move(merged));
-  const auto roi = box();
-  test::OpCall call(regionRegistry());
-  call.inputs = {{"profile", paired},
-                 {"provenance", Data::record(provenance)},
-                 {"box", roi},
-                 {"boxContext", context(c, roi)}};
-  REQUIRE_MESSAGE(call.run("profile.crop_box", {{"bounds", Value::text("open")}}).ok,
-                  call.status.message);
-  const auto crop = call.out("profile"), cropProvenance = call.out("provenance");
-  CHECK(crop.asProfile()->sourceIndices == std::vector<std::uint32_t>{20, 70});
-  nlohmann::json references;
-  REQUIRE(profile_contract::profileSources(crop, cropProvenance.asRecord(), references, why));
-  CHECK(std::find(references.begin(), references.end(), profile_contract::context(c)) !=
-        references.end());
-  call.inputs = {{"profile", crop}, {"provenance", cropProvenance}};
-  REQUIRE(call.run("profile.filter_validity", {{"mode", Value::text("compact")}}).ok);
-  const auto finite = call.out("profile"), finiteProvenance = call.out("provenance");
-  Point2D point;
-  point.p[0] = point.p[1] = .003F;
-  const auto anchor = Data::point2d(point);
-  call.inputs = {{"profile", finite},
-                 {"provenance", finiteProvenance},
-                 {"anchor", anchor},
-                 {"anchorContext", context(c, anchor)}};
-  REQUIRE(call.run("profile.nearest_sample").ok);
-  CHECK(call.out("selection").asRecord()->data["source"]["logicalRole"] == "secondary");
-  CHECK(call.out("selection").asRecord()->data["source"]["sourceId"] == "physical-A");
-  CHECK(call.out("selection").asRecord()->data["source"]["sourceIndex"] == 20);
-  const auto& geometrySources = call.out("pointContext").asRecord()->data["sources"];
-  CHECK(std::find(geometrySources.begin(), geometrySources.end(), profile_contract::context(c)) !=
-        geometrySources.end());
-  call.inputs = {{"profile", finite},
-                 {"provenance", finiteProvenance},
-                 {"geometry", anchor},
-                 {"referenceGeometry", roi},
-                 {"referenceContext", context(c, roi)}};
-  REQUIRE(call.run("profile.bind_geometry",
-                   {{"frame", Value::text("measurement")}, {"plane", Value::text("XZ")}})
-              .ok);
-  CHECK(call.out("context").asRecord()->data["relation"] == "declared");
-  const auto& boundSources = call.out("context").asRecord()->data["sources"];
-  CHECK(std::find(boundSources.begin(), boundSources.end(), profile_contract::context(c)) !=
-        boundSources.end());
-  call.inputs.erase("referenceGeometry");
-  CHECK_FALSE(call.run("profile.bind_geometry",
-                       {{"frame", Value::text("measurement")}, {"plane", Value::text("XZ")}})
-                  .ok);
-  CHECK(call.outputs.empty());
 }

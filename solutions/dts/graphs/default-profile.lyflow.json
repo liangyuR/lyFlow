@@ -43,7 +43,7 @@
     {
       "id": "n_faces",
       "op": "profile.split_faces",
-      "opVersion": "1.0.0",
+      "opVersion": "2.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -55,7 +55,7 @@
     {
       "id": "n_dome",
       "op": "dts.seal_dome",
-      "opVersion": "2.0.0",
+      "opVersion": "3.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -67,7 +67,7 @@
     {
       "id": "n_metal",
       "op": "dts.pick_metal",
-      "opVersion": "2.0.0",
+      "opVersion": "3.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -79,7 +79,7 @@
     {
       "id": "n_root",
       "op": "dts.seal_root",
-      "opVersion": "2.0.0",
+      "opVersion": "3.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -91,7 +91,7 @@
     {
       "id": "n_flush",
       "op": "dts.flush",
-      "opVersion": "2.0.0",
+      "opVersion": "3.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -103,7 +103,7 @@
     {
       "id": "n_bundle",
       "op": "dts.profile_bundle",
-      "opVersion": "2.0.0",
+      "opVersion": "3.0.0",
       "params": {},
       "ui": {
         "position": {
@@ -247,17 +247,6 @@
       }
     },
     {
-      "id": "e12",
-      "from": {
-        "node": "n_metal",
-        "port": "metal"
-      },
-      "to": {
-        "node": "n_flush",
-        "port": "metal"
-      }
-    },
-    {
       "id": "e13",
       "from": {
         "node": "n_faces",
@@ -302,17 +291,6 @@
       }
     },
     {
-      "id": "e17",
-      "from": {
-        "node": "n_metal",
-        "port": "metal"
-      },
-      "to": {
-        "node": "n_bundle",
-        "port": "metal"
-      }
-    },
-    {
       "id": "e18",
       "from": {
         "node": "n_flush",
@@ -321,17 +299,6 @@
       "to": {
         "node": "n_bundle",
         "port": "flush"
-      }
-    },
-    {
-      "id": "e19",
-      "from": {
-        "node": "n_flush",
-        "port": "foot"
-      },
-      "to": {
-        "node": "n_bundle",
-        "port": "foot"
       }
     },
     {

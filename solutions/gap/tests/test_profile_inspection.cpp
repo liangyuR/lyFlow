@@ -6,7 +6,7 @@
 #include "helpers.h"
 #include "lyflow/profile.h"
 #include "lyflow_profile/features.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 #include "ops/profile_inspection.h"
 
 using namespace lyflow;
@@ -97,9 +97,8 @@ ParamMap defaults(const std::vector<Param>& descriptions, const ParamMap& overri
     result[entry.first] = entry.second;
   return result;
 }
-Data bind(const Data& profile, const Data& geometry) {
-  return Data::record(
-      Record{"profile.Geometry.v2", profile_contract::geometryContextV2(profile, geometry)});
+Data bind(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
 }
 void checkNumeric(const Data& actual, const Data& expected) {
   CHECK(actual.typeName() == expected.typeName());
@@ -141,9 +140,9 @@ scene::CornerInputs cornerFixture() {
   input.lineLeft = Data::line2d(left);
   input.lineRight = Data::line2d(right);
   input.origin = Data::point2d(origin);
-  input.lineLeftContext = bind(source, input.lineLeft);
-  input.lineRightContext = bind(source, input.lineRight);
-  input.originContext = bind(source, input.origin);
+  input.lineLeftContext = bind(source);
+  input.lineRightContext = bind(source);
+  input.originContext = bind(source);
   return input;
 }
 class CancelContext final : public ExecContext {
@@ -170,18 +169,14 @@ TEST_CASE("native scene corner preserves float geometry and explicit origin with
   REQUIRE(scene::measureProfileCorner(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
   ProfileDescriptor descriptor;
   std::string why;
-  CHECK(profile_contract::geometryMatchesPhysical(result.vertex, result.vertexContext.asRecord(),
-                                                  descriptor, why));
+  CHECK(profile_contract::geometrySpace(result.vertex, result.vertexContext.asRecord(), descriptor,
+                                        why));
   CHECK(result.quality.data.at("originMode") == "explicit_metric_point");
   const auto before = result.quality.data;
-  input.origin = Data::point2d(Point2D{});
-  CHECK_FALSE(
-      scene::measureProfileCorner(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
-  CHECK(result.quality.data == before);
-  input = cornerFixture();
   input.lineRightContext = Data::record(Record{"profile.Geometry.v1", Json::object()});
   CHECK_FALSE(
       scene::measureProfileCorner(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
+  CHECK(result.quality.data == before);
 }
 
 TEST_CASE(
@@ -195,7 +190,7 @@ TEST_CASE(
         CAPTURE(camera);
         const auto a = notch ? notchCloud(0) : grooveCloud();
         const auto b = notch ? notchCloud(.6) : grooveCloud(.2);
-        scene::JointInputs input{native(a, "camera-A"), native(b, "camera-B"), {}, {}};
+        scene::JointInputs input{native(a, "camera-A"), native(b, "camera-B")};
         auto parameters =
             defaults(notch ? scene::notchInspectionParams() : scene::grooveInspectionParams(),
                      {{"baseSide", Value::text(mode)},
@@ -238,7 +233,6 @@ TEST_CASE(
         for (auto field = oldResults.at("qualityBase").asRecord()->data.begin();
              field != oldResults.at("qualityBase").asRecord()->data.end(); ++field)
           CHECK(actual.qualityBase.data.at(field.key()) == field.value());
-        CHECK(actual.quality.data.at("actualSourceIds").at("primary") == Json::array({"camera-A"}));
       }
 }
 
@@ -249,7 +243,7 @@ TEST_CASE(
     const auto cloud = notch ? notchCloud(.2) : grooveCloud();
     const auto parameters =
         defaults(notch ? scene::notchInspectionParams() : scene::grooveInspectionParams());
-    scene::JointInputs baseline{native(cloud, "a"), native(cloud, "b"), {}, {}};
+    scene::JointInputs baseline{native(cloud, "a"), native(cloud, "b")};
     scene::JointResult expected;
     REQUIRE((notch ? scene::measureProfileNotch(baseline, ParamView(parameters, ctx.baseDir()),
                                                 expected, ctx)
@@ -261,8 +255,8 @@ TEST_CASE(
         CAPTURE(notch);
         CAPTURE(unit);
         CAPTURE(plane);
-        scene::JointInputs input{
-            native(cloud, "a", unit, plane, true), native(cloud, "b", unit, plane, true), {}, {}};
+        scene::JointInputs input{native(cloud, "a", unit, plane, true),
+                                 native(cloud, "b", unit, plane, true)};
         const auto original = input.primary.valueJson();
         const auto* pointer = input.primary.asProfile()->cloud.get();
         scene::JointResult actual;
@@ -280,28 +274,18 @@ TEST_CASE(
         CHECK(input.primary.asProfile()->sourceIndices[1] == 10);
         CHECK(input.primary.asProfile()->cloud->rgb.size() ==
               3 * input.primary.asProfile()->pointCount());
-        CHECK(actual.pointContext.asRecord()->data.at("sources")[0].at("descriptor").at("plane") ==
-              plane);
+        CHECK(actual.pointContext.asRecord()->data.at("plane") == plane);
       }
   }
 }
 
 TEST_CASE(
-    "native scene inspection rejects mismatched provenance geometry and cancellation atomically") {
+    "native scene inspection rejects mismatched spaces bad parameters and cancellation atomically") {
   test::StubContext ctx;
   auto parameters = defaults(scene::notchInspectionParams());
-  scene::JointInputs input{native(notchCloud(), "a"), native(notchCloud(), "b"), {}, {}};
+  scene::JointInputs input{native(notchCloud(), "a"), native(notchCloud(), "b")};
   scene::JointResult result;
   result.quality.type = "sentinel";
-  Record wrong;
-  std::string why;
-  REQUIRE(
-      profile_contract::rebindProvenance(input.secondary, input.secondary, nullptr, wrong, why));
-  input.primaryProvenance = Data::record(wrong);
-  CHECK_FALSE(
-      scene::measureProfileNotch(input, ParamView(parameters, ctx.baseDir()), result, ctx).ok);
-  CHECK(result.quality.type == "sentinel");
-  input.primaryProvenance = {};
   Profile altered = *input.secondary.asProfile();
   altered.descriptor.frame = "another-frame";
   input.secondary = Data::profile(altered);
@@ -362,7 +346,7 @@ TEST_CASE(
   REQUIRE(exec::ResultStore::instance().get(session.runId(), "measure", "quality", quality));
   CHECK(gap.asMeasurement()->ok);
   CHECK_FALSE(flush.asMeasurement()->ok);
-  CHECK(unavailableContext.asRecord()->type == "gap.GeometryUnavailable.v1");
+  CHECK(unavailableContext.asRecord()->type == "gap.GeometryUnavailable.v2");
   CHECK(unavailableContext.asRecord()->data.at("available") == false);
   CHECK(quality.asRecord()->data.at("refGeometryAvailable") == false);
   CHECK_FALSE(exec::ResultStore::instance().get(session.runId(), "consume", "point", consumed));
@@ -395,7 +379,7 @@ TEST_CASE(
                     Inputs(oldInputs), ParamView(parameters, ctx.baseDir()), pending, ctx);
     scene::JointResult actual;
     actual.quality.type = "sentinel";
-    const scene::JointInputs input{native(cloud, "a"), native(cloud, "b"), {}, {}};
+    const scene::JointInputs input{native(cloud, "a"), native(cloud, "b")};
     const auto status =
         notch
             ? scene::measureProfileNotch(input, ParamView(parameters, ctx.baseDir()), actual, ctx)
@@ -516,10 +500,8 @@ struct Call {
     test::StubContext ctx;
     if (corner) {
       const auto originProfile = native(PointCloud{}, "explicit-origin-fixture");
-      const auto bound = [&](const Data& data) {
-        return Data::record(Record{"profile.Geometry.v2",
-                                   profile_contract::geometryContextV2(originProfile, data)});
-      };
+      const auto bound =
+          Data::record(profile_contract::geometryContext(originProfile.asProfile()->descriptor));
       Point2D origin;
       origin.p[0] = static_cast<float>(
           (overrides.count("originX") ? overrides.at("originX").floatValue() : 0) / 1000.0);
@@ -528,13 +510,13 @@ struct Call {
       scene::CornerInputs input;
       input.lineLeft = inputs.at("lineLeft");
       input.lineRight = inputs.at("lineRight");
-      input.lineLeftContext = bound(input.lineLeft);
-      input.lineRightContext = bound(input.lineRight);
+      input.lineLeftContext = bound;
+      input.lineRightContext = bound;
       input.origin = Data::point2d(origin);
-      input.originContext = bound(input.origin);
+      input.originContext = bound;
       if (inputs.count("baseLine")) {
         input.baseLine = inputs.at("baseLine");
-        input.baseLineContext = bound(input.baseLine);
+        input.baseLineContext = bound;
       }
       scene::CornerResult result;
       const auto status =
@@ -546,9 +528,7 @@ struct Call {
       return status;
     }
     scene::JointInputs input{native(*inputs.at("primary").asCloud(), "explicit-primary"),
-                             native(*inputs.at("secondary").asCloud(), "explicit-secondary"),
-                             {},
-                             {}};
+                             native(*inputs.at("secondary").asCloud(), "explicit-secondary")};
     scene::JointResult result;
     const auto status =
         notch
@@ -652,17 +632,17 @@ TEST_CASE(
 
       const Record* q = call.out("quality").asRecord();
       REQUIRE(q != nullptr);
-      CHECK(q->type == "gap.GrooveQuality.v2");
+      CHECK(q->type == "gap.GrooveQuality.v3");
       CHECK(q->data["lowerSurface"].get<std::string>() == "ref");
       CHECK(q->data["cameras"]["primary"]["valid"].get<bool>());
 
       const Record* qb = call.out("qualityBase").asRecord();
       REQUIRE(qb != nullptr);
-      CHECK(qb->type == "gap.FitQuality.v2");
+      CHECK(qb->type == "gap.FitQuality.v3");
       CHECK(qb->data["model"].get<std::string>() == "line");
       const Record* qr = call.out("qualityRef").asRecord();
       REQUIRE(qr != nullptr);
-      CHECK(qr->type == "gap.FitQuality.v2");
+      CHECK(qr->type == "gap.FitQuality.v3");
     }
 
     SUBCASE("换基准侧只翻 flush 的符号") {
@@ -736,14 +716,14 @@ TEST_CASE(
             doctest::Approx(notchNominalMm(0.25, open)).epsilon(0.03));
       const Record* q = call.out("quality").asRecord();
       REQUIRE(q != nullptr);
-      CHECK(q->type == "gap.NotchQuality.v2");
+      CHECK(q->type == "gap.NotchQuality.v3");
       CHECK(q->data["validCameras"].get<int>() == 2);
       CHECK(q->data["cameras"]["primary"]["cornerDepthMm"].get<double>() ==
             doctest::Approx(kNotchEdgeDrop).epsilon(0.05));
       const Point2D* anchor = call.out("anchor").asPoint2D();
       REQUIRE(anchor != nullptr);
       CHECK(std::fabs(static_cast<double>(anchor->p[0]) - kNotchXcMm / 1000.0) < 0.0002);
-      CHECK(call.out("qualityBase").asRecord()->type == "gap.FitQuality.v2");
+      CHECK(call.out("qualityBase").asRecord()->type == "gap.FitQuality.v3");
     }
   }
   SUBCASE(
@@ -848,7 +828,7 @@ TEST_CASE(
             doctest::Approx(0.3 * std::cos(std::atan(kNotchSlopeA))).epsilon(0.05));
       CHECK(call.out("refLine").asLine2D() != nullptr);
       CHECK(call.out("flushSegment").asLine2D() != nullptr);
-      CHECK(call.out("qualityRef").asRecord()->type == "gap.FitQuality.v2");
+      CHECK(call.out("qualityRef").asRecord()->type == "gap.FitQuality.v3");
       REQUIRE(call.run("gap.notch_width", {{"flushBase", Value::text("right")}}).ok);
       CHECK(call.out("flush").asMeasurement()->value == doctest::Approx(-raised).epsilon(0.1));
       const double gapRight = call.out("gap").asMeasurement()->value;

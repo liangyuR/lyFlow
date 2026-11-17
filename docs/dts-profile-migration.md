@@ -36,7 +36,7 @@ lyflow migrate old.lyflow.json --profile-source n_in --profile-frame scanner --p
 
 子图使用显式定义作用域：CLI 的 `--profile-source inside/n_in` 对应 rule 的 `"scope":{"subgraph":"inside"}`，而 `source.node` 仍为子图内的 `n_in`。作用域选择 GraphDoc 的全局 `subgraphs` 定义，使用此定义的所有实例一起升级；子图参数、接口、图级命名输出及相对资源路径保留。外部库图应对库的原始 `.lyflow.json` 资产运行同一命令，不会通过主图的库引用修改外部文件。M1 原请求没有子图作用域字段；未退休的嵌套 M1 请求不能通过猜测补出来源。
 
-迁移保留原节点 ID、UI、分组、原参数和绑定，插入 `profile.from_cloud`，将清洗/分面改为公共算子，将五个场景节点升为 v2，并连接 `flush.footInfo → bundle.footInfo`。旧宿主仍向原来源节点的 PointCloud 输出注入。已有明确来源的 M1 几何桥保留节点身份，升级为 `dts.geometry_to_metric@2` 的 `sourceContract=dts.geometry.v2` 米制直通，避免再次乘 `0.001`。单独迁移旧桥时，v1 来源声明仍保留毫米换算行为。
+迁移保留原节点 ID、UI、分组、原参数和绑定，插入 `profile.from_cloud`，将清洗/分面改为公共算子，将五个场景节点升为 v3，连接 `flush.footInfo → bundle.footInfo`，并删除只用于几何指纹比对的 `pick_metal.metal → flush.metal`、`pick_metal.metal → bundle.metal`、`flush.foot → bundle.foot` 连线。旧宿主仍向原来源节点的 PointCloud 输出注入。已有明确来源的 M1 几何桥保留节点身份，升级为 `dts.geometry_to_metric@2` 的 `sourceContract=dts.geometry.v2` 米制直通，避免再次乘 `0.001`。单独迁移旧桥时，v1 来源声明仍保留毫米换算行为。
 
 CLI 使用同目录临时文件后改名保存，并移除顶层 `contractUpgrade`。编辑器和宿主加载时不执行迁移：文档仍带 `contractUpgrade` 时只报 `migration_required` 错误诊断，提示先运行 `lyflow migrate <graph> --write`；`meta.contractUpgradeHistory` 作为普通元数据原样保留，不锁定后续拓扑修改。
 

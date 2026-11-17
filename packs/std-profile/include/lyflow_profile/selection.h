@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "lyflow/operator.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 
 namespace lyflow::profile_contract {
 struct SelectionOptions {
@@ -18,20 +18,17 @@ struct SelectionResult {
   Data profile;
   Indices selected;
   Indices rejected;
-  Record provenance;
   Record selection;
 };
 namespace selection_detail {
-using Json = nlohmann::json;
 inline Status bad(const std::string& message, const char* port = "profile",
                   const char* code = "bad_input") {
   return Status::Error(Phase::Execute, code, message, {}, port);
 }
 inline Status cancelled() { return bad("轮廓选区已取消", "profile", "cancelled"); }
 inline Status select(const Data& source, const Data* boxData, const Record* boxContext,
-                     const Indices* indices, const Record* provenance,
-                     const SelectionOptions& options, SelectionResult& outputResult,
-                     ExecContext& ctx, bool byBox) {
+                     const Indices* indices, const SelectionOptions& options,
+                     SelectionResult& outputResult, ExecContext& ctx) {
   const auto* input = source.asProfile();
   std::string why;
   if (ctx.cancelled())
@@ -41,21 +38,13 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
     return bad("轮廓槽数超过Indices范围", "profile", "budget_exceeded");
   const auto& mode = options.mode;
   const auto& empty = options.emptyPolicy;
-  Json sources;
-  if (!profile_contract::profileSources(source, provenance, sources, why))
-    return bad(why, "provenance");
-  Json references = Json::array();
   std::vector<std::uint8_t> accepted(n, 0);
-  if (byBox) {
-    const auto* box = boxData ? boxData->asBox2D() : nullptr;
-    ProfileDescriptor space;
-    Json boxSources;
-    if (!box ||
-        !profile_contract::geometryMatchesPhysical(*boxData, boxContext, space, why, &boxSources))
-      return bad(why.empty() ? "需要米制Box2D和有效上下文" : why, "boxContext");
-    references = boxSources;
-    if (!profile_contract::sameSpace(input->descriptor, space))
-      return bad("ROI与轮廓不在相同物理空间", "boxContext");
+  if (boxData) {
+    const auto* box = boxData->asBox2D();
+    if (!box)
+      return bad("ROI需要Box2D", "box");
+    if (!geometryInSpace(*boxData, boxContext, input->descriptor, why))
+      return bad(why, "boxContext");
     const auto& bounds = options.bounds;
     Profile metric;
     if (!convertProfileUnit(*input, "m", metric, why, [&ctx] { return ctx.cancelled(); }))
@@ -118,48 +107,32 @@ inline Status select(const Data& source, const Data* boxData, const Record* boxC
       result.validity[i] = input->validity[i] && accepted[i];
     }
   }
-  const auto data = Data::profile(std::move(result));
-  Record rebound;
-  if (!profile_contract::rebindProvenance(source, data, provenance, rebound, why))
-    return bad(why, "provenance");
-  if (!references.empty()) {
-    Record extended;
-    if (!profile_contract::extendProvenanceSources(data, rebound, references, extended, why))
-      return bad(why, "boxContext");
-    rebound = std::move(extended);
-  }
-  const auto selection = Data::record(Record{"profile.RegionSelection.v1",
-                                             {{"schemaVersion", 1},
-                                              {"inputContext", profile_contract::context(source)},
-                                              {"outputContext", profile_contract::context(data)},
-                                              {"mode", mode},
-                                              {"indexSpace", "input_profile_slots"},
-                                              {"sourceCloudId", std::to_string(input->cloud->id)},
-                                              {"selectedCount", selected.values.size()},
-                                              {"rejectedCount", rejected.values.size()},
-                                              {"sourceIndexMapping", "profile.sourceIndices"}}});
+  Record selection{"profile.RegionSelection.v2",
+                   {{"schemaVersion", 2},
+                    {"mode", mode},
+                    {"indexSpace", "input_profile_slots"},
+                    {"selectedCount", selected.values.size()},
+                    {"rejectedCount", rejected.values.size()},
+                    {"sourceIndexMapping", "profile.sourceIndices"}}};
   if (ctx.cancelled())
     return cancelled();
   SelectionResult candidate;
-  candidate.profile = data;
+  candidate.profile = Data::profile(std::move(result));
   candidate.selected = std::move(selected);
   candidate.rejected = std::move(rejected);
-  candidate.provenance = std::move(rebound);
-  candidate.selection = *selection.asRecord();
+  candidate.selection = std::move(selection);
   outputResult = std::move(candidate);
   return Status::Ok();
 }
 } // namespace selection_detail
-inline Status cropProfile(const Data& source, const Data& box, const Record& boxContext,
-                          const Record* provenance, const SelectionOptions& options,
-                          SelectionResult& result, ExecContext& ctx) {
-  return selection_detail::select(source, &box, &boxContext, nullptr, provenance, options, result,
-                                  ctx, true);
+inline Status cropProfile(const Data& source, const Data& box, const Record* boxContext,
+                          const SelectionOptions& options, SelectionResult& result,
+                          ExecContext& ctx) {
+  return selection_detail::select(source, &box, boxContext, nullptr, options, result, ctx);
 }
 inline Status selectProfileIndices(const Data& source, const Indices& indices,
-                                   const Record* provenance, const SelectionOptions& options,
-                                   SelectionResult& result, ExecContext& ctx) {
-  return selection_detail::select(source, nullptr, nullptr, &indices, provenance, options, result,
-                                  ctx, false);
+                                   const SelectionOptions& options, SelectionResult& result,
+                                   ExecContext& ctx) {
+  return selection_detail::select(source, nullptr, nullptr, &indices, options, result, ctx);
 }
 } // namespace lyflow::profile_contract

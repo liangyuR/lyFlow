@@ -12,10 +12,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     const Status loaded = loadProfile(source, active, ctx);
     if (!loaded.ok)
       return loaded;
-    const auto context = profile_contract::context(source);
-    const auto pieces = checkedPieces(inputs.get("faces"), source, active);
-    const auto& dome = checkedRecord(inputs.get("dome"), "DtsDome.v2", context);
-    const auto& pick = checkedRecord(inputs.get("pick"), "DtsMetalPick.v2", context);
+    const auto pieces = checkedPieces(inputs.get("faces"), active);
+    const auto& dome = checkedRecord(inputs.get("dome"), "DtsDome.v3");
+    const auto& pick = checkedRecord(inputs.get("pick"), "DtsMetalPick.v3");
     const View all = mergedView(active.samples, pieces, [&ctx] { return ctx.cancelled(); });
     const auto& signValue = pick.at("sealSign");
     if (!signValue.is_number_integer() || (signValue != 1 && signValue != -1))
@@ -33,16 +32,11 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       return Status::Error(Phase::Execute, "no_root", "基准面与胶条顶点之间点太少", {}, "clean");
     const auto activeIndex = static_cast<std::size_t>(all.index(root.index));
     const auto slot = active.slots.at(activeIndex);
-    const Line2D line = lineMillimeters(pick.at("metalLineMm"));
-    const Data metal = Data::line2d(metricGeometry(line));
-    if (pick.at("metalGeometryHash") != profile_contract::geometryHash(metal))
-      throw std::invalid_argument("毫米基准线与米制几何指纹不匹配");
     Point2D point;
     point.p[0] = static_cast<float>(root.x);
     point.p[1] = static_cast<float>(root.z);
     const Data geometry = Data::point2d(metricGeometry(point));
-    const auto pointContext = profile_contract::geometryContext(source, geometry);
-    nlohmann::json j = sceneRecord(source);
+    nlohmann::json j = sceneRecord();
     j.update({{"x", root.x},
               {"z", root.z},
               {"method", root.bump ? "bump" : "valley"},
@@ -56,14 +50,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
               {"activeIndex", activeIndex},
               {"slotIndex", slot},
               {"sourceIndex", active.native->sourceIndices.at(slot)},
-              {"metalLineMm", pick.at("metalLineMm")},
-              {"metalGeometryHash", pick.at("metalGeometryHash")},
-              {"pointGeometryHash", pointContext.at("geometryHash")}});
+              {"metalLineMm", pick.at("metalLineMm")}});
     if (ctx.cancelled())
       return cancelledStatus();
-    outputs.set("root", Data::record(Record{"DtsRoot.v2", std::move(j)}));
+    outputs.set("root", Data::record(Record{"DtsRoot.v3", std::move(j)}));
     outputs.set("point", geometry);
-    outputs.set("pointContext", Data::record(Record{"profile.Geometry.v1", pointContext}));
+    outputs.set("pointContext",
+                Data::record(profile_contract::geometryContext(source.asProfile()->descriptor)));
     return Status::Ok();
   } catch (const kernel::profile::Cancelled&) {
     return cancelledStatus();
@@ -77,8 +70,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerSealRoot(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_root";
-  op.version = "2.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr}};
+  op.version = "3.0.0";
+  op.migrations = {{1, requireGraphMigration, nullptr},
+                   {2, nullptr, &profile_contract::keepInputs}};
   op.label = "胶条根部定位";
   op.category = "DTS/胶条";
   op.keywords = {"seal root localization",
@@ -101,10 +95,10 @@ void registerSealRoot(Registry& r) {
                Port{"faces", "Record", "Faces", "面表（取分片）。", true},
                Port{"dome", "Record", "Dome", "胶条主体。", true},
                Port{"pick", "Record", "Pick", "挑中的基准面。", true}};
-  op.outputs = {
-      Port{"root", "Record", "Root", "底部点与判定依据（DtsRoot.v2）。", true},
-      Port{"point", "Point2D", "Point", "底部点米制坐标，给视图用。", true},
-      Port{"pointContext", "Record", "Point Context", "profile.Geometry.v1米制根部上下文。", true}};
+  op.outputs = {Port{"root", "Record", "Root", "底部点与判定依据（DtsRoot.v3）。", true},
+                Port{"point", "Point2D", "Point", "底部点米制坐标，给视图用。", true},
+                Port{"pointContext", "Record", "Point Context",
+                     "根部点所在空间（profile.Geometry.v3）。", true}};
 
   Param bulge;
   bulge.name = "sealBulge";

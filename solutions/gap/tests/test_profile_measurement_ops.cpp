@@ -33,6 +33,9 @@ Data sensor(const std::string& id) {
                       std::move(validity), std::move(sourceIndices), result, why));
   return Data::profile(std::move(result));
 }
+Data context(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
+}
 struct Fixture {
   Registry registry;
   Data scan, rois;
@@ -57,13 +60,11 @@ struct Fixture {
       std::copy_n(bounds[i], 2, box.min);
       std::copy_n(bounds[i] + 2, 2, box.max);
       fields.boxes[i] = Data::box2d(box);
-      fields.contexts[i] =
-          Data::record(Record{"profile.Geometry.v2",
-                              profile_contract::geometryContextV2(*view.merged, fields.boxes[i])});
+      fields.contexts[i] = context(*view.merged);
     }
     fields.info = {
         scene::kRoiInfoType,
-        {{"schemaVersion", 2},
+        {{"schemaVersion", 3},
          {"source", "config"},
          {"datumSide", "left"},
          {"alignment", nullptr},
@@ -101,8 +102,8 @@ TEST_CASE(
         fit.out("inliers").asIndices()->values.size());
   ProfileDescriptor space;
   std::string why;
-  REQUIRE(profile_contract::geometryMatchesPhysical(fit.out("line"),
-                                                    fit.out("lineContext").asRecord(), space, why));
+  REQUIRE(profile_contract::geometrySpace(fit.out("line"), fit.out("lineContext").asRecord(), space,
+                                          why));
   CHECK(space.frame == "measurement");
   test::OpCall point(fixture.registry);
   point.inputs = fit.inputs;
@@ -113,7 +114,7 @@ TEST_CASE(
   fixture.complete("gap.ref_point", point);
   CHECK(point.out("point").valueJson() == fit.out("innerEnd").valueJson());
   CHECK(point.out("line").valueJson() == fit.out("line").valueJson());
-  CHECK(point.out("selection").asRecord()->data["lineFitted"] == true);
+  CHECK(point.out("selection").asRecord()->type == "gap.ReferenceSelection.v3");
   CHECK(fixture.scan.asBundle()->field("merged")->profilePtr() == before);
 }
 
@@ -125,9 +126,7 @@ TEST_CASE(
   box.max[0] = .3F;
   fixture.fields.boxes[1] = Data::box2d(box);
   const auto& measurement = *fixture.scan.asBundle()->field("merged");
-  fixture.fields.contexts[1] = Data::record(
-      Record{"profile.Geometry.v2",
-             profile_contract::geometryContextV2(measurement, fixture.fields.boxes[1])});
+  fixture.fields.contexts[1] = context(measurement);
   std::string why;
   REQUIRE(scene::makeRoiSet(fixture.fields, fixture.rois, why));
   test::OpCall point(fixture.registry);
@@ -137,17 +136,14 @@ TEST_CASE(
   CHECK(point.out("point").asPoint2D()->p[0] < .2F);
   CHECK(point.out("profile").profilePtr() == measurement.profilePtr());
   CHECK(point.out("quality").asRecord()->data["lineFitted"] == false);
-  CHECK(point.out("lineContext").asRecord()->type == "gap.GeometryUnavailable.v1");
+  CHECK(point.out("lineContext").asRecord()->type == "gap.GeometryUnavailable.v2");
   CHECK(point.out("lineContext").asRecord()->data["available"] == false);
   ProfileDescriptor unavailableSpace;
-  CHECK_FALSE(profile_contract::geometryMatchesPhysical(
+  CHECK_FALSE(profile_contract::geometrySpace(
       point.out("line"), point.out("lineContext").asRecord(), unavailableSpace, why));
   CHECK_FALSE(point.run("gap.ref_point", {{"method", Value::text("nearest_point")}}).ok);
   CHECK(point.outputs.empty());
   fixture.fields.boxes[1] = Data::box2d(Box2D{{.002F, .165F}, {.02F, .175F}});
-  fixture.fields.contexts[1] = Data::record(
-      Record{"profile.Geometry.v2",
-             profile_contract::geometryContextV2(measurement, fixture.fields.boxes[1])});
   REQUIRE(scene::makeRoiSet(fixture.fields, fixture.rois, why));
   Line2D line;
   line.point[1] = .17035F;
@@ -155,9 +151,7 @@ TEST_CASE(
   point.inputs = {{"scan", fixture.scan},
                   {"rois", fixture.rois},
                   {"baseLine", base},
-                  {"baseLineContext",
-                   Data::record(Record{"profile.Geometry.v2",
-                                       profile_contract::geometryContextV2(measurement, base)})}};
+                  {"baseLineContext", context(measurement)}};
   REQUIRE(point.run("gap.ref_point", {{"method", Value::text("nearest_point")}}).ok);
   fixture.complete("gap.ref_point", point);
   CHECK(point.out("profile").asProfile()->pointCount() < measurement.asProfile()->pointCount());
@@ -172,7 +166,7 @@ TEST_CASE(
                   .empty());
 }
 
-TEST_CASE("Native datum direction uses the long outer window and preserves ROI reference sources") {
+TEST_CASE("Native datum direction uses the long outer window and constrains role lines") {
   Fixture fixture;
   test::OpCall direction(fixture.registry);
   direction.inputs = {{"scan", fixture.scan}, {"rois", fixture.rois}};
@@ -181,8 +175,6 @@ TEST_CASE("Native datum direction uses the long outer window and preserves ROI r
   CHECK(direction.out("window").asBox2D()->max[0] < fixture.fields.boxes[2].asBox2D()->min[0]);
   CHECK(direction.out("quality").asRecord()->data["segmentApplied"] == false);
   CHECK(direction.out("profile").asProfile()->cloud->hasIntensity());
-  const auto& referenceSources = direction.out("provenance").asRecord()->data["referenceSources"];
-  CHECK_FALSE(referenceSources.empty());
   test::OpCall fit(fixture.registry);
   fit.inputs = {{"scan", fixture.scan},
                 {"rois", fixture.rois},
@@ -195,7 +187,11 @@ TEST_CASE("Native datum direction uses the long outer window and preserves ROI r
   CHECK_FALSE(fit.validate("gap.role_line", {{"dirMode", Value::text("fixed")}},
                            {"scan", "rois", "refLine"})
                   .empty());
-  fit.inputs["refLineContext"] = fixture.fields.contexts[0];
+  ProfileDescriptor foreign;
+  foreign.frame = "template-frame";
+  foreign.plane = "XY";
+  foreign.handedness = "right";
+  fit.inputs["refLineContext"] = Data::record(profile_contract::geometryContext(foreign));
   CHECK_FALSE(fit.run("gap.role_line", {{"dirMode", Value::text("fixed")}}).ok);
   CHECK(fit.outputs.empty());
 }

@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "dts_ops.h"
@@ -169,6 +170,7 @@ void migrateProfile(Json& graph, const Json& rule, Json* outer) {
     auto& node = nodes[nodeIndex(nodes, id)];
     if (op == "dts.profile_clean" || op == "dts.split_faces") {
       node["op"] = op == "dts.profile_clean" ? "profile.clean" : "profile.split_faces";
+      node["opVersion"] = op == "dts.profile_clean" ? "1.0.0" : "2.0.0";
       auto& params = node["params"];
       if (!params.is_object())
         params = Json::object();
@@ -178,9 +180,22 @@ void migrateProfile(Json& graph, const Json& rule, Json* outer) {
             !(outer && bound(*outer, id, item.key(), true)))
           params[item.key()] = item.value();
     } else {
-      node["opVersion"] = "2.0.0";
+      node["opVersion"] = "3.0.0";
     }
   }
+  const std::vector<std::pair<Json, Json>> retired = {
+      {endpoint(chain.at("dts.pick_metal"), "metal"), endpoint(chain.at("dts.flush"), "metal")},
+      {endpoint(chain.at("dts.pick_metal"), "metal"),
+       endpoint(chain.at("dts.profile_bundle"), "metal")},
+      {endpoint(chain.at("dts.flush"), "foot"), endpoint(chain.at("dts.profile_bundle"), "foot")}};
+  edges.erase(std::remove_if(edges.begin(), edges.end(),
+                             [&](const Json& edge) {
+                               return std::any_of(
+                                   retired.begin(), retired.end(), [&](const auto& link) {
+                                     return edge["from"] == link.first && edge["to"] == link.second;
+                                   });
+                             }),
+              edges.end());
   for (const auto i : bridges) {
     nodes[i]["opVersion"] = "2.0.0";
     nodes[i]["params"]["sourceContract"] = "dts.geometry.v2";

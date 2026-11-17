@@ -5,7 +5,7 @@
 #include "helpers.h"
 #include "lyflow/profile.h"
 #include "lyflow_profile/features.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 #include "ops/profile_feature_bundle.h"
 #include "ops/profile_regions.h"
 #include "ops/profile_scan.h"
@@ -45,9 +45,8 @@ Data source(float delta = 0) {
                       std::move(validity), std::move(indices), profile, why));
   return Data::profile(std::move(profile));
 }
-Data bind(const Data& profile, const Data& geometry) {
-  return Data::record(
-      Record{"profile.Geometry.v2", profile_contract::geometryContextV2(profile, geometry)});
+Data bind(const Data& profile) {
+  return Data::record(profile_contract::geometryContext(profile.asProfile()->descriptor));
 }
 struct Fixture {
   Registry registry;
@@ -72,9 +71,8 @@ struct Fixture {
       cropOptions.halfHeight = 2;
       cropOptions.minPointsKept = 1;
       scene::RollCropResult result;
-      REQUIRE(scene::rollAnchoredCrop(scan, left, *bind(*view.merged, left).asRecord(), right,
-                                      *bind(*view.merged, right).asRecord(), cropOptions, result,
-                                      ctx)
+      REQUIRE(scene::rollAnchoredCrop(scan, left, *bind(*view.merged).asRecord(), right,
+                                      *bind(*view.merged).asRecord(), cropOptions, result, ctx)
                   .ok);
       REQUIRE(result.status.data.at("applied") == true);
       scan = result.scan;
@@ -84,11 +82,11 @@ struct Fixture {
     for (std::size_t i = 0; i < 4; ++i) {
       fields.boxes[i] = Data::box2d(Box2D{{.001F * static_cast<float>(i), .16F},
                                           {.012F + .001F * static_cast<float>(i), .18F}});
-      fields.contexts[i] = bind(*view.merged, fields.boxes[i]);
+      fields.contexts[i] = bind(*view.merged);
     }
     fields.info = {
         scene::kRoiInfoType,
-        {{"schemaVersion", 2},
+        {{"schemaVersion", 3},
          {"source", "model"},
          {"datumSide", "left"},
          {"alignment", nullptr},
@@ -106,20 +104,14 @@ struct Fixture {
     for (const auto& parameter : profile_contract::robustLineParams())
       parameters[parameter.name] = parameter.def;
     parameters["segmentPoints"] = Value::integer(0);
-    REQUIRE(profile_contract::fitRobustLine({*view.merged,
-                                             box,
-                                             bind(*view.merged, box),
-                                             toward,
-                                             bind(*view.merged, toward),
-                                             {},
-                                             {},
-                                             Data::record(*view.mergedProvenance)},
-                                            ParamView(parameters, ctx.baseDir()), fit, ctx)
+    REQUIRE(profile_contract::fitRobustLine(
+                {*view.merged, box, bind(*view.merged), toward, bind(*view.merged), {}, {}},
+                ParamView(parameters, ctx.baseDir()), fit, ctx)
                 .ok);
-    REQUIRE(scene::makeLineFeature({fit.profile, fit.line, fit.lineContext, fit.innerEnd,
-                                    fit.pointContext, fit.inliers, fit.weightedInliers, fit.quality,
-                                    fit.provenance},
-                                   feature, why));
+    REQUIRE(
+        scene::makeLineFeature({fit.profile, fit.line, fit.lineContext, fit.innerEnd,
+                                fit.pointContext, fit.inliers, fit.weightedInliers, fit.quality},
+                               feature, why));
   }
 };
 class Cancel : public ExecContext {
@@ -136,14 +128,14 @@ private:
 }
 
 TEST_CASE(
-    "native result v3 converts explicit measurement units and never invents missing point counts timing or consistency") {
+    "native result v4 converts explicit measurement units and never invents missing point counts timing or consistency") {
   Fixture fixture;
   test::OpCall call(fixture.registry);
   call.inputs = {{"gap", measure(.002, "m")},
                  {"flush", measure(std::numeric_limits<double>::quiet_NaN(), "mm", false)}};
   REQUIRE(call.run("gap.result_bundle").ok);
   const auto& result = call.out("bundle").asRecord()->data;
-  CHECK(result.at("schemaVersion") == 3);
+  CHECK(result.at("schemaVersion") == 4);
   CHECK(result.at("gap").at("value_mm") == 2.0);
   CHECK(result.at("flush").at("status") == "failure");
   CHECK(result.at("flush").at("value_mm").is_null());
@@ -161,10 +153,11 @@ TEST_CASE(
   CHECK(call.out("bundle").asRecord()->data.at("flush").at("status") == "inactive");
   const auto* desc = fixture.registry.find("gap.result_bundle");
   REQUIRE(desc);
-  CHECK(desc->version == "3.0.0");
-  REQUIRE(desc->migrations.size() == 2);
+  CHECK(desc->version == "4.0.0");
+  REQUIRE(desc->migrations.size() == 3);
   CHECK(desc->migrations[0].fromMajor == 1);
   CHECK(desc->migrations[1].fromMajor == 2);
+  CHECK(desc->migrations[2].fromMajor == 3);
   CHECK_THROWS_WITH_AS(desc->migrations[0].apply(Json::object()),
                        doctest::Contains("graph_upgrade_required"), std::invalid_argument);
 }
@@ -173,7 +166,7 @@ TEST_CASE(
     "native result preserves legacy quality CSV fields and maps public SI residuals with distinct weighting") {
   Fixture fixture;
   test::OpCall call(fixture.registry);
-  const Record legacy{"gap.FitQuality.v2",
+  const Record legacy{"gap.FitQuality.v3",
                       {{"model", "line"},
                        {"pointCount", 10},
                        {"inlierCount", 8},
@@ -210,7 +203,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "native result feature evidence and per-stage fallback keep actual ROI source and original sensor counts") {
+    "native result features and per-stage fallback keep actual ROI source and original sensor counts") {
   Fixture fixture(0, true);
   test::OpCall call(fixture.registry);
   call.inputs = {{"gap", measure(.5)},
@@ -232,9 +225,6 @@ TEST_CASE(
   CHECK(result.at("fits")[0].at("line_point_x_mm") ==
         static_cast<double>(fixture.fit.line.asLine2D()->point[0]) * 1000);
   CHECK(result.at("fits")[0].at("line_dir_x") == fixture.fit.line.asLine2D()->dir[0]);
-  CHECK(result.at("source_evidence").at("baseFeature").at("profile") ==
-        profile_contract::context(fixture.fit.profile));
-  CHECK(result.at("source_evidence").at("rois").at("status") == "bound_to_scan");
   CHECK(result.at("point_counts").at("sensor_input_primary") == 100);
   CHECK(result.at("point_counts").at("input_primary").get<std::size_t>() < 100);
   CHECK(result.at("input_point_count").get<std::size_t>() < 200);
@@ -245,15 +235,13 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "native result rejects wrong types stale features inconsistent quality and ROI contexts atomically") {
+    "native result rejects wrong record types inconsistent quality and ROI contexts atomically") {
   Fixture fixture, other(.001F);
   test::OpCall call(fixture.registry);
   for (const auto& invalid : std::vector<std::pair<const char*, Data>>{
            {"fitBase", Data::record(Record{"wrong", Json::object()})},
            {"fits", Data::record(Record{"GapFitQualityPair", Json::object()})},
-           {"fallbackLine", Data::record(Record{"wrong", Json::object()})},
-           {"scan", Data::record(Record{"wrong", Json::object()})},
-           {"baseFeature", other.feature}}) {
+           {"fallbackLine", Data::record(Record{"wrong", Json::object()})}}) {
     CAPTURE(invalid.first);
     call.inputs = {{"gap", measure(.5)}, {"scan", fixture.scan}, {"rois", fixture.rois}};
     call.inputs[invalid.first] = invalid.second;
@@ -269,11 +257,11 @@ TEST_CASE(
   const auto box = Data::box2d(Box2D{{0, .16F}, {.02F, .18F}});
   call.inputs = {{"gap", measure(.5)}, {"rois", fixture.rois}, {"roiOverall", box}};
   CHECK_FALSE(call.run("gap.result_bundle").ok);
-  call.inputs["roiOverallContext"] = bind(fixture.fit.profile, box);
+  call.inputs["roiOverallContext"] = bind(fixture.fit.profile);
   REQUIRE(call.run("gap.result_bundle").ok);
   Profile foreign = *fixture.fit.profile.asProfile();
   foreign.descriptor.frame = "foreign";
-  call.inputs["roiOverallContext"] = bind(Data::profile(foreign), box);
+  call.inputs["roiOverallContext"] = bind(Data::profile(foreign));
   CHECK_FALSE(call.run("gap.result_bundle").ok);
   Cancel cancel;
   ParamMap values;
@@ -289,7 +277,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "real executor emits the complete native result record with feature lineage and explicit unavailable timing") {
+    "real executor emits the complete native result record with explicit unavailable timing") {
   Fixture fixture;
   auto& global = ensureRegistry();
   const std::string id = "test.m4c.profile_result_bundle";
@@ -324,7 +312,7 @@ TEST_CASE(
   REQUIRE(value.asRecord());
   CHECK(value.asRecord()->type == "GapResultBundle");
   CHECK(value.asRecord()->data.at("gap").at("value_mm") == 3.0);
-  CHECK(value.asRecord()->data.at("schemaVersion") == 3);
+  CHECK(value.asRecord()->data.at("schemaVersion") == 4);
   CHECK(value.asRecord()->data.at("point_count_status") == "available");
   CHECK(value.asRecord()->data.at("timing_status") == "unavailable");
 }
@@ -356,15 +344,14 @@ TEST_CASE(
   test::StubContext ctx;
   profile_contract::RobustLineResult fit;
   REQUIRE(profile_contract::fitRobustLine(
-              {input, box, bind(input, box), point, bind(input, point), ref, bind(input, ref), {}},
+              {input, box, bind(input), point, bind(input), ref, bind(input)},
               ParamView(parameters, ctx.baseDir()), fit, ctx)
               .ok);
   REQUIRE(fit.inliers.asIndices()->values.size() == 3);
   REQUIRE(fit.weightedInliers.asIndices()->values.size() == 4);
   Data feature;
   REQUIRE(scene::makeLineFeature({fit.profile, fit.line, fit.lineContext, fit.innerEnd,
-                                  fit.pointContext, fit.inliers, fit.weightedInliers, fit.quality,
-                                  fit.provenance},
+                                  fit.pointContext, fit.inliers, fit.weightedInliers, fit.quality},
                                  feature, why));
   test::OpCall call(fixture.registry);
   call.inputs = {{"gap", measure(1)}, {"baseFeature", feature}};
@@ -377,8 +364,7 @@ TEST_CASE(
   CHECK(output.at("weighted_inlier_count") == 4);
 }
 
-TEST_CASE(
-    "native result distinguishes actual overall crop from roll crop and rejects unbound declarations") {
+TEST_CASE("native result distinguishes actual overall crop from roll crop") {
   Fixture fixture;
   scene::ScanView scan;
   scene::RoiView rois;
@@ -405,13 +391,10 @@ TEST_CASE(
       previous.at("guard"),
       crop,
       previous.at("origins"),
-      {{"method", "template"}, {"status", "complete"}, {"details", Json::object()}},
-      scan.primaryProvenance,
-      scan.secondaryProvenance};
+      {{"method", "template"}, {"status", "complete"}, {"details", Json::object()}}};
   Data processed;
   REQUIRE(scene::makeScanPair(*scan.sensorPrimary, *scan.sensorSecondary, *scan.primary,
-                              *scan.secondary, *scan.merged, *scan.mergedProvenance, metadata,
-                              processed, why));
+                              *scan.secondary, *scan.merged, metadata, processed, why));
   scene::RoiFields fields;
   for (std::size_t i = 0; i < 4; ++i) {
     fields.boxes[i] = *rois.boxes[i];
@@ -430,15 +413,6 @@ TEST_CASE(
   CHECK(output.at("crop_status") == "applied");
   CHECK(output.at("point_counts").at("roll_crop_applied") == 0);
   CHECK(output.at("point_counts").at("roll_crop_reverted") == 0);
-  call.inputs.erase("scan");
-  CHECK_FALSE(call.run("gap.result_bundle").ok);
-  call.inputs["scan"] = fixture.scan;
-  CHECK_FALSE(call.run("gap.result_bundle").ok);
-  call.inputs["scan"] = processed;
-  fields.info.data["cropStatus"]["method"] = "unknown";
-  REQUIRE(scene::makeRoiSet(fields, actualRois, why));
-  call.inputs["rois"] = actualRois;
-  CHECK_FALSE(call.run("gap.result_bundle").ok);
 
   Fixture rolled(0, true);
   REQUIRE(scene::readScanPair(rolled.scan, scan, why));

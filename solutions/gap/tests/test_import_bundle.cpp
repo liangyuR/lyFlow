@@ -180,7 +180,7 @@ TEST_CASE(
   for (const auto& o : manifest["operators"]) {
     versions[o["id"].get<std::string>()] = o["version"].get<std::string>();
   }
-  REQUIRE(versions.at("gap.locate_template") == "3.0.0");
+  REQUIRE(versions.at("gap.locate_template") == "4.0.0");
   Fixture f("opversion", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   for (const char* kind : {"StandardGap.yml:template", "StandardGap.yml:template:fine",
                            "StandardGap.yml:model", "StandardGap.yml:model:fine"}) {
@@ -387,7 +387,7 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
   std::string why;
   REQUIRE(lyflow::packs::gap::profile_scene::readRoiSet(roiData, rois, why));
   REQUIRE(lyflow::packs::gap::profile_template::readAlignment(alignmentData, alignment, why));
-  CHECK(bundle["schemaVersion"] == 3);
+  CHECK(bundle["schemaVersion"] == 4);
   CHECK(bundle["gap"]["status"] == "success");
   CHECK(bundle["gap"]["value_mm"].get<double>() ==
         doctest::Approx(result(session, "n_gap", "value").asMeasurement()->value));
@@ -848,7 +848,6 @@ TEST_CASE(
       CHECK_FALSE(hasOp(doc, "gap.read_scan"));
       CHECK_FALSE(hasOp(doc, "gap.locate_template"));
       CHECK_FALSE(hasOp(doc, "gap.locate_model"));
-      CHECK(nodeById(doc, "n_merge")["params"]["roleA"] == "secondary");
       CHECK(hasEdgeFrom(doc, "n_drop_s", "n_merge", "a"));
       CHECK(hasEdgeFrom(doc, "n_drop_p", "n_merge", "b"));
     } else {
@@ -858,7 +857,6 @@ TEST_CASE(
     }
     if (hasOp(doc, "gap.infer_profile")) {
       CHECK(hasEdgeFrom(doc, "n_raw_fields", "n_tensor", "primary"));
-      CHECK(hasEdgeFrom(doc, "n_tensor", "n_seg", "modelInput"));
       CHECK(hasEdgeFrom(doc, "n_raw_fields", "n_seg", "primary"));
       CHECK(hasEdgeFrom(doc, "n_raw_fields", "n_seg", "secondary"));
     }
@@ -877,7 +875,7 @@ TEST_CASE(
           (selected ? "selected_point" : "nearest_point"));
     if (selected) {
       CHECK_FALSE(hasOp(doc, "gap.selected_point"));
-      CHECK(hasEdgeFrom(doc, "n_measure_rois", "n_reference_anchor_context", "referenceContext"));
+      CHECK(hasEdgeFrom(doc, "n_measure_scan", "n_reference_anchor_context", "profile"));
       for (const auto& node : doc["nodes"])
         CHECK(node["id"] != "n_crop_flushRef");
     } else {
@@ -928,7 +926,7 @@ TEST_CASE(
         CHECK(gap.asMeasurement()->value == doctest::Approx(referenceGap).epsilon(1e-6));
       }
       const auto selected = result(session, "n_selected_circles", "leftContext");
-      CHECK(selected.asRecord()->type == "profile.Geometry.v2");
+      CHECK(selected.asRecord()->type == "profile.Geometry.v3");
     }
   }
 }

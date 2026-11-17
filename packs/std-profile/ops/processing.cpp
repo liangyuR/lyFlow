@@ -147,12 +147,11 @@ Status split(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
     if (pieces.empty())
       return bad("切不出任何分片", "clean", "no_segments");
     const auto faces = kp::splitFaces(active, pieces, fp, stop);
-    nlohmann::json result{{"schemaVersion", 1},
+    nlohmann::json result{{"schemaVersion", 2},
                           {"workingUnit", "mm"},
                           {"indexSpace", "active_samples"},
                           {"slotCount", input->pointCount()},
                           {"activeCount", active.size()},
-                          {"context", profile_contract::context(source)},
                           {"parameters",
                            {{"gapMm", gap},
                             {"jumpMm", jump},
@@ -186,7 +185,7 @@ Status split(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
     }
     if (ctx.cancelled())
       return cancelled();
-    outputs.set("faces", Data::record(Record{"profile.Faces.v1", std::move(result)}));
+    outputs.set("faces", Data::record(Record{"profile.Faces.v2", std::move(result)}));
     return Status::Ok();
   } catch (const kp::Cancelled&) {
     return cancelled();
@@ -244,15 +243,16 @@ void registerProfileProcessing(Registry& registry) {
 
   op = {};
   op.id = "profile.split_faces";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
+  op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "有序轮廓分片与直线面";
   op.category = "轮廓/分段";
   op.keywords = {"profile", "TLS", "segmentation", "轮廓", "分片", "分面"};
   op.doc =
-      "按采样序的相邻有效槽分片，分片内按第一平面轴建立索引视图，滑窗TLS提取直线面。毫米工作标度，输出保留输入来源证据。";
+      "按采样序的相邻有效槽分片，分片内按第一平面轴建立索引视图，滑窗TLS提取直线面。毫米工作标度，分片记录原槽与物理源索引。";
   op.inputs = {{"clean", "Profile", "Clean", "明确acquisition采样序的轮廓。", true}};
   op.outputs = {
-      {"faces", "Record", "Faces", "profile.Faces.v1毫米工作坐标及active样本索引。", true}};
+      {"faces", "Record", "Faces", "profile.Faces.v2毫米工作坐标及active样本索引。", true}};
   op.params = {real("gapMm", "第一轴间断", 1),
                real("jumpMm", "第二轴跳变", 1.5),
                integer("minPoints", "分片最少点数", 15, 3),

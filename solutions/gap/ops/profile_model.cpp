@@ -3,12 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstring>
-#include <limits>
-#include <set>
 
 #include "gap_ml/RoiFeatures.hpp"
-#include "lyflow/hash.h"
 #include "lyflow/profile.h"
 #include "lyflow_profile/context.h"
 
@@ -25,14 +21,6 @@ Status cancelled() { return bad("模型轮廓处理已取消", "", "cancelled");
 bool fail(std::string& why, const char* message) {
   why = message;
   return false;
-}
-bool keys(const Json& data, std::initializer_list<const char*> names) {
-  if (!data.is_object() || data.size() != names.size())
-    return false;
-  for (const auto* name : names)
-    if (!data.contains(name))
-      return false;
-  return true;
 }
 bool rawDescriptor(const ProfileDescriptor& d) {
   return d.plane == "XZ" && d.sampleOrder == "acquisition" && d.sourceCount == slots &&
@@ -51,20 +39,6 @@ bool sensors(const Data& a, const Data& b, std::string& why) {
   return sensor(a, why) && sensor(b, why) &&
          (profile_contract::sameSpace(a.asProfile()->descriptor, b.asProfile()->descriptor) ||
           fail(why, "两个逻辑模型row必须处于相同传感器坐标空间"));
-}
-std::string tensorHash(const Tensor& tensor) {
-  HashBuilder hash;
-  hash.add("gap-model-tensor/v2");
-  hash.addBytes(tensor.shape.data(), tensor.shape.size() * sizeof(std::int64_t));
-  hash.addBytes(tensor.data.data(), tensor.data.size() * sizeof(float));
-  return hash.hex();
-}
-std::string bindingHash(Json info) {
-  info.erase("bindingHash");
-  HashBuilder hash;
-  hash.add("gap-label-rows/v2");
-  hash.add(info.dump());
-  return hash.hex();
 }
 bool labelsValid(const Tensor& labels, int classes, std::string& why) {
   if (classes < 1 || classes > 256 || labels.shape != std::vector<std::int64_t>{2, slots} ||
@@ -105,34 +79,17 @@ Status rows(const Data& a, const Data& b, std::array<model::ProfileRow, 2>& resu
   }
   return Status::Ok();
 }
-Status pack(const Tensor& labels, int classes, const Data& a, const Data& b,
-            const std::string& inputHash, const std::string& logitsHash, Data& result,
+Status pack(const Tensor& labels, int classes, const Data& a, const Data& b, Data& result,
             ExecContext& ctx) {
   std::string why;
   if (ctx.cancelled())
     return cancelled();
   if (!sensors(a, b, why) || !labelsValid(labels, classes, why))
     return bad(why);
-  Json info{{"schemaVersion", 2},
-            {"classCount", classes},
-            {"slots", slots},
-            {"logicalRows", {"primary", "secondary"}},
-            {"sensorContexts", {profile_contract::context(a), profile_contract::context(b)}},
-            {"association", "declared"},
-            {"intensitySource", "rgb.R-or-zero"},
-            {"labelsHash", tensorHash(labels)},
-            {"inputHash", inputHash},
-            {"logitsHash", logitsHash}};
-  info["bindingHash"] = bindingHash(info);
   Bundle bundle(kLabelRowsKind);
-  bundle.set("labels", Data::tensor(labels)).set("info", Data::record({kLabelInfoType, info}));
-  const auto candidate = Data::bundle(std::move(bundle));
-  LabelRowsView view;
-  if (!readLabelRows(candidate, view, why))
-    return bad(why);
-  if (ctx.cancelled())
-    return cancelled();
-  result = candidate;
+  bundle.set("labels", Data::tensor(labels))
+      .set("info", Data::record({kLabelInfoType, {{"schemaVersion", 3}, {"classCount", classes}}}));
+  result = Data::bundle(std::move(bundle));
   return Status::Ok();
 }
 Json finiteOrNull(double value) { return std::isfinite(value) ? Json(value) : Json(); }
@@ -172,28 +129,15 @@ Status buildTensor(const Data& a, const Data& b, Tensor& result, ExecContext& ct
 }
 Status makeLabelRows(const Tensor& labels, int classes, const Data& a, const Data& b, Data& result,
                      ExecContext& ctx) {
-  return pack(labels, classes, a, b, {}, {}, result, ctx);
+  return pack(labels, classes, a, b, result, ctx);
 }
 Status labelsFromLogits(const Tensor& logits, const Data& a, const Data& b, Data& result,
-                        ExecContext& ctx, const Tensor* modelInput) {
+                        ExecContext& ctx) {
   if (ctx.cancelled())
     return cancelled();
   if (logits.shape.size() != 3 || logits.shape[0] != 2 || logits.shape[1] < 1 ||
       logits.shape[1] > 256 || logits.shape[2] != slots || !logits.consistent())
     return bad("模型输出需要Tensor[2,1..256,1280]", "tensor");
-  std::string inputHash;
-  if (modelInput) {
-    Tensor expected;
-    const auto status = buildTensor(a, b, expected, ctx);
-    if (!status.ok)
-      return status;
-    if (!modelInput->consistent() || modelInput->shape != expected.shape ||
-        modelInput->data.size() != expected.data.size() ||
-        std::memcmp(modelInput->data.data(), expected.data.data(),
-                    expected.data.size() * sizeof(float)))
-      return bad("声明的模型输入与实际原始传感器特征不匹配", "input");
-    inputHash = tensorHash(*modelInput);
-  }
   const auto classes = static_cast<int>(logits.shape[1]);
   Tensor labels;
   labels.shape = {2, slots};
@@ -212,60 +156,14 @@ Status labelsFromLogits(const Tensor& logits, const Data& a, const Data& b, Data
         }
       labels.data[row * slots + slot] = static_cast<float>(best);
     }
-  return pack(labels, classes, a, b, inputHash, tensorHash(logits), result, ctx);
+  return pack(labels, classes, a, b, result, ctx);
 }
 bool readLabelRows(const Data& data, LabelRowsView& result, std::string& why) {
-  try {
-    const auto* bundle = data.asBundle();
-    if (!bundle || bundle->kind != kLabelRowsKind || bundle->fields.size() != 2 ||
-        !bundle->field("labels") || !bundle->field("info"))
-      return fail(why, "需要仅含labels与info的gap.LabelRows.v2");
-    const auto* labels = bundle->field("labels")->asTensor();
-    const auto* record = bundle->field("info")->asRecord();
-    if (!labels || !record || record->type != kLabelInfoType)
-      return fail(why, "标签Bundle需要原生Tensor与小型来源Record");
-    const auto& info = record->data;
-    if (!keys(info, {"schemaVersion", "classCount", "slots", "logicalRows", "sensorContexts",
-                     "association", "intensitySource", "labelsHash", "inputHash", "logitsHash",
-                     "bindingHash"}) ||
-        info["schemaVersion"] != 2 || !info["schemaVersion"].is_number_integer() ||
-        !info["classCount"].is_number_integer() || info["classCount"] < 1 ||
-        info["classCount"] > 256 || !info["slots"].is_number_integer() || info["slots"] != slots ||
-        info["logicalRows"] != Json::array({"primary", "secondary"}) ||
-        info["association"] != "declared" || info["intensitySource"] != "rgb.R-or-zero" ||
-        !info["sensorContexts"].is_array() || info["sensorContexts"].size() != 2 ||
-        !profile_contract::fingerprint(info["labelsHash"]) ||
-        !profile_contract::fingerprint(info["bindingHash"]) ||
-        (info["inputHash"] != "" && !profile_contract::fingerprint(info["inputHash"])) ||
-        (info["logitsHash"] != "" && !profile_contract::fingerprint(info["logitsHash"])) ||
-        info.dump().size() > 32768)
-      return fail(why, "标签信息版本、来源、类别或指纹字段非法");
-    ProfileDescriptor first;
-    for (std::size_t row = 0; row < 2; ++row) {
-      ProfileDescriptor descriptor;
-      if (!profile_contract::parse(info["sensorContexts"][row], descriptor, why) ||
-          !rawDescriptor(descriptor) || (row && !profile_contract::sameSpace(first, descriptor)))
-        return fail(why, "标签来源必须为同空间完整XZ传感器原槽声明");
-      first = descriptor;
-    }
-    const int classes = info["classCount"].get<int>();
-    if (!labelsValid(*labels, classes, why) || info["labelsHash"] != tensorHash(*labels) ||
-        info["bindingHash"] != bindingHash(info))
-      return fail(why, "标签载荷、来源声明或绑定指纹不匹配");
-    result = {labels, record, classes};
-    why.clear();
-    return true;
-  } catch (const Json::exception&) {
-    return fail(why, "标签元数据类型或编码非法");
-  }
-}
-bool matchesSensors(const Data& labels, const Data& a, const Data& b, std::string& why) {
-  LabelRowsView view;
-  if (!readLabelRows(labels, view, why) || !sensors(a, b, why))
-    return false;
-  if (!profile_contract::matches(a, view.info->data["sensorContexts"][0], why) ||
-      !profile_contract::matches(b, view.info->data["sensorContexts"][1], why))
-    return fail(why, "标签与实际两路传感器原槽或内容已不匹配");
+  const auto* bundle = data.asBundle();
+  if (!bundle || bundle->kind != kLabelRowsKind)
+    return fail(why, "需要gap.LabelRows.v3");
+  const auto* record = bundle->field("info")->asRecord();
+  result = {bundle->field("labels")->asTensor(), record, record->data.at("classCount").get<int>()};
   why.clear();
   return true;
 }
@@ -279,8 +177,6 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
   std::string why;
   if (!profile_scene::readScanPair(scanData, scan, why))
     return bad(why, "scan");
-  if (!matchesSensors(labelData, *scan.sensorPrimary, *scan.sensorSecondary, why))
-    return bad(why);
   std::array<model::ProfileRow, 2> raw;
   auto status = rows(*scan.sensorPrimary, *scan.sensorSecondary, raw, ctx);
   if (!status.ok)
@@ -302,18 +198,8 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
   }
   if (ctx.cancelled())
     return cancelled();
-  Json sources = Json::array();
-  for (const auto* sensorData : {scan.sensorPrimary, scan.sensorSecondary}) {
-    Profile axes, metric;
-    if (!remapProfileAxes(*sensorData->asProfile(), "XZY", {1, 1, 1},
-                          scan.primary->asProfile()->descriptor.frame, axes, why,
-                          [&ctx] { return ctx.cancelled(); }) ||
-        !convertProfileUnit(axes, "m", metric, why, [&ctx] { return ctx.cancelled(); }))
-      return ctx.cancelled() ? cancelled() : bad(why, "scan");
-    const auto source = profile_contract::context(Data::profile(std::move(metric)));
-    if (std::find(sources.begin(), sources.end(), source) == sources.end())
-      sources.push_back(source);
-  }
+  const auto space =
+      Data::record(profile_contract::geometryContext(scan.primary->asProfile()->descriptor));
   BoxComputation candidate;
   candidate.missingSegments = boxes.missing_segments;
   candidate.complete = candidate.missingSegments.empty();
@@ -347,11 +233,9 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
       box.max[axis] = static_cast<float>(bounds[index][axis + 2]) / 1000.0F;
     }
     candidate.fields.boxes[index] = Data::box2d(box);
-    if (!profile_contract::validGeometryV2(candidate.fields.boxes[index], why))
+    if (!profile_contract::validGeometry(candidate.fields.boxes[index], why))
       return bad(why, "labels", "model_roi_failed");
-    candidate.fields.contexts[index] = Data::record(
-        {"profile.Geometry.v2",
-         profile_contract::geometryContextV2FromSources(candidate.fields.boxes[index], sources)});
+    candidate.fields.contexts[index] = space;
   }
   if (candidate.complete) {
     const auto& left = *candidate.fields.boxes[2].asBox2D();
@@ -364,9 +248,7 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
       seam.min[axis] = seam.max[axis] = static_cast<float>(.5 * (lc + rc));
     }
     candidate.seam = Data::box2d(seam);
-    candidate.seamContext =
-        Data::record({"profile.Geometry.v2",
-                      profile_contract::geometryContextV2FromSources(candidate.seam, sources)});
+    candidate.seamContext = space;
     const double datumX =
         .5 * (static_cast<double>(datum.min[0]) * 1000 + static_cast<double>(datum.max[0]) * 1000);
     const double seamX =
@@ -374,7 +256,7 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
                static_cast<double>(right.min[0]) * 1000 + static_cast<double>(right.max[0]) * 1000);
     const bool onRight = datumX > seamX;
     candidate.fields.info = {profile_scene::kRoiInfoType,
-                             {{"schemaVersion", 2},
+                             {{"schemaVersion", 3},
                               {"datumSide", onRight ? "right" : "left"},
                               {"source", "model"},
                               {"roisFrom", "model"},
@@ -384,9 +266,7 @@ Status boxesFromLabels(const Data& labelData, const Data& scanData,
                               {"processing",
                                {{"method", "model"},
                                 {"status", "complete"},
-                                {"details",
-                                 {{"labelsHash", labels.info->data["labelsHash"]},
-                                  {"intensitySource", "rgb.R-or-zero"}}}}}}};
+                                {"details", {{"intensitySource", "rgb.R-or-zero"}}}}}}};
   }
   if (ctx.cancelled())
     return cancelled();

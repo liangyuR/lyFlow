@@ -7,7 +7,6 @@
 #include "lyflow/registry.h"
 #include "lyflow_profile/context.h"
 #include "lyflow_profile/features.h"
-#include "lyflow_profile/provenance.h"
 
 namespace lyflow::packs::std_profile {
 namespace {
@@ -35,7 +34,7 @@ Param choice(const char* name, const char* label, const char* value,
 OperatorDesc description(const char* id, const char* label, const char* keywords) {
   OperatorDesc result;
   result.id = id;
-  result.version = "1.1.0";
+  result.version = "2.0.0";
   result.label = label;
   result.category = "轮廓/选择与适配";
   result.keywords = {keywords, label};
@@ -53,51 +52,12 @@ Status bindGeometry(const Inputs& inputs, const ParamView& params, Outputs& outp
   if (params.choice("plane") != input->descriptor.plane)
     return Status::Error(Phase::Execute, "bad_param", "必须明确声明与轮廓相同的分析平面", "plane");
   const auto& geometry = inputs.get("geometry");
-  if (!profile_contract::validGeometryV2(geometry, why))
+  if (!profile_contract::validGeometry(geometry, why))
     return failure(why, "geometry");
   if (ctx.cancelled())
     return cancelled();
-  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  nlohmann::json sources;
-  if (!profile_contract::profileSources(inputs.get("profile"), provenance, sources, why))
-    return failure(why, "provenance");
-  if (inputs.has("referenceGeometry") != inputs.has("referenceContext"))
-    return failure("参考几何与上下文须成对连接", "referenceContext");
-  if (inputs.has("referenceGeometry")) {
-    const auto* reference = inputs.get("referenceContext").asRecord();
-    ProfileDescriptor space;
-    nlohmann::json references;
-    if (!reference || reference->type != "profile.Geometry.v2" ||
-        !profile_contract::geometryMatchesPhysical(inputs.get("referenceGeometry"), reference,
-                                                   space, why, &references))
-      return failure(why.empty() ? "参考几何需要严格v2上下文" : why, "referenceContext");
-    if (!profile_contract::sameSpace(input->descriptor, space))
-      return failure("参考几何与轮廓物理空间不匹配", "referenceContext");
-    for (const auto& source : references)
-      sources.push_back(source);
-  }
-  Data context;
-  Record rebound;
-  try {
-    context = Data::record(
-        Record{"profile.Geometry.v2",
-               profile_contract::geometryContextV2FromSources(geometry, sources, "declared")});
-    if (!profile_contract::rebindProvenance(inputs.get("profile"), inputs.get("profile"),
-                                            provenance, rebound, why))
-      return failure(why, "provenance");
-    Record extended;
-    if (!profile_contract::extendProvenanceSources(inputs.get("profile"), rebound, sources,
-                                                   extended, why))
-      return failure(why, "referenceContext");
-    rebound = std::move(extended);
-  } catch (const std::invalid_argument& error) {
-    return failure(error.what(), "referenceContext");
-  }
-  if (ctx.cancelled())
-    return cancelled();
   outputs.set("geometry", geometry);
-  outputs.set("context", context);
-  outputs.set("provenance", Data::record(std::move(rebound)));
+  outputs.set("context", Data::record(profile_contract::geometryContext(input->descriptor)));
   return Status::Ok();
 }
 
@@ -109,13 +69,9 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
   const auto& geometry = inputs.get(geometryPort);
   const auto* anchor = geometry.asPoint2D();
   const auto* line = geometry.asLine2D();
-  ProfileDescriptor descriptor;
-  nlohmann::json sources;
-  if (!profile_contract::geometryMatchesPhysical(geometry, inputs.get(contextPort).asRecord(),
-                                                 descriptor, why, &sources))
+  if (!profile_contract::geometryInSpace(geometry, inputs.get(contextPort).asRecord(),
+                                         input->descriptor, why))
     return failure(why, contextPort);
-  if (!profile_contract::sameSpace(input->descriptor, descriptor))
-    return failure("参考几何与轮廓的坐标帧、分析平面和手性不匹配", contextPort);
   if (ctx.cancelled())
     return cancelled();
   Profile metric;
@@ -169,59 +125,25 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
   Point2D point;
   point.p[0] = metric.cloud->xyz[3 * selected + a];
   point.p[1] = metric.cloud->xyz[3 * selected + b];
-  const auto result = Data::point2d(point);
-  const auto inputContext = profile_contract::context(inputs.get("profile"));
-  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  nlohmann::json profileSources;
-  Record rebound;
-  if (!profile_contract::profileSources(inputs.get("profile"), provenance, profileSources, why) ||
-      !profile_contract::rebindProvenance(inputs.get("profile"), inputs.get("profile"), provenance,
-                                          rebound, why))
-    return failure(why, "provenance");
-  for (const auto& source : profileSources)
-    sources.push_back(source);
-  Data pointContext;
-  try {
-    pointContext = Data::record(Record{
-        "profile.Geometry.v2", profile_contract::geometryContextV2FromSources(result, sources)});
-  } catch (const std::invalid_argument& error) {
-    return failure(error.what(), contextPort);
-  }
-  Record extended;
-  if (!profile_contract::extendProvenanceSources(inputs.get("profile"), rebound, sources, extended,
-                                                 why))
-    return failure(why, "provenance");
-  rebound = std::move(extended);
-  auto selectionRecord = Record{"profile.SampleSelection.v1",
-                                {{"schemaVersion", 1},
-                                 {"context", inputContext},
-                                 {"sourceCloudId", std::to_string(input->cloud->id)},
-                                 {"indexSpace", "profile_slots"},
-                                 {"slotIndex", selected},
-                                 {"sourceIndex", input->sourceIndices[selected]},
-                                 {"distance", best},
-                                 {"unit", "m"}}};
-  if (provenance) {
-    nlohmann::json resolved;
-    if (!profile_contract::resolveSourceIndex(inputs.get("profile"), provenance,
-                                              input->sourceIndices[selected], resolved, why))
-      return failure(why, "provenance");
-    selectionRecord.data["source"] = std::move(resolved);
-  }
-  const auto selection = Data::record(std::move(selectionRecord));
+  const auto selection = Data::record(Record{"profile.SampleSelection.v2",
+                                             {{"schemaVersion", 2},
+                                              {"sourceCloudId", std::to_string(input->cloud->id)},
+                                              {"indexSpace", "profile_slots"},
+                                              {"slotIndex", selected},
+                                              {"sourceIndex", input->sourceIndices[selected]},
+                                              {"distance", best},
+                                              {"unit", "m"}}});
   if (ctx.cancelled())
     return cancelled();
-  outputs.set("point", result);
-  outputs.set("pointContext", pointContext);
+  outputs.set("point", Data::point2d(point));
+  outputs.set("pointContext", Data::record(profile_contract::geometryContext(input->descriptor)));
   outputs.set("selection", selection);
   outputs.set("profile", inputs.get("profile"));
-  outputs.set("provenance", Data::record(std::move(rebound)));
   return Status::Ok();
 }
 
 Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                       ExecContext& ctx) {
-  std::string why;
   const auto* input = inputs.get("profile").asProfile();
   if (input->pointCount() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
     return failure("轮廓槽数超过Indices范围", "profile", "budget_exceeded");
@@ -250,15 +172,9 @@ Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& ou
         Profile{std::make_shared<const PointCloud>(std::move(cloud)), input->descriptor,
                 std::vector<std::uint8_t>(valid.values.size(), 1), std::move(sourceIndices)});
   }
-  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  Record rebound;
-  if (!profile_contract::rebindProvenance(inputs.get("profile"), result, provenance, rebound, why))
-    return failure(why, "provenance");
   const auto info =
-      Data::record(Record{"profile.ValiditySelection.v1",
-                          {{"schemaVersion", 1},
-                           {"inputContext", profile_contract::context(inputs.get("profile"))},
-                           {"outputContext", profile_contract::context(result)},
+      Data::record(Record{"profile.ValiditySelection.v2",
+                          {{"schemaVersion", 2},
                            {"mode", mode},
                            {"slotCount", input->pointCount()},
                            {"validCount", valid.values.size()},
@@ -266,7 +182,6 @@ Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& ou
                            {"removedCount", mode == "compact" ? invalid.values.size() : 0},
                            {"outputCount", result.asProfile()->pointCount()},
                            {"indexSpace", "input_profile_slots"},
-                           {"sourceCloudId", std::to_string(input->cloud->id)},
                            {"sourceIndexMapping", "profile.sourceIndices"}}});
   const auto validData = Data::indices(std::move(valid)),
              invalidData = Data::indices(std::move(invalid));
@@ -277,58 +192,56 @@ Status filterValidity(const Inputs& inputs, const ParamView& params, Outputs& ou
   outputs.set("valid", validData);
   outputs.set("invalid", invalidData);
   outputs.set("selection", info);
-  outputs.set("provenance", Data::record(std::move(rebound)));
   return Status::Ok();
+}
+
+TopologyEdit retireProvenance(const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+  return profile_contract::retireInputs(inputs, {"provenance"});
 }
 }
 
 void registerProfileSelection(Registry& registry) {
   auto op = description("profile.bind_geometry", "轮廓几何坐标声明",
                         "profile geometry frame plane declare bind 坐标声明 几何上下文");
+  op.migrations = {
+      {1, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+         return profile_contract::retireInputs(
+             inputs, {"referenceGeometry", "referenceContext", "provenance"});
+       }}};
   Port geometry{"geometry", "Any", "物理几何", "明确位于所声明帧和轴平面的米制点、线、圆或框。",
                 true};
   geometry.anyGroup = 1;
-  Port reference{"referenceGeometry", "Any", "来源参考几何", "与其上下文成对连接的物理几何。",
-                 false};
-  reference.anyGroup = 2;
-  op.inputs = {{"profile", "Profile", "来源轮廓", "坐标声明与来源身份。", true},
-               geometry,
-               reference,
-               {"referenceContext", "Record", "参考上下文", "绑定参考几何的严格v2来源。", false},
-               {"provenance", "Record", "轮廓来源", "可选复合来源，严格绑定当前输入。", false}};
+  op.inputs = {{"profile", "Profile", "来源轮廓", "提供坐标帧、分析平面与手性。", true}, geometry};
   op.outputs = {geometry,
                 {"context", "Record", "几何上下文",
-                 "profile.Geometry.v2；关系为declared，不声称从轮廓拟合得到。", true},
-                {"provenance", "Record", "轮廓来源", "绑定输入轮廓的来源。", true}};
+                 "profile.Geometry.v3：轮廓的坐标帧、分析平面与手性。", true}};
   op.params = {text("frame", "已确认的坐标帧"),
                choice("plane", "已确认的分析平面", "", {"", "XY", "XZ", "YZ"})};
-  op.doc =
-      "显式确认外部米制几何的坐标帧和分析平面，绑定几何内容与完整轮廓来源。坐标不做缩放或换轴。";
+  op.doc = "显式确认外部米制几何与轮廓处于相同坐标帧和分析平面，输出其空间上下文。"
+           "这是调用方声明，不证明标定正确；坐标不做缩放或换轴。";
   op.compute = &bindGeometry;
   registry.addOperator(std::move(op));
   for (const bool toLine : {false, true}) {
     op = description(toLine ? "profile.nearest_to_line" : "profile.nearest_sample",
                      toLine ? "轮廓直线最近样本" : "轮廓锚点最近样本",
                      "profile nearest sample point line 轮廓 最近点 选点");
+    op.migrations = {{1, nullptr, &retireProvenance}};
     op.inputs = {{"profile", "Profile", "轮廓", "按原槽序选择有效样本；保留物理源索引。", true},
                  {toLine ? "line" : "anchor", toLine ? "Line2D" : "Point2D", "参考几何",
                   "同帧同平面的米制几何。", true},
                  {toLine ? "lineContext" : "anchorContext", "Record", "参考上下文",
-                  "profile.Geometry.v1/v2。", true},
-                 {"provenance", "Record", "轮廓来源", "可选复合来源，严格绑定当前输入。", false}};
+                  "profile.Geometry.v3。", true}};
     op.outputs = {
         {"point", "Point2D", "选中样本", "分析平面内的原始样本，明确换算为米。", true},
-        {"pointContext", "Record", "点上下文", "profile.Geometry.v2；保留轮廓和参考几何的来源。",
-         true},
-        {"selection", "Record", "选择信息", "原槽号与物理源索引、米制距离；只含单点元数据。", true},
-        {"profile", "Profile", "原始轮廓", "共享只读输入；完整源映射留在原生数组。", true},
-        {"provenance", "Record", "轮廓来源", "绑定原始Profile的来源。", true}};
+        {"pointContext", "Record", "点上下文", "profile.Geometry.v3。", true},
+        {"selection", "Record", "选择信息",
+         "profile.SampleSelection.v2：原槽号、物理源索引与米制距离。", true},
+        {"profile", "Profile", "原始轮廓", "共享只读输入；完整源映射留在原生数组。", true}};
     op.doc = toLine ? "按到无限直线的垂距选有效样本，不限幅到线段；等距保留原槽序较前者。"
                     : "按到明确锚点的欧氏距离扫描全部有效样本；等距保留原槽序较前者。";
     op.compute = [toLine](const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx) {
       profile_contract::NearestInputs input{in.get("profile"), in.get(toLine ? "line" : "anchor"),
-                                            in.get(toLine ? "lineContext" : "anchorContext"),
-                                            in.get("provenance")};
+                                            in.get(toLine ? "lineContext" : "anchorContext")};
       profile_contract::NearestResult result;
       if (auto status =
               profile_contract::nearestSample(input,
@@ -343,22 +256,21 @@ void registerProfileSelection(Registry& registry) {
       out.set("point", result.point);
       out.set("pointContext", result.pointContext);
       out.set("selection", result.selection);
-      out.set("provenance", result.provenance);
       return Status::Ok();
     };
     registry.addOperator(std::move(op));
   }
   op = description("profile.filter_validity", "轮廓有效样本筛选",
                    "profile validity finite mask compact 轮廓 有效性 非有限 保槽 筛选");
-  op.inputs = {{"profile", "Profile", "轮廓", "完整原生采样、有效掩码与源索引。", true},
-               {"provenance", "Record", "轮廓来源", "可选复合来源，严格绑定当前输入。", false}};
+  op.migrations = {{1, nullptr, &retireProvenance}};
+  op.inputs = {{"profile", "Profile", "轮廓", "完整原生采样、有效掩码与源索引。", true}};
   op.outputs = {
       {"profile", "Profile", "筛选轮廓", "显式保槽或压缩；所有通道和物理源索引保持对应。", true},
       {"sourceProfile", "Profile", "原始轮廓", "valid/invalid的槽号属于此原始轮廓。", true},
       {"valid", "Indices", "保留槽", "绑定原始轮廓实际cloud.id的槽号。", true},
       {"invalid", "Indices", "无效槽", "绑定原始轮廓实际cloud.id的槽号。", true},
-      {"selection", "Record", "筛选信息", "上下文与计数；大数组保留在原生载荷。", true},
-      {"provenance", "Record", "轮廓来源", "绑定筛选后Profile的来源。", true}};
+      {"selection", "Record", "筛选信息",
+       "profile.ValiditySelection.v2计数；大数组保留在原生载荷。", true}};
   op.params = {choice("mode", "输出模式", "preserve_slots", {"preserve_slots", "compact"})};
   op.doc =
       "只按既有有效掩码与XYZ有限性筛选，不进行平滑、强度阈值或统计去噪。压缩保留样本顺序与全部可选通道。";
@@ -377,15 +289,13 @@ Status nearestSample(const NearestInputs& input, NearestReference reference, Nea
       {"profile", input.profile},
       {toLine ? "line" : "anchor", input.reference},
       {toLine ? "lineContext" : "anchorContext", input.referenceContext}};
-  if (input.provenance.kind() != Data::Kind::None)
-    inputs.emplace("provenance", input.provenance);
   std::unordered_map<std::string, Data> values;
   Outputs outputs(values);
   if (auto status = packs::std_profile::nearestCore(Inputs(inputs), outputs, ctx, toLine);
       !status.ok)
     return status;
   NearestResult result{values.at("profile"), values.at("point"), values.at("pointContext"),
-                       values.at("selection"), values.at("provenance")};
+                       values.at("selection")};
   if (ctx.cancelled())
     return Status::Error(Phase::Execute, "cancelled", "最近样本已取消");
   out = std::move(result);

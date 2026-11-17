@@ -4,7 +4,7 @@
 #include "lyflow/profile.h"
 #include "lyflow/registry.h"
 #include "lyflow_pcl/filters.h"
-#include "lyflow_profile/provenance.h"
+#include "lyflow_profile/context.h"
 
 namespace lyflow::packs::std_profile {
 namespace {
@@ -19,10 +19,6 @@ Status radiusOutlier(const Inputs& inputs, const ParamView& params, Outputs& out
   std::string why;
   if (ctx.cancelled())
     return cancelled();
-  const auto* provenance = inputs.has("provenance") ? inputs.get("provenance").asRecord() : nullptr;
-  nlohmann::json sources;
-  if (!profile_contract::profileSources(source, provenance, sources, why))
-    return bad(why, "provenance");
   Profile metric;
   if (!convertProfileUnit(*input, "m", metric, why, [&ctx] { return ctx.cancelled(); }))
     return ctx.cancelled() ? cancelled() : bad(why);
@@ -55,18 +51,12 @@ Status radiusOutlier(const Inputs& inputs, const ParamView& params, Outputs& out
     result.sourceIndices.push_back(input->sourceIndices[slot]);
   }
   const auto data = Data::profile(std::move(result));
-  Record rebound;
-  if (!profile_contract::rebindProvenance(source, data, provenance, rebound, why))
-    return bad(why, "provenance");
-  const auto selection = Data::record(Record{"profile.RadiusSelection.v1",
-                                             {{"schemaVersion", 1},
-                                              {"inputContext", profile_contract::context(source)},
-                                              {"outputContext", profile_contract::context(data)},
+  const auto selection = Data::record(Record{"profile.RadiusSelection.v2",
+                                             {{"schemaVersion", 2},
                                               {"unit", "m"},
                                               {"radius", params.number("radius")},
                                               {"minNeighbors", params.integer("minNeighbors")},
                                               {"indexSpace", "input_profile_slots"},
-                                              {"sourceCloudId", std::to_string(input->cloud->id)},
                                               {"keptCount", selected.kept.values.size()},
                                               {"removedCount", selected.removed.values.size()},
                                               {"sourceIndexMapping", "profile.sourceIndices"}}});
@@ -76,7 +66,6 @@ Status radiusOutlier(const Inputs& inputs, const ParamView& params, Outputs& out
   outputs.set("sourceProfile", source);
   outputs.set("kept", Data::indices(std::move(selected.kept)));
   outputs.set("removed", Data::indices(std::move(selected.removed)));
-  outputs.set("provenance", Data::record(std::move(rebound)));
   outputs.set("selection", selection);
   return Status::Ok();
 }
@@ -84,20 +73,23 @@ Status radiusOutlier(const Inputs& inputs, const ParamView& params, Outputs& out
 void registerProfileRadiusOutlier(Registry& registry) {
   OperatorDesc op;
   op.id = "profile.radius_outlier";
-  op.version = "1.0.1";
+  op.version = "2.0.0";
+  op.migrations = {
+      {1, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+         return profile_contract::retireInputs(inputs, {"provenance"});
+       }}};
   op.label = "轮廓半径离群样本剔除";
   op.category = "轮廓/过滤";
   op.keywords = {"profile", "radius", "outlier", "neighbors", "轮廓", "半径", "去噪"};
   op.doc =
       "以米制XYZ工作副本调用共享KD树邻域内核；无效槽不参与邻域，输出压缩但保留全部原通道与sourceIndices。";
-  op.inputs = {{"profile", "Profile", "轮廓", "明确m/mm单位和原槽映射。", true},
-               {"provenance", "Record", "来源", "可选、严格绑定当前输入的来源。", false}};
+  op.inputs = {{"profile", "Profile", "轮廓", "明确m/mm单位和原槽映射。", true}};
   op.outputs = {{"profile", "Profile", "过滤轮廓", "有效邻域样本，保序并保留物理源槽。", true},
                 {"sourceProfile", "Profile", "原始轮廓", "kept/removed所属索引空间。", true},
                 {"kept", "Indices", "保留槽", "绑定输入cloud.id的原槽。", true},
                 {"removed", "Indices", "排除槽", "绑定输入cloud.id的原槽。", true},
-                {"provenance", "Record", "来源", "严格绑定过滤后Profile的来源。", true},
-                {"selection", "Record", "选择信息", "单位、参数与计数，不复制源槽数组。", true}};
+                {"selection", "Record", "选择信息",
+                 "profile.RadiusSelection.v2：单位、参数与计数，不复制源槽数组。", true}};
   Param radius;
   radius.name = "radius";
   radius.label = "邻域半径";

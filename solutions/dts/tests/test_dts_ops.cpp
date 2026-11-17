@@ -114,7 +114,6 @@ struct Chain {
       return false;
 
     flush.inputs["root"] = root.out("root");
-    flush.inputs["metal"] = metal.out("metal");
     if (!step(flush, "dts.flush"))
       return false;
 
@@ -122,9 +121,7 @@ struct Chain {
     bundle.inputs["dome"] = dome.out("dome");
     bundle.inputs["pick"] = metal.out("pick");
     bundle.inputs["root"] = root.out("root");
-    bundle.inputs["metal"] = metal.out("metal");
     bundle.inputs["flush"] = flush.out("flush");
-    bundle.inputs["foot"] = flush.out("foot");
     bundle.inputs["footInfo"] = flush.out("footInfo");
     return step(bundle, "dts.profile_bundle");
   }
@@ -192,12 +189,12 @@ TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
 
     const Record* faces = chain.faces.out("faces").asRecord();
     REQUIRE(faces != nullptr);
-    CHECK(faces->type == "profile.Faces.v1");
+    CHECK(faces->type == "profile.Faces.v2");
     CHECK(faces->data["faces"].size() >= 1);
 
     const Record* dome = chain.dome.out("dome").asRecord();
     REQUIRE(dome != nullptr);
-    CHECK(dome->type == "DtsDome.v2");
+    CHECK(dome->type == "DtsDome.v3");
     // 半径是胶条的硬判据：seal_dome 成功就意味着它落在 [7, 14] 里。
     CHECK(dome->data["radiusMm"].get<double>() > 0.0);
 
@@ -207,7 +204,7 @@ TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
 
     const Record* root = chain.root.out("root").asRecord();
     REQUIRE(root != nullptr);
-    CHECK(root->type == "DtsRoot.v2");
+    CHECK(root->type == "DtsRoot.v3");
     CHECK(root->data.contains("x"));
     CHECK(root->data.contains("z"));
 
@@ -223,7 +220,7 @@ TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
 
     const Record* bundle = chain.bundle.out("bundle").asRecord();
     REQUIRE(bundle != nullptr);
-    CHECK(bundle->type == "DtsProfileBundle.v2");
+    CHECK(bundle->type == "DtsProfileBundle.v3");
     CHECK(bundle->data["ok"].get<bool>());
     CHECK(bundle->data["flushMm"].get<double>() == doctest::Approx(m->value));
   }
@@ -354,7 +351,7 @@ TEST_CASE("一条直线没有胶条：停在 seal_dome") {
   CHECK(chain.status.code == "no_dome");
 }
 
-TEST_CASE("DTS v2 preserves slots, channels, source identity and metric geometry companions") {
+TEST_CASE("DTS preserves slots, channels, source identity and metric geometry spaces") {
   auto raw = resampled(td::kZ1000, td::kI1000);
   raw.normals.assign(raw.xyz.size(), .25f);
   raw.rgb.assign(raw.xyz.size(), 71);
@@ -368,7 +365,7 @@ TEST_CASE("DTS v2 preserves slots, channels, source identity and metric geometry
   CHECK(clean->cloud->normals == std::vector<float>(clean->pointCount() * 3, .25f));
   CHECK(clean->cloud->rgb == std::vector<std::uint8_t>(clean->pointCount() * 3, 71));
   const auto& root = chain.root.out("root").asRecord()->data;
-  CHECK(root["schemaVersion"] == 2);
+  CHECK(root["schemaVersion"] == 3);
   CHECK(root["workingUnit"] == "mm");
   const auto slot = root["slotIndex"].get<std::size_t>();
   CHECK(clean->validity.at(slot) == 1);
@@ -390,21 +387,19 @@ TEST_CASE("DTS v2 preserves slots, channels, source identity and metric geometry
       static_cast<float>(static_cast<double>(static_cast<float>(root["z"].get<double>())) * .001));
   std::string why;
   ProfileDescriptor descriptor;
-  REQUIRE(profile_contract::geometryMatches(
+  REQUIRE(profile_contract::geometrySpace(
       chain.root.out("point"), chain.root.out("pointContext").asRecord(), descriptor, why));
-  REQUIRE(profile_contract::geometryMatches(
-      chain.metal.out("metal"), chain.metal.out("metalContext").asRecord(), descriptor, why));
+  REQUIRE(profile_contract::geometryInSpace(chain.metal.out("metal"),
+                                            chain.metal.out("metalContext").asRecord(),
+                                            clean->descriptor, why));
   CHECK(descriptor.frame == "dts-scan");
   const auto& info = chain.flush.out("footInfo").asRecord()->data;
   const auto& bundle = chain.bundle.out("bundle").asRecord()->data;
   CHECK(info["footMm"][0] == bundle["perpendicular"]["x"]);
   CHECK(info["footMm"][1] == bundle["perpendicular"]["z"]);
-  CHECK(info["valueMm"] == bundle["flushMm"]);
-  CHECK(info["context"] == root["context"]);
 }
 
-TEST_CASE(
-    "DTS v2 rejects foreign contexts, missing fields and mismatched geometry without output") {
+TEST_CASE("DTS rejects a non-XZ profile and missing fields without output") {
   Chain chain;
   REQUIRE(chain.run(resampled(td::kZ1000, nullptr)));
   const Data clean = chain.clean.out("clean");
@@ -415,13 +410,9 @@ TEST_CASE(
     CHECK(call.outputs.empty());
   };
   auto changed = *clean.asProfile();
-  changed.descriptor.frame = "other-sensor";
+  changed.descriptor.plane = "XY";
   Call dome;
   dome.inputs = chain.dome.inputs;
-  dome.inputs["clean"] = Data::profile(changed);
-  checkRejected(dome, "dts.seal_dome");
-  changed = *clean.asProfile();
-  changed.descriptor.plane = "XY";
   dome.inputs["clean"] = Data::profile(changed);
   checkRejected(dome, "dts.seal_dome");
   dome.inputs = chain.dome.inputs;
@@ -441,22 +432,6 @@ TEST_CASE(
   pick.data.erase("metalLineMm");
   root.inputs["pick"] = Data::record(pick);
   checkRejected(root, "dts.seal_root");
-  Call flush;
-  flush.inputs = chain.flush.inputs;
-  auto wrong = *chain.metal.out("metal").asLine2D();
-  wrong.point[0] += .001f;
-  flush.inputs["metal"] = Data::line2d(wrong);
-  checkRejected(flush, "dts.flush");
-  Call bundle;
-  bundle.inputs = chain.bundle.inputs;
-  auto footInfo = *chain.flush.out("footInfo").asRecord();
-  footInfo.data["footMm"][0] = 10000;
-  bundle.inputs["footInfo"] = Data::record(footInfo);
-  checkRejected(bundle, "dts.profile_bundle");
-  bundle.inputs = chain.bundle.inputs;
-  bundle.inputs.erase("foot");
-  REQUIRE(bundle.run("dts.profile_bundle").ok);
-  CHECK_FALSE(bundle.out("bundle").asRecord()->data.contains("perpendicular"));
 }
 
 TEST_CASE("DTS v2 flush retains legacy float direction arithmetic and all business signs") {
@@ -477,12 +452,9 @@ TEST_CASE("DTS v2 flush retains legacy float direction arithmetic and all busine
         auto root = original;
         root.data["x"] = 4.567891;
         root.data["z"] = 7.654321;
-        const auto geometry = Data::line2d(lyflow::dts::metricGeometry(legacy));
         root.data["metalLineMm"] = lyflow::dts::lineMillimeters(legacy);
-        root.data["metalGeometryHash"] = profile_contract::geometryHash(geometry);
         Call flush;
         flush.inputs["root"] = Data::record(root);
-        flush.inputs["metal"] = geometry;
         REQUIRE(flush
                     .run("dts.flush", {{"sealBulge", Value::text(bulge)},
                                        {"positiveDirection", Value::text(positive)}})
@@ -525,7 +497,7 @@ TEST_CASE("DTS v2 real graphs run through legacy cloud and native profile inject
       REQUIRE(log.runStatus() == "ok");
       Data result;
       REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_bundle", "bundle", result));
-      CHECK(result.asRecord()->type == "DtsProfileBundle.v2");
+      CHECK(result.asRecord()->type == "DtsProfileBundle.v3");
       CHECK(result.asRecord()->data["ok"] == true);
       CHECK(result.asRecord()->data["flushMm"].get<double>() ==
             (std::string(variant) == "default" ? 29.405751121893076 : 0.028393018568152684));
