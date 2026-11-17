@@ -8,6 +8,7 @@
 - 旧图迁移改为离线执行：编辑器和宿主加载时不再自动升级，图中带`contractUpgrade`或已退役的DTS/Gap节点时报`migration_required`并提示命令，运行`lyflow migrate <图> --write`（或`--request <文件>`）迁移后保存。迁移规则由提供算子的包注册，C ABI新增`lyflow_migrate`；执行状态不再返回`graphUpdate`，SDK头`graph_contract_upgrade.h`改为`graph_migration.h`。
 - 执行器对算子输出的Bundle逐字段做与顶层输出相同的Profile/点云/图像自洽校验，字段非法时报`internal`并指明字段；算子不再重复检查执行器已保证的参数枚举、范围与端口类型。
 - Profile公共算子删除来源集合、`profile.CompositeSources.v1`、`provenance`输入输出及内容指纹；几何上下文统一为只记录坐标帧、分析平面与手性的`profile.Geometry.v3`，几何内容不再与上下文绑定。合并轮廓的`sourceId`改为可读的`derived:composite/a+b`。相关算子升为2.0.0，旧图运行`lyflow migrate`删除连到已退役端口的边。Gap与DTS同步删除来源端口、来源闸门和各类指纹及读取时的重算比对：Gap场景、特征、模板与模型Bundle升为v3，`GapResultBundle`升为schemaVersion 4并去掉`source_evidence`，`gap.labels_from_logits`去掉`modelInput`，DTS的`dts.flush`、`dts.profile_bundle`去掉只用于指纹比对的`metal`/`foot`输入；涉及的算子升主版本。
+- 点到直线有符号距离只保留公共`metrology::signedPointLine`一份实现：点线面差、稳健直线ROI求交、轮廓直线最近样本和Gap旧引擎都改用它的双精度计算，结果相对原float计算只差舍入，`metrology.flush_point_line`、`profile.nearest_to_line`升为2.0.1、`gap.measure_reference`升为1.0.1隔离缓存；正法向参考与直线法向的正交判定改为精确。删除无调用方的`profile_kernel` `Line::signedDistance`。
 - std-profile升级0.5.0、std-metrology升级0.4.0、std-geometry升级0.7.0、gap与dts升级0.2.0；产品1.4.4保持1.4系列C ABI布局。旧8ID、场景/Bundle及六导入器迁移留M4c，整个M4尚未完成。
 
 ## 1.4.3（M4a已合并）

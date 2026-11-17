@@ -30,13 +30,18 @@ bool signedPointLine(const std::array<double, 2>& point, const std::array<double
     normal[0] /= norm;
     normal[1] /= norm;
   }
-  const double referenceScale = std::max(std::abs(positiveNormal[0]), std::abs(positiveNormal[1]));
-  if (referenceScale == 0) {
+  if (positiveNormal[0] == 0 && positiveNormal[1] == 0) {
     why = "正法向参考不能为零";
     return false;
   }
-  const double alignment = positiveNormal[0] / referenceScale * normal[0] +
-                           positiveNormal[1] / referenceScale * normal[1];
+  const auto binaryScaled = [](double x, double y) {
+    int exponent = 0;
+    std::frexp(std::max(std::abs(x), std::abs(y)), &exponent);
+    return std::array<double, 2>{std::ldexp(x, -exponent), std::ldexp(y, -exponent)};
+  };
+  const auto reference = binaryScaled(positiveNormal[0], positiveNormal[1]);
+  const auto unnormalized = binaryScaled(-lineDir[1], lineDir[0]);
+  const double alignment = reference[0] * unnormalized[0] + reference[1] * unnormalized[1];
   if (alignment == 0) {
     why = "正法向参考不能与直线法向正交";
     return false;

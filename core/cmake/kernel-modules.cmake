@@ -114,7 +114,7 @@ macro(lyflow_setup_profile_robust_kernel)
   set_target_properties(lyflow_profile_robust_kernel PROPERTIES
     EXPORT_NAME profile_robust_kernel POSITION_INDEPENDENT_CODE ON LYFLOW_PROFILE_PCL_VERSION "${PCL_VERSION}")
   target_compile_features(lyflow_profile_robust_kernel PUBLIC cxx_std_17)
-  target_link_libraries(lyflow_profile_robust_kernel PUBLIC lyflow_data_contract)
+  target_link_libraries(lyflow_profile_robust_kernel PUBLIC lyflow_data_contract PRIVATE lyflow_metrology_kernel)
   target_include_directories(lyflow_profile_robust_kernel PUBLIC
     "$<BUILD_INTERFACE:${LYFLOW_KERNEL_ROOT}/include>" "$<INSTALL_INTERFACE:include>")
   set(_libraries "")
@@ -144,4 +144,4 @@ macro(lyflow_setup_profile_robust_kernel)
 endmacro()
 
 lyflow_declare_module(NAME profile-robust-kernel TARGET lyflow_profile_robust_kernel SETUP lyflow_setup_profile_robust_kernel
-  REQUIRES data-contract)
+  REQUIRES data-contract metrology-kernel)

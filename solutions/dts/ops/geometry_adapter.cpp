@@ -34,30 +34,19 @@ Status compute(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&)
     if (!source || source->unit != Unit2D::Meter || !std::isfinite(source->p[0]) ||
         !std::isfinite(source->p[1]))
       return bad();
-    Point2D point = *source;
-    if (legacy)
-      for (auto& coordinate : point.p)
-        coordinate = static_cast<float>(static_cast<double>(coordinate) * 0.001);
-    out.set("geometry", Data::point2d(point));
+    out.set("geometry", Data::point2d(legacy ? metricGeometry(*source) : *source));
   } else {
     const auto* source = value.asLine2D();
     if (!source || source->unit != Unit2D::Meter)
       return bad();
-    Line2D line = *source;
-    for (int i = 0; i < 2; ++i) {
-      if (!std::isfinite(line.point[i]) || !std::isfinite(line.dir[i]) ||
-          (line.hasSegment && (!std::isfinite(line.start[i]) || !std::isfinite(line.end[i]))))
+    for (int i = 0; i < 2; ++i)
+      if (!std::isfinite(source->point[i]) || !std::isfinite(source->dir[i]) ||
+          (source->hasSegment &&
+           (!std::isfinite(source->start[i]) || !std::isfinite(source->end[i]))))
         return bad();
-      if (legacy)
-        line.point[i] = static_cast<float>(static_cast<double>(line.point[i]) * 0.001);
-      if (legacy && line.hasSegment) {
-        line.start[i] = static_cast<float>(static_cast<double>(line.start[i]) * 0.001);
-        line.end[i] = static_cast<float>(static_cast<double>(line.end[i]) * 0.001);
-      }
-    }
-    if (std::hypot(line.dir[0], line.dir[1]) == 0)
+    if (std::hypot(source->dir[0], source->dir[1]) == 0)
       return bad();
-    out.set("geometry", Data::line2d(line));
+    out.set("geometry", Data::line2d(legacy ? metricGeometry(*source) : *source));
   }
   return Status::Ok();
 }

@@ -1,7 +1,9 @@
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
 
+#include "lyflow/kernel/metrology.h"
 #include "lyflow/operator.h"
 #include "lyflow/profile.h"
 #include "lyflow/registry.h"
@@ -69,9 +71,10 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
   const auto& geometry = inputs.get(geometryPort);
   const auto* anchor = geometry.asPoint2D();
   const auto* line = geometry.asLine2D();
-  if (!profile_contract::geometryInSpace(geometry, inputs.get(contextPort).asRecord(),
-                                         input->descriptor, why))
-    return failure(why, contextPort);
+  if (auto status = profile_contract::geometryInSpace(geometry, inputs.get(contextPort),
+                                                      input->descriptor, contextPort);
+      !status.ok)
+    return status;
   if (ctx.cancelled())
     return cancelled();
   Profile metric;
@@ -79,19 +82,11 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
     return ctx.cancelled() ? cancelled() : failure(why);
   const int a = metric.descriptor.plane == "YZ" ? 1 : 0;
   const int b = metric.descriptor.plane == "XY" ? 1 : 2;
-  float nx = 0, ny = 0;
+  std::array<double, 2> linePoint{}, lineDirection{}, lineReference{};
   if (line) {
-    nx = line->dir[1];
-    ny = -line->dir[0];
-    const float length = std::sqrt(nx * nx + ny * ny);
-    if (length > 0 && std::isfinite(length)) {
-      nx /= length;
-      ny /= length;
-    } else {
-      const double length64 = std::hypot(static_cast<double>(nx), ny);
-      nx = static_cast<float>(nx / length64);
-      ny = static_cast<float>(ny / length64);
-    }
+    linePoint = {line->point[0], line->point[1]};
+    lineDirection = {line->dir[0], line->dir[1]};
+    lineReference = kernel::metrology::canonicalNormalReference(lineDirection);
   }
   std::size_t selected = metric.pointCount();
   double best = std::numeric_limits<double>::infinity();
@@ -103,11 +98,12 @@ Status nearestCore(const Inputs& inputs, Outputs& outputs, ExecContext& ctx, boo
     const float x = metric.cloud->xyz[3 * i + a], y = metric.cloud->xyz[3 * i + b];
     double distance;
     if (line) {
-      const float dx = x - line->point[0], dy = y - line->point[1];
-      distance = std::fabs(static_cast<double>(nx) * dx + static_cast<double>(ny) * dy);
-      if (!std::isfinite(distance))
-        distance = std::fabs(static_cast<double>(nx) * (static_cast<double>(x) - line->point[0]) +
-                             static_cast<double>(ny) * (static_cast<double>(y) - line->point[1]));
+      kernel::metrology::SignedPointLine projection;
+      if (!kernel::metrology::signedPointLine({x, y}, linePoint, lineDirection, lineReference,
+                                              kernel::metrology::DirectionPolicy::Normalize,
+                                              projection, why))
+        return failure(why, geometryPort);
+      distance = std::fabs(projection.distance);
     } else {
       const float dx = x - anchor->p[0], dy = y - anchor->p[1];
       distance = std::sqrt(dx * dx + dy * dy);
@@ -225,6 +221,8 @@ void registerProfileSelection(Registry& registry) {
     op = description(toLine ? "profile.nearest_to_line" : "profile.nearest_sample",
                      toLine ? "轮廓直线最近样本" : "轮廓锚点最近样本",
                      "profile nearest sample point line 轮廓 最近点 选点");
+    if (toLine)
+      op.version = "2.0.1";
     op.migrations = {{1, nullptr, &retireProvenance}};
     op.inputs = {{"profile", "Profile", "轮廓", "按原槽序选择有效样本；保留物理源索引。", true},
                  {toLine ? "line" : "anchor", toLine ? "Line2D" : "Point2D", "参考几何",

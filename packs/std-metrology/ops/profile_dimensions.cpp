@@ -15,24 +15,6 @@ Status failure(const std::string& why, const char* port = "", const char* code =
   return Status::Error(Phase::Execute, code, why, {}, port);
 }
 
-Status first(const Inputs& inputs, const char* geometry, const char* context,
-             ProfileDescriptor& space) {
-  std::string why;
-  if (!profile_contract::geometrySpace(inputs.get(geometry), inputs.get(context).asRecord(), space,
-                                       why))
-    return failure(why, context);
-  return Status::Ok();
-}
-
-Status same(const Inputs& inputs, const char* geometry, const char* context,
-            const ProfileDescriptor& space) {
-  std::string why;
-  if (!profile_contract::geometryInSpace(inputs.get(geometry), inputs.get(context).asRecord(),
-                                         space, why))
-    return failure(why, context);
-  return Status::Ok();
-}
-
 Data contextOf(const ProfileDescriptor& space) {
   return Data::record(profile_contract::geometryContext(space));
 }
@@ -62,10 +44,12 @@ Status flushPointLine(const Inputs& inputs, const ParamView& params, Outputs& ou
   const auto* base = inputs.get("baseLine").asLine2D();
   const auto* point = inputs.get("refPoint").asPoint2D();
   ProfileDescriptor space;
-  auto status = first(inputs, "baseLine", "baseLineContext", space);
+  auto status = profile_contract::geometrySpace(
+      inputs.get("baseLine"), inputs.get("baseLineContext"), space, "baseLineContext");
   if (!status.ok)
     return status;
-  status = same(inputs, "refPoint", "refPointContext", space);
+  status = profile_contract::geometryInSpace(inputs.get("refPoint"), inputs.get("refPointContext"),
+                                             space, "refPointContext");
   if (!status.ok)
     return status;
   dimensions::FlushOptions options;
@@ -107,10 +91,12 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
   const auto* left = inputs.get("left").asCircle2D();
   const auto* right = inputs.get("right").asCircle2D();
   ProfileDescriptor space;
-  auto status = first(inputs, "left", "leftContext", space);
+  auto status = profile_contract::geometrySpace(inputs.get("left"), inputs.get("leftContext"),
+                                                space, "leftContext");
   if (!status.ok)
     return status;
-  status = same(inputs, "right", "rightContext", space);
+  status = profile_contract::geometryInSpace(inputs.get("right"), inputs.get("rightContext"), space,
+                                             "rightContext");
   if (!status.ok)
     return status;
   dimensions::CircleGapOptions options;
@@ -124,7 +110,8 @@ Status circleGap(const Inputs& inputs, const ParamView& params, Outputs& outputs
     base = inputs.get("baseLine").asLine2D();
     if (!base)
       return failure("基准线与其上下文必须成对提供", "baseLine");
-    status = same(inputs, "baseLine", "baseLineContext", space);
+    status = profile_contract::geometryInSpace(
+        inputs.get("baseLine"), inputs.get("baseLineContext"), space, "baseLineContext");
     if (!status.ok)
       return status;
   }
@@ -157,10 +144,12 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
   const auto* a = inputs.get("a").asPoint2D();
   const auto* b = inputs.get("b").asPoint2D();
   ProfileDescriptor space;
-  auto status = first(inputs, "a", "aContext", space);
+  auto status =
+      profile_contract::geometrySpace(inputs.get("a"), inputs.get("aContext"), space, "aContext");
   if (!status.ok)
     return status;
-  status = same(inputs, "b", "bContext", space);
+  status =
+      profile_contract::geometryInSpace(inputs.get("b"), inputs.get("bContext"), space, "bContext");
   if (!status.ok)
     return status;
   dimensions::PointOffsetOptions options;
@@ -234,7 +223,7 @@ Port contextPort(const char* name, const char* label, bool required = true) {
 void registerProfileDimensions(Registry& registry) {
   OperatorDesc op;
   op.id = "metrology.flush_point_line";
-  op.version = "2.0.0";
+  op.version = "2.0.1";
   op.migrations = {{1, nullptr, &profile_contract::keepInputs}};
   op.label = "点线面差测量";
   op.category = "计量/轮廓";

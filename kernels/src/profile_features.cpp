@@ -1,5 +1,7 @@
 #include "lyflow/kernel/profile_features.h"
 
+#include "lyflow/kernel/metrology.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -115,25 +117,24 @@ bool roiIntersections(const Bounds& bounds, const std::array<float, 6>& coeffici
                       std::array<float, 2>& start, std::array<float, 2>& end) {
   const std::array<std::array<float, 2>, 4> corners{
       bounds.min, {bounds.min[0], bounds.max[1]}, bounds.max, {bounds.max[0], bounds.min[1]}};
-  float nx = coefficients[4];
-  float ny = -coefficients[3];
-  const float length = std::sqrt(nx * nx + ny * ny);
-  nx /= length;
-  ny /= length;
-  if (ny > 0) {
-    nx = -nx;
-    ny = -ny;
+  const std::array<double, 2> linePoint{coefficients[0], coefficients[1]};
+  const std::array<double, 2> direction{coefficients[3], coefficients[4]};
+  const auto reference = metrology::canonicalNormalReference(direction);
+  std::array<double, 4> distances{};
+  for (std::size_t i = 0; i < corners.size(); ++i) {
+    metrology::SignedPointLine projection;
+    std::string why;
+    if (!metrology::signedPointLine({corners[i][0], corners[i][1]}, linePoint, direction, reference,
+                                    metrology::DirectionPolicy::Normalize, projection, why))
+      return false;
+    distances[i] = projection.distance;
   }
-  const auto distance = [&](const std::array<float, 2>& point) {
-    return static_cast<double>(nx * (point[0] - coefficients[0]) +
-                               ny * (point[1] - coefficients[1]));
-  };
   std::array<std::array<float, 2>, 2> intersections{};
   std::size_t count = 0;
   for (std::size_t i = 0; i < corners.size(); ++i) {
     const auto& a = corners[i];
     const auto& b = corners[(i + 1) % corners.size()];
-    if (distance(a) * distance(b) < 0 && count < intersections.size()) {
+    if (distances[i] * distances[(i + 1) % corners.size()] < 0 && count < intersections.size()) {
       if (a[0] == b[0]) {
         const double x = a[0];
         const double y =

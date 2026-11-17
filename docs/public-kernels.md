@@ -13,7 +13,7 @@ M3已抽取轮廓数值方法并迁移DTS试点，M4a公开稳健拟合后端；
 | `lyflow::metrology_kernel`        | `lyflow/kernel/metrology.h`、`profile_dimensions.h`         | 平面标定距离、采样间隙/面差、点线面差、圆间隙与位移分量；无视觉后端                            |
 | `lyflow::profile_kernel`          | `lyflow/kernel/profile.h`                                   | 原采样序中值、分片、稳定排序视图、TLS/圆拟合与面分割；标准库，显式毫米工作坐标                 |
 | `lyflow::profile_analysis_kernel` | `lyflow/kernel/profile_analysis.h`                          | 原TLS分析与刚体投影；Eigen5.0.1仅在库编译时使用，公开接口和安装后消费者无需Eigen               |
-| `lyflow::profile_robust_kernel`   | `lyflow/kernel/profile_robust.h`、`profile_features.h`      | PCL双迹线RANSAC、完整近端重拟合/方向回退/端点质量、圆LM/固定半径/软先验；独立消费需同版本PCL   |
+| `lyflow::profile_robust_kernel`   | `lyflow/kernel/profile_robust.h`、`profile_features.h`      | PCL双迹线RANSAC、完整近端重拟合/方向回退/端点质量、圆LM/固定半径/软先验；链接`metrology_kernel`，独立消费需同版本PCL |
 
 这些目标不链接 Registry、ComputeFn、Data 运行时分派或 core 执行器。公开 API 使用原生几何结构、`std::array`、`std::variant` 和有界 JSON；包含原生结构头不等于需要链接执行器。使用这些头中的其他运行时方法，例如构造 `Data` 或访问 Frame，仍须按[嵌入协议](embedding.md)接入运行库。
 
@@ -92,6 +92,8 @@ target_link_libraries(my-robust-host PRIVATE lyflow::profile_robust_kernel)
 
 `profile_features::fitLine`加入近端样本选段、阈值1/3重拟合、free/band/fixed方向及中位回退、ROI/内点端点、innerSlot与质量结果。输入、ROI和toward统一为米。返回槽号指向原数组；固定方向回退保留重复的最终内点权重，不能去重后再算质量，也不把这些权重描述成RANSAC内部抽样轨迹。非有限槽经内部视图排除，输入不改写。
 
-`profile_dimensions`在`metrology_kernel`提供点线面差、两种圆间隙和两点位移分解。输入几何真实为米，补偿显式为毫米，结果字段`valueMm/dxMm/dyMm/distanceMm`保留既有计算顺序；调用方负责按需要换算显示单位。重合圆心、像素、非有限参数及溢出明确拒绝，失败不改变结果。零位移允许生成有限的零长度显示段，不放宽原v1几何上下文校验。
+`profile_dimensions`在`metrology_kernel`提供点线面差、两种圆间隙和两点位移分解。输入几何真实为米，补偿显式为毫米；点线面差的距离与垂足由`metrology::signedPointLine`以双精度计算，圆间隙和位移分量保留既有计算顺序；调用方负责按需要换算显示单位。重合圆心、像素、非有限参数及溢出明确拒绝，失败不改变结果。零位移允许生成有限的零长度显示段，不放宽原v1几何上下文校验。
+
+点到无限直线的有符号距离只由`metrology::signedPointLine`实现：面差、ROI边界求交、轮廓最近样本和旧Gap引擎都调用它，`canonicalNormalReference`给出方向朝+x（竖直朝+y）后的右法向参考。带线段裁剪的精确几何距离仍在`geometry_kernel`。
 
 公开节点的帧、平面、来源hash、单位以及旧算子patch版本见[公共Profile算子](profile-public-operators.md)。安装示例同时执行这些新增接口；轻量消费仍显式禁用PCL查找，稳健消费检查实际PCL依赖闭包并隔离core/CV/ORT。SDK只暴露静态计算，不以安装后数值验证代替场景导入或现场验收。

@@ -19,6 +19,11 @@ bool signedPointLine(const std::array<double, 2>& point, const std::array<double
                      const std::array<double, 2>& positiveNormal, DirectionPolicy policy,
                      SignedPointLine& output, std::string& why);
 
+// Right normal of the direction turned toward +x (vertical: toward +y).
+inline std::array<double, 2> canonicalNormalReference(const std::array<double, 2>& lineDir) {
+  return {lineDir[0] == 0 ? 1.0 : 0.0, -1.0};
+}
+
 struct SampledLine {
   std::array<double, 2> center{0, 0}, direction{1, 0};
   double minimum = 0, maximum = 0, rms = 0;

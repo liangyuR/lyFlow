@@ -80,15 +80,6 @@ bool working(const Profile& input, Working& out, ExecContext& ctx, std::string& 
   return true;
 }
 
-Status samePhysical(const Inputs& inputs, const char* port, const char* contextPort,
-                    const ProfileDescriptor& input) {
-  std::string why;
-  if (!profile_contract::geometryInSpace(inputs.get(port), inputs.get(contextPort).asRecord(),
-                                         input, why))
-    return bad(why, contextPort);
-  return Status::Ok();
-}
-
 struct Selection {
   Data inliers;
   Data samples;
@@ -166,13 +157,18 @@ Status fitLineCore(const Inputs& inputs, const ParamView& params, Outputs& outpu
       (options.directionMode != features::DirectionMode::Free && !inputs.has("refLine")))
     return bad("方向约束需要成对连接refLine与refLineContext", "refLineContext");
   try {
-    if (auto status = samePhysical(inputs, "box", "boxContext", input->descriptor); !status.ok)
+    if (auto status = profile_contract::geometryInSpace(inputs.get("box"), inputs.get("boxContext"),
+                                                        input->descriptor, "boxContext");
+        !status.ok)
       return status;
-    if (auto status = samePhysical(inputs, "toward", "towardContext", input->descriptor);
+    if (auto status = profile_contract::geometryInSpace(
+            inputs.get("toward"), inputs.get("towardContext"), input->descriptor, "towardContext");
         !status.ok)
       return status;
     if (inputs.has("refLine")) {
-      if (auto status = samePhysical(inputs, "refLine", "refLineContext", input->descriptor);
+      if (auto status =
+              profile_contract::geometryInSpace(inputs.get("refLine"), inputs.get("refLineContext"),
+                                                input->descriptor, "refLineContext");
           !status.ok)
         return status;
       const auto* reference = inputs.get("refLine").asLine2D();

@@ -124,10 +124,6 @@ TEST_CASE("Profile kernel: prominence extrema and canonical normal preserve orie
   CHECK(extrema[3].isMax);
   CHECK(kp::normalizeDeg(-180) == 180);
   CHECK(kp::normalizeDeg(540) == 180);
-  kp::Line forward, reverse;
-  reverse.dx = -1;
-  CHECK(forward.signedDistance(4, 3) == 3);
-  CHECK(reverse.signedDistance(4, 3) == 3);
 }
 
 TEST_CASE("Profile kernel: cancellation and invalid views cannot overwrite fit outputs") {

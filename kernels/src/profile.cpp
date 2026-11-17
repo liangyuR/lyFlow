@@ -56,14 +56,6 @@ double normalizeDeg(double a) {
 
 double Line::angleDeg() const { return std::atan2(dz, dx) * 180.0 / 3.14159265358979323846; }
 
-double Line::nx() const { return dx >= 0 ? -dz : dz; }
-
-double Line::nz() const { return dx >= 0 ? dx : -dx; }
-
-double Line::signedDistance(double qx, double qz) const {
-  return (qx - px) * nx() + (qz - pz) * nz();
-}
-
 int View::lowerBound(double xv) const {
   int lo = 0, hi = size();
   while (lo < hi) {

@@ -1,5 +1,7 @@
 #include "lyflow/kernel/profile_dimensions.h"
 
+#include "lyflow/kernel/metrology.h"
+
 #include <cmath>
 #include <limits>
 
@@ -59,41 +61,22 @@ bool flushPointLine(const Line2D& base, const Point2D& reference, const FlushOpt
     return fail(why, "面差增益和毫米偏置必须有限");
   if (options.sign != FlushSign::CanonicalAxis && options.sign != FlushSign::PositiveNormal)
     return fail(why, "面差符号策略非法");
-  Pair normal{base.dir[1], -base.dir[0]};
-  if (!normalize(normal))
-    return fail(why, "面差直线方向无法归一化");
-  if (normal[1] > 0)
-    normal = {-normal[0], -normal[1]};
+  const std::array<double, 2> direction{base.dir[0], base.dir[1]};
+  const auto positiveNormal =
+      options.signedDistance && options.sign == FlushSign::PositiveNormal
+          ? std::array<double, 2>{options.positiveNormal[0], options.positiveNormal[1]}
+          : metrology::canonicalNormalReference(direction);
+  metrology::SignedPointLine projection;
+  if (!metrology::signedPointLine({reference.p[0], reference.p[1]}, {base.point[0], base.point[1]},
+                                  direction, positiveNormal, metrology::DirectionPolicy::Normalize,
+                                  projection, why))
+    return false;
   const Pair end{reference.p[0], reference.p[1]};
-  const float distance = dot(normal, difference(end, {base.point[0], base.point[1]}));
-  const Pair start{end[0] - distance * normal[0], end[1] - distance * normal[1]};
+  const Pair start{static_cast<float>(projection.foot[0]), static_cast<float>(projection.foot[1])};
   if (!finite(start))
     return fail(why, "面差垂足超出float32范围");
-  const Pair displacement = difference(end, start);
-  double valueMm = static_cast<double>(norm(displacement)) * 1000;
-  if (options.signedDistance) {
-    if (options.sign == FlushSign::CanonicalAxis) {
-      const double length =
-          std::hypot(static_cast<double>(base.dir[0]), static_cast<double>(base.dir[1]));
-      double x = base.dir[0] / length, y = base.dir[1] / length;
-      if (x < 0 || (x == 0 && y < 0)) {
-        x = -x;
-        y = -y;
-      }
-      normal = {static_cast<float>(y), static_cast<float>(-x)};
-    } else {
-      if (!finite(options.positiveNormal) ||
-          (options.positiveNormal[0] == 0 && options.positiveNormal[1] == 0))
-        return fail(why, "正法向参考必须为有限非零向量");
-      const double alignment = static_cast<double>(normal[0]) * options.positiveNormal[0] +
-                               static_cast<double>(normal[1]) * options.positiveNormal[1];
-      if (!std::isfinite(alignment) || alignment == 0)
-        return fail(why, "正法向参考不能与直线法向正交");
-      if (alignment < 0)
-        normal = {-normal[0], -normal[1]};
-    }
-    valueMm = static_cast<double>(dot(normal, displacement)) * 1000;
-  }
+  const double valueMm =
+      (options.signedDistance ? projection.distance : std::abs(projection.distance)) * 1000;
   FlushResult result;
   result.valueMm = valueMm * options.gain + options.offsetMm;
   if (!std::isfinite(result.valueMm))
