@@ -204,6 +204,10 @@ TEST_CASE("Gap native bundle nodes round trip immutable profiles and scene info"
   CHECK_FALSE(assemble.run("gap.make_scan_pair").ok);
   CHECK(assemble.outputs.empty());
   assemble.inputs = fields;
+  assemble.inputs["merged"] = input.sensorPrimary;
+  CHECK_FALSE(assemble.run("gap.make_scan_pair").ok);
+  CHECK(assemble.outputs.empty());
+  assemble.inputs = fields;
   assemble.inputs.erase("info");
   REQUIRE(assemble.run("gap.make_scan_pair").ok);
   REQUIRE(scene::readScanPair(assemble.out("scan"), view, why));

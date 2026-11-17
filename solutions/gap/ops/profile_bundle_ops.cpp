@@ -31,6 +31,10 @@ Status assembleScan(const Inputs& inputs, const ParamView& params, Outputs& outp
     for (const auto* field : scanFields)
       bundle.set(field, inputs.get(field));
     result = Data::bundle(std::move(bundle));
+    ScanView view;
+    std::string why;
+    if (!readScanPair(result, view, why))
+      return bad(why, "scan");
   } else {
     const auto& p = inputs.get("sensorPrimary");
     const auto& s = inputs.get("sensorSecondary");
