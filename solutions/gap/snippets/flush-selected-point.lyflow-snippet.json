@@ -53,7 +53,7 @@
         "offsetMm": 0.0,
         "outputUnit": "mm"
       },
-      "opVersion": "2.0.0"
+      "opVersion": "2.0.1"
     },
     {
       "id": "judge",

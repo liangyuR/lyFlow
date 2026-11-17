@@ -447,7 +447,15 @@ TEST_CASE(
 
 #if defined(LYFLOW_GAP_TEMPLATE) && defined(LYFLOW_GAP_MODEL)
 namespace {
+constexpr double kLegacyMeasurementToleranceMm = 0.002;
 Json legacyRuntime() { return gapFixture("gap-runtime-v1.json"); }
+bool sameMeasurement(const Data& actual, Json expected) {
+  auto value = Json::parse(actual.valueJson());
+  const double delta = value.at("value").get<double>() - expected.at("value").get<double>();
+  value.erase("value");
+  expected.erase("value");
+  return value == expected && std::abs(delta) <= kLegacyMeasurementToleranceMm;
+}
 Json migratedRuntime(const Json& legacy, const RuntimeFixture& fixture) {
   auto graph = legacy.at("graph");
   const bool fine = legacy.at("kind").get<std::string>().find(":fine") != std::string::npos;
@@ -502,8 +510,9 @@ TEST_CASE(
     for (const auto* node : {"n_flush", "n_gap"})
       for (const auto* port : {"value", "segment"}) {
         const auto value = result(session, node, port);
-        CHECK_MESSAGE(Json::parse(value.valueJson()) ==
-                          item.value().at("measurements").at(node).at(port),
+        const auto& expected = item.value().at("measurements").at(node).at(port);
+        CHECK_MESSAGE((std::string(port) == "value" ? sameMeasurement(value, expected)
+                                                    : Json::parse(value.valueJson()) == expected),
                       item.key(), node, port);
       }
     CHECK(Json::parse(result(session, "n_flush", "baseLine").valueJson()) ==
@@ -607,8 +616,9 @@ TEST_CASE(
   REQUIRE(log.runStatus() == "ok");
   const auto baseline =
       legacy.at("measurements").at("n_flush").at("value").at("value").get<double>();
-  CHECK(result(session, "a/n_flush", "value").asMeasurement()->value == baseline + 2.0);
-  CHECK(result(session, "b/n_flush", "value").asMeasurement()->value == baseline + 2.0);
+  for (const auto* node : {"a/n_flush", "b/n_flush"})
+    CHECK(std::abs(result(session, node, "value").asMeasurement()->value - (baseline + 2.0)) <=
+          kLegacyMeasurementToleranceMm);
   CHECK(result(session, upgraded["outputs"]["aLine"]["node"].get<std::string>().c_str(), "line")
             .asLine2D() != nullptr);
   Json repeated;

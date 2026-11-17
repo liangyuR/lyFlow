@@ -1,6 +1,7 @@
 file(GLOB STD_PROFILE_SOURCES CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/ops/*.cpp")
 file(GLOB STD_PROFILE_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
-set(_profile_links lyflow_profile_contract lyflow_profile_kernel lyflow_profile_analysis_kernel)
+set(_profile_links lyflow_profile_contract lyflow_profile_kernel lyflow_profile_analysis_kernel
+  lyflow_metrology_kernel)
 if(TARGET lyflow_profile_robust_kernel)
   list(APPEND _profile_links lyflow_profile_robust_kernel)
 else()

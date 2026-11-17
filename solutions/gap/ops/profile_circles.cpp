@@ -19,13 +19,6 @@ Status bad(const std::string& message, const char* port = "merged",
 }
 Status cancelled() { return bad("间隙圆拟合已取消", "merged", "cancelled"); }
 bool present(const Data& data) { return data.kind() != Data::Kind::None; }
-Status physical(const Data& geometry, const Data& context, const ProfileDescriptor& expected,
-                const char* port) {
-  std::string why;
-  if (!profile_contract::geometryInSpace(geometry, context.asRecord(), expected, why))
-    return bad(why, port);
-  return Status::Ok();
-}
 Status parameterValuesValid(const ParamView& parameters) {
   for (const auto* name : {"distThresh", "retryDistance"}) {
     const double value = parameters.number(name) / 1000.0;
@@ -97,8 +90,9 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
   }
   const auto& space = inputs.merged.asProfile()->descriptor;
   for (std::size_t i = 0; i < 2; ++i) {
-    if (auto status = physical(inputs.boxes[i], inputs.boxContexts[i], space,
-                               i ? "boxRightContext" : "boxLeftContext");
+    if (auto status =
+            profile_contract::geometryInSpace(inputs.boxes[i], inputs.boxContexts[i], space,
+                                              i ? "boxRightContext" : "boxLeftContext");
         !status.ok)
       return status;
   }
@@ -109,8 +103,8 @@ Status fitProfileGapCircles(const CirclePairInputs& inputs, const ParamView& par
     if (present(*lines[i]) != present(*lineContexts[i]))
       return bad("参考线与上下文须成对提供", "refLineContext");
     if (present(*lines[i]))
-      if (auto status = physical(*lines[i], *lineContexts[i], space,
-                                 i ? "refLineRightContext" : "refLineContext");
+      if (auto status = profile_contract::geometryInSpace(
+              *lines[i], *lineContexts[i], space, i ? "refLineRightContext" : "refLineContext");
           !status.ok)
         return status;
   }

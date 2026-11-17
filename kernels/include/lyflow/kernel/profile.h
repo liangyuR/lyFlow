@@ -47,9 +47,6 @@ struct Line {
   int n = 0;
 
   double angleDeg() const;
-  double nx() const;
-  double nz() const;
-  double signedDistance(double qx, double qz) const;
 };
 
 struct Face {

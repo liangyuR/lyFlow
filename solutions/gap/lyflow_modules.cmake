@@ -13,7 +13,8 @@ function(lyflow_setup_gap_geometry)
   _lyflow_gap_static(lyflow_gap_geometry
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/GapUtils.cpp"
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/Converter.cpp")
-  target_link_libraries(lyflow_gap_geometry PUBLIC lyflow_std_algo lyflow_data_contract)
+  target_link_libraries(lyflow_gap_geometry PUBLIC lyflow_std_algo lyflow_data_contract
+    PRIVATE lyflow_metrology_kernel)
 endfunction()
 
 function(lyflow_setup_gap_template)
@@ -58,7 +59,7 @@ function(lyflow_setup_gap_compat)
 endfunction()
 
 lyflow_declare_module(NAME gap-geometry TARGET lyflow_gap_geometry SETUP lyflow_setup_gap_geometry
-  REQUIRES pointcloud-algorithms data-contract)
+  REQUIRES pointcloud-algorithms data-contract metrology-kernel)
 lyflow_declare_module(NAME gap-template TARGET lyflow_gap_template SETUP lyflow_setup_gap_template
   REQUIRES gap-geometry)
 lyflow_declare_module(NAME gap-model-adapters TARGET lyflow_gap_model_adapters SETUP lyflow_setup_gap_model_adapters

@@ -8,6 +8,7 @@
 
 #include "lyflow/manifest.h"
 #include "lyflow/profile.h"
+#include "lyflow/status.h"
 
 namespace lyflow::profile_contract {
 inline bool sameSpace(const ProfileDescriptor& a, const ProfileDescriptor& b) {
@@ -78,6 +79,22 @@ inline bool geometryInSpace(const Data& geometry, const Record* context,
     return false;
   }
   return true;
+}
+
+inline Status geometrySpace(const Data& geometry, const Data& context, ProfileDescriptor& space,
+                            const std::string& contextPort) {
+  std::string why;
+  return geometrySpace(geometry, context.asRecord(), space, why)
+             ? Status::Ok()
+             : Status::Error(Phase::Execute, "bad_input", why, {}, contextPort);
+}
+
+inline Status geometryInSpace(const Data& geometry, const Data& context,
+                              const ProfileDescriptor& expected, const std::string& contextPort) {
+  std::string why;
+  return geometryInSpace(geometry, context.asRecord(), expected, why)
+             ? Status::Ok()
+             : Status::Error(Phase::Execute, "bad_input", why, {}, contextPort);
 }
 
 inline TopologyEdit retireInputs(const std::vector<MigrationInput>& inputs,

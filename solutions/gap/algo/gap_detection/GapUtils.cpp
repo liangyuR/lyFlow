@@ -6,6 +6,8 @@
  */
 #include "gap_detection/GapUtils.hpp"
 
+#include "lyflow/kernel/metrology.h"
+
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -644,19 +646,18 @@ double lineCircleDistance(const Eigen::VectorXf& line, const Eigen::VectorXf& ci
 
 double pointLineDistance(const Eigen::VectorXf& line, const Eigen::Vector2f& start_pt,
                          Eigen::Vector2f* end_pt) {
-  float cx = line[0];
-  float cy = line[1];
-  float vx = line[3];
-  float vy = line[4];
-  // calculate the distance
-  Eigen::Vector2f n{vy, -vx};
-  Eigen::Vector2f c{cx, cy};
-  n.normalize();
-  if (n[1] > 0)
-    n = -n;
-  double dist = n.dot(start_pt - c);
-  *end_pt = start_pt - dist * n;
-  return dist;
+  const double vx = line[3], vy = line[4];
+  lyflow::kernel::metrology::SignedPointLine projection;
+  std::string why;
+  // Normal points toward -y; a vertical line keeps (vy, -vx).
+  if (!lyflow::kernel::metrology::signedPointLine(
+          {start_pt[0], start_pt[1]}, {line[0], line[1]}, {vx, vy}, {vx == 0 ? vy : 0.0, -1.0},
+          lyflow::kernel::metrology::DirectionPolicy::Normalize, projection, why)) {
+    end_pt->setConstant(std::numeric_limits<float>::quiet_NaN());
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  *end_pt << static_cast<float>(projection.foot[0]), static_cast<float>(projection.foot[1]);
+  return projection.distance;
 }
 
 double circleCircleDistance(const Eigen::VectorXf& circle1, const Eigen::VectorXf& circle2,
@@ -681,17 +682,12 @@ double pointCircleDistance(const Eigen::VectorXf& circle, const Eigen::Vector2f&
 
 double lineCloudDistance(const Eigen::VectorXf& line, const PointCloud& cloud,
                          Eigen::Vector2f* start_pt, Eigen::Vector2f* end_pt) {
-  float px = line[0];
-  float py = line[1];
-  float vx = line[3];
-  float vy = line[4];
-  Eigen::Vector2f n{vy, -vx};
-  n.normalize();
-
   int idx_near = 0;
   double min_dist = std::numeric_limits<double>::max();
+  Eigen::Vector2f foot;
   for (std::size_t i = 0; i < cloud.size(); ++i) {
-    double dist = std::fabs(n[0] * (cloud[i].x - px) + n[1] * (cloud[i].y - py));
+    double dist =
+        std::fabs(pointLineDistance(line, Eigen::Vector2f(cloud[i].x, cloud[i].y), &foot));
     if (min_dist > dist) {
       idx_near = i;
       min_dist = dist;

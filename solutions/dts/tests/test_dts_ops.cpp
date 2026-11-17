@@ -459,20 +459,16 @@ TEST_CASE("DTS v2 flush retains legacy float direction arithmetic and all busine
                     .run("dts.flush", {{"sealBulge", Value::text(bulge)},
                                        {"positiveDirection", Value::text(positive)}})
                     .ok);
-        lyflow::dts::Line reference;
-        reference.px = legacy.point[0];
-        reference.pz = legacy.point[1];
-        reference.dx = legacy.dir[0];
-        reference.dz = legacy.dir[1];
-        const double distance = reference.signedDistance(4.567891, 7.654321);
+        const double dx = legacy.dir[0], dz = legacy.dir[1];
+        const double nx = dx >= 0 ? -dz : dz, nz = dx >= 0 ? dx : -dx;
+        const double distance =
+            (4.567891 - legacy.point[0]) * nx + (7.654321 - legacy.point[1]) * nz;
         const double toward = std::string(bulge) == "+z" ? distance : -distance;
         const double expected = std::string(positive) == "deeper" ? -toward : toward;
         CHECK(flush.out("flush").asMeasurement()->value == expected);
         const auto& info = flush.out("footInfo").asRecord()->data;
-        CHECK(info["footMm"][0].get<float>() ==
-              static_cast<float>(4.567891 - distance * reference.nx()));
-        CHECK(info["footMm"][1].get<float>() ==
-              static_cast<float>(7.654321 - distance * reference.nz()));
+        CHECK(info["footMm"][0].get<float>() == static_cast<float>(4.567891 - distance * nx));
+        CHECK(info["footMm"][1].get<float>() == static_cast<float>(7.654321 - distance * nz));
       }
 }
 

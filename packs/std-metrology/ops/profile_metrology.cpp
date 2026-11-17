@@ -124,11 +124,15 @@ Status signedPointLine(const Inputs& in, const ParamView& p, Outputs& out, ExecC
   const auto* point = pointData.asPoint2D();
   const auto* line = lineData.asLine2D();
   ProfileDescriptor space;
+  if (auto status =
+          profile_contract::geometrySpace(pointData, in.get("pointContext"), space, "pointContext");
+      !status.ok)
+    return status;
+  if (auto status =
+          profile_contract::geometryInSpace(lineData, in.get("lineContext"), space, "lineContext");
+      !status.ok)
+    return status;
   std::string why;
-  if (!profile_contract::geometrySpace(pointData, in.get("pointContext").asRecord(), space, why))
-    return failure(why, "pointContext");
-  if (!profile_contract::geometryInSpace(lineData, in.get("lineContext").asRecord(), space, why))
-    return failure(why, "lineContext");
   const auto reference = p.vec2("positiveNormal");
   if (reference[0] == 0 && reference[1] == 0)
     return Status::Error(Phase::Execute, "bad_param", "正法向参考必须为非零向量", "positiveNormal");

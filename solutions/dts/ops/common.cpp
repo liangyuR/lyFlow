@@ -149,8 +149,10 @@ Line2D metricGeometry(const Line2D& legacy) {
   Line2D result = legacy;
   for (int i = 0; i < 2; ++i) {
     result.point[i] = static_cast<float>(static_cast<double>(legacy.point[i]) * .001);
-    result.start[i] = static_cast<float>(static_cast<double>(legacy.start[i]) * .001);
-    result.end[i] = static_cast<float>(static_cast<double>(legacy.end[i]) * .001);
+    if (legacy.hasSegment) {
+      result.start[i] = static_cast<float>(static_cast<double>(legacy.start[i]) * .001);
+      result.end[i] = static_cast<float>(static_cast<double>(legacy.end[i]) * .001);
+    }
   }
   return result;
 }

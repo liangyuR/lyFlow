@@ -202,7 +202,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerMeasureReference(Registry& r) {
   OperatorDesc op;
   op.id = "gap.measure_reference";
-  op.version = "1.0.0";
+  op.version = "1.0.1";
   op.label = "参考基线测量";
   op.category = "间隙/参考";
   op.keywords = {"reference baseline measurement",
