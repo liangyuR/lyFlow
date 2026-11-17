@@ -1,43 +1,42 @@
 # e2e —— CDP 验收
 
-用 CDP 驱动**真实运行的 Tauri app**，覆盖 [docs/当前指南](../../docs/architecture.md) §11
-里所有标着「CDP」的验收项，外加中文路径那一条。逐条结果见
-[docs/当前指南](https://github.com/liangyuR/lyFlow/blob/7f414a1b84d7806bca5cfb45ba9a0efb0dfe0032/docs/m2-acceptance.md)。
+用 CDP 驱动**真实运行的 Tauri app**，验证真鼠标、键盘、弹窗、焦点、窗口行为与渲染这些
+只有真实前端加真实后端才能证明的交互，外加中文路径那一条。
 
 ```
 cdp.mjs      极简 CDP 客户端
 harness.mjs  起 app、连 CDP、记断言、收尾
 page.mjs     页面侧的公共动作（搭图、按键、真鼠标拖拽、等一次运行）
-run.mjs      M2 的分组 + main
-m3.mjs       M3 的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
-m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
+run.mjs      基础分组（中文路径、演示 pipeline、validate、坏参数、取消、安装包）+ main
+m3.mjs       编辑器核心与交互的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
+m4.mjs       子图与大图的分组（子图、库算子、live preview、大图性能）
 gap.mjs      gap 领域包的分组（量测输出、真实 gap 图、模型 gap 图）
 peek.mjs     连线内容查看器的分组（双击开窗、四种视图、快照锁、生命周期、边的右键菜单）
 compare.mjs  两节点输出并排对比（进入即冻结、重跑只有 A 变、共用相机、换 B 解冻、A 跟随选中 / 钉住）
-phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
-m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
-m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
-motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
-noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b 与 §6 修订一 17–20：按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
-params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
-params_p2.mjs 参数面板的分组（docs/param-recipe-plan.md P2 验收 9–15：开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
-params_p3.mjs 配方的分组（docs/param-recipe-plan.md P3 验收 17–24：新建两个配方 Ctrl+S 落盘与重开还原、K6 ① ② ③ 与外部修改检测、K4 从基础重算、切配方后的缓存命中与自动运行、K7 撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
-params_p4.mjs 配方 P4 的分组（docs/param-recipe-plan.md P4 验收 26：真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字 —— 接着验收 26 的状态，数据不在时自己用合成小图搭一个一样挤的，照样验）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
+phase_a.mjs  惰性分支与图级输出的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
+m8b.mjs      空白画布拼测点的分组（自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
+m8c.mjs      多模板框的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
+motion.mjs   动效的分组（docs/motion-plan.md：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
+noderun.mjs  节点运行按钮的分组（按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
+params_p1.mjs 图参数成形的分组（完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、复制路径名与撤销回到保存点）
+params_p2.mjs 参数面板的分组（开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
+params_p3.mjs 配方的分组（新建两个配方 Ctrl+S 落盘与重开还原、编辑落点与外部修改检测、从基础重算、切配方后的缓存命中与自动运行、撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
+params_p4.mjs 配方经 CLI 运行的分组（真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字 —— 接着对拍分组的状态，数据不在时自己用合成小图搭一个一样挤的，照样验）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
-record-params-p2.mjs 参数面板的验收截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
-record-params-p3.mjs 配方的验收截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
+record-params-p2.mjs 参数面板的截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
+record-params-p3.mjs 配方的截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
-CLI（m4-plan §3、m5-plan §1）不在这里：它没有界面，验收走 `cargo test`
-（`bridge/src/cli/tests.rs` 与 `bridge/src/eval/tests.rs`），理由见 docs/m4-acceptance.md。
+CLI 不在这里：它没有界面，验收走 `cargo test`
+（`bridge/src/cli/tests.rs` 与 `bridge/src/eval/tests.rs`）。
 `lyflow eval` 的批量评估也归这一档 —— 值路径解析、留出与分组统计、glob 生成样本
 都是纯逻辑，对着手算的数字断言比开浏览器便宜得多
 （[ADR-0020](../../docs/adr/0020-eval-and-perturb-as-cli.md)）。
 
 ## 为什么是 CDP，不是前端单元测试
 
-CLAUDE.md 规定不写 UI 单元测试。而 M1 的经验是——真正会咬人的 bug
+CLAUDE.md 规定不写 UI 单元测试。而过去的经验是——真正会咬人的 bug
 （d3-zoom 吞掉双击、MiniMap 不画节点、选中状态渲染死循环）没有一个是单元测试
 能发现的，它们全都要求「真实的浏览器 + 真实的事件 + 真实的后端」。
 
@@ -63,8 +62,8 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 
 挑出来的组照全量里的先后跑，但中间少了别的组，前一组留下的状态（视口缩放、hover 之类）会直接落到后一组头上。
 靠视口几何的组开头自己定死视口：`page.mjs` 的 `setViewport`（经窗口桥定 React Flow 的 x / y / zoom）；`normalizeZoom`
-只往小里压，上一组留下 0.2 的缩放它不管。以前记过的一处 —— `--only m4:suiteBigGraph,motion` 时 motion 的验收 2
-（平移之后有新节点进入视口）与验收 8 的拖连线那条挂掉 —— 就是这么来的，两组开头定死视口之后过了。
+只往小里压，上一组留下 0.2 的缩放它不管。以前记过的一处 —— `--only m4:suiteBigGraph,motion` 时 motion 的进场分组
+（平移之后有新节点进入视口）与 hover 分组的拖连线那条挂掉 —— 就是这么来的，两组开头定死视口之后过了。
 
 调试脚本本身时，另开一个窗口跑
 
@@ -144,9 +143,9 @@ app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装�
   `dropFromPalette`）：CDP 的鼠标事件不会触发 HTML5 拖放。面板行自己的 `dragstart` 把 MIME 写进去，
   落点处 `elementFromPoint` 拿到的元素收 `dragover` / `drop`，走的是画布真实的 onDrop。
   2D 拖框、连线拖拽这类指针手势照旧用真实鼠标（`dragMouse`）。
-- **M8b 的最终画布截图**：设 `LYFLOW_E2E_SCREENSHOT=docs/m8b-canvas.png`（相对仓库根）时，
-  验收 7 那一组跑完用 `Page.captureScreenshot` 截整个窗口写到那里；不设就不写，免得每跑一遍都改动仓库文件。
-  M8c 同理：`LYFLOW_E2E_M8C_SHOT=docs/m8c-slot2.png` 时，验收 12 切到槽 2 那一刻只截 3D 视图那一块（`clip`）。
+- **空白画布拼测点的最终画布截图**：设 `LYFLOW_E2E_SCREENSHOT=docs/m8b-canvas.png`（相对仓库根）时，
+  `m8b.mjs` 的 `suiteBuildFromBlank` 跑完用 `Page.captureScreenshot` 截整个窗口写到那里；不设就不写，免得每跑一遍都改动仓库文件。
+  多模板框同理：`LYFLOW_E2E_M8C_SHOT=docs/m8c-slot2.png` 时，`m8c.mjs` 的三模板分组切到槽 2 那一刻只截 3D 视图那一块（`clip`）。
 - **动效会让「刚改完就读」读到半路上的值**（`motion.mjs`、docs/motion-plan.md）。节点刚加上时在播
   200 ms 的进场淡入，stale / 静音 / 未被需要的透明度变化也有过渡：读计算后的 `opacity` 之前先等
   `el.getAnimations()` 里有限的那些播完再过两帧（`phase_a.mjs` 的 `opacityOf`；running 的呼吸光是
@@ -157,10 +156,10 @@ app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装�
   装一个观察器，记下它们出现过几次。关动效用 `Emulation.setEmulatedMedia` 设 `prefers-reduced-motion`，
   宿主的 `animations={false}` 在 `e2e:http` 里点宿主栏上的「动效」开关。
 - **单节点运行的断言要看事件，不看节点表**（`noderun.mjs`）。这种运行不清空节点表、计划里其余节点的
-  node_state 也不落进 store（验收 8：它们的状态与耗时不变），所以「计划里有谁、isolate 是什么」只能从
+  node_state 也不落进 store（它们的状态与耗时不变），所以「计划里有谁、isolate 是什么」只能从
   `run_started` 读：分组在页面里另挂一个 `transport.onExecutionEvent` 记下 run_started / run_finished。
   「只有 b 变了」看 `window.__lyflow.transitions` —— 它来自事件，被忽略的那些节点一条都不会有。
-- **要一个跑得够久的节点**（验收 10 / 11 的停止、抢占、进度环）：三百万点过一道 0.0006 的体素栅格，
+- **要一个跑得够久的节点**（停止、抢占、进度环）：三百万点过一道 0.0006 的体素栅格，
   本机约 1.7 s。等「按钮进入 running」要在页面里逐帧看（`waitButton`），从 Node 侧轮询会错过。
 - **同名的输入、输出端口 testid 相同**（voxel 的 `cloud` 进 `cloud` 出都是 `port-<id>-cloud`）。按侧别挑要加
   `.node-port--input` / `.node-port--output`，否则 `querySelector` 拿到的永远是输入那一个。
@@ -170,7 +169,7 @@ app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装�
 - **在 Inspector 的输入框里「打字」**：用原生 value setter + `input` 事件 + `blur()`（NumberInput 失焦才提交），
   直接改 `value` 属性 React 看不见。复制路径名断言前把 `navigator.clipboard.writeText` 换成记录器 ——
   WebView2 里剪贴板未必授权，菜单自己的兜底路径（execCommand）读不回来。
-- **测试算子要 `LYFLOW_TEST_OPS=1`**（param-recipe P2.10）。`test.param_showcase`（14 种参数类型各一个）编进了 core，
+- **测试算子要 `LYFLOW_TEST_OPS=1`**。`test.param_showcase`（14 种参数类型各一个）编进了 core，
   但只在进程环境里有这个变量时才注册：`launchApp` 起 app 时自己设；`LYFLOW_E2E_ATTACH=1` 连的那个实例要自己带着它启动，
   否则 `params_p2` 的第一组直接中断，原因写着「test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1」。
 - **参数面板的行是虚拟化的**（`params_p2.mjs`）：只有视口附近的行在 DOM 里。操作某一行之前先 `reveal`（把列表一屏一屏往下翻，
@@ -178,7 +177,7 @@ app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装�
 - **`placeAtScreen` 的坐标是相对画布容器的**，不是窗口坐标 —— 参数面板开着时画布只剩几百像素宽，传窗口坐标会把节点摆到面板底下，
   真鼠标点下去点中的是面板的行。
 - **不带移动的一次点击，React Flow 的选中会慢一拍**：它点选节点时只改内部的 nodeLookup、不发 store 更新，`onSelectionChange`
-  要等下一次更新才来。画布在 `onNodesChange` 里把 select 变更直接写进 ui store（P2 补上），CDP 的真鼠标点一下就能选中。
+  要等下一次更新才来。画布在 `onNodesChange` 里把 select 变更直接写进 ui store，CDP 的真鼠标点一下就能选中。
 - **配方的分组要一张有路径的图**（`params_p3.mjs`）：配方目录是图文件旁边的 `<图名>.recipes/`，没存过盘的图不能建配方；
   而 Ctrl+S 在没有路径时会弹系统的另存为对话框（CDP 点不到）。所以先 `saveGraphTo`（transport 写盘 + markSaved），之后的
   Ctrl+S 都是真按键。起名、确认删除、「文件已被外部修改」是编辑器自己画的对话框（`lib/modal.ts`），照常点；导入导出在界面上

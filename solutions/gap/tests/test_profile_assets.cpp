@@ -358,7 +358,7 @@ void validSnippetMeasurement(const Data& value, double expected) {
 }
 }
 TEST_CASE(
-    "all six packaged native GAP snippets execute actual file model geometry and fallback dependencies") {
+    "all packaged native GAP snippets execute actual file model geometry and fallback dependencies") {
   using namespace test::gap_graph_test;
   RuntimeFixture fixture;
   const auto model = fixture.model(), missingLabels = fixture.model(true);

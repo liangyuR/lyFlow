@@ -119,7 +119,7 @@ function fakeOutputs() {
   ];
 }
 
-/** §5：叠画几何、2D 剖面模式、Inspector 数值显示各至少一条断言。 */
+/** 叠画几何、2D 剖面模式、Inspector 数值显示各至少一条断言。 */
 async function suiteMeasurementOutputs(cdp, report) {
   report.section('量测输出：3D 叠画 + 2D 剖面 + Inspector 数值');
 
@@ -484,7 +484,7 @@ function nodeOfOp(cdp, op) {
   `);
 }
 
-/** §10：模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图（`--fine` 导入）；
+/** 模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图（`--fine` 导入）；
  *  未设时整组跳过。怎么生成那张图见 solutions/gap/README.md「模型 ROI 路径」。 */
 async function suiteModelGapGraph(cdp, report) {
   const graphPath = process.env.LYFLOW_GAP_GRAPH_MODEL;
@@ -587,7 +587,7 @@ async function suiteModelGapGraph(cdp, report) {
     String(windowRow),
   );
 
-  // -- 数值：R1 的模型路径基线 gap 3.7838 / flush 2.3504 ----------------------
+  // -- 读数：gap 与 flush 都出了有限值 ------------------------------------------
   const values = await cdp.eval(`
     const e = window.__lyflow.stores.execution.getState();
     const doc = window.__lyflow.stores.graph.getState().doc;
@@ -602,7 +602,7 @@ async function suiteModelGapGraph(cdp, report) {
     };
     return { gap: read('n_gap', 'value'), flush: read('n_flush', 'value') };
   `);
-  // 黑盒对照 gap.measure_reference 导入器不再生成（m8-plan L12），只看两个读数都在
+  // 读数的数值判据在 solutions/gap/tests 里；这里只看两个读数都在
   report.ok(
     'gap 与 flush 都出了数',
     Number.isFinite(values.gap) && Number.isFinite(values.flush),

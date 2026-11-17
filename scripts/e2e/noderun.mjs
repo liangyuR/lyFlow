@@ -1,7 +1,7 @@
-// 节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b，§6 修订一验收 17–20）：按钮的位置与
+// 节点运行按钮的分组：按钮的位置与
 // 真鼠标、单击 = 智能运行（本节点 + 缺结果或过时的上游）、Shift+单击 = 强制重算、hover 提示的预告、
 // 「仅此节点」的上游不齐兜底、运行中停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、
-// 右键三项。逐条结果见 docs/node-run-acceptance.md。
+// 右键三项。
 //
 // 点按钮一律用 CDP 的真鼠标（Input.dispatchMouseEvent）：合成的 click 骗不过 React Flow 的
 // 拖动/选中判定，也骗不过 CSS 的 :hover。
@@ -157,10 +157,10 @@ const waitRunEnd = (cdp, what) =>
     { timeoutMs: 120_000, what },
   );
 
-// ---------------------------------------------------- 验收 7：位置与真鼠标
+// ---------------------------------------------------- 位置与真鼠标
 
 async function suitePlacement(cdp, report) {
-  report.section("单节点运行 验收 7：按钮在标题与徽标之后、折叠仍在；真鼠标点它不选中、不拖动、不改名");
+  report.section("单节点运行：按钮在标题与徽标之后、折叠仍在；真鼠标点它不选中、不拖动、不改名");
   await installMotionProbe(cdp);
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
@@ -240,7 +240,7 @@ async function suitePlacement(cdp, report) {
   report.eq("单击按钮：节点没有被选中、没有进入改名、位置没动",
     { selected: after.selected, renaming: after.renaming, pos: after.pos }, { selected: [], renaming: false, pos: posBefore });
 
-  // 验收 20 的前半：本节点有编辑期校验 error 时按钮置灰（修订一 V3：唯一的置灰原因）。
+  // 本节点有编辑期校验 error 时按钮置灰（唯一的置灰原因）。
   // 顺手拿这个不可点的按钮验拖动与双击 —— 可点的按钮双击会发起两次运行，第二次还是「停止」
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.b)}, 'leafSize', [0, 0.01, 0.01]); return true;`);
   const invalid = await waitButton(cdp, ids.b, "(s) => s.state === 'disabled'", 5000);
@@ -284,10 +284,10 @@ async function suitePlacement(cdp, report) {
   report.ok("（20）改回合法参数：按钮恢复可点", back !== null, JSON.stringify(back));
 }
 
-// ------------------------------------ 修订一 验收 17 / 18：智能运行、Shift = 强制
+// ------------------------------------ 智能运行、Shift = 强制
 
 async function suiteSmart(cdp, report) {
-  report.section("修订一 验收 18：全部就绪时单击 = 已缓存、不真跑；Shift+单击 = 只有本节点真跑");
+  report.section("单节点运行：全部就绪时单击 = 已缓存、不真跑；Shift+单击 = 只有本节点真跑");
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
@@ -332,7 +332,7 @@ async function suiteSmart(cdp, report) {
 }
 
 async function suiteSmartUpstream(cdp, report) {
-  report.section("修订一 验收 17：改上游参数后 b 仍可点，hover 提示预告「将一并运行上游」，单击后 a、b 依次运行");
+  report.section("单节点运行：改上游参数后 b 仍可点，hover 提示预告「将一并运行上游」，单击后 a、b 依次运行");
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
   // 另放一个与这条链无关的源 d：改 a 之后 b、c 的键都变，d 的不变 —— 挂结果（V2）要看得出区别
@@ -390,10 +390,10 @@ async function suiteSmartUpstream(cdp, report) {
     JSON.stringify({ attached: finished?.attached, d: run.nodes[d], dInfo }));
 }
 
-// ------------------------------- 修订一 验收 19 的第三项：仅此节点（isolate）的兜底
+// ------------------------------- 仅此节点（isolate）的兜底
 
 async function suiteIsolateOnly(cdp, report) {
-  report.section("修订一 验收 19：「仅此节点」—— 上游过时时置灰写明缺谁；绕过预判 → upstream_not_ready toast、零 running");
+  report.section("单节点运行：「仅此节点」—— 上游过时时置灰写明缺谁；绕过预判 → upstream_not_ready toast、零 running");
   await installMotionProbe(cdp);
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
@@ -449,11 +449,11 @@ async function suiteIsolateOnly(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
 }
 
-// ------------------------------------------------- 验收 10：运行中停止与抢占
+// ------------------------------------------------- 运行中停止与抢占
 
 async function suiteStopAndPreempt(cdp, report) {
-  report.section("单节点运行 验收 10 / 修订一 20：Shift+单击发起的运行中按钮 running、点它取消；全图运行里 running 的节点上点按钮是抢占，不是停止；" +
-    "验收 11：进度环动效开着时转、关了停住但仍显示");
+  report.section("单节点运行：Shift+单击发起的运行中按钮 running、点它取消；全图运行里 running 的节点上点按钮是抢占，不是停止；" +
+    "进度环动效开着时转、关了停住但仍显示");
   await installMotionProbe(cdp);
   await installRecorder(cdp);
   const ids = await slowPair(cdp);
@@ -530,8 +530,8 @@ async function suiteStopAndPreempt(cdp, report) {
     JSON.stringify(end));
   report.ok("抢占它的那次跑完了（ok），而不是被当成「停止」", end.runId === preempt.runId && end.status === "ok", JSON.stringify(end));
 
-  // 验收 11 的进度环：复用这张刚跑完的慢图，不再另搭一张、另跑一遍全图。
-  // 同一帧里顺带拍下入边的流动与 running 的呼吸光 —— 关动效时它们归 docs/motion-plan.md §3 验收 9（6）
+  // 进度环：复用这张刚跑完的慢图，不再另搭一张、另跑一遍全图。
+  // 同一帧里顺带拍下入边的流动与 running 的呼吸光 —— 关动效时它们也该停
   const sampleArc = async () => {
     // 强制重算：慢图刚跑过，不 force 的话 slow 命中缓存、根本不进 running
     await cdp.eval(`window.__lyflow.run({ targets: [${lit(ids.slow)}], force: [${lit(ids.slow)}] }); return true;`);
@@ -580,10 +580,10 @@ async function suiteStopAndPreempt(cdp, report) {
     const off = await sampleArc();
     report.ok("关动效：进度环仍显示（有弧、有描边）", off.shot !== null && off.shot.visible && off.shot.dash !== "none", JSON.stringify(off.shot));
     report.eq("关动效：进度环不转（animation-name 为 none）", off.shot?.animation, "none");
-    report.ok("关动效（动效 验收 9 之 6）：目标节点 running 时它的入边仍有 data-flowing=\"1\"",
+    report.ok("关动效：目标节点 running 时它的入边仍有 data-flowing=\"1\"",
       off.shot !== null && off.shot.expected.length > 0 && JSON.stringify(off.shot.flowing) === JSON.stringify(off.shot.expected),
       JSON.stringify(off.shot && { flowing: off.shot.flowing, expected: off.shot.expected }));
-    report.eq("关动效（动效 验收 9 之 6）：流动层与 running 的呼吸光 animation-name 都是 none",
+    report.eq("关动效：流动层与 running 的呼吸光 animation-name 都是 none",
       { flow: off.shot?.flowAnimation, pulse: off.shot?.pulse }, { flow: "none", pulse: "none" });
   } finally {
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
@@ -591,7 +591,7 @@ async function suiteStopAndPreempt(cdp, report) {
   }
 }
 
-// ---------------------------- 抢占一个停不下来的运行（docs/large-image-plan.md L1，ADR-0027）
+// ---------------------------- 抢占一个停不下来的运行（ADR-0027）
 
 async function suitePreemptStalled(cdp, report) {
   const present = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.has('test.stall');`);
@@ -731,10 +731,10 @@ async function suiteLibraryRescanStalled(cdp, report) {
     ["first:run_started", "first:run_finished:cancelled", "queued:run_started", "queued:run_finished:ok"]);
 }
 
-// ------------------------------------ 验收 11：hover、端点对齐（进度环在上面的验收 10 里，复用那张慢图）
+// ------------------------------------ hover、端点对齐（进度环在上面的停止与抢占分组里，复用那张慢图）
 
 async function suiteLook(cdp, report) {
-  report.section("单节点运行 验收 11：hover 实心 accent、端点对齐 ≤ 1 px");
+  report.section("单节点运行：hover 实心 accent、端点对齐 ≤ 1 px");
   await installMotionProbe(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
@@ -769,10 +769,10 @@ async function suiteLook(cdp, report) {
   await sleep(150);
 }
 
-// ------------------------------------ 验收 11b：计划外节点挂结果（R7）
+// ------------------------------------ 计划外节点挂结果
 
 async function suiteAttached(cdp, report) {
-  report.section("单节点运行 验收 11b：单击中间节点后，下游仍是 done、Edge Peek 与 3D 视图照样取得到数据；从没跑过的下游保持 idle");
+  report.section("单节点运行：单击中间节点后，下游仍是 done、Edge Peek 与 3D 视图照样取得到数据；从没跑过的下游保持 idle");
   await installRecorder(cdp);
   await newDoc(cdp);
   await resetPeek(cdp);
@@ -844,10 +844,10 @@ async function suiteAttached(cdp, report) {
     report.fail("双击 d 的入边开出了 Edge Peek", JSON.stringify(opened?.after));
   }
   await resetPeek(cdp);
-  // 「键变了、仓里没有当前结果就不挂，退回 idle」由验收 17（suiteSmartUpstream 里 c 的那条）覆盖，这里不再重跑
+  // 「键变了、仓里没有当前结果就不挂，退回 idle」由 suiteSmartUpstream 里 c 的那条覆盖，这里不再重跑
 }
 
-// ------------------------------------------------------ 验收 12：右键菜单
+// ------------------------------------------------------ 右键菜单
 
 async function openMenu(cdp, id) {
   return cdp.eval(`
@@ -874,7 +874,7 @@ const closeMenu = async (cdp) => {
 };
 
 async function suiteMenu(cdp, report) {
-  report.section("修订一 验收 19：右键三项 —— 运行到此 = 单击、强制重算此节点 = Shift+单击、仅此节点（用现有上游）");
+  report.section("单节点运行：右键三项 —— 运行到此 = 单击、强制重算此节点 = Shift+单击、仅此节点（用现有上游）");
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
 

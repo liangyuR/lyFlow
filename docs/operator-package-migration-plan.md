@@ -78,7 +78,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 
 M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约，须在 M4d-2 之后，以便同一离线迁移覆盖契约变化；M4d-5a、5b、5c 依次进行。
 
-当前状态：M4d-1 至 M4d-4、M4d-5a、M4d-5b、M4d-5c 已完成。gap 场景模块由 `solutions/gap/lyflow_modules.cmake` 声明，solution 的安装规则随各自包文件；core 构建脚本只把 `solutions/` 当作包发现目录。
+当前状态：M4d-1 至 M4d-6 已完成。gap 场景模块由 `solutions/gap/lyflow_modules.cmake` 声明，solution 的安装规则随各自包文件；core 构建脚本只把 `solutions/` 当作包发现目录。
 
 精简构建已暴露旧 Gap 图对 `std-pointcloud` 的 `util.merge`、`filter.radius_outlier`、`filter.crop_box2d` 以及 `std-ml` 的 `ml.onnx_run` 的隐式注册依赖；这些依赖须在场景模块声明中明确，`flow.fallback` 继续由 core 提供。
 

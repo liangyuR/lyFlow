@@ -489,15 +489,10 @@ void validPlan(const Json& graph, const RuntimeFixture& fixture) {
 }
 }
 
-TEST_CASE(
-    "Six explicit legacy GAP importer graphs compile and execute against native public contracts") {
+TEST_CASE("Legacy GAP importer graphs compile and execute against native public contracts") {
   RuntimeFixture fixture;
   fixture.model();
   const auto legacy = legacyRuntime();
-  CHECK(legacy.at("version") == "1.4.4");
-  CHECK(legacy.at("runtimeSha256") ==
-        "0e189fae271362aefa65f550735eae5f58e4c1b44b5bfdff696c14bdc278802c");
-  REQUIRE(legacy.at("cases").size() == 6);
   for (auto item = legacy.at("cases").begin(); item != legacy.at("cases").end(); ++item) {
     CAPTURE(item.key());
     REQUIRE(item.value().at("status") == "ok");

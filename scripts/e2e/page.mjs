@@ -1,5 +1,5 @@
 // 页面侧的公共动作：搭图、按键、真实鼠标拖拽、等一次运行结束。
-// M2 与 M3 两份验收脚本共用，避免各写一份之后互相漂移。
+// 各分组的验收脚本共用，避免各写一份之后互相漂移。
 
 import { sleep } from "./cdp.mjs";
 
@@ -120,7 +120,7 @@ export const pressShiftF5 = (cdp) => pressKey(cdp, "F5", 116, ["shift"]);
 export const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);
 export const pressQuestion = (cdp) => pressKey(cdp, "?", 191, ["shift"]);
 
-/** 参数面板是虚拟列表（param-recipe P2）：要的行可能还没渲染。从顶上一段段往下滚找到它，
+/** 参数面板是虚拟列表：要的行可能还没渲染。从顶上一段段往下滚找到它，
  *  再把它滚到列表里不贴边的位置。返回它在屏幕上的矩形；找不到返回 null。
  *  原来 params_p2 / params_p3 / compare 各抄一份（返回值各不相同），统一到这里。 */
 export async function revealInList(cdp, selector) {

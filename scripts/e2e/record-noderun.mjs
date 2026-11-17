@@ -1,6 +1,6 @@
-// 「运行此节点」按钮的演示录制（docs/node-run-plan.md §6 修订一）：用 CDP 驱动真实的 Tauri app，
+// 「运行此节点」按钮的演示录制：用 CDP 驱动真实的 Tauri app，
 // 在一张 5 节点的链式图上依次演示七步，每步截一张画布区域的 PNG 到 docs/noderun-step-N.png（第 7 步 7a / 7b 两张）。
-// 本机没有 ffmpeg，所以不合成 mp4 / gif（见 docs/node-run-acceptance.md）。不接进 run.mjs。
+// 本机没有 ffmpeg，所以不合成 mp4 / gif。不接进 run.mjs。
 //
 //   LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import;gap-compat' node scripts/e2e/record-noderun.mjs          # 自己起 tauri dev
 //   LYFLOW_E2E_ATTACH=1 node scripts/e2e/record-noderun.mjs           # 连到已经开着的实例

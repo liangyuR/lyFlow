@@ -66,7 +66,7 @@ export class Report {
  * DLL。验的是「DLL 随包 + 从 exe 同目录加载」，不等于干净机器 —— 见 ./README.md。 */
 export function stagePackagedApp() {
   const release = path.join(ROOT, "bridge", "target", "release");
-  // M4 起桌面壳叫 lyflow-app.exe：包名那个 bin 名让给了 CLI（ADR-0012）
+  // 桌面壳叫 lyflow-app.exe：包名那个 bin 名让给了 CLI（ADR-0012）
   const exe = path.join(release, "lyflow-app.exe");
   if (!fs.existsSync(exe)) {
     throw new Error(`找不到 ${exe} —— 先跑 \`pnpm tauri build\``);
@@ -80,7 +80,7 @@ export function stagePackagedApp() {
   const dir = path.join(os.tmpdir(), `lyflow 安装目录 ${process.pid}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  // CLI 也拷进去：无 GUI 机器上的验收跑的就是这一份（§6 第二条）
+  // CLI 也拷进去：无 GUI 机器上的验收跑的就是这一份
   for (const name of ["lyflow-app.exe", "lyflow.exe"]) {
     if (fs.existsSync(path.join(release, name))) fs.copyFileSync(path.join(release, name), path.join(dir, name));
   }
@@ -136,7 +136,7 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
       env: {
         ...process.env,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
-        // 测试算子（test.param_showcase，param-recipe P2.10）只在这个变量为 1 时注册进 core
+        // 测试算子（test.param_showcase）只在这个变量为 1 时注册进 core
         LYFLOW_TEST_OPS: "1",
       },
       stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],
@@ -151,7 +151,7 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
       env: {
         ...process.env,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
-        // 测试算子（test.param_showcase，param-recipe P2.10）只在这个变量为 1 时注册进 core
+        // 测试算子（test.param_showcase）只在这个变量为 1 时注册进 core
         LYFLOW_TEST_OPS: "1",
       },
       stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],

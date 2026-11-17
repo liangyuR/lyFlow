@@ -1,5 +1,5 @@
-// M3 验收：核心轨 §1.1–1.6 每项，编辑轨交互清单 P1 #17–#30 每项至少一条断言。
-// 与 M2 的分组共用一个 app 实例，helper 在 ./page.mjs。
+// 编辑器核心与交互的分组：缓存复用、并行、静音与 reroute、迁移、参数联动、连线手感、布局、编辑与输入、
+// 面板与备份、3D 视图、测量、精确运行。与 run.mjs 的分组共用一个 app 实例，helper 在 ./page.mjs。
 
 import fs from "node:fs";
 import os from "node:os";
@@ -74,10 +74,10 @@ const domOf = (cdp, selector, expr) =>
     return (${expr});
   `);
 
-// ------------------------------------------------------------- 1.1 缓存复用
+// ------------------------------------------------------------- 缓存复用
 
 async function suiteCache(cdp, report) {
-  report.section("1.1 缓存复用：重跑全 skipped、改中间节点只重算下游");
+  report.section("缓存复用：重跑全 skipped、改中间节点只重算下游");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   await newDoc(cdp);
@@ -99,7 +99,7 @@ async function suiteCache(cdp, report) {
   const first = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("第一次全部真算", Object.values(first.nodes).filter((n) => n.state === "done").length, 3);
 
-  // 预测集合必须与实际 skipped 集合完全一致（§1.1 验收）
+  // 预测集合必须与实际 skipped 集合完全一致
   const warm = await replan(cdp);
   const predicted = Object.entries(warm.plan)
     .filter(([, n]) => n.cached)
@@ -179,10 +179,10 @@ async function suiteCache(cdp, report) {
   return ids;
 }
 
-// ------------------------------------------------------------- 1.2 并行执行
+// ------------------------------------------------------------- 并行执行
 
 async function suiteParallel(cdp, report) {
-  report.section("1.2 并行执行：菱形图跑通、事件不重不漏");
+  report.section("并行执行：菱形图跑通、事件不重不漏");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -231,10 +231,10 @@ async function suiteParallel(cdp, report) {
   );
 }
 
-// --------------------------------------------------- 1.3 bypass 与 reroute
+// --------------------------------------------------- bypass 与 reroute
 
 async function suiteBypassReroute(cdp, report) {
-  report.section("1.3 / P1 #24 #25：静音透传、reroute 串联与类型推导");
+  report.section("静音透传、reroute 串联与类型推导");
 
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
@@ -248,7 +248,7 @@ async function suiteBypassReroute(cdp, report) {
     `${before.nodes[ids.voxel]?.elementCount} < ${rawCount}`,
   );
 
-  // Ctrl+M 静音（#25）。这是 change 动作，要进撤销栈。
+  // Ctrl+M 静音。这是 change 动作，要进撤销栈。
   await select(cdp, ids.voxel);
   await pressCtrl(cdp, "M");
   await sleep(150);
@@ -284,7 +284,7 @@ async function suiteBypassReroute(cdp, report) {
     )),
   );
 
-  // #24：在边的右键菜单里插入 reroute（双击已让给连线查看器，见 edge-peek-plan P1）。
+  // 在边的右键菜单里插入 reroute（双击已让给连线查看器）。
   // 摆成一条水平线，路径包围盒的中心才落在线上；
   // 命中要用 edge-interaction 那条粗路径，edge-path 的 pointer-events 是关的。
   await normalizeZoom(cdp, 0.6);
@@ -324,7 +324,7 @@ async function suiteBypassReroute(cdp, report) {
     JSON.stringify(doc.edges.map((e) => `${e.from.node}.${e.from.port}→${e.to.node}.${e.to.port}`)),
   );
 
-  // E6：Any 端口的实际类型由连线推导，端口着色跟着源走
+  // Any 端口的实际类型由连线推导，端口着色跟着源走
   const inserted = reroutes.find((n) => n.id !== ids.tail);
   if (inserted) {
     const color = await domOf(
@@ -553,10 +553,10 @@ async function suiteBypassReroute(cdp, report) {
     JSON.stringify({ boxed, t3, t3Box, branchSteps }));
 }
 
-// ------------------------------------------------------------- 1.4 迁移
+// ------------------------------------------------------------- 迁移
 
 async function suiteMigration(cdp, report, ws) {
-  report.section("1.4 迁移：v1 的图打开即改写、可撤销、再打开不再提示");
+  report.section("迁移：v1 的图打开即改写、可撤销、再打开不再提示");
 
   const fixture = path.join(ws.dir, "老版本 随机抽样.lyflow.json");
   fs.writeFileSync(
@@ -627,7 +627,7 @@ async function suiteMigration(cdp, report, ws) {
   `);
   report.eq("保存后再打开不再提示迁移", again.length, 0);
 
-  // 顶层图参数（M7 J7）：编辑器只原样保留，经 Tauri 后端保存再打开也不能丢。
+  // 顶层图参数：编辑器只原样保留，经 Tauri 后端保存再打开也不能丢。
   // 绑定目标 s.seed 从节点上拿掉 —— 同一个参数两处定义是 param_conflict。
   const graphParams = { seedAll: { type: "int", default: 4, binds: ["s.seed"], doc: "抽样种子" } };
   const kept = await cdp.eval(`
@@ -649,10 +649,10 @@ async function suiteMigration(cdp, report, ws) {
   report.eq("抽样点数就是迁移过来的那个值", run.nodes["s"]?.elementCount, 777);
 }
 
-// ---------------------------------------------------------- 1.5 热重载装置
+// ---------------------------------------------------------- 热重载装置
 
 async function suiteHotReload(cdp, report) {
-  report.section("1.5 热重载：开发期装置已就位");
+  report.section("热重载：开发期装置已就位");
 
   const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
   // 安装包里不开（release 构建，bridge/src/core_ffi.rs 的 watch_source），那一条在 run.mjs 的「安装包」组里验
@@ -667,13 +667,13 @@ async function suiteHotReload(cdp, report) {
     packaged ? null : String(info?.generation ?? 0),
   );
   // 换代本身在 cargo test 里验（hot_reload_swaps_in_a_fresh_generation）：
-  // CDP 没法在一次会话里重编 C++，手工复现步骤见 docs/m3-acceptance.md。
+  // CDP 没法在一次会话里重编 C++。
 }
 
-// ------------------------------------------------------------- 1.6 参数联动
+// ------------------------------------------------------------- 参数联动
 
 async function suiteParamLinkage(cdp, report) {
-  report.section("1.6 参数联动：visibleWhen 隐藏的参数不渲染也不校验必填");
+  report.section("参数联动：visibleWhen 隐藏的参数不渲染也不校验必填");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -739,11 +739,11 @@ async function suiteParamLinkage(cdp, report) {
   void pass;
 }
 
-// ----------------------------------------------- P1 #17 #19 #20 #21 连线手感
+// ----------------------------------------------- 连线手感
 
-/** #17：落点偏离端口中心 16 px 仍然能连上（connectionRadius = 24）。 */
+/** 落点偏离端口中心 16 px 仍然能连上（connectionRadius = 24）。 */
 async function suiteSnap(cdp, report) {
-  report.section("P1 #17：连线端口吸附");
+  report.section("连线端口吸附");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -776,9 +776,9 @@ async function suiteSnap(cdp, report) {
   );
 }
 
-/** #20：拖线中兼容端口高亮、不兼容端口置灰。 */
+/** 拖线中兼容端口高亮、不兼容端口置灰。 */
 async function suitePortHints(cdp, report) {
-  report.section("P1 #20：拖线时的端口兼容性可视化");
+  report.section("拖线时的端口兼容性可视化");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -817,9 +817,9 @@ async function suitePortHints(cdp, report) {
   report.eq("松手之后标记清掉", highlight.after, null);
 }
 
-/** #19：拖离输入端 → 另一端跟着鼠标 → 落到别的兼容端口上。 */
+/** 拖离输入端 → 另一端跟着鼠标 → 落到别的兼容端口上。 */
 async function suiteReconnect(cdp, report) {
-  report.section("P1 #19：拖离输入端连线，另一端跟着鼠标");
+  report.section("拖离输入端连线，另一端跟着鼠标");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -918,9 +918,9 @@ async function suiteReconnect(cdp, report) {
     { edges: [`${ids.gen}>${ids.crop}.cloud`], added: 1, rejected: null, undone: [`${gen2}>${ids.crop}.cloud`, `${ids.gen}>${ids.voxel}.cloud`].sort() });
 }
 
-/** #21：把一个孤立节点拖到连线上 → 自动插入到中间。 */
+/** 把一个孤立节点拖到连线上 → 自动插入到中间。 */
 async function suiteInsertOnEdge(cdp, report) {
-  report.section("P1 #21：拖节点到连线上自动插入");
+  report.section("拖节点到连线上自动插入");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -1007,7 +1007,7 @@ async function suiteInsertOnEdge(cdp, report) {
     { edges: [`${ids.gen}>${ids.crop}`], at: freeAt, past: pastBeforeDrag });
 }
 
-// ------------------------------------------------------------ P1 #18 搜索接上
+// ------------------------------------------------------------ 搜索接上
 
 export async function checkOperatorSearch(cdp, report) {
   const setQuery = (selector, value) => cdp.eval(`
@@ -1050,7 +1050,7 @@ export async function checkOperatorSearch(cdp, report) {
 }
 
 async function suiteDropToSearch(cdp, report) {
-  report.section("P1 #18：连线中途松手 → 搜索面板 → 自动接上");
+  report.section("连线中途松手 → 搜索面板 → 自动接上");
 
   await newDoc(cdp);
   await checkOperatorSearch(cdp, report);
@@ -1235,10 +1235,10 @@ async function suiteDropToSearch(cdp, report) {
     JSON.stringify({ listed, typedWire, pastBeforeTyped }));
 }
 
-// ------------------------------------------------ P1 #22 网格吸附与自动布局
+// ------------------------------------------------ 网格吸附与自动布局
 
 async function suiteLayout(cdp, report) {
-  report.section("P1 #22 + E8：网格吸附、对齐参考线、dagre 自动布局");
+  report.section("网格吸附、对齐参考线、dagre 自动布局");
 
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
@@ -1265,7 +1265,7 @@ async function suiteLayout(cdp, report) {
     JSON.stringify(pos),
   );
 
-  // Ctrl+L 整理整图（M4 起 Ctrl+G 让给了「合成子图」）
+  // Ctrl+L 整理整图（Ctrl+G 是「合成子图」）
   await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
   await pressCtrl(cdp, "L");
   await sleep(400);
@@ -1283,10 +1283,10 @@ async function suiteLayout(cdp, report) {
   // 在 packages/editor/test/layout.test.mjs 里验
 }
 
-// ------------------------------------------ P1 #23 #26 #28 #29 编辑与输入
+// ------------------------------------------ 编辑与输入
 
 async function suiteEditing(cdp, report) {
-  report.section("P1 #25 #26 #28 #29：折叠重命名、参数右键、拖动改值、快捷键面板；空画布的提示");
+  report.section("折叠重命名、参数右键、拖动改值、快捷键面板；空画布的提示");
 
   await newDoc(cdp);
   await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
@@ -1304,7 +1304,7 @@ async function suiteEditing(cdp, report) {
   await select(cdp, ids.voxel);
   await sleep(200);
 
-  // #25 折叠
+  // 折叠
   await pressCtrl(cdp, "E");
   await sleep(200);
   report.ok(
@@ -1318,7 +1318,7 @@ async function suiteEditing(cdp, report) {
     !(await cdp.eval(`return !!document.querySelector('[data-testid="node-collapsed-${ids.voxel}"]');`)),
   );
 
-  // #25 双击标题重命名
+  // 双击标题重命名
   const head = await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`);
   if (head) {
     for (const type of ["mousePressed", "mouseReleased"]) {
@@ -1359,7 +1359,7 @@ async function suiteEditing(cdp, report) {
     { focus: renameFocus, past: afterF2.past - pastBeforeF2, title: afterF2.title, open: afterF2.open },
     { focus: `node-rename-${ids.gen}`, past: 0, title: null, open: false });
 
-  // #26 参数右键菜单
+  // 参数右键菜单
   await select(cdp, ids.voxel);
   await sleep(200);
   const menu = await cdp.eval(`
@@ -1393,7 +1393,7 @@ async function suiteEditing(cdp, report) {
   `);
   report.ok("重置为默认把稀疏键删掉了", reset.after === null, JSON.stringify(reset));
 
-  // #28 数字框拖动改值，整段一条撤销
+  // 数字框拖动改值，整段一条撤销
   await cdp.eval(`
     window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'pointCount', 30000);
     window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []);
@@ -1843,7 +1843,7 @@ async function suiteEditing(cdp, report) {
         reset: { twin: {}, steps: 1 } });
   }
 
-  // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
+  // 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
   // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板
   await stubClipboard(cdp);
   await cdp.eval(`
@@ -1965,7 +1965,7 @@ async function suiteEditing(cdp, report) {
     c1.value === false && c1.past === c0.past + 1 && c2.value === c0.value && c2.past === c0.past, JSON.stringify({ c0, c1, c2 }));
   await cdp.eval(`if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true;`);
 
-  // #29 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
+  // 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
   // 而键表里 help 没标 inTextField，会被「打字时不拦键」的铁律挡掉。
   await cdp.eval(`
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -1994,7 +1994,7 @@ async function suiteEditing(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setHelpOpen(false); return true;`);
 }
 
-// ------------------------------------------------- §2.5 面板、最近文件、备份
+// ------------------------------------------------- 面板、最近文件、备份
 
 export async function checkWindowChrome(cdp, report) {
   report.eq("自定义标题栏去掉系统装饰，并提供三个窗口按钮", await cdp.eval(`
@@ -2030,7 +2030,7 @@ export async function checkWindowChrome(cdp, report) {
 }
 
 async function suitePanels(cdp, report, ws) {
-  report.section("§2.5：日志/诊断抽屉、最近文件、备份恢复、窗口标题");
+  report.section("日志/诊断抽屉、最近文件、备份恢复、窗口标题");
 
   await newDoc(cdp);
   await checkWindowChrome(cdp, report);
@@ -2476,12 +2476,12 @@ async function suitePanels(cdp, report, ws) {
   report.ok("删掉之后文件没了", !fs.existsSync(UNTITLED_BACKUP));
 }
 
-// ------------------------------------------------------------ #30 / 2.6 视图
+// ------------------------------------------------------------ 3D 视图
 
 const VIEWER_PREFS_KEY = "lyflow.viewer.display";
 
 async function suiteViewer(cdp, report) {
-  report.section("P1 #30 / §2.6：着色模式、色带与范围、钉住、导出");
+  report.section("3D 视图：着色模式、色带与范围、钉住、导出");
   // 显示设置会落 localStorage（lib/viewPrefs）：记下原样，分组结束时放回去，不影响后面的分组
   // （run.mjs 开跑时已经把你自己存的那份挪开、换成默认）
   const before = await cdp.eval(`
@@ -2762,7 +2762,7 @@ function readMeasure(cdp) {
 }
 
 async function suiteMeasure(cdp, report) {
-  report.section("测量（measure-plan）：M 开工具、单击选点、两点测距、拖动不选点、重跑标过期、换节点清掉");
+  report.section("测量：M 开工具、单击选点、两点测距、拖动不选点、重跑标过期、换节点清掉");
   await newDoc(cdp);
   const ids = await buildGraph(
     cdp,
@@ -2968,10 +2968,10 @@ async function suiteMeasure(cdp, report) {
   report.eq("再按 M 关掉工具、读数框收起", [off.on, off.readout], ["0", false]);
 }
 
-// ---------------------------------------------------------- Shift+F5 / #27
+// ---------------------------------------------------------- Shift+F5 精确运行
 
 async function suiteRunToSelected(cdp, report) {
-  report.section("P1 #27 + E7：Shift+F5 与多选浮动条精确运行到选中节点");
+  report.section("Shift+F5 与多选浮动条精确运行到选中节点");
 
   await newDoc(cdp);
   await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });

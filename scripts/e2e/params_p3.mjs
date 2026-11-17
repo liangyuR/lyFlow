@@ -1,15 +1,15 @@
-// 配方（docs/param-recipe-plan.md P3）的分组：验收 17–24。逐条结果见 docs/param-recipe-p3-acceptance.md。
+// 配方的分组：
 //
-// 17 新建两个配方、各改几项、Ctrl+S：磁盘上两个配方文件与 index.json（只存与基础不同的值），图文件同时保存；
+// - 新建两个配方、各改几项、Ctrl+S：磁盘上两个配方文件与 index.json（只存与基础不同的值），图文件同时保存；
 //    重开后下拉框（默认配方）、矩阵、值都还原。
-// 18 K6 ① ② ③：改已纳入的参数只有当前配方文件变；改没纳入的图变、行上提示，「改为只在本配方生效」；
+// - 编辑落点：改已纳入的参数只有当前配方文件变；改没纳入的图变、行上提示，「改为只在本配方生效」；
 //    切走再切回来未保存的改动还在；保存前发现文件被外部修改 → 提示覆盖 / 重新载入。
-// 19 K4：A 覆盖 x、B 覆盖 y，A → B 之后 x 回到基础。
-// 20 切换配方后运行：受影响的节点重算、其余命中缓存；切回原配方全部命中缓存；「将重算 N 个」跟着变；自动运行照常触发。
-// 21 K7：配方值的改动能 Ctrl+Z / Ctrl+Y；切换配方不产生撤销记录。
-// 22 矩阵：三态、只显示差异、单元格编辑写对配方、多选复制到另一配方、隐藏列、越界为红且运行被阻止并给出原因。
-// 23 失配：手工构造的配方文件分别触发四类，条目与建议正确；「全部按建议修复」后能运行，一次撤销还原。
-// 24 管理：新建、复制、重命名、删除、设为默认、导入（重名处理）、导出，各看磁盘结果；自动备份写与恢复。
+// - 从基础重算：A 覆盖 x、B 覆盖 y，A → B 之后 x 回到基础。
+// - 切换配方后运行：受影响的节点重算、其余命中缓存；切回原配方全部命中缓存；「将重算 N 个」跟着变；自动运行照常触发。
+// - 撤销：配方值的改动能 Ctrl+Z / Ctrl+Y；切换配方不产生撤销记录。
+// - 矩阵：三态、只显示差异、单元格编辑写对配方、多选复制到另一配方、隐藏列、越界为红且运行被阻止并给出原因。
+// - 失配：手工构造的配方文件分别触发四类，条目与建议正确；「全部按建议修复」后能运行，一次撤销还原。
+// - 管理：新建、复制、重命名、删除、设为默认、导入（重名处理）、导出，各看磁盘结果；自动备份写与恢复。
 //
 // 配方目录是图文件旁边的 <图名>.recipes/：每组用自己的图名，开始前把上一轮的目录删掉。
 // 对话框（起名、确认删除、外部修改的三选一）是编辑器自己画的，照常点；导入导出在界面上要弹系统文件对话框，
@@ -210,14 +210,14 @@ async function recipeGraph(cdp, ws, name, { seed = 7 } = {}) {
 
 const recipeFile = (dir, name) => path.join(dir, `${name}.lyflow-recipe.json`);
 
-// ------------------------------------------------------------ 验收 17
+// ------------------------------------------------------------ 新建、保存与重开
 
 const A = "车型A·左前门";
 const B = "车型B·尾门";
 
 async function suiteCreateSaveReopen(cdp, report, ws) {
-  report.section("P3 验收 17：新建两个配方、各改几项、Ctrl+S → 两个配方文件 + index.json，图同时保存；重开后都还原");
-  const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 17");
+  report.section("配方：新建两个配方、各改几项、Ctrl+S → 两个配方文件 + index.json，图同时保存；重开后都还原");
+  const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 新建");
 
   // 对话框开着、焦点不在它里面时按 Delete：画布上选中的节点不能跟着没了。以前 React Flow 自己的
   // deleteKeyCode 不管编辑器的对话框，后面选中的节点就被删了（快捷键那边对话框开着时一个都不响）
@@ -233,7 +233,7 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
   await must("起名对话框：新建配方 A", answerText(cdp, A));
   await openPanel(cdp, "nodes");
-  // 在按节点页被绑定的行上打字：选着配方 → 写进配方（K6 ①）
+  // 在按节点页被绑定的行上打字：选着配方 → 写进配方
   await must("A：leafSize 第一个分量改成 0.03", typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.03"));
   await must("A：cutMax 改成 2.5", typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "2.5"));
   await must("起名对话框：新建配方 B", newRecipeFromMenu(cdp, B));
@@ -292,11 +292,11 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   return { ids, file, dir };
 }
 
-// ------------------------------------------------------------ 验收 18
+// ------------------------------------------------------------ 编辑落点与外部修改
 
 async function suiteEditSemantics(cdp, report, ws) {
-  report.section("P3 验收 18：K6 ① 只写当前配方、② 改图 + 提示 +「改为只在本配方生效」、③ 切走切回改动还在；外部修改检测");
-  const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 18");
+  report.section("配方：① 只写当前配方、② 改图 + 提示 +「改为只在本配方生效」、③ 切走切回改动还在；外部修改检测");
+  const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 编辑");
   await newRecipeFromMenu(cdp, A);
   await newRecipeFromMenu(cdp, B);
   await pickRecipe(cdp, A);
@@ -393,11 +393,11 @@ async function suiteEditSemantics(cdp, report, ws) {
   await closePanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 19、21
+// ------------------------------------------------------------ 从基础重算与撤销
 
 async function suiteBaseAndUndo(cdp, report, ws) {
-  report.section("P3 验收 19 / 21：K4 总是从基础重算；K7 配方值能 Ctrl+Z / Ctrl+Y，切换配方不进撤销栈");
-  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 19");
+  report.section("配方：总是从基础重算；配方值能 Ctrl+Z / Ctrl+Y，切换配方不进撤销栈");
+  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 重算");
   await newRecipeFromMenu(cdp, A);
   await openPanel(cdp, "nodes");
   await typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.05");
@@ -409,7 +409,7 @@ async function suiteBaseAndUndo(cdp, report, ws) {
   report.eq("A → B：x 回到基础（不残留 A 的值）、y 是 B 的", [p.leafSize, p.cutMax], [[0.02, 0.02, 0.02], 0.8]);
   await pickRecipe(cdp, "");
 
-  // K7
+  // 配方值的撤销 / 重做
   await pickRecipe(cdp, B);
   const past0 = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
   await pickRecipe(cdp, A);
@@ -434,12 +434,12 @@ async function suiteBaseAndUndo(cdp, report, ws) {
   await closePanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 20
+// ------------------------------------------------------------ 切换配方后运行
 
 async function suiteSwitchAndRun(cdp, report, ws) {
-  report.section("P3 验收 20：切换配方后运行 —— 受影响的节点重算、其余命中缓存；切回原配方全部命中缓存");
+  report.section("配方：切换配方后运行 —— 受影响的节点重算、其余命中缓存；切回原配方全部命中缓存");
   // 种子每次不同：结果仓按内容寻址，同一个 app 里跑过一样的图，「该重算的」也会命中缓存
-  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 20", { seed: 1000 + (Date.now() % 100000) });
+  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 切换", { seed: 1000 + (Date.now() % 100000) });
   await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
     g.createRecipe(${lit(A)}); g.createRecipe(${lit(B)});
@@ -475,11 +475,11 @@ async function suiteSwitchAndRun(cdp, report, ws) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
 }
 
-// ------------------------------------------------------------ 验收 22
+// ------------------------------------------------------------ 矩阵
 
 async function suiteMatrix(cdp, report, ws) {
-  report.section("P3 验收 22：矩阵 —— 三态、只显示差异、单元格编辑、多选复制、隐藏列、越界为红且运行被阻止");
-  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 22");
+  report.section("配方：矩阵 —— 三态、只显示差异、单元格编辑、多选复制、隐藏列、越界为红且运行被阻止");
+  const { ids } = await recipeGraph(cdp, ws, "车门缝隙 矩阵");
   const C = "车型C·右前门";
   await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
@@ -510,7 +510,7 @@ async function suiteMatrix(cdp, report, ws) {
   report.ok("越界的单元格是红的（invalid、红字），悬停写原因（越界：不能小于 2）",
     invalidState === "invalid" && redTitle.color === "rgb(229, 72, 77)" && /越界.*不能小于 2/.test(redTitle.title),
     JSON.stringify({ state: invalidState, ...redTitle }));
-  // 「越界阻止运行、其余配方照常运行」在验收 23 里对同一条路径断言（③ 的配方被阻止、④ 的配方照常运行），这里不再重跑
+  // 「越界阻止运行、其余配方照常运行」在失配分组里对同一条路径断言（③ 的配方被阻止、④ 的配方照常运行），这里不再重跑
 
   // 只显示差异 / 全部
   await click(cdp, '[data-testid="mx-diff"]');
@@ -567,11 +567,11 @@ async function suiteMatrix(cdp, report, ws) {
   return { ids };
 }
 
-// ------------------------------------------------------------ 验收 23
+// ------------------------------------------------------------ 失配
 
 async function suiteMismatch(cdp, report, ws) {
-  report.section("P3 验收 23：失配 —— 手工构造的配方文件触发四类，条目与建议正确；全部按建议修复后能运行，一次撤销还原");
-  const { file, dir } = await recipeGraph(cdp, ws, "车门缝隙 23");
+  report.section("配方：失配 —— 手工构造的配方文件触发四类，条目与建议正确；全部按建议修复后能运行，一次撤销还原");
+  const { file, dir } = await recipeGraph(cdp, ws, "车门缝隙 失配");
   const doc = await docOf(cdp);
   const digest = await cdp.eval(`return window.__lyflow.recipes.specDigest();`);
   const ref = { id: doc.id, specDigest: digest };
@@ -634,11 +634,11 @@ async function suiteMismatch(cdp, report, ws) {
   await closePanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 24
+// ------------------------------------------------------------ 管理
 
 async function suiteManage(cdp, report, ws) {
-  report.section("P3 验收 24：管理 —— 新建、复制、重命名、删除、设为默认、导入（重名）、导出，看磁盘；自动备份");
-  const { file, dir } = await recipeGraph(cdp, ws, "车门缝隙 24");
+  report.section("配方：管理 —— 新建、复制、重命名、删除、设为默认、导入（重名）、导出，看磁盘；自动备份");
+  const { file, dir } = await recipeGraph(cdp, ws, "车门缝隙 管理");
   await openPanel(cdp, "recipes");
   await click(cdp, '[data-testid="mg-new"]');
   await must("新建：起名对话框", answerText(cdp, A));

@@ -27,7 +27,7 @@
 using namespace lyflow;
 using namespace lyflow::test;
 
-TEST_CASE("点云包的完整 50 项算子集合与归属版本一致") {
+TEST_CASE("点云包的完整算子集合与归属版本一致") {
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems)
     MESSAGE(p);

@@ -1,13 +1,13 @@
-// 图参数成形（docs/param-recipe-plan.md P1）的分组：验收 1–7。逐条结果见 docs/param-recipe-p1-acceptance.md。
+// 图参数成形的分组：
 //
-// 1 schema / 往返：带完整规格的图参数经 Rust 存盘再读回不丢字段；完整规格与老格式在 core 里都能跑。
-// 2 core：default 越过图参数自己的硬限位报 bad_param（paramPath = 名字，nodeId 为空）；params 传越界值同样；
+// - schema / 往返：带完整规格的图参数经 Rust 存盘再读回不丢字段；完整规格与老格式在 core 里都能跑。
+// - core：default 越过图参数自己的硬限位报 bad_param（paramPath = 名字，nodeId 为空）；params 传越界值同样；
 //   老的无 type 图参数照常运行。
-// 3 右键「纳入配方」：规格从 manifest 抄、default = 当前值、显式值被删；cacheKey 不变、结果命中缓存；一次 Ctrl+Z 还原。
-// 4 子图内部参数纳入：子图参数 + 图参数两级；另一个实例不受影响；一次撤销还原两级；库算子进不去、没有这个动作。
-// 5 被绑定参数的行上编辑：改的是图参数的 default，不产生 param_conflict。
-// 6 RunOptions.params 传一个与 default 不同的值：被绑定节点的 cacheKey 与结果跟着变；传回 default 命中缓存。
-// 7 P1.6：复制路径名带 nodeId；撤销回到保存点时 dirty 复原（visibleWhen 的 ne 在面板上由 P2 验收 11 的 enabledWhen（ne）覆盖）。
+// - 右键「纳入配方」：规格从 manifest 抄、default = 当前值、显式值被删；cacheKey 不变、结果命中缓存；一次 Ctrl+Z 还原。
+// - 子图内部参数纳入：子图参数 + 图参数两级；另一个实例不受影响；一次撤销还原两级；库算子进不去、没有这个动作。
+// - 被绑定参数的行上编辑：改的是图参数的 default，不产生 param_conflict。
+// - RunOptions.params 传一个与 default 不同的值：被绑定节点的 cacheKey 与结果跟着变；传回 default 命中缓存。
+// - 复制路径名带 nodeId；撤销回到保存点时 dirty 复原（visibleWhen 的 ne 在面板上由 params_p2 的 enabledWhen（ne）覆盖）。
 //
 // 右键菜单与输入框走真实 DOM 事件（与 m4 的「提升为子图参数」同一个做法）；搭图走 store 的语义化动作。
 
@@ -119,10 +119,10 @@ const validateNow = (cdp, params) =>
 
 const SEED = 60000 + (Date.now() % 9000);
 
-// ------------------------------------------------------------ 验收 3 / 5 / 6 / 7（复制路径）
+// ------------------------------------------------------------ 纳入配方、绑定行编辑、RunOptions.params、复制路径
 
 async function suiteIncludeTopLevel(cdp, report) {
-  report.section("P1 验收 3：普通节点参数「纳入配方」——规格从 manifest 抄、default = 当前值、结果不变、一次撤销");
+  report.section("普通节点参数「纳入配方」——规格从 manifest 抄、default = 当前值、结果不变、一次撤销");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -201,8 +201,8 @@ async function suiteIncludeTopLevel(cdp, report) {
   const undone = await docOf(cdp);
   report.eq("一次 Ctrl+Z 完全还原（doc 与纳入前逐字段相同）", JSON.stringify(undone), JSON.stringify(docBefore));
 
-  // ------------------------------------------------ 验收 5：在被绑定的行上编辑
-  report.section("P1 验收 5：在被绑定参数的行上编辑 = 改图参数的 default，不产生 param_conflict");
+  // ------------------------------------------------ 在被绑定的行上编辑
+  report.section("在被绑定参数的行上编辑 = 改图参数的 default，不产生 param_conflict");
   await select(cdp, ids.gen);
   await sleep(200);
   const included = await paramMenu(cdp, "pointCount", "param-menu-include");
@@ -225,8 +225,8 @@ async function suiteIncludeTopLevel(cdp, report) {
   const ran30k = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("运行用上了新的 default", countOf(ran30k, ids.gen), 30000);
 
-  // ------------------------------------------------ 验收 6：RunOptions.params
-  report.section("P1 验收 6：RunOptions.params 传另一个值 —— cacheKey 与结果跟着变，传回 default 命中缓存");
+  // ------------------------------------------------ RunOptions.params
+  report.section("RunOptions.params 传另一个值 —— cacheKey 与结果跟着变，传回 default 命中缓存");
   const base = await ranKeys(cdp);
   const other = await runAndWait(cdp, () =>
     cdp.eval(`await window.__lyflow.run({ params: { pointCount: 12000 } }); return true;`),
@@ -247,8 +247,8 @@ async function suiteIncludeTopLevel(cdp, report) {
     [[true, "skipped"], [true, "skipped"], [true, "skipped"]],
   );
 
-  // ------------------------------------------------ 验收 7（一）：复制路径名
-  report.section("P1 验收 7：P1.6 三项 —— 复制路径名带 nodeId");
+  // ------------------------------------------------ 复制路径名
+  report.section("参数右键：复制路径名带 nodeId");
   await select(cdp, ids.cut);
   await sleep(200);
   // 主窗口放行了剪贴板读取（bridge/src/lib.rs 的 open_main_window）：真的 readText 马上回来，
@@ -278,10 +278,10 @@ async function suiteIncludeTopLevel(cdp, report) {
   await restoreClipboard(cdp);
 }
 
-// ------------------------------------------------------------ 验收 4
+// ------------------------------------------------------------ 子图内部参数纳入配方
 
 async function suiteIncludeInSubgraph(cdp, report, ws) {
-  report.section("P1 验收 4：子图内部参数纳入配方 —— 两级提升、另一个实例不变、一次撤销；库算子内部没有这个动作");
+  report.section("子图内部参数纳入配方 —— 两级提升、另一个实例不变、一次撤销；库算子内部没有这个动作");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -419,10 +419,10 @@ async function pressKeyCtrlEnter(cdp) {
   await sleep(250);
 }
 
-// ------------------------------------------------------------ 验收 1 / 2
+// ------------------------------------------------------------ 图参数规格往返与 core 校验
 
 async function suiteSpecAndCore(cdp, report, ws) {
-  report.section("P1 验收 1：带完整规格的图参数 —— Rust 存盘往返不丢字段，完整规格与老格式都能跑");
+  report.section("带完整规格的图参数 —— Rust 存盘往返不丢字段，完整规格与老格式都能跑");
 
   await newDoc(cdp);
   const fixture = path.join(ROOT, "schema", "examples", "graph-params.example.lyflow.json");
@@ -447,7 +447,7 @@ async function suiteSpecAndCore(cdp, report, ws) {
   `);
   report.eq("Inspector 顶上的图参数简表列出全部四个", table, ["leafSize", "cutField", "pointCount", "cutMax"]);
 
-  report.section("P1 验收 2：core 按图参数自己的规格校验 default 与传入的值；无 type 的老图参数照常");
+  report.section("core 按图参数自己的规格校验 default 与传入的值；无 type 的老图参数照常");
   await cdp.eval(`window.__lyflow.stores.graph.getState().setGraphParamDefault('pointCount', 30000000); return true;`);
   const bad = await validateNow(cdp);
   const hit = (bad ?? []).find((d) => d.code === "bad_param" && d.paramPath === "pointCount");
@@ -484,13 +484,13 @@ async function suiteSpecAndCore(cdp, report, ws) {
   report.eq("老图参数传值照常运行", oldRun.status, "ok");
 }
 
-// ------------------------------------------------------------ 验收 7（ne、dirty）
+// ------------------------------------------------------------ 撤销回到保存点
 
 async function suiteP16(cdp, report, ws) {
-  report.section("P1 验收 7：P1.6 —— 撤销回到保存点时 dirty 复原");
+  report.section("撤销回到保存点时 dirty 复原");
 
   // 一张带子图参数（visibleWhen 用 ne）的小图，dirty 的验证拿它当底子。ne 在 Inspector 上的显隐不再在这里断言：
-  // 面板那一侧由 P2 验收 11 的 enabledWhen（ne）覆盖，core 那一侧（conditionHolds / manifest 导出）由 doctest 验
+  // 面板那一侧由 params_p2 的 enabledWhen（ne）覆盖，core 那一侧（conditionHolds / manifest 导出）由 doctest 验
   await newDoc(cdp);
   const inst = await cdp.eval(`
     const b = window.__lyflow;
@@ -517,7 +517,7 @@ async function suiteP16(cdp, report, ws) {
   await sleep(250);
 
   // dirty：存盘 → 改 → Ctrl+Z 回到保存点 → dirty 复原；重做又脏
-  const file = path.join(ws.dir, "P1 保存点.lyflow.json");
+  const file = path.join(ws.dir, "图参数 保存点.lyflow.json");
   await cdp.eval(`
     const b = window.__lyflow;
     const g = b.stores.graph.getState();

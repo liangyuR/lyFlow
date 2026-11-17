@@ -82,11 +82,11 @@ python tests/release/p5_contract.py --schema-only
 python tests/release/p5_contract.py --cli build/rust/release/lyflow.exe
 ```
 
-可用 `--examples <安装SDK/examples>` 验证安装后的文件，`--output-dir` 指定日志目录。脚本先核十个夹具的尺寸/SHA256，把八图和相关文件保存到新的 Unicode 目录，逐图执行默认→覆盖→默认共24次，核物理真值、正式 summary、原生大载荷元信息和业务 ID，并检查全部源文件没有被运行改写。
+可用 `--examples <安装SDK/examples>` 验证安装后的文件，`--output-dir` 指定日志目录。脚本先核十个夹具的尺寸/SHA256，把八图和相关文件保存到新的 Unicode 目录，逐图执行默认→覆盖→默认共24次，核覆盖生效与还原、正式 summary、原生大载荷元信息和业务 ID 等结构契约（物理真值由 `core/tests/integration/p5_depth_geometry.cpp` 验证），并检查全部源文件没有被运行改写。
 
 点云的进程内 ID 不跨运行保证一致。脚本仅在保存副本追加 cloud.statistics 观察节点，逐运行验证每个 sourceCloudId/parentCloudId/resultCloudId/sliceCloudId 实际绑定的云角色后再规范化这些字段；不删除工件 ID、掩膜 ID、帧名或几何摘要，也不把绑定错误隐藏成“ID本来会变化”。CLI JSON 的云/掩膜/四边形仍为元信息；完整原生数组、索引身份、C ABI 和动态 C++ SDK 的保存重载一致性由正式 core 集成测试另验。Rust CLI 经过 Rust 客户端执行工作流，不能据此冒充 Rust SDK 全数组专项验收。
 
-独立安装的 C++17 SDK 门禁使用 `tests/release/p5_sdk_consumer`，必须显式传入 `LYFLOW_CONSUMER_VERSION=X.Y.Z` 并以 EXACT 查找安装包，编译时不读取源码构建路径或 vcpkg。`p5_sdk_contract.py --sdk <安装目录> --consumer <编译后的程序> --bait-dir <构建bin> --output-dir <日志目录>` 实际运行八图、核物理真值和资产不变，并在 Windows 暂移SDK内OpenCV依赖时验证有效CWD/PATH诱饵仍被拒绝。该门禁纳入原生Windows CI；不能把旧补丁客户端兼容运行冒充当前头文件重新编译。
+独立安装的 C++17 SDK 门禁使用 `tests/release/p5_sdk_consumer`，必须显式传入 `LYFLOW_CONSUMER_VERSION=X.Y.Z` 并以 EXACT 查找安装包，编译时不读取源码构建路径或 vcpkg。`p5_sdk_contract.py --sdk <安装目录> --consumer <编译后的程序> --bait-dir <构建bin> --output-dir <日志目录>` 实际运行八图、核结构契约和资产不变，并在 Windows 暂移SDK内OpenCV依赖时验证有效CWD/PATH诱饵仍被拒绝。该门禁纳入原生Windows CI；不能把旧补丁客户端兼容运行冒充当前头文件重新编译。
 
 本轮 Windows 本地完整验证实际执行七个算子包、P1四模型、P4分割/OCR真实模型与全部平台回归：691组、370939断言通过，0失败/0跳过。最终DLL安装后，八图CLI默认→覆盖→默认24次通过，当前1.3.11 EXACT/C++17独立消费工程的八图和依赖诱饵负例通过。编辑器94项及React18/19类型检查通过。CI与Codex结论仍以PR最新提交为准，这些软件证据不替代现场精度、吞吐或安全验收。
 

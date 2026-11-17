@@ -2237,74 +2237,9 @@ fn recipes_lists_the_dir_with_reports_and_params() {
     assert_eq!(none.first()["count"], 0);
 }
 
-/// J5/J6：dirMode=band 却没接 refLine。检查在 validate 里，所以 `run` 在执行任何节点
-/// 之前就停下（没有一条 node_state）。gap 包没编进来时 gap.fit_line 是 unknown_op，
-/// 同样校验失败 —— 所以前半句在任何构建里都成立，诊断码只在带 gap 包时才断言。
-#[test]
-fn fit_line_band_without_ref_line_fails_at_validate() {
-    let dir = workspace("m7-fit-line");
-    let doc = json!({
-        "schemaVersion": 1,
-        "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
-        "nodes": [
-            {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 2000, "seed": 7107}},
-            {"id": "roi", "op": "gap.overall_roi"},
-            {"id": "fit", "op": "gap.fit_line", "params": {"dirMode": "band"}}
-        ],
-        "edges": [
-            {"id": "e1", "from": {"node": "g", "port": "cloud"}, "to": {"node": "roi", "port": "primary"}},
-            {"id": "e2", "from": {"node": "g", "port": "cloud"}, "to": {"node": "roi", "port": "secondary"}},
-            {"id": "e3", "from": {"node": "g", "port": "cloud"}, "to": {"node": "fit", "port": "cloud"}},
-            {"id": "e4", "from": {"node": "roi", "port": "box"}, "to": {"node": "fit", "port": "box"}},
-            {"id": "e5", "from": {"node": "roi", "port": "box"}, "to": {"node": "fit", "port": "toward"}}
-        ]
-    });
-    let file = dir.join("band.lyflow.json");
-    std::fs::write(&file, doc.to_string()).unwrap();
-    let path = file.to_string_lossy().into_owned();
-
-    let v = cli(&["validate", &path]);
-    assert_eq!(v.code, EXIT_INVALID, "{}", v.err);
-    let run = cli(&["run", &path]);
-    assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
-    assert!(
-        !run.lines()
-            .iter()
-            .any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
-        "校验没过就不该起跑：{}",
-        run.out
-    );
-
-    let gap_built = std::env::var("LYFLOW_PACKS")
-        .unwrap_or_default()
-        .contains("gap");
-    let manifest = cli(&["manifest"]).first();
-    let has_fit_line = manifest["operators"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|o| o["id"] == "gap.fit_line");
-    assert!(
-        !gap_built || has_fit_line,
-        "LYFLOW_PACKS 带了 gap，manifest 里却没有 gap.fit_line"
-    );
-    if has_fit_line {
-        let diags = v.first();
-        let d = diags
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|d| d["severity"] == "error")
-            .unwrap()
-            .clone();
-        assert_eq!(d["code"], "bad_param", "{diags}");
-        assert_eq!(d["phase"], "validate", "{diags}");
-        assert_eq!(d["nodeId"], "fit", "{diags}");
-    }
-}
-
-/// m8-plan L12 与 M8a 验收 4：`import` 默认产出积木图，`--fine` 产出细粒度图；
+/// `import` 默认产出积木图，`--fine` 产出细粒度图，两张图都能过 `validate`；
 /// 积木图里把 datum 框拖到 target 那一侧，`lyflow validate` 在执行前就报错。
+/// 各导入入口产出的节点组成由 solutions/gap/tests/test_import_bundle.cpp 覆盖。
 /// 导入器属于 gap 包，没编进来时整条跳过（manifest 里没有这个 kind）。
 #[test]
 fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
@@ -2326,7 +2261,7 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
     if !has_importer {
         return;
     }
-    let dir = workspace("m8a-import");
+    let dir = workspace("gap-import");
     let config = dir.join("StandardGap.yml");
     std::fs::write(
         &config,
@@ -2383,21 +2318,13 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
         "{blocks}"
     );
     assert!(
-        !ops(&blocks).contains(&"gap.fit_line".to_string()),
+        !ops(&blocks).contains(&"gap.business_rois".to_string()),
         "{blocks}"
     );
-    assert!(ops(&blocks).len() <= 12, "{blocks}");
-    assert!(ops(&fine).contains(&"gap.fit_line".to_string()), "{fine}");
     assert!(
         ops(&fine).contains(&"gap.business_rois".to_string()),
         "{fine}"
     );
-    for doc in [&blocks, &fine] {
-        assert!(
-            !ops(doc).contains(&"gap.measure_reference".to_string()),
-            "{doc}"
-        );
-    }
     for p in [&blocks_path, &fine_path] {
         let v = cli(&["validate", p]);
         assert_eq!(v.code, EXIT_OK, "{p}: {}", v.out);

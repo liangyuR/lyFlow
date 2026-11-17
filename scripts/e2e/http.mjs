@@ -312,7 +312,7 @@ async function suiteBuildAndShortcut(cdp, report) {
   report.ok("坏参数被 HTTP 校验逮到，诊断带 nodeId", bad.length > 0 && bad[0]?.nodeId === ids.gen, JSON.stringify(bad).slice(0, 200));
 }
 
-/** 宿主关动效（docs/motion-plan.md A4、§3 验收 9 的 animations={false}）：真鼠标点宿主栏上的
+/** 宿主关动效（animations={false}）：真鼠标点宿主栏上的
  *  「动效」开关，编辑器根上挂 lyflow-motion-off，新节点不播进场、新连线不长；再点回来恢复。 */
 async function suiteAnimationsProp(cdp, report) {
   report.section("宿主 animations={false}：关掉之后进场与生长都不播，打开恢复");
@@ -371,7 +371,7 @@ async function suiteAnimationsProp(cdp, report) {
     JSON.stringify(on));
 }
 
-/** 单节点运行经 HTTP（docs/node-run-plan.md R6）：桩服务器按 cacheKey 记账实现最小语义 ——
+/** 单节点运行经 HTTP：桩服务器按 cacheKey 记账实现最小语义 ——
  *  上游没跑过回 upstream_not_ready，跑过就照常跑、run_started 带上 isolate。 */
 async function suiteNodeRunOverHttp(cdp, report) {
   report.section("HttpTransport：只运行此节点 —— 上游没跑过回 upstream_not_ready，跑过之后照常跑");
@@ -411,7 +411,7 @@ async function suiteNodeRunOverHttp(cdp, report) {
   report.ok("下游 tail 仍是 done、按新 runId 取得到 tail 的输出信息", only.nodes[ids.tail]?.state === "done" && tail.includes("out"),
     JSON.stringify({ tail: only.nodes[ids.tail], outputs: tail }));
 
-  // 修订一：按钮单击 = 智能运行 targets=[id]，Shift = 再加 force。桩里也照样挂结果（V2）
+  // 按钮单击 = 智能运行 targets=[id]，Shift = 再加 force。桩里也照样挂结果
   const smart = await runAndWait(cdp, () =>
     cdp.eval(`await window.__lyflow.run({ targets: [${lit(ids.pass)}], force: [${lit(ids.pass)}] }); return true;`));
   const smartTail = await cdp.eval(`
@@ -452,10 +452,10 @@ async function suiteImageOverHttp(cdp, report) {
   });
 }
 
-/** 图参数的取值经 HTTP 信封的 params 走到桩服务器、再变成 CLI 的 --param（param-recipe P1.5）：
+/** 图参数的取值经 HTTP 信封的 params 走到桩服务器、再变成 CLI 的 --param：
  *  运行、校验、取点云三处用的是同一组值。 */
 async function suiteGraphParamsOverHttp(cdp, report) {
-  report.section("HttpTransport：图参数取值经信封 params → CLI --param（param-recipe P1.5）");
+  report.section("HttpTransport：图参数取值经信封 params → CLI --param");
 
   await newDoc(cdp);
   const ids = await buildGraph(
@@ -489,9 +489,9 @@ async function suiteGraphParamsOverHttp(cdp, report) {
   );
 }
 
-/** 配方文件的五个端点（param-recipe P3.2）与路径约束，再走一遍界面上的 Ctrl+S：配方经 HTTP 写进工作区。 */
+/** 配方文件的五个端点与路径约束，再走一遍界面上的 Ctrl+S：配方经 HTTP 写进工作区。 */
 async function suiteRecipesOverHttp(cdp, report, ws) {
-  report.section("HttpTransport：配方文件（param-recipe P3.2）—— 列、写、读、改名、删只在工作区里；Ctrl+S 经 HTTP 落盘");
+  report.section("HttpTransport：配方文件 —— 列、写、读、改名、删只在工作区里；Ctrl+S 经 HTTP 落盘");
 
   const api = await cdp.eval(`
     const t = window.__lyflow.transport;
@@ -633,7 +633,7 @@ async function main() {
         "--disable-extensions",
         "--remote-allow-origins=*",
         // 有头跑时窗口被挡住或没拿到前台，Chrome 会把页面当成 hidden：CDP 的键鼠事件送不进去、
-        // rAF 也不来，F5 触发不了运行（docs/motion-acceptance.md「环境问题」）。这三项关掉后台降级
+        // rAF 也不来，F5 触发不了运行。这三项关掉后台降级
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
         "--disable-background-timer-throttling",

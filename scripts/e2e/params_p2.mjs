@@ -1,14 +1,14 @@
-// 参数面板（docs/param-recipe-plan.md P2）的分组：验收 9–15。逐条结果见 docs/param-recipe-p2-acceptance.md。
+// 参数面板的分组：
 //
-//  9 面板开关（工具栏按钮 / Ctrl+Shift+P）、拖宽、最大化与还原、宽度记忆；打开时 Inspector 不显示；
+// - 面板开关（工具栏按钮 / Ctrl+Shift+P）、拖宽、最大化与还原、宽度记忆；打开时 Inspector 不显示；
 //    画布选中 ↔ 面板定位双向联动。
-// 10 全类型示例（test.param_showcase）：14 种类型每种的控件都能改值，doc 里值与类型都对；
+// - 全类型示例（test.param_showcase）：14 种类型每种的控件都能改值，doc 里值与类型都对；
 //    transform 与 curve 改 → 存盘 → 重开，值不变，core 收到的也是这一份（echo）。
-// 11 advanced 默认折叠；visibleWhen / enabledWhen 随另一个参数的改动即时生效。
-// 12 搜索与每个过滤 chip 的结果：期望值在 Node 这边对着 doc + manifest 独立算。
-// 13 子图定义行有「N 个实例共享」标记，改它两个实例的有效值都变；库算子内部只读（不展开）。
-// 14 ROI 缩略图 →「拖框」进 2D 拖框视图，真鼠标拖框，参数变，一次撤销还原。
-// 15 性能：脚本生成 1000 参数的图，打开面板 < 300 ms，滚动 ≥ 50 fps，输入一个数到画布状态更新 < 100 ms。
+// - advanced 默认折叠；visibleWhen / enabledWhen 随另一个参数的改动即时生效。
+// - 搜索与每个过滤 chip 的结果：期望值在 Node 这边对着 doc + manifest 独立算。
+// - 子图定义行有「N 个实例共享」标记，改它两个实例的有效值都变；库算子内部只读（不展开）。
+// - ROI 缩略图 →「拖框」进 2D 拖框视图，真鼠标拖框，参数变，一次撤销还原。
+// - 性能：脚本生成 1000 参数的图，打开面板 < 300 ms，滚动 ≥ 50 fps，输入一个数到画布状态更新 < 100 ms。
 //
 // test.param_showcase 只在 LYFLOW_TEST_OPS=1 时注册进 core（harness.mjs 起 app 时设）。
 // 面板的行是虚拟化的：要操作的行先 reveal（滚到它挂上为止），再走真实 DOM 事件；指针手势用 CDP 的真鼠标。
@@ -163,10 +163,10 @@ async function showcaseGraph(cdp, { seed = 11, extra = [] } = {}) {
   );
 }
 
-// ------------------------------------------------------------ 验收 9
+// ------------------------------------------------------------ 面板开关与联动
 
 async function suiteLayout(cdp, report) {
-  report.section("P2 验收 9：面板开关、拖宽、最大化、宽度记忆；打开时 Inspector 不显示；画布 ↔ 面板联动");
+  report.section("参数面板：开关、拖宽、最大化、宽度记忆；打开时 Inspector 不显示；画布 ↔ 面板联动");
   await resetPanel(cdp);
   const hasOp = await cdp.eval(`return !!window.__lyflow.stores.manifest.getState().operatorsById.get(${lit(SHOW)});`);
   mustOk(hasOp, "test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1");
@@ -463,7 +463,7 @@ async function suiteLayout(cdp, report) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 10
+// ------------------------------------------------------------ 全类型控件
 
 /** 每种类型一条：怎么在面板里改、改完 doc 里该是什么。 */
 function typeCases(show) {
@@ -525,7 +525,7 @@ const approxEq = (a, b) =>
       : JSON.stringify(a) === JSON.stringify(b);
 
 async function suiteAllTypes(cdp, report, ws) {
-  report.section("P2 验收 10：14 种类型的控件都能改值，doc 里值与类型都对；transform / curve 存盘重开不变");
+  report.section("参数面板：14 种类型的控件都能改值，doc 里值与类型都对；transform / curve 存盘重开不变");
   await resetPanel(cdp);
   const ids = await showcaseGraph(cdp);
   await openPanel(cdp);
@@ -731,7 +731,7 @@ async function suiteAllTypes(cdp, report, ws) {
     JSON.stringify({ pose: echo?.params?.pose, response: echo?.params?.response }));
 
   // 往返：存盘 → 读回来重开 → 值逐字不变
-  const file = path.join(ws.dir, "P2 全类型往返.lyflow.json");
+  const file = path.join(ws.dir, "参数面板 全类型往返.lyflow.json");
   await saveGraphTo(cdp, file);
   const disk = JSON.parse(fs.readFileSync(file, "utf8")).nodes.find((n) => n.id === ids.show).params;
   report.ok("磁盘上 transform 是 16 个数、curve 是对象", disk.pose?.length === 16 && typeof disk.response === "object",
@@ -760,10 +760,10 @@ async function suiteAllTypes(cdp, report, ws) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 11
+// ------------------------------------------------------------ advanced 与条件显隐
 
 async function suiteConditions(cdp, report) {
-  report.section("P2 验收 11：advanced 默认折叠；visibleWhen / enabledWhen 随另一个参数即时生效");
+  report.section("参数面板：advanced 默认折叠；visibleWhen / enabledWhen 随另一个参数即时生效");
   await resetPanel(cdp);
   const ids = await showcaseGraph(cdp, { seed: 12 });
   await openPanel(cdp);
@@ -807,7 +807,7 @@ async function suiteConditions(cdp, report) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 12
+// ------------------------------------------------------------ 搜索与过滤
 
 /** 期望值：照 lib/paramPanel.ts 写明的判据，在 Node 这边对着 doc + manifest 独立算一遍（只有顶层、没有子图）。 */
 function expectedRows(doc, ops, validation) {
@@ -889,7 +889,7 @@ async function listedKeys(cdp, { expand = false } = {}) {
 }
 
 async function suiteSearchFilter(cdp, report) {
-  report.section("P2 验收 12：搜索与每个过滤 chip 的结果（期望值对着 doc 独立算）");
+  report.section("参数面板：搜索与每个过滤 chip 的结果（期望值对着 doc 独立算）");
   await resetPanel(cdp);
   const ids = await showcaseGraph(cdp, {
     seed: 13,
@@ -996,7 +996,7 @@ async function suiteSearchFilter(cdp, report) {
   await sleep(150);
   await reveal(cdp, rowSel(`${ids.show}.iterations`));
   const diagText = await cdp.eval(`return document.querySelector(${lit(rowSel(`${ids.show}.iterations`))})?.querySelector('.pp-diag')?.textContent ?? null;`);
-  report.ok("诊断贴在 iterations 这一行下（P2.8）", (diagText ?? "").includes("1000"), diagText);
+  report.ok("诊断贴在 iterations 这一行下", (diagText ?? "").includes("1000"), diagText);
 
   // 图参数的诊断（nodeId 为空）贴在「图参数」分组那一行下：把 gain 的 default 设成越过它自己的 max
   await cdp.eval(`window.__lyflow.stores.graph.getState().setGraphParamDefault('gain', 50); await window.__lyflow.validate(); return true;`);
@@ -1020,10 +1020,10 @@ async function suiteSearchFilter(cdp, report) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 13
+// ------------------------------------------------------------ 子图定义与库算子
 
 async function suiteSubgraphShared(cdp, report, ws) {
-  report.section("P2 验收 13：子图定义行标「N 个实例共享」，改它两个实例都变；库算子内部只读");
+  report.section("参数面板：子图定义行标「N 个实例共享」，改它两个实例都变；库算子内部只读");
   await resetPanel(cdp);
   const example = JSON.parse(fs.readFileSync(path.join(ROOT, "examples", "param-showcase.lyflow.json"), "utf8"));
   await cdp.eval(`
@@ -1110,10 +1110,10 @@ async function suiteSubgraphShared(cdp, report, ws) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 14
+// ------------------------------------------------------------ ROI 拖框
 
 async function suiteRoi(cdp, report) {
-  report.section("P2 验收 14：ROI 缩略图 →「拖框」进 2D 拖框视图，拖动后参数变，一次撤销还原");
+  report.section("参数面板：ROI 缩略图 →「拖框」进 2D 拖框视图，拖动后参数变，一次撤销还原");
   await resetPanel(cdp);
   const ids = await showcaseGraph(cdp, { seed: 14 });
   const run = await runAndWait(cdp, () => pressF5(cdp));
@@ -1179,7 +1179,7 @@ async function suiteRoi(cdp, report) {
   await resetPanel(cdp);
 }
 
-// ------------------------------------------------------------ 验收 15
+// ------------------------------------------------------------ 性能
 
 /** 脚本生成一张 1000 参数的图：50 个 test.param_showcase，每个 20 个可见参数（22 个里两个被 visibleWhen 藏着），
  *  值各不相同。写成文件再按「打开文件」的路径读进来。 */
@@ -1194,14 +1194,14 @@ function bigGraph(dir) {
       ui: { position: { x: (i % 10) * 260, y: Math.floor(i / 10) * 180 }, title: `示例 ${i}` },
     });
   }
-  const doc = { schemaVersion: 1, id: "01JPARAMPERF00000000000000", name: "P2 性能 · 1000 参数", nodes, edges: [], groups: [], subgraphs: {}, x: {} };
-  const file = path.join(dir, "P2 性能 1000 参数.lyflow.json");
+  const doc = { schemaVersion: 1, id: "01JPARAMPERF00000000000000", name: "参数面板性能 · 1000 参数", nodes, edges: [], groups: [], subgraphs: {}, x: {} };
+  const file = path.join(dir, "参数面板性能 1000 参数.lyflow.json");
   fs.writeFileSync(file, JSON.stringify(doc, null, 2));
   return file;
 }
 
 async function suitePerf(cdp, report, ws) {
-  report.section("P2 验收 15：1000 参数的图 —— 打开面板 < 300 ms、滚动 ≥ 50 fps、输入到画布状态 < 100 ms");
+  report.section("参数面板：1000 参数的图 —— 打开面板 < 300 ms、滚动 ≥ 50 fps、输入到画布状态 < 100 ms");
   await resetPanel(cdp);
   const file = bigGraph(ws.dir);
   await cdp.eval(`
