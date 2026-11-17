@@ -168,6 +168,16 @@ TEST_CASE("Native label model validation and cancellation do not publish partial
   Data output = Data::record({"sentinel", {}});
   for (int classes : {0, 257})
     CHECK_FALSE(native::makeLabelRows(labelTensor(), classes, a, b, output, ctx).ok);
+  REQUIRE(native::makeLabelRows(labelTensor(), 8, a, b, output, ctx).ok);
+  native::LabelRowsView view;
+  std::string why;
+  Bundle injected = *output.asBundle();
+  Tensor shortLabels;
+  shortLabels.shape = {1};
+  shortLabels.data = {0};
+  injected.set("labels", Data::tensor(shortLabels));
+  CHECK_FALSE(native::readLabelRows(Data::bundle(std::move(injected)), view, why));
+  output = Data::record({"sentinel", {}});
   for (float value : {-1.F, 8.F, 1.5F, std::numeric_limits<float>::quiet_NaN()}) {
     auto labels = labelTensor();
     labels.data[0] = value;

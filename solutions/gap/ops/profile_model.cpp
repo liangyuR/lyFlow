@@ -163,7 +163,14 @@ bool readLabelRows(const Data& data, LabelRowsView& result, std::string& why) {
   if (!bundle || bundle->kind != kLabelRowsKind)
     return fail(why, "需要gap.LabelRows.v3");
   const auto* record = bundle->field("info")->asRecord();
-  result = {bundle->field("labels")->asTensor(), record, record->data.at("classCount").get<int>()};
+  const auto& classes = record->data.is_object() && record->data.contains("classCount")
+                            ? record->data["classCount"]
+                            : nlohmann::json();
+  if (record->type != kLabelInfoType || !classes.is_number_integer())
+    return fail(why, "标签信息需要gap.LabelRowsInfo.v3及整数classCount");
+  result = {bundle->field("labels")->asTensor(), record, classes.get<int>()};
+  if (!labelsValid(*result.labels, result.classCount, why))
+    return false;
   why.clear();
   return true;
 }

@@ -166,6 +166,9 @@ TEST_CASE("Gap role boxes keep four boxes in one measurement space") {
   fields.contexts[0] = space(input.sensorPrimary);
   CHECK_FALSE(scene::makeRoiSet(fields, output, why));
   CHECK(output.asBundle() == original);
+  Bundle injected = *original;
+  injected.set("seamRightContext", space(input.sensorPrimary));
+  CHECK_FALSE(scene::readRoiSet(Data::bundle(std::move(injected)), view, why));
   fields = roiFields(input.primary);
   fields.info.data["source"] = "template";
   fields.info.data["processing"]["method"] = "template";

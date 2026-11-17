@@ -12,19 +12,28 @@ bool fail(std::string& why, const char* text) {
   why = text;
   return false;
 }
-bool roiValid(const RoiFields& fields, std::string& why) {
+bool roiValid(const std::array<const Data*, 4>& boxes, const std::array<const Data*, 4>& contexts,
+              std::string& why) {
   ProfileDescriptor first;
-  for (std::size_t i = 0; i < fields.boxes.size(); ++i) {
+  for (std::size_t i = 0; i < boxes.size(); ++i) {
     ProfileDescriptor space;
-    if (!fields.boxes[i].asBox2D() ||
-        !profile_contract::geometrySpace(fields.boxes[i], fields.contexts[i].asRecord(), space,
-                                         why))
+    if (!boxes[i]->asBox2D() ||
+        !profile_contract::geometrySpace(*boxes[i], contexts[i]->asRecord(), space, why))
       return false;
     if (space.plane != "XY" || (i && !profile_contract::sameSpace(first, space)))
       return fail(why, "四个角色框必须位于同一量测XY空间");
     if (!i)
       first = std::move(space);
   }
+  return true;
+}
+bool scanValid(const Profile& sp, const Profile& ss, const Profile& p, const Profile& s,
+               const Profile& m, std::string& why) {
+  if (sp.descriptor.plane != "XZ" || ss.descriptor.plane != "XZ" || p.descriptor.plane != "XY" ||
+      p.descriptor.unit != "m" || s.descriptor.unit != "m" || m.descriptor.unit != "m" ||
+      !profile_contract::sameSpace(p.descriptor, s.descriptor) ||
+      !profile_contract::sameSpace(p.descriptor, m.descriptor))
+    return fail(why, "传感器轮廓须为XZ，两路量测与合并轮廓须处于同一米制XY空间");
   return true;
 }
 } // namespace
@@ -57,11 +66,8 @@ bool makeScanPair(const Data& sensorPrimary, const Data& sensorSecondary, const 
   const auto* m = merged.asProfile();
   if (!sp || !ss || !p || !s || !m)
     return fail(why, "场景字段需要原生Profile");
-  if (sp->descriptor.plane != "XZ" || ss->descriptor.plane != "XZ" || p->descriptor.plane != "XY" ||
-      p->descriptor.unit != "m" || s->descriptor.unit != "m" || m->descriptor.unit != "m" ||
-      !profile_contract::sameSpace(p->descriptor, s->descriptor) ||
-      !profile_contract::sameSpace(p->descriptor, m->descriptor))
-    return fail(why, "传感器轮廓须为XZ，两路量测与合并轮廓须处于同一米制XY空间");
+  if (!scanValid(*sp, *ss, *p, *s, *m, why))
+    return false;
   Bundle bundle(kScanPairKind);
   bundle.set("sensorPrimary", sensorPrimary)
       .set("sensorSecondary", sensorSecondary)
@@ -88,11 +94,20 @@ bool readScanPair(const Data& data, ScanView& result, std::string& why) {
   result = {bundle->field("sensorPrimary"), bundle->field("sensorSecondary"),
             bundle->field("primary"),       bundle->field("secondary"),
             bundle->field("merged"),        bundle->field("info")->asRecord()};
+  if (!scanValid(*result.sensorPrimary->asProfile(), *result.sensorSecondary->asProfile(),
+                 *result.primary->asProfile(), *result.secondary->asProfile(),
+                 *result.merged->asProfile(), why))
+    return false;
   why.clear();
   return true;
 }
 bool makeRoiSet(const RoiFields& fields, Data& result, std::string& why) {
-  if (!roiValid(fields, why))
+  std::array<const Data*, 4> boxes, contexts;
+  for (std::size_t i = 0; i < roles.size(); ++i) {
+    boxes[i] = &fields.boxes[i];
+    contexts[i] = &fields.contexts[i];
+  }
+  if (!roiValid(boxes, contexts, why))
     return false;
   Bundle bundle(kRoiSetKind);
   for (std::size_t i = 0; i < roles.size(); ++i)
@@ -111,6 +126,8 @@ bool readRoiSet(const Data& data, RoiView& result, std::string& why) {
     result.contexts[i] = bundle->field(contextNames[i]);
   }
   result.info = bundle->field("info")->asRecord();
+  if (!roiValid(result.boxes, result.contexts, why))
+    return false;
   why.clear();
   return true;
 }

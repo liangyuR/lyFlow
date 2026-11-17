@@ -71,6 +71,16 @@ bool referenceValid(const ReferenceFeatureFields& f, std::string& why) {
   return f.lineContext.asRecord()->type != "profile.Geometry.v3" ||
          inSpace(f.profile, f.line, f.lineContext, why);
 }
+bool locationValid(const Data& scan, const Data& rois, std::string& why) {
+  ScanView scanView;
+  RoiView roiView;
+  if (!readScanPair(scan, scanView, why) || !readRoiSet(rois, roiView, why))
+    return false;
+  return profile_contract::geometryInSpace(*roiView.boxes[0], roiView.contexts[0]->asRecord(),
+                                           scanView.primary->asProfile()->descriptor, why)
+             ? true
+             : fail(why, "定位角色框必须与实际scan处于同一物理空间");
+}
 bool circleValid(const CirclePairFeatureFields& f, std::string& why) {
   if (f.quality.type != "gap.CircleFitPair.v3")
     return fail(why, "双圆特征需要gap.CircleFitPair.v3质量记录");
@@ -87,13 +97,8 @@ Data field(const Data& data, const std::string& name) { return *data.asBundle()-
 } // namespace
 
 bool makeLocation(const Data& scan, const Data& rois, Data& result, std::string& why) {
-  ScanView scanView;
-  RoiView roiView;
-  if (!readScanPair(scan, scanView, why) || !readRoiSet(rois, roiView, why))
+  if (!locationValid(scan, rois, why))
     return false;
-  if (!profile_contract::geometryInSpace(*roiView.boxes[0], roiView.contexts[0]->asRecord(),
-                                         scanView.primary->asProfile()->descriptor, why))
-    return fail(why, "定位角色框必须与实际scan处于同一物理空间");
   Bundle bundle(kLocationKind);
   for (const auto& entry : scan.asBundle()->fields)
     bundle.set(entry.first == "info" ? "scanInfo" : entry.first, entry.second);
@@ -111,6 +116,8 @@ bool readLocation(const Data& data, LocationFields& result, std::string& why) {
     (i < kScanFieldCount ? scan : rois).set(target, field(data, name));
   }
   result = {Data::bundle(std::move(scan)), Data::bundle(std::move(rois))};
+  if (!locationValid(result.scan, result.rois, why))
+    return false;
   why.clear();
   return true;
 }
@@ -130,6 +137,8 @@ bool readLineFeature(const Data& data, LineFeatureFields& result, std::string& w
   result = {field(data, "profile"),         field(data, "line"),         field(data, "lineContext"),
             field(data, "innerEnd"),        field(data, "pointContext"), field(data, "inliers"),
             field(data, "weightedInliers"), field(data, "quality")};
+  if (!lineValid(result, why))
+    return false;
   why.clear();
   return true;
 }
@@ -149,6 +158,8 @@ bool readReferenceFeature(const Data& data, ReferenceFeatureFields& result, std:
   result = {field(data, "profile"), field(data, "line"),         field(data, "lineContext"),
             field(data, "point"),   field(data, "pointContext"), field(data, "selection"),
             field(data, "quality")};
+  if (!referenceValid(result, why))
+    return false;
   why.clear();
   return true;
 }
@@ -214,6 +225,8 @@ bool readCirclePairFeature(const Data& data, CirclePairFeatureFields& result, st
     result.inliers[side] = field(data, prefix + "Inliers");
   }
   result.quality = *field(data, "quality").asRecord();
+  if (!circleValid(result, why))
+    return false;
   why.clear();
   return true;
 }
