@@ -304,13 +304,6 @@ jobs:
             build/opencv5-install
           key: opencv5-windows-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
 
-      - name: 准备并验证固定发布依赖
-        shell: pwsh
-        env:
-          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-        run: ./scripts/prepare-release-deps.ps1 -SkipVisionBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
-
       - name: 同一本地入口构建、测试和打包
         shell: pwsh
         env:
