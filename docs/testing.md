@@ -115,6 +115,6 @@ P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，�
 
 ## P2 原生帧、Python与结果交付门禁
 
-`core/tests/test_frames.cpp`覆盖所有原生载荷、来源身份与缓存独立所有权、坏归档/预算、FIFO容量/顺序/重置/取消。`core/tests/test_python.cpp`继续通过真实worker验证新直接几何/Tensor端口、版本错误与恢复。`python -B -m unittest discover -s python/tests -v`运行SDK侧测试。
+`core/tests/test_frames.cpp`覆盖所有原生载荷、来源身份与缓存独立所有权、坏归档/预算、FIFO容量/顺序/重置/取消。深度缺陷和截面的中间记录覆盖来源云、截面云重绑及加载后再次保存。`core/tests/test_python.cpp`继续通过真实worker验证新直接几何/Tensor端口、版本错误与恢复。`python -B -m unittest discover -s python/tests -v`运行SDK侧测试。
 
 安装后的新CLI与C++17消费者不在 CI 中运行，改动交付链时在本地执行：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。编辑器功能测试总数保持100以下，无新增跳过；查看器浏览器证据与样例见[P6指南](p6-examples.md)。

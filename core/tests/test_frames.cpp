@@ -107,31 +107,47 @@ int32_t cancelled(void*) { return 1; }
 }
 
 TEST_CASE("Frame archives own native payloads preserve bits and rebind declared identities") {
-  const auto oldId = seedFrame("frame-native");
+  const char* run = "frame-native";
+  const auto oldId = seedFrame(run);
+  auto& store = exec::ResultStore::instance();
+  PointCloud slice;
+  slice.xyz = {2, 3, 4};
+  const auto oldSliceId = slice.id;
+  store.put(run, "n", "sliceCloud", run, Data::cloud(std::move(slice)));
+  Bundle candidates("inspection.DefectCandidates.v1");
+  candidates.set("regions", Data::record({"inspection.DefectRegions.v1",
+                                          {{"sourceCloudId", std::to_string(oldId)}}}));
+  store.put(run, "n", "candidates", run, Data::bundle(std::move(candidates)));
+  const Json sliceReferences{{"sourceCloudId", std::to_string(oldId)},
+                             {"sliceCloudId", std::to_string(oldSliceId)}};
+  store.put(run, "n", "sliceInfo", run,
+            Data::record({"inspection.ProfileSliceInfo.v1", sliceReferences}));
+  store.put(run, "n", "features", run,
+            Data::record({"inspection.ProfileFeatures.v1", sliceReferences}));
   OwnedFrame original;
-  captureFixture(original, "frame-native");
+  captureFixture(original, run);
   auto info = Json::parse(takeFrameString(lyflow_frame_metadata(original.value)));
   REQUIRE(info["injectedInputs"].size() == 1);
   std::size_t virtualFields = 0;
   for (const auto& entry : info["entries"])
     if (entry.value("virtual", false))
       ++virtualFields;
-  CHECK(virtualFields == 7);
+  CHECK(virtualFields == 8);
   CHECK(info["missing"].size() == 1);
   const auto inputNode = info["injectedInputs"][0]["sourceNode"].get<std::string>();
   FrameDirectory directory;
   auto path = (directory.path / "all.lyframe").u8string();
   CHECK(takeFrameString(lyflow_frame_save(original.value, path.c_str(), 0)).empty());
   CHECK_FALSE(takeFrameString(lyflow_frame_save(original.value, path.c_str(), 0)).empty());
-  exec::ResultStore::instance().freeRun("frame-native");
-  exec::ResultStore::instance().clear();
+  store.freeRun(run);
+  store.clear();
   OwnedFrame loaded;
   CHECK(takeFrameString(lyflow_frame_load(path.c_str(), 0, &loaded.value)).empty());
   REQUIRE(loaded.value);
   const std::string view = lyflow_frame_run_id(loaded.value);
   auto get = [&](const char* node, const char* port) {
     Data result;
-    REQUIRE(exec::ResultStore::instance().get(view, node, port, result));
+    REQUIRE(store.get(view, node, port, result));
     return result;
   };
   const auto cloud = get("n", "cloud");
@@ -145,6 +161,18 @@ TEST_CASE("Frame archives own native payloads preserve bits and rebind declared 
   CHECK(get(inputNode.c_str(), "model").asCloud()->id == newId);
   CHECK(get("n", "indices").asIndices()->sourceCloudId == newId);
   CHECK(get("n", "groups").asRecord()->data["sourceCloudId"] == std::to_string(newId));
+  CHECK(get("n", "candidates.regions").asRecord()->data["sourceCloudId"] == std::to_string(newId));
+  const auto newSliceId = get("n", "sliceCloud").asCloud()->id;
+  CHECK(newSliceId != oldSliceId);
+  CHECK(newSliceId != newId);
+  for (const char* port : {"sliceInfo", "features"}) {
+    CAPTURE(std::string(port));
+    const auto record = get("n", port);
+    CHECK(record.asRecord()->data["sourceCloudId"] == std::to_string(newId));
+    CHECK(record.asRecord()->data["sliceCloudId"] == std::to_string(newSliceId));
+  }
+  const auto resaved = (directory.path / "resaved.lyframe").u8string();
+  CHECK(takeFrameString(lyflow_frame_save(loaded.value, resaved.c_str(), 0)).empty());
   CHECK(get("n", "business").asRecord()->data["sourceCloudId"] == std::to_string(oldId));
   CHECK(get("n", "untyped").asRecord()->type.empty());
   CHECK(get("n", "untyped").asRecord()->data["value"] == 42);
@@ -173,7 +201,7 @@ TEST_CASE("Frame archives own native payloads preserve bits and rebind declared 
   REQUIRE(inputs.size() == 1);
   CHECK(inputs[0].data.asCloud()->id == newId);
   CHECK_THROWS(runtime::frameInputs(loaded.value, Json::array({bindings[0], bindings[0]}).dump()));
-  exec::ResultStore::instance().clear();
+  store.clear();
   CHECK(get("n", "cloud").asCloud()->id == newId);
 }
 
