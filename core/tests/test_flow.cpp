@@ -461,6 +461,33 @@ TEST_CASE("输入注入：端口上已有连线、端口名不存在、与输出
   }
 }
 
+TEST_CASE("整节点注入只给一部分输出：没给的输出不存在，可选输入按未连接，必填输入报错") {
+  ensureTestOps();
+  const Json doc = graphWithOutputs(
+      {N{"sp", "test.split", Json::object()}, N{"m", "test.merge2", Json::object()}},
+      {E{"sp.selected", "m.a"}, E{"sp.rest", "m.b"}},
+      Json{{"merged", Json{{"node", "m"}, {"port", "cloud"}}}});
+  SUBCASE("可选输入") {
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"sp", "selected", Data::cloud(lineCloud(3, 0.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    RunLog& log = s.wait();
+    CHECK(log.runStatus() == "ok");
+    CHECK(log.nodeEvent("sp", "done")["stats"]["provided"] == true);
+    const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
+    CHECK(outputs["merged"]["elementCount"] == 3);
+  }
+  SUBCASE("必填输入") {
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"sp", "rest", Data::cloud(lineCloud(2, 1.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    const Json failed = s.wait().nodeEvent("m", "error");
+    REQUIRE_FALSE(failed.empty());
+    CHECK(failed["errors"][0]["code"] == "missing_input");
+    CHECK(failed["errors"][0]["portName"] == "a");
+  }
+}
+
 TEST_CASE("注入的数据进 cacheKey：换一片云就不会命中旧结果（整节点注入与输入注入）") {
   ensureTestOps();
   SUBCASE("整节点注入") {

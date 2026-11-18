@@ -960,6 +960,40 @@ TEST_CASE(
     }
   }
 }
+TEST_CASE("Imported graphs with a profile loader run from host profiles injected into it") {
+  std::string guarded = kRunConfig;
+  const auto at = guarded.find("common_settings:\n") + std::strlen("common_settings:\n");
+  guarded.insert(at, "  camera_guard: {enabled: true, on_disagree: record}\n");
+  const struct {
+    const char* kind;
+    std::string yaml;
+  } cases[] = {{"StandardGap.yml:template", guarded},
+               {"StandardGap.yml:template:fine", kRunConfig}};
+  for (const auto& item : cases) {
+    CAPTURE(std::string(item.kind));
+    RuntimeFixture fixture;
+    const auto doc = fixture.graph(item.kind, item.yaml);
+    Data primary, secondary;
+    double fromFiles = 0;
+    {
+      test::Session session(doc, fixture.root);
+      requireRun(session.wait());
+      primary = result(session, "n_load", "primary");
+      secondary = result(session, "n_load", "secondary");
+      fromFiles = result(session, "n_gap", "value").asMeasurement()->value;
+    }
+    std::filesystem::remove(fixture.root / "LaserProfile_L0_Master_x.pcd");
+    std::filesystem::remove(fixture.root / "LaserProfile_R1_Slave_x.pcd");
+    std::vector<exec::InjectedInput> inputs{exec::InjectedInput{"n_load", "primary", primary},
+                                            exec::InjectedInput{"n_load", "secondary", secondary}};
+    test::Session session(doc, fixture.root, {}, false, 0, false, std::move(inputs));
+    const auto& log = session.wait();
+    requireRun(log);
+    CHECK(log.nodeEvent("n_load", "done")["stats"]["provided"] == true);
+    CHECK(result(session, "n_gap", "value").asMeasurement()->value ==
+          doctest::Approx(fromFiles).epsilon(1e-6));
+  }
+}
 TEST_CASE("Native imported fallback is lazy atomic and never adds a second circle retry policy") {
   RuntimeFixture fixture;
   const auto good = fixture.model(), missing = fixture.model(true);
