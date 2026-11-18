@@ -17,8 +17,30 @@ try {
   await cp(join(root, 'src'), source, { recursive: true });
   const vendor = join(source, 'lib/visualization');
   await mkdir(vendor, { recursive: true });
-  for (const name of ['index.js', 'index.d.ts'])
-    await cp(join(root, '../visualization', name), join(vendor, name));
+  // 浏览器入口连同它经相对路径引用到的每个模块一起带走；缺一个，宿主的打包器就解析不了。
+  const shipped = new Set();
+  const queue = ['index.js'];
+  while (queue.length > 0) {
+    const name = queue.pop();
+    if (shipped.has(name)) continue;
+    shipped.add(name);
+    const from = join(root, '../visualization', name);
+    if (!existsSync(from)) throw new Error(`${shared} is missing ${name}`);
+    await cp(from, join(vendor, name));
+    const types = name.replace(/\.js$/, '.d.ts');
+    if (existsSync(join(root, '../visualization', types)))
+      await cp(join(root, '../visualization', types), join(vendor, types));
+    const text = await readFile(from, 'utf8');
+    for (const match of text.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
+      const target = relative(vendor, resolve(vendor, dirname(name), match[1])).replaceAll(
+        '\\',
+        '/',
+      );
+      if (target.startsWith('..'))
+        throw new Error(`${name} imports outside ${shared}: ${match[1]}`);
+      queue.push(target);
+    }
+  }
   // 发布包不带 workspace 依赖：每个源文件对共享可视化包的引用都指到随包副本。
   let rewritten = 0;
   for (const entry of await readdir(source, { recursive: true, withFileTypes: true })) {
