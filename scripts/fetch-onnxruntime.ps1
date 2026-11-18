@@ -26,9 +26,10 @@ function Assert-Runtime([string]$Directory) {
     if ($actualVersion -ne $version) { throw "ONNX Runtime 版本不符：$actualVersion，预期 $version" }
 }
 function Assert-Archive([string]$Path) {
-    if ((Get-Item -LiteralPath $Path).Length -ne $expectedBytes -or
+    $actualBytes = (Get-Item -LiteralPath $Path).Length
+    if ($actualBytes -ne $expectedBytes -or
         (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
-        throw "ONNX Runtime 归档字节数或 SHA256 不符：$Path"
+        throw "ONNX Runtime 归档字节数或 SHA256 不符（收到 $actualBytes 字节，应为 $expectedBytes）：$Path"
     }
 }
 if (Test-Path -LiteralPath $dest) {
@@ -49,7 +50,12 @@ if (Test-Path -LiteralPath $archive -PathType Leaf) {
     for ($i = 0; $i -lt $urls.Count; $i++) {
         try {
             Write-Host "下载固定 CPU 归档：$($urls[$i])"
-            Invoke-WebRequest -Uri $urls[$i] -OutFile $pending
+            if ($i -eq 0) {
+                Invoke-WebRequest -Uri $urls[$i] -OutFile $pending
+            } else {
+                & curl.exe --fail --location --silent --show-error --retry 2 --output $pending $urls[$i]
+                if ($LASTEXITCODE -ne 0) { throw "ONNX Runtime 镜像下载失败 (exit $LASTEXITCODE)" }
+            }
             Assert-Archive $pending
             Move-Item -LiteralPath $pending -Destination $archive
             break
