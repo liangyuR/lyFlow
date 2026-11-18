@@ -1,6 +1,12 @@
 # 版本变更
 
-## 2.0.0（开发中）
+## 2.0.1（开发中）
+
+- 整节点注入可以只给一部分输出：没给的输出不存在，下游的可选输入按未连接处理，必填输入报 `missing_input`。带 `gap.load_profile_pair` 的 StandardGap 导入图由此可以直接注入两路 Profile，不必再提供 `sourceInfo`。
+- 编辑器发布包的全部源文件都引用随包的可视化副本，宿主不再遇到找不到 `@lyflow/visualization`。
+- `@lyflow/editor` 把 `qing-steel` 列为 peer 依赖，由宿主直接安装并与编辑器共用一份。升级的宿主需要在自己的依赖里加上 `qing-steel`。
+
+## 2.0.0（已发布）
 
 - 同一 Windows 运行库交付 Gap、DTS 和 Glue 三个场景包及其配套标准算子。
 - StandardGap 导入图使用独立的锚窗、轮廓重叠观测和公差比较节点。Glue 彩色卡尺可以单独输出原始观测，也可交给场景节点按邻站补缝。
