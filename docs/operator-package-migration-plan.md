@@ -1,6 +1,6 @@
 # 算子边界迁移计划
 
-状态：M1–M5 已合并。[M6 标准算子职责拆分](#m6-标准算子职责拆分)已实现，待合并。M7 待实施。
+状态：M1–M6 已合并。下一波是 [M7 退役与统一交付](#m7-退役与统一交付)。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
@@ -17,8 +17,8 @@
 | M4c   | 已合并：Gap原生场景、模板/模型、Bundle及显式图升级          | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移](gap-profile-migration.md)                                                 |
 | M4d   | 已合并 | [M4d 收敛切片](#m4d-收敛切片) |
 | M5    | 已合并 | [M5 切片及验证](#m5-glue-拆分)、[标定连线迁移](glue-integration.md#迁移旧标定连线) |
-| M6    | 已实现，待合并 | [M6 切片与规则](#m6-标准算子职责拆分) |
-| M7    | 待实施 | [后续波次门槛](#波次与完成门槛) |
+| M6    | 已合并 | [M6 切片与规则](#m6-标准算子职责拆分) |
+| M7    | 待实施 | [场景职责、退役与统一交付](#m7-退役与统一交付) |
 
 M1 提升产品/ABI 至 1.4.0。M2 交付公开静态 SDK（geometry/metrology 内核）。M3 交付公共 Profile 链与 solution-dts。M4a–M4c 交付稳健拟合公共核、公共 Profile 选点/拟合/度量节点及 solution-gap。各发行系列的版本号与 ABI 规则以[发包契约](deployment/packaging.md)为准。
 
@@ -29,7 +29,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 1. **图迁移离线一次完成。** 旧图升级只由 `lyflow migrate` 显式触发并写回文件；GraphDoc 不携带活动升级请求，加载与执行路径不运行升级。读到遗留的 `contractUpgrade` 或已退役算子时只给出可操作诊断（提示运行 `lyflow migrate`），不在内存中改图。
 2. **迁移规则归场景包所有。** 某个 solution 的旧 ID 白名单、参数改名与单位换算写在该 solution 内，通过迁移注册接口挂载；core、bridge、编辑器不出现任何 solution 算子 ID 或业务常量。同一规则只实现一份，其他宿主调用它而不是各自重写校验。
 3. **等价性按容差 + 场景金标准验收。** 默认以声明的数值容差和真实场景基准帧证明行为不变。只有在清单中逐项写明理由的项才要求逐位一致；不为逐位一致保留 float/double 两份核或旧算法分支。
-4. **随切片退役。** 一个切片替代了旧实现，就在同一切片删除旧注册、旧源文件、适配壳及其测试。不允许留下未编译的源文件、未被调用的注册函数、同一 ID 的两份注册，或只为旧路径存在的参数分支。M7 只负责跨宿主切换和真正需要用户配合的退役项。
+4. **随切片退役。** 一个切片替代了旧实现，就在同一切片删除旧注册、旧源文件、适配壳及其测试。不允许留下未编译的源文件、未被调用的注册函数、同一 ID 的两份注册，或只为旧路径存在的参数分支。M7 处理本轮明确列出的场景边界和退役项，并验收统一发行产物。
 5. **校验只做一次。** 执行器已保证的事项（端口类型、Profile 合法性、枚举取值、参数类型与范围）算子内不重复；内核只校验自身输入不变量。不对算子刚生成的结果再做哈希或逐槽比对来"自证"。
 6. **元数据必须有消费者。** 新增的来源、上下文或质量字段须写明读取方（编辑器、宿主、下游算子或测试以外的 SDK 消费者）。没有消费者的字段不进入端口契约；为保持旧输出结构而填占位值、重复值的字段在下一个契约版本删除。
 7. **分层不倒置。** core（含 `core/cmake`、`core/tests`）不编译、不引用 `solutions/` 下的源码与测试；场景测试放在对应 solution 内。
@@ -48,7 +48,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 | M4d 收敛              | 迁移离线化并移出core、死代码与重复校验清理、来源元数据收缩、清单与测试瘦身                       | M4c                    | 满足全部[迁移原则](#迁移原则)；除切片中列明的契约变化外行为不变；生产代码净减少                                                          |
 | M5 glue拆解           | 通用颜色/响应/路径/卡尺→image或geometry；胶路语义→solution-glue；图像采样与度量核分离            | M4d                    | 示教/自由搜索、边缘选择、对比模型、缺胶/断胶/无效测量行为不混；颜色/卡尺链不附带ORT/PCL；旧glue实现随切片删除，不新增运行时图升级        |
 | M6 标准算子职责拆分 | 将独立的测量、判定及结果应用交给可分别连接的节点，整理单一职责算子的注册归属 | M4d、M5 | 原图可离线迁移，拆后的上游结果可单独使用或接不同下游，正式包覆盖原有使用场景。见 [M6 切片](#m6-标准算子职责拆分) |
-| M7 退役与统一交付 | 移除旧运行入口，按现有包边界交付一套运行库，Agent 通过 MCP 按新版契约搭图 | 以 M6 合并后的主线为基线 | 同一安装产物能运行 Gap、DTS 和 Glue 代表图，旧黑盒已移除，Agent 搭建的新图通过样本验证。见 [M7 计划](#m7-退役与统一交付) |
+| M7 退役与统一交付 | 上提通用窗口与观测，拆开测量和场景策略，退役历史入口；保留三个场景包，统一发行 | M6 | 标准节点能独立使用；同一安装产物运行三个场景的代表图，已退役 ID 缺席，Agent 搭建的新图通过样本验证。见 [M7 计划](#m7-退役与统一交付) |
 
 每个波次按可独立验证的调用链交付。M5 进行期间可先做 M6 的邻域高度切片，共用的图像注册及交付入口在 M5 合并后集成。逐项 `wave` 表示该项目标归属的交付波次。
 
@@ -60,7 +60,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 | 8    | M4d 收敛（见下节，可拆为多个PR） | 各子切片验收；行为变化逐项列出                                  |
 | 9–10 | Glue 公共能力与场景拆分 | 按 [M5 切片及验证](#m5-glue-拆分)逐条交付 |
 | 11   | 标准算子职责拆分与归属整理 | 按 [M6 切片](#m6-标准算子职责拆分)验证独立使用、组合结果和旧图迁移 |
-| 12   | 退役旧入口、统一正式包、Agent 搭图 | 按 [M7 计划](#m7-退役与统一交付)用同一候选运行库完成验收 |
+| 12   | 场景职责拆分、旧入口退役、统一正式包与 Agent 搭图 | 按 [M7 计划](#m7-退役与统一交付)逐片验证，用同一候选运行库验收交付 |
 
 每个切片先修复审查问题并确认对应 CI 通过，再合并后续依赖切片。只有可独立完成且不共享未定接口的工作才并行。PR 描述须给出生产代码、测试、文档、生成物各自的增删行数；生成物或测试占比异常时说明原因。
 
@@ -219,15 +219,54 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 **版本边界。** M7 从 M6 合并后的实际契约出发。前文的离线规则适用于已交付的迁移路径。自 M7 起，同一产品主版本内需要调整的图，由 Agent 配合 MCP 按需更新，停止编写逐图或逐节点组合的专用升级包。本次破坏性变更按产品主版本断代处理。跨主版本（例如 1.x 到 2.x）只支持根据业务目标在新版重新搭图，旧文件可作为需求参考。发版时按[发包契约](deployment/packaging.md)确定具体版本号和客户端 ABI 配对。
 
+### 三个场景包的归属
+
+正式运行库同时注册三个场景包。下表中的职责由场景包拥有，图中的公共步骤直接连接标准算子。每个实施切片同步修改实际读取方、随包图或导入器及[算子清单](operator-package-audit.json)；数值在负责计算的最低层验证，图级验收关注端口能否独立消费和重新组合。
+
+| 场景包 | 保留的职责与入口 |
+| --- | --- |
+| `solution-gap` | 双头采集与原槽模型协议（`load_profile_pair`、`read_scan`、`profile_tensor`、`labels_from_logits`、`labels_to_cloud`、`roi_from_labels`、`locate_model`）；左右模板定位与四角色 ROI（`load_template`、`align_template`、`select_alignment`、`business_rois`、`locate_template`）；选相机、定基准、测量槽口及组装结果（`overall_roi`、`roll_anchored_crop`、`role_line`、`ref_point`、`datum_direction`、`fit_gap_circles`、`seam_circles`、`groove_joint`、`notch_width`、`result_bundle`）。保留 StandardGap 导入器。对 scan_pair、roi_set、location、line_feature、reference_feature、circle_pair 六组 `make_*` / `split_*`，只在有图需要组装或取字段时保留对应公开入口；精简前核对导入图、片段和宿主，验证定位结果的轮廓和 ROI 仍取自同一候选。[组合值与编排](gap-profile-migration.md) |
+| `solution-dts` | `dts.seal_dome`、`dts.pick_metal`、`dts.seal_root` 决定胶条主体、基准钣金和胶脚。`dts.flush` 复用现有有符号垂距核，保留凸起方向、深浅正号、毫米读数与垂足；`dts.profile_bundle` 组装宿主结果。用默认与相邻基准两张图分别核对选面、面差方向和 `DtsProfileBundle.v3` 字段。[场景图与结果](../solutions/dts/README.md) |
+| `solution-glue` | 自由搜索和示教路径、胶宽和连续断胶、端点规则及判定（`bead_path`、`taught_path`、`bead_width`、`bead_breaks`、`judge`）。`color_model` 保留沿示教线取胶、两侧取背景的策略，调用已有标准颜色拟合。`synth_break` 归场景评估，调整其暴露方式前须跑通现有[人造断胶工具](../solutions/glue/tools/glue_synth.py)。 |
+
+### 标准能力与场景策略的实施顺序
+
+先分别交付窗口构造和彩色卡尺两条链，再拆相机比较与公差判定。每行都列明新版图的公共输出和场景读取方。新节点接替旧入口时，在同一切片移除被替代的注册。
+
+| 现有入口 | 上提到哪里，场景保留什么 | 切片验收 |
+| --- | --- | --- |
+| `gap.datum_window` | `std-geometry` 根据水平锚框、可选的同空间高度锚框、左右方向、偏移和尺寸生成窗口和空间上下文。选择钣金或缝侧锚框留在 StandardGap 图。 | 用普通 Box2D 独立构造左右窗口，覆盖独立高度锚框和空间不符。核对原毫米参数到公共单位的换算，细粒度导入图直接使用公共 `box/context`。核实旧 `gap.DatumWindow.v2` 状态字段的读取方后再变更输出。[区域用例](../solutions/gap/tests/test_profile_regions.cpp) |
+| `glue.color_runs` | `std-image` 沿折线法向返回各站原始色段、两侧边界、无信息区间及成因。`solution-glue` 消费同一份观测，用邻站参考宽度和中心决定是否补缝，保留 `widthPolicy=extent`。 | 同一份原始观测可直接读出，也可接到 Glue 获得补缝结果。复用反光裂分、真实背景双段、ROI/图像边界截断用例，验证补缝不跨真实背景。以配对运行库核对 GlueSight 的必需 ID、`extent`、`unknownSpans` 和跟踪端 `coverageInformative`。[彩色用例](../solutions/glue/tests/test_color.cpp) · [宿主要求](https://github.com/liangyuR/ly-gluesight/blob/main/packaging/runtime.json) |
+| `gap.camera_guard` | `std-profile` 输出两条轮廓在重叠窗口内的有效样本数、高度差的有符号中位数和绝对值中位数。Gap 决定记录、保留哪一路或报错。 | 同一观测可分别驱动记录与择相机。验证阈值使用绝对值中位数，刚好等于上限时通过；重叠不足时标明未能评估并保留双路。切换保留侧时核对物理源身份。[相机一致性用例](../solutions/gap/tests/test_profile_guard.cpp) |
+| `gap.judge` | `std-metrology` 比较 Measurement 与标称值、上下偏差和边界余量。Gap 消费比较结果，将巡检超限降为 `margin`，无效测量给 `fail`。 | 同一测量可同时供正常与巡检策略读取，原值和单位一致。覆盖上下限等号、靠近边界、双向超限与无效输入；StandardGap 导入图及判定片段仍发布约定的 verdict。[现有判定](../solutions/gap/ops/measure.cpp) |
+
+**有明确读方才进一步拆的入口。** 以下项目各有继续上提的条件，未满足时按现有场景归属交付。
+
+| 入口 | 候选边界与决定条件 |
+| --- | --- |
+| `gap.corner_vertex` | 复用几何交点；若下游需单独读取翼角，可公开从顶点指向两翼的有向角。用反向拟合线和近乎平行的翼面验证角度及退化行为；Gap 保留基准朝向、增益、零偏及 gap/flush 口径。 |
+| `gap.infer_profile` | 细粒度图优先试接已有 `ml.onnx_run`。同一模型须保留原双头批次、线程配置、有限输入 `[2,6,1280]`、输出 `[2,C,1280]`（1 ≤ C ≤ 256）的槽序与错误诊断；由模型适配端承担这些约定。等价后删除专用重复入口。[模型用例](../solutions/gap/tests/test_profile_model_ops.cpp) |
+| `glue.polyline` | 有非 Glue 图需要构造折线时，公开带步长和弧长区间的标准入口，复用几何重采样核；像素走廊与叠画留场景。验证端点、顺序、原 2 px 步长，以及折线总长与示教检测区各自的 8 px 约定。先切换引用旧 ID 的宿主模板。 |
+| `glue.track_path`、`glue.color_track`、`glue.station_calipers`、`glue.edge_distance` | 读取方需要独立轨迹点、站位采样或候选边时复用标准图像能力。失跟重接、近胶/最强内边、跨站投票及中心/胶边基准归 Glue。改变接口的切片须验证跟踪重接、两种选边及 `no_inner`、`no_bead`、`incomplete_bead` 的区别。[飞拍用例](../solutions/glue/tests/test_flyshot.cpp) |
+
+### 退役与发行验收
+
+以下退役项在新主版本执行。各项退役完成后，正式 manifest 中对应 ID 缺席，读取旧图时能定位已移除节点。退役切片同步移除旧注册、仅供旧入口使用的实现、测试和构建配置。
+
+| DTS 退役候选 | 切换条件与验收 |
+| --- | --- |
+| `dts.geometry_to_metric` | 用显式单位与原生几何核对米制点线、毫米面差和垂足，不把旧版“毫米数值标为 Meter”纳入标准换算。移除仍会插入历史桥的规则及其专用用例；随包图和当前宿主均不再消费旧桥时退役。[历史规则](../solutions/dts/ops/graph_migration.cpp) |
+| `dts.profile_in` | 明确核对旧 PointCloud 注入和宽松 CSV 调用方，切换为 `profile.input` 原生 Profile 注入或带显式契约的 CSV。将仍引用旧入口的默认图和相邻基准图切换到各自原生版本，验证单位、平面、帧、采样顺序及两种基准选择。对应宿主及安装示例切换完成后再删除入口，同片清理只为旧节点生成请求的 CLI 选项、帮助和测试。[默认原生图](../solutions/dts/graphs/default-profile.lyflow.json) · [相邻基准原生图](../solutions/dts/graphs/adjacent-profile.lyflow.json) |
+
 | 实施切片 | 交付内容 | 验收 |
 | --- | --- | --- |
 | 1 · 退役 Gap 旧黑盒 | 从历史对照工具移除向新图注入 `gap.measure_reference` 的路径；需要历史比较时直接读取已有基线 CSV。同片删除该节点的注册、专用旧引擎与缓存、`gap-compat` 模块及其构建、发布和工具引用。清单允许退役项表达“无等价替代”。 | 导入一份 StandardGap 配置，生成图只使用当前节点；对照工具可直接比较新图输出与基线。运行库不导出旧 ID，读取含它的图时能定位该节点。退役后无同名别名、兼容开关或调用旧引擎的回退路径。[黑盒契约](../solutions/gap/ops/measure_reference.cpp) · [现有工具](../solutions/gap/tools/lyflow_ab.py) |
-| 2 · 统一正式包 | 以一份发布配置交付标准算子包及 `solution-gap`、`solution-dts`、`solution-glue`。在现行正式组合中加入 DTS，移除已退役模块，保留现用导入、模板、模型能力与 OpenCV、PCL 等标准依赖。三个场景继续由各自的包注册。同步安装资产、依赖缓存身份和发包文档。[发布清单](../packaging/release.json) | 从同一暂存运行库读取 manifest，核对三个场景的关键能力和所属包，以及旧黑盒缺席。用安装后的 CLI 分别运行 StandardGap 导入图、[DTS 轮廓图](../solutions/dts/graphs/default-profile.lyflow.json)和 [Glue 测量图](../solutions/glue/graphs/measure.lyflow.json)，为各图提供对应输入。用现有源码树外 SDK 消费工程验证安装路径与资源解析。 |
+| 2 · 统一正式包 | 以一份发布配置交付标准算子包及 `solution-gap`、`solution-dts`、`solution-glue`。在现行正式组合中加入 DTS，移除已退役模块，保留现用导入、模板、模型能力与 OpenCV、PCL 等标准依赖。三个场景继续由各自的包注册。同步安装资产、依赖缓存身份和发包文档。[发布清单](../packaging/release.json) | 从同一暂存运行库读取 manifest，核对三个场景的关键能力和所属包，以及已退役的 Gap、DTS 入口缺席。用安装后的 CLI 分别运行 StandardGap 导入图、[DTS 轮廓图](../solutions/dts/graphs/default-profile.lyflow.json)和 [Glue 测量图](../solutions/glue/graphs/measure.lyflow.json)，为各图提供对应输入。用现有源码树外 SDK 消费工程验证安装路径与资源解析。 |
 | 3 · 验证 Agent 使用发布契约搭图 | Agent 从旧资料中提取输入、目标输出、参数绑定、单位和帧；通过 MCP 查询新版节点并生成单独的候选图。对公开端口或参数已变化的用户组合，在当前编辑器保存组合后，用外层图验证绑定。[MCP 图工具](mcp.md) | 在切片 2 的同一候选版本上，以一条 M6 拆分过的业务链完成下述端到端验证。发布说明给出新版搭图示例、退役入口和已知语义差异。 |
 
-**Agent 搭图验收示例。** 以“读取测点附近的高度，必要时按高度更新工件位姿”为任务。用 `get_environment` 确认 HTTP 运行库与 CLI 的版本和能力一致，再用 `list_operators`、`get_operator` 读取实际 ID、端口、单位及有效性约定。Agent 按用户需要搭出只读高度的图，或接上下游位姿更新节点，将候选图另存。使用同一组图参数、配方和样本执行 `validate_graph`、`plan_graph`、`run_graph`，读取命名输出，核对高度单位、无效测量的表达及需要时的位姿结果。数据不足以确定单位、坐标帧或判据时，向使用者指出缺项。验收以新版业务结果为准。[高度测量示例](../examples/p2-height-rules.lyflow.json)
+**Agent 搭图验收示例。** 以“读取测点附近的高度，必要时按高度更新工件位姿”为任务。用 `get_environment` 确认 HTTP 运行库与 CLI 的版本和能力一致，再用 `list_operators`、`get_operator` 读取实际 ID、端口、单位及有效性约定。Agent 按用户需要搭出只读高度的图，或接上下游位姿更新节点，将候选图另存。再从标准窗口或原始彩色卡尺中选一条已交付链，验证 Agent 可以只取公共观测，也可接入场景策略。使用同一组图参数、配方和样本执行 `validate_graph`、`plan_graph`、`run_graph`，读取命名输出，核对高度单位、无效测量的表达及需要时的位姿结果。数据不足以确定单位、坐标帧或判据时，向使用者指出缺项。验收以新版业务结果为准。[高度测量示例](../examples/p2-height-rules.lyflow.json)
 
-三个切片完成后，用同一候选修订运行现有 Windows 完整打包门禁并检查暂存产物，记录实际验证过的组合和样本。正式 tag、Release 与业务宿主采用该版本分别按各自发布流程执行。
+统一发行验收使用同一候选修订运行现有 Windows 完整打包门禁，检查场景与标准节点在暂存产物中的实际归属，记录已验证的图和样本。正式 tag、Release 与业务宿主采用该版本分别按各自发布流程执行。
 
 ## 规划检查与后续维护
 
