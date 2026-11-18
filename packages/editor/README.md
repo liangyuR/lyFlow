@@ -36,12 +36,19 @@ peerDependencies —— **必须与宿主共用同一份实例**，否则包里�
 | `@xyflow/react` | `^12.11.6` |
 | `three` | `>=0.160.0 <1` |
 | `zustand` | `^5.0.2` |
+| `qing-steel` | `^0.11.2` |
 | `@tauri-apps/api` | `^2`，**可选** —— 只有用 `TauriTransport` 才需要 |
+
+`qing-steel` 不在 npm registry，宿主按它的发布 tarball 直接依赖：
+
+```json
+"qing-steel": "https://github.com/liangyuR/qing-steel/releases/download/v0.11.2/qing-steel-0.11.2.tgz"
+```
 
 Vite 宿主把它们写进 `resolve.dedupe`：
 
 ```ts
-resolve: { dedupe: ["react", "react-dom", "@xyflow/react", "three", "zustand"] }
+resolve: { dedupe: ["react", "react-dom", "@xyflow/react", "three", "zustand", "qing-steel"] }
 ```
 
 `examples/host-react/` 是一份可以照抄的最小宿主，它的 `vite.config.ts` 里还带一个

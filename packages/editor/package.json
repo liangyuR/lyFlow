@@ -1,6 +1,6 @@
 {
   "name": "@lyflow/editor",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "description": "LyFlow 节点图编辑器，可嵌进任意 React 宿主",
@@ -24,12 +24,12 @@
     "@dagrejs/dagre": "^3.1.1",
     "immer": "^11.1.18",
     "motion": "^12.43.0",
-    "qing-steel": "https://github.com/liangyuR/qing-steel/releases/download/v0.11.2/qing-steel-0.11.2.tgz",
     "@lyflow/visualization": "workspace:*"
   },
   "peerDependencies": {
     "@tauri-apps/api": "^2",
     "@xyflow/react": "^12.11.6",
+    "qing-steel": "^0.11.2",
     "react": "^18.3.1 || ^19.0.0",
     "react-dom": "^18.3.1 || ^19.0.0",
     "three": ">=0.160.0 <1",
@@ -43,6 +43,7 @@
     "@types/react-dom-19": "npm:@types/react-dom@^19.1.0",
     "@types/three": "^0.169.0",
     "@xyflow/react": "^12.11.6",
+    "qing-steel": "https://github.com/liangyuR/qing-steel/releases/download/v0.11.2/qing-steel-0.11.2.tgz",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0",

@@ -8,7 +8,7 @@ export default defineConfig({
   // 宿主与 @lyflow/editor 必须共用同一个 React/React Flow/three 实例，
   // 否则 hooks 与 context 会在两份副本之间对不上（A2-3）。
   resolve: {
-    dedupe: ['react', 'react-dom', '@xyflow/react', 'three', 'zustand'],
+    dedupe: ['react', 'react-dom', '@xyflow/react', 'three', 'zustand', 'qing-steel'],
   },
   server: {
     port: 5173,
