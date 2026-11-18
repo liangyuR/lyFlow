@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(lyflow_profile_robust_consumer LANGUAGES CXX)
 
-find_package(lyflow 2.0.0 EXACT REQUIRED COMPONENTS profile_robust_kernel)
+find_package(lyflow 2.0.1 EXACT REQUIRED COMPONENTS profile_robust_kernel)
 
 add_executable(lyflow-profile-robust main.cpp)
 target_compile_features(lyflow-profile-robust PRIVATE cxx_std_17)

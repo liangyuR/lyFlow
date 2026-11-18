@@ -266,8 +266,10 @@ options.profileInputs = { std::move(primary), std::move(secondary) };
 
 `port` 有两种意思，按算子声明区分：
 
-- **是这个算子的输出端口**：整节点注入（v7 起）。被注入的节点**整个 compute 都不会被调用**，
-  所以它声明的每个输出端口都要给一项，不能只注入其中一个输出。
+- **是这个算子的输出端口**：整节点注入（v7 起）。被注入的节点**整个 compute 都不会被调用**。
+  可以只给一部分输出：没给的输出不存在，接在它上面的连线不生效，下游的可选输入按未连接处理，
+  必填输入在校验时报 `missing_input`。带 `gap.load_profile_pair` 的图（相机守卫、细粒度图）这样喂：
+  注入它的 `primary` / `secondary`，不注入 `sourceInfo`，来源由注入 Profile 的描述符给出。
 - **只是它的输入端口**：输入注入（M8b，m8-plan L18，加在 v10 里）。compute 照常调，这个输入端口的值就是
   注入的数据。`gap.read_scan` 的 `primary` / `secondary` 就是这样喂的：两个都给了就直接用它们，不读目录
   （图里原来的 `source` / `dir` 不用改；不想配目录时把 `source` 设成 `inputs`），宿主只看见一个「读剖面」节点，

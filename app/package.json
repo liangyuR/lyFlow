@@ -1,7 +1,7 @@
 {
   "name": "lyflow-app",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@xyflow/react": "^12.11.6",
+    "qing-steel": "https://github.com/liangyuR/qing-steel/releases/download/v0.11.2/qing-steel-0.11.2.tgz",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0",

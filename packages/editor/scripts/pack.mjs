@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, writeFile, cp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, cp, mkdir, rm, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -11,24 +11,32 @@ if (at < 0 || !process.argv[at + 1])
 const destination = resolve(process.argv[at + 1]);
 await mkdir(destination, { recursive: true });
 const stage = await mkdtemp(join(tmpdir(), 'lyflow-editor-pack-'));
+const shared = '@lyflow/visualization';
 try {
-  await cp(join(root, 'src'), join(stage, 'src'), { recursive: true });
-  const vendor = join(stage, 'src/lib/visualization');
+  const source = join(stage, 'src');
+  await cp(join(root, 'src'), source, { recursive: true });
+  const vendor = join(source, 'lib/visualization');
   await mkdir(vendor, { recursive: true });
   for (const name of ['index.js', 'index.d.ts'])
     await cp(join(root, '../visualization', name), join(vendor, name));
-  for (const name of ['shapes2d.ts', 'sceneExport.ts']) {
-    const file = join(stage, 'src/lib', name);
-    const source = await readFile(file, 'utf8');
-    if (!source.includes("from '@lyflow/visualization'"))
-      throw new Error(`Shared visualization import missing in ${name}`);
-    await writeFile(
-      file,
-      source.replace("from '@lyflow/visualization'", "from './visualization/index.js'"),
-    );
+  // 发布包不带 workspace 依赖：每个源文件对共享可视化包的引用都指到随包副本。
+  let rewritten = 0;
+  for (const entry of await readdir(source, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !/\.tsx?$/.test(entry.name)) continue;
+    const file = join(entry.parentPath, entry.name);
+    const text = await readFile(file, 'utf8');
+    if (!text.includes(shared)) continue;
+    let target = relative(dirname(file), join(vendor, 'index.js')).replaceAll('\\', '/');
+    if (!target.startsWith('.')) target = `./${target}`;
+    const next = text.replaceAll(`'${shared}'`, `'${target}'`);
+    if (next.includes(shared))
+      throw new Error(`Unsupported reference to ${shared} in ${relative(source, file)}`);
+    await writeFile(file, next);
+    rewritten += 1;
   }
+  if (rewritten === 0) throw new Error(`No reference to ${shared} found in the editor sources`);
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-  delete pkg.dependencies['@lyflow/visualization'];
+  delete pkg.dependencies[shared];
   delete pkg.scripts;
   await writeFile(join(stage, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   const args = ['pack', stage, '--pack-destination', destination, '--silent'];

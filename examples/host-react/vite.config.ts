@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 /** peerDependency 的实际检查：打包结果里每个 peer 只许出现一份拷贝。
  *  两份 React 会让编辑器里的 hooks 在宿主的渲染树里炸掉（A2-3）。 */
-const SINGLETONS = ['react', 'react-dom', '@xyflow/react', 'three', 'zustand'];
+const SINGLETONS = ['react', 'react-dom', '@xyflow/react', 'three', 'zustand', 'qing-steel'];
 
 /** rollup 的模块 id 可能带虚拟前缀（\0commonjs-proxy:）、前导斜杠或反斜杠。 */
 function normalizeId(id: string): string {

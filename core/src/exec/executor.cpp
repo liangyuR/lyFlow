@@ -1291,7 +1291,8 @@ private:
       auto it = values.find(p.name);
       if (it == values.end() || it->second.empty()) {
         // 静音节点找不到源时该输出就是空的，报错留给下游（E5）。
-        if (bypassed)
+        // 宿主只注入一部分输出时，其余输出不存在，计划阶段已经摘掉了接在上面的连线。
+        if (bypassed || node.provided)
           continue;
         // 算子必须把声明过的输出端口都填上。少填了是算子的 bug，早点炸在这里，
         // 好过让下游收到一个空 Data 再报「上游没有产出」。

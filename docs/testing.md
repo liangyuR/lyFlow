@@ -70,7 +70,8 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 | 图像响应、法向候选与颜色模型 | `packs/std-image/tests/test_line_scan.cpp`、`packs/std-image/tests/test_color_model.cpp`。 |
 | 标准算子组合与旧图拆分 | `packs/std-pointcloud/tests/test_p2_height_rules.cpp`、`test_p2_advanced_fit.cpp`、`test_p5_primitive_crop.cpp` 及 `packs/std-image/tests/test_p5_inspection.cpp`。节点拆分公共规则在 `core/tests/test_graph_migration.cpp`。 |
 | 涂胶搜索、示教、灰度/彩色测量与飞拍场景 | `solutions/glue/tests/`，涵盖随包彩色、灰度和飞拍图。 |
-| Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`。 |
+| 宿主注入（整节点与输入注入、只给部分输出、注入进缓存键） | `core/tests/test_flow.cpp`；Profile 的 C ABI 注入在 `core/tests/test_profile_c_api.cpp`。 |
+| Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`；StandardGap 导入图由宿主注入两路 Profile 运行在 `solutions/gap/tests/test_import_bundle.cpp`。 |
 | 锚框窗口、重叠高度观测和公差比较 | 几何计算在 `kernels/tests/test_geometry.cpp`，窗口空间检查在 `packs/std-geometry/tests/test_geometry.cpp`，观测在 `packs/std-profile/tests/test_compare_overlap.cpp`，比较在 `packs/std-metrology/tests/test_metrology.cpp`。 |
 | 安装后的 CLI/SDK 交付契约（EXACT 版本、链接与依赖闭包、覆盖生效与还原、身份绑定、CLI 与嵌入宿主一致） | `tests/release/*_contract.py`、`tests/release/p5_sdk_consumer/`、`bridge/tests/p6_delivery_contract.py`；产品版本取自 `scripts/release-common.ps1` 的 `Get-ReleaseVersion` 等单一来源，不在测试里写死。对应数值判据在 `core/tests/integration/p4_recognition.cpp`、`p5_depth_geometry.cpp` 及各包测试。 |
 | 算子分包清单（字段、Python 示例 ID、与 manifest 的 ID 及包归属一致） | `scripts/tests/test_operator_package_audit.py` 测检查脚本本身；CI 的 `quality` 检查清单，`native`、`vision` 用各自 manifest 以 `--subset` 核对。 |

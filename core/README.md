@@ -222,7 +222,8 @@ compute 可能被调用不止一次，所以它必须是纯的 —— 有副作�
   是否存在，结果登记进结果仓；`lyflow_run_outputs(run_id)` 按名字返回元信息与可读值。
   点云只给元信息，二进制仍走 `lyflow_output_cloud`。
 - **`lyflow_run_options.inputs`** 把一片内存点云直接当成某个源节点的输出：
-  该节点标 `provided`，**compute 整个不调用**，所以它的每个输出端口都要给一项。
+  该节点标 `provided`，**compute 整个不调用**。没给的输出不存在：接在上面的可选输入按未连接处理，
+  必填输入报 `missing_input`。
   注入数据的 xxh3 摘要进 cacheKey。
 - **`Registry::addImporter`** 注册「文本 → 图」。`lyflow_import` 成功返回 GraphDoc
   对象、失败返回诊断数组（与 `lyflow_plan` 同一套区分办法）。注册了哪些进 manifest 的
