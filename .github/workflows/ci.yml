@@ -293,6 +293,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     env:
+      RUSTUP_HOME: ${{ github.workspace }}/build/rustup
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
       LYFLOW_STD_PACKS: '0'
@@ -316,7 +317,8 @@ jobs:
         with:
           workspaces: bridge
           key: profile-dts-m3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
 
       - uses: mozilla-actions/sccache-action@v0.0.11
         with:
