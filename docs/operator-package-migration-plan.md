@@ -45,10 +45,10 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 | M4 gap拆解            | 公共选点/轮廓/度量能力、场景节点与模型/模板模块；Bundle/导入器/图升级                            | M3                     | 双头1280槽模型协议保留；RANSAC/先验/回退在容差内不漂移；旧积木与细粒度图迁移等价；各路径依赖闭包明确                                     |
 | M4d 收敛              | 迁移离线化并移出core、死代码与重复校验清理、来源元数据收缩、清单与测试瘦身                       | M4c                    | 满足全部[迁移原则](#迁移原则)；除切片中列明的契约变化外行为不变；生产代码净减少                                                          |
 | M5 glue拆解           | 通用颜色/响应/路径/卡尺→image或geometry；胶路语义→solution-glue；图像采样与度量核分离            | M4d                    | 示教/自由搜索、边缘选择、对比模型、缺胶/断胶/无效测量行为不混；颜色/卡尺链不附带ORT/PCL；旧glue实现随切片删除，不新增运行时图升级        |
-| M6 标准包与后端整理   | geometry/pointcloud/profile归属修正，Tensor适配→ml，portable与后端targets，gen.synthetic退出core | M4d、M5                | adapters-only无需ORT；portable-generation无需PCL；图像与ml无注册环；非默认构建明确能力和缺失诊断                                         |
+| M6 标准算子职责拆分 | 将独立的测量、判定及结果应用交给可分别连接的节点，整理单一职责算子的注册归属 | M4d、M5 | 原图可离线迁移，拆后的上游结果可单独使用或接不同下游，正式包覆盖原有使用场景。见 [M6 切片](#m6-标准算子职责拆分) |
 | M7 切换与交付退役     | 全量样例/片段/导入器/SDK/CLI/编辑器/Python/Transport同步；`gap.measure_reference`等兼容入口退役  | M3–M6全部验收          | 各配置完整通过；安装SDK独立运行；历史图可经 `lyflow migrate` 迁移或给可操作诊断；不遗留第二份算法或无截止条件别名                        |
 
-依赖顺序不是要求每个 PR 搬完整个波次：M5 中不依赖新 Profile 的纯图像/折线接口可在 M4d 的迁移离线化完成后并行；M6 中的基础几何归属调整也可先做。逐项 `wave` 表示该项目标归属的交付波次。
+每个波次按可独立验证的调用链交付。M5 进行期间可先做 M6 的邻域高度切片，共用的图像注册及交付入口在 M5 合并后集成。逐项 `wave` 表示该项目标归属的交付波次。
 
 ## 建议的可审查PR切片
 
@@ -57,7 +57,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 | 1–7  | M0–M4c（已合并）                 | 见各 PR                                                         |
 | 8    | M4d 收敛（见下节，可拆为多个PR） | 各子切片验收；行为变化逐项列出                                  |
 | 9–10 | Glue 公共能力与场景拆分 | 按 [M5 切片及验证](#m5-glue-拆分)逐条交付 |
-| 11   | 标准包轻量/后端隔离和归属移动    | YAML可选、Tensor适配无ORT、云portable无PCL、全部方法与错误契约  |
+| 11   | 标准算子职责拆分与归属整理 | 按 [M6 切片](#m6-标准算子职责拆分)验证独立使用、组合结果和旧图迁移 |
 | 12   | 全量构建/发布切换与退役          | 精确manifest能力集合、安装SDK、各宿主、缓存失效、示例与文档一致 |
 
 每个切片先修复审查问题并确认对应 CI 通过，再合并后续依赖切片。只有可独立完成且不共享未定接口的工作才并行。PR 描述须给出生产代码、测试、文档、生成物各自的增删行数；生成物或测试占比异常时说明原因。
@@ -113,6 +113,32 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 公开 ID、参数或 Record 变化时，同片更新受影响的随包图和读取方。保存到磁盘的旧图需要改写时，由 `lyflow migrate` 调用所属包的离线规则。影响 GlueSight 时，在改变契约的切片用配对运行库验证受影响的内置模板、启动所需 ID、彩色节点的 `widthPolicy=extent` 或已有配方的模型 JSON，并注明宿主可接入的版本。类型或状态字段影响 MCP 时验证相应摘要。读取方见 [GlueSight 启动检查](https://github.com/liangyuR/ly-gluesight/blob/main/src-tauri/src/vision.rs)、[内置图模板](https://github.com/liangyuR/ly-gluesight/tree/main/src-tauri/graphs)和 [MCP 摘要](../packages/mcp/src/summary.ts)。
 
+### M6 标准算子职责拆分
+
+同一节点既产生观测值，又用策略修改对象或作出判定时，先看随包图如何消费这两种结果。能指出独立用途、且中间结果足以驱动下游的，按图级职责拆分。一次运算的互补结果可以共用节点，例如 `segment.extract_indices` 同时返回选中点和剩余点。正式包继续使用 OpenCV、PCL 等现有依赖。迁移沿用现有方法、默认值和数值容差。
+
+**优先切片。** 下表每行交付一条可运行的图。先做邻域高度，复用现有输出即可验证拆分方式。其余切片按各自的输入输出独立实施。
+
+| 现有算子与调用方 | 上下游交接什么 | 该片怎样验收 |
+| --- | --- | --- |
+| `cloud.neighbor_height` · [邻域高度图](../examples/p2-height-rules.lyflow.json) | 点云节点按实例输出 `height`、`axisHeight`、支持量和有效性。位姿更新节点按实例 ID 取轴向高度，应用尺寸策略并保持顶面位置。 | 图可以只导出高度，也能将更新后的实例接入料箱判定。复用原高度及顶面用例，覆盖支持不足、`maximum` 和倾斜工件。迁移 `source=original` 或 `method=provided` 时，保留直接取原尺寸或给定高度的结果。 |
+| `depth.defects` · [深度检测图](../examples/p5-depth-inspection.lyflow.json) | 区域测量按平面有符号距离提取凸凹候选，给出逐区长、宽、面积、体积及观测覆盖。判定节点读取这些结果，应用尺寸限值和最低覆盖率。`distanceThreshold` 决定候选支持，归上游。 | 同一份候选可接两套判定限值，物理量与支持区域一致。闭运算连接区域后仍按原始超阈值支持计量。已有超限项时返回 `defect`，无超限时区分覆盖充分的 `clear` 和覆盖不足的 `unknown`。 |
+| `depth.profile_slices` · [深度检测图](../examples/p5-depth-inspection.lyflow.json) | 截面提取交付按切片和链排列的交点，并保留父三角索引。特征测量从同一截面选 A/B 点，返回横向或高度差及有效性。范围判定消费该测量。现有 Profile/度量节点能表达这些数据时优先复用。 | 同一截面接两种特征测量，改变限值只影响判定。保持多链、缺测以及插值点与原云的对应关系。示例继续提供截面、读数、有效性和绘图；检查部分切片缺测时的汇总状态。 |
+| `cloud.crop_primitives`、`cloud.remove_primitives` · [几何体裁云图](../examples/p5-box-crop.lyflow.json) | 空间查询交付按几何体分组的命中索引、并集与无效观测。裁取或保序移除消费索引，碰撞分类单独消费逐体支持和 `maxCount`。 | 对同一次查询改变计数阈值，裁出的点与顺序一致。覆盖重叠体、紧凑/保序输出、源云索引绑定，以及零支持或含未知观测时的 `unknown` 分支。 |
+| `register.constrained_fit_3d` · [约束拟合图](../examples/p2-constrained-fit.lyflow.json) | 约束求解交付源到目标的变换和残差质量。需要对齐点云的图连接 `transform.apply`，先核对其通道、法线和溢出处理。 | 只给约束的示例可直接取变换和质量。接云路径复用相同变换，对齐结果符合声明容差。旧图若读取了无源云的空 `aligned`，迁移时指出须删除该输出或提供源云。 |
+| `cloud.empty_tote` · [料箱状态图](../examples/p2-height-rules.lyflow.json) | 在同一 ROI 统计观测点数与已识别实例数。料箱规则消费这两个计数、外部观测有效性及阈值，生成状态。 | 使用同一份计数独立验证四态优先级：观测无效为 `unknown`，有识别实例为 `occupied`，其余按未识别点数是否严格超限返回 `unrecognized` 或 `empty`。 |
+
+**先确认交接数据的候选。** `image.find_circles_3d` 包含二维椭圆检测与标定后的空间圆恢复。现有椭圆记录只含拟合摘要，三维恢复实际使用原始弧段观测点逐点去畸变。先用[空间圆示例](../examples/p5-circles-3d.lyflow.json)验证下游凭候选及其弧段即可恢复结果，保住半径与稳定候选顺序的绑定、空间圆歧义解，再确定公开端口。`image.segmentation_decode` 暂保留当前入口；出现独立标签图、实例生成或渲染的调用需求时，复核[保留掩膜示例](../examples/p4-segmentation-retained.lyflow.json)中按 ROI 复用已有掩膜、概率先回贴再选类的顺序。
+
+**归属整理。** 下列能力可以整节点交付。
+
+- `workspace.load` 归 `std-geometry`，同一工作空间的区域和双向变换一起返回。保留 JSON 与旧 YAML 输入，用[标记定位图](../examples/p3-marker-workspace.lyflow.json)验证 `toWorkspace` 的方向。
+- `image.yolo_decode`、`image.yolox_decode`、`image.ocr_orient`、`image.ocr_ctc_decode` 归 `std-ml`。保留公开 ID、模型布局、坐标回映与 OCR 字典语义。图像预处理、裁图仍归 `std-image`。用原有检测和 OCR 图验证跨包连线。
+- `gen.synthetic` 归 `std-pointcloud`。生成器使用方显式选择该包，纯 core 的用例改用明确输入。默认开发与正式组合仍提供原 ID。
+- `cloud.from_depth` 与 `cloud.to_depth_image` 已分别表达一个转换方向。`pose.project_3d` 与 `pose.project_to_plane` 在[投影图](../examples/p5-pose-project-plane.lyflow.json)中通过位姿、掩膜及其描述衔接。四项保留在 `std-image`，共享计算可以在包内整理。
+
+**旧图与交付。** 拆分切片同批迁移参数绑定、连线、图级输出和随包示例；升级契约并删除被替代的注册和实现。旧图由所属包提供 `lyflow migrate` 离线规则；遇到无法等价映射的输出，诊断指出具体端口与处理方式。仅更换注册包时保留 ID，更新包选择和清单。数值在拥有该行为的最低层验证，图级检查独立取用及重新组合。包选择或链接依赖发生变化时再验证对应构建配置，正式交付沿用[发包契约](deployment/packaging.md)。
+
 ## 每次迁移的执行清单
 
 按切片实际变动选用下列项目。M5 的测试层级和触发条件以[分片验证](#m5-glue-拆分)为准。
@@ -165,7 +191,7 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | TLS替换RANSAC、固定半径/先验/重试被合并掉      | 分方法固定夹具、短弧/退化/双相机异常与质量字段回归，不以名称相同代替算法等价                                          |
 | 纯几何距离误当作间隙或面差定义                 | 独立基准和方向、signed/unsigned、左右交换、投影/采样边缘、端点/圆边界分别验证                                         |
 | 有效性、胶路合格和生产许可混为一谈             | 未测得保持无效及reason；候选可见性不改变正式runs/present/coverage或最终业务判据                                       |
-| 包变轻只存在于文档                             | core-minimal、profile-metrology、adapters-only、portable-generation独立构建与实际导入表检查                           |
+| 声明的可选能力与构建产物不符 | 变更包或后端依赖时，核对所影响配置的 manifest 和实际链接库。 |
 | 旧库图表面加载成功但丢端口/参数                | `lyflow migrate` 迁移夹具覆盖编辑器与headless；缺包/旧版保留节点连线，不能迁移的项明确拒绝执行                        |
 | 相同ID内部实现变化复用旧缓存                   | 明确版本/图/模型指纹变更，旧缓存不命中新语义；迁移后重复运行与干净运行一致                                            |
 | SDK通过但依赖开发目录或私有头                  | 独立安装目录的C++17/Rust/CLI消费者，源码树外运行；不得依赖另一包的私有实现路径                                        |

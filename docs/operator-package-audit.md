@@ -9,7 +9,7 @@
 | `id`          | 算子 ID；Python 示例为 `@node(id=...)` 中的 ID。                                  |
 | `currentPack` | 当前注册所在的包，须与 `lyflow-dump-manifest` 导出的 `pack` 一致。                |
 | `targetPack`  | 迁移完成后的归属，取值见顶层 `targetPackages`。                                   |
-| `action`      | `retain` 原地保留、`move` 整体迁包、`split` 拆分到多个包、`solution` 归入场景包。 |
+| `action`      | `retain` 原地保留、`move` 整体迁包、`split` 拆分职责（可在同包或跨包）、`solution` 归入场景包。 |
 | `wave`        | 计划完成归属调整的波次 `M0`–`M7`。                                                |
 
 `retiredOperators` 记录已退役的 ID 及替代它们的算子，供 `lyflow migrate` 的诊断与文档引用。行按 `id` 排序。
