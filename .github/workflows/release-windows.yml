@@ -390,7 +390,7 @@ jobs:
               '',
               `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
               '',
-              `固定算子包：${runtimeContract.packs.map(pack => pack.name).join('、')}。显式能力模块：${runtimeContract.modules.join('、')}。ONNX Runtime 使用 CPU 版；不含 solution-dts、客户模型、桌面安装程序或调试符号。`,
+              `固定算子包：${runtimeContract.packs.map(pack => pack.name).join('、')}。显式能力模块：${runtimeContract.modules.join('、')}。ONNX Runtime 使用 CPU 版。运行库和 SDK 不附客户模型、桌面安装程序或调试符号。`,
               '',
               `\`lyflow-editor-v${version}.tgz\` 是 \`@lyflow/editor\` 的 TypeScript 源码包（npm pack），宿主按 tarball 依赖安装、用自己的打包器编译。`,
               '',
