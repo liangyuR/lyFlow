@@ -6,8 +6,8 @@
 
 | 原项与实际源 | 已读模式、问题及本轮替代 |
 | --- | --- |
-| `3D_Processing/CloudCutByPrimitives.cpp/.hpp`，`property_settings.yml` | cuboid/cylinder/ball，参数尺寸、局部 Z 圆柱轴、逐工件内部云/合并内部云/外部云/按点数分碰撞。参考圆柱用有限角度的包围框会漏真实圆周，输出还依赖端口连接状态。`cloud.crop_primitives` 用精确有限体判定，支持每工件尺寸或显式覆盖，边界 open/closed 显式，重叠分组独立但合并云源索引去重，所有声明输出完整计算。 |
-| `3D_Processing/CloudRemovalByPrimitives.cpp/.hpp`，参数源 | model 半径邻域移除、cube 体积移除、表面/中心锚点、XY/Z 外扩、未知高度替代、关联 2D mask 与每列顶端向上扩展、保点序/紧凑结果。参考中心分支 Z 比较方向相反，mask 分支丢 OOB 点和可选通道。`cloud.remove_primitives` 支持 shape/model_radius、每侧 padding、top/center、heightUnknown/maxHeight；`cloud.remove_mask_primitives` 可先做 mask 移除，再串接 shape 或 model_radius，不引入 std-pointcloud→OpenCV 依赖。 |
+| `3D_Processing/CloudCutByPrimitives.cpp/.hpp`，`property_settings.yml` | cuboid/cylinder/ball，参数尺寸、局部 Z 圆柱轴、逐工件内部云/合并内部云/外部云/按点数分碰撞。参考圆柱用有限角度的包围框会漏真实圆周，输出还依赖端口连接状态。`cloud.query_primitives` 用精确有限体判定，支持每工件尺寸或显式覆盖，区分开闭边界及重叠分组。内外点云和计数判定分别消费查询结果。 |
+| `3D_Processing/CloudRemovalByPrimitives.cpp/.hpp`，参数源 | model 半径邻域移除、cube 体积移除、表面/中心锚点、XY/Z 外扩、未知高度替代、关联 2D mask 与每列顶端向上扩展、保点序/紧凑结果。参考中心分支 Z 比较方向相反，mask 分支丢 OOB 点和可选通道。`cloud.query_primitives` 支持 shape/model_radius、每侧 padding、top/center 和 heightUnknown/maxHeight。`cloud.remove_indices` 应用原云索引。先经 `cloud.remove_mask_primitives` 移除 2D 掩膜时，后续查询基于移除后的云。 |
 | `Primitive_Processing/FlipPrimitiveAxis.cpp/.hpp`，参数源 | X/Y/Z 被优化轴、局部参考旋转轴、六个有符号父帧方向、有限 object_sides。`pose.flip_axis_3d` 在显式 n 重局部旋转等价类内最大化目标点积，支持任意父帧方向，不把轴名索引误当实际空间平行关系。 |
 | `Primitive_Processing/RotatePrimitiveAxis.cpp/.hpp`，参数源 | 局部固定轴/旋转轴，Point/Direction，两种指向、use_z。`pose.rotate_axis_3d` 保持固定轴，把目标投影到其正交平面后求有符号最短转角；须明确 continuousSymmetry，零向量、重合点、平行轴诊断错误，不交付 NaN 或假成功原姿态。 |
 | `Flow_Data_Operation/Extend2DInformation.cpp/.hpp`，参数源 | 单个/集合 Geometry2D，point/line/circle，新轴 X/Y/Z，frame type/id；包装还声明 Primitives2D，但实际运行分支未实现。`geometry.extend_2d` 真正支持原生 Point2D/Line2D/Circle2D、几何集合和 Poses2D；线段保端点，圆有真实法向/半径，工件有完整右手姿态和已知厚度，px→m 显式比例，另可乘原生 rigid Transform。 |
@@ -38,9 +38,11 @@ dimensions 模式中，若 Pose 声明 hasMask=true，缺少原生 masks/maskInf
 
 `geometry.extend_2d` 五类输入互斥：poses/point/line/circle/features。集合 `geometry.Features2D.v1={frame,unit:'px'|'m',items}`，每项 id/type/position，line 加 direction、可成对给 start/end，circle 加 radius；可保留标准名称/类别/置信度/attributes。输出 `geometry.Features3D.v1` 内含真正三维 point、单位化 line/有限端点、circle 中心/单位法向/米制半径，不用占位矩阵代表几何。新增 Y 轴时输入 XY 映到 XZ，其右手平面法向为 -Y；新增 X/Z 时分别为 +X/+Z。Pose2D 则输出可消费的标准 Pose3D。每次成功调用始终写出 poses 与 features 两个端口；非适用端口为同帧、带类型的空集合，不使用缺失 Data 或空矩阵。
 
-裁云 `groupIndices` 绑定原云 ID，`groups` 为既有 cloud.Groups.v1，offset/count 对应按输入 Pose 顺序的独立支持，重叠组可包含同一源点。innerIndices 为唯一源索引升序；outerIndices 是其补集，包含未知坐标。所有 select 经 PointCloud.select，RGB、normals、intensity 不丢失。`cloud.crop_primitives.cloud` 为 outer，inner/outer 显式另出。model_radius 的模型是 Pose 局部坐标米制采样点，对变换后实际 float32 query 做距离复核；坐标计算范围绝对值不超过1e12m，半径1e-12..1e6m，避免上游float距离溢出/下溢。
+`cloud.query_primitives` 的 `groupIndices` 和 `cloud.Groups.v1` 元数据绑定原云 ID。分组按输入 Pose 顺序保留独立支持，重叠组可包含同一源点。`innerIndices` 为去重后的升序源索引，`outerIndices` 是包含未知坐标的补集。连接 `segment.extract_indices` 可紧凑裁出内外点云，保留 RGB、法线与强度。查询的 `model_radius` 模式按 Pose 局部坐标的米制采样点，在实际 float32 查询坐标上复核距离。计算范围是绝对坐标 1e12 m 以内、半径 1e-12 至 1e6 m。
 
-preserve_order 是保留源点序并对移除 XYZ 写 NaN，不宣称 PointCloud 具有 H/W；validity `[pointCount]` 为保留且有限=1，其余0。云本身没有网格元数据，有组织消费必须另传正确 mapping/indexMap。原 NaN 点进入 invalidIndices；若存在未知坐标且已知支持未达碰撞阈值，或该有限体完全没有已知支持（包括空云），该工件归 unknownPoses，不归 freePoses。已知支持超过 maxCount 仍可确定 collision。free/collision/unknown 均无抓取许可，术语仅指给定云的点计数，quality 明确 basis=observed_cloud_point_count、physicalCollisionSafetyVerified=false。有限体输出 Pose 描述实际计数体（中心、override/padding 后尺寸），原始 Pose 备份到 sourcePose3D；再次裁云时先去掉旧备份，避免递归增长。
+`cloud.remove_indices` 的 `preserve_order` 模式保留源点序并将移除点的 XYZ 置为 NaN。查询提供 `validity[pointCount]`，保留且有限的点为 1，其余为 0。有组织消费还需原云对应的 mapping/indexMap。原 NaN 点进入 `invalidIndices`。
+
+`cloud.classify_primitive_hits` 消费查询输出的 `cloud.PrimitiveSupport.v1`。已知支持严格超过 `maxCount` 时判为 `collision`，否则存在无效观测或零支持时判为 `unknown`，其余判为 `free`。分类反映观测点数，质量记录的 `basis` 为 `observed_cloud_point_count`，`physicalCollisionSafetyVerified` 为 false。有限体位姿描述实际计数体，`sourcePose3D` 保存原位姿。旧图可用 `primitiveCrop.v1` 规则离线迁移，规则的 `source.node` 指向旧裁云或移除节点。
 
 关联 mask 移除要求每个输入 Pose3D 的 `attributes.primitive2DId` 严格指向 detections 的 ID，重复关联/缺失 ID 拒绝。按每列真实最顶非零像素向上 topExpand，不填充其他空洞。仅移除投影落入支持的正深度点；负深度/非有限坐标归 unknown 并保留，传感器 OOB 点保留并单独计数，源云和全部可选通道只读。该节点可与 shape/model_radius 按原用途顺序组合。
 

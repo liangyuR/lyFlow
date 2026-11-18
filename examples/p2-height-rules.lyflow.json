@@ -103,7 +103,8 @@
           "x": 960,
           "y": 230
         }
-      }
+      },
+      "opVersion": "2.0.0"
     },
     {
       "id": "patches",
@@ -126,12 +127,37 @@
     {
       "id": "tote",
       "op": "cloud.empty_tote",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 960,
+          "y": 460
+        }
+      },
+      "opVersion": "2.0.0"
+    },
+    {
+      "id": "relative_apply",
+      "op": "pose.apply_height",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1280,
+          "y": 230
+        }
+      }
+    },
+    {
+      "id": "tote_counts",
+      "op": "cloud.tote_observation",
+      "opVersion": "1.0.0",
       "params": {
         "frame": "input"
       },
       "ui": {
         "position": {
-          "x": 320,
+          "x": 640,
           "y": 460
         }
       }
@@ -222,18 +248,18 @@
         "port": "cloud"
       },
       "to": {
-        "node": "tote",
+        "node": "tote_counts",
         "port": "cloud"
       }
     },
     {
       "id": "8",
       "from": {
-        "node": "relative",
+        "node": "relative_apply",
         "port": "instances"
       },
       "to": {
-        "node": "tote",
+        "node": "tote_counts",
         "port": "instances"
       }
     },
@@ -246,6 +272,39 @@
       "to": {
         "node": "tote",
         "port": "observation"
+      }
+    },
+    {
+      "id": "10",
+      "from": {
+        "node": "objects",
+        "port": "poses"
+      },
+      "to": {
+        "node": "relative_apply",
+        "port": "instances"
+      }
+    },
+    {
+      "id": "11",
+      "from": {
+        "node": "relative",
+        "port": "heights"
+      },
+      "to": {
+        "node": "relative_apply",
+        "port": "heights"
+      }
+    },
+    {
+      "id": "12",
+      "from": {
+        "node": "tote_counts",
+        "port": "counts"
+      },
+      "to": {
+        "node": "tote",
+        "port": "counts"
       }
     }
   ],
@@ -267,7 +326,7 @@
       "port": "heights"
     },
     "objects": {
-      "node": "relative",
+      "node": "relative_apply",
       "port": "instances"
     },
     "patches": {
@@ -285,6 +344,10 @@
     "toteStatus": {
       "node": "tote",
       "port": "status"
+    },
+    "toteCounts": {
+      "node": "tote_counts",
+      "port": "counts"
     }
   },
   "params": {

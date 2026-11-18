@@ -1,5 +1,5 @@
 // 执行器：事件顺序与 seq、上游失败传播、取消在第 k 个节点生效、结果仓。
-// 算子一律用 gen.synthetic 与 test.*（S6）—— 点云算法的测试在 packs/std-pointcloud/tests。
+// 算子一律用 test.make_cloud 与 test.*（S6）—— 点云算法的测试在 packs/std-pointcloud/tests。
 #include <doctest/doctest.h>
 
 #include <cctype>
@@ -43,7 +43,7 @@ TEST_CASE("缺失算子的运行返回原有诊断且不产生伪造结果") {
 TEST_CASE("两节点图：事件顺序与 seq 连续") {
   ensureTestOps();
   const Json doc =
-      makeGraph({{"g", "gen.synthetic", kSmall}, {"v", "test.thin"}}, {{"g.cloud", "v.cloud"}});
+      makeGraph({{"g", "test.make_cloud", kSmall}, {"v", "test.thin"}}, {{"g.cloud", "v.cloud"}});
 
   Session s(doc);
   RunLog& log = s.wait();
@@ -81,7 +81,7 @@ TEST_CASE("两节点图：事件顺序与 seq 连续") {
 }
 
 TEST_CASE("结果仓：抽样点数、总数与 bounds") {
-  const Json doc = makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 5000}}}}, {});
+  const Json doc = makeGraph({{"g", "test.make_cloud", Json{{"pointCount", 5000}}}}, {});
   Session s(doc);
   s.wait();
 
@@ -123,7 +123,7 @@ TEST_CASE("结果仓：抽样点数、总数与 bounds") {
 TEST_CASE("run_free 之后结果仓不再持有该 run 的数据") {
   std::string runId;
   {
-    const Json doc = makeGraph({{"g", "gen.synthetic", kSmall}}, {});
+    const Json doc = makeGraph({{"g", "test.make_cloud", kSmall}}, {});
     Session s(doc);
     s.wait();
     runId = s.runId();
@@ -141,7 +141,7 @@ TEST_CASE("上游失败：下游标 cancelled + upstream_failed，旁支照常�
   // 与此同时 o 只依赖 g，必须照常跑完（D5 的执行期对应物：一次看到所有能看到的）
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"v", "test.thin", kBadLeaf},
           {"p", "test.thin"},
           {"o", "test.half_indices"},
@@ -175,8 +175,8 @@ TEST_CASE("下标来自另一片点云：报 bad_input 指向 indices 端口，�
   // split 拿到的下标来自另一片点云 → bad_input（不是崩溃）
   const Json doc = makeGraph(
       {
-          {"g1", "gen.synthetic", kSmall},
-          {"g2", "gen.synthetic", Json{{"pointCount", 2000}, {"seed", 9}}},
+          {"g1", "test.make_cloud", kSmall},
+          {"g2", "test.make_cloud", Json{{"pointCount", 2000}, {"seed", 9}}},
           {"s", "test.half_indices"},
           {"e", "test.split"},
       },
@@ -194,7 +194,7 @@ TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
   // std::exception 与未知类型两条 catch 各一个节点；旁支 g 不受牵连
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"t", "test.throw", Json{{"kind", "std"}, {"message", "boom-from-op"}}},
           {"u", "test.throw", Json{{"kind", "int"}}},
       },
@@ -213,7 +213,7 @@ TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
   CHECK(u["errors"][0]["code"] == "internal");
 
   // 进程还活着、执行器还能用：紧接着再跑一张图照常 ok
-  const RunLog after = runGraph(makeGraph({{"g", "gen.synthetic", kSmall}}, {}));
+  const RunLog after = runGraph(makeGraph({{"g", "test.make_cloud", kSmall}}, {}));
   CHECK(after.runStatus() == "ok");
 }
 
@@ -221,7 +221,7 @@ TEST_CASE("声明了输出端口却不写：output_not_written，消息带端口
   ensureTestOps();
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"n", "test.no_output"},
       },
       {{"g.cloud", "n.cloud"}});
@@ -240,7 +240,7 @@ TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
 
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"b", "test.block"},
           {"p", "test.thin"},
       },
@@ -278,7 +278,7 @@ TEST_CASE("线程预算按整个进程里在算的节点数分：另一次运行
   // 另一次运行卡在 test.block 里（编辑器里被抢占、还在收尾的那次就是这样，eval --jobs 也是）
   ops::blockEntered().store(false);
   Session other(
-      makeGraph({{"g", "gen.synthetic", kSmall}, {"b", "test.block"}}, {{"g.cloud", "b.cloud"}}));
+      makeGraph({{"g", "test.make_cloud", kSmall}, {"b", "test.block"}}, {{"g.cloud", "b.cloud"}}));
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (!ops::blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -295,7 +295,7 @@ TEST_CASE("Run to node：只执行目标的上游闭包") {
   ensureTestOps();
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"v", "test.thin"},
           {"p", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
       },
@@ -347,7 +347,7 @@ TEST_CASE("输入端口的实际类型对不上时报 type_mismatch，而不是�
 
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"h", "test.half_indices"},
           {"r", "test.any_pass"},
           {"v", "test.thin"},

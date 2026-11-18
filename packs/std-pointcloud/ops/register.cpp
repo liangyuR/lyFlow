@@ -7,6 +7,7 @@ namespace lyflow::packs::std_pointcloud {
 void registerPackOps(Registry& r) {
   // 顺序即面板里同分类下的排列顺序，按「一条 pipeline 从左到右」排。
   // 它同时是 manifest 里的顺序 —— 改动会改变 manifest 的字节。
+  ops::registerGenSynthetic(r);
   ops::registerIoLoadPcd(r);
   ops::registerIoSavePcd(r);
 

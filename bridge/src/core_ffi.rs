@@ -155,9 +155,7 @@ pub fn manifest_problems() -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    /// 标准包（ADR-0014）编没编进来只看 LYFLOW_STD_PACKS：纯平台构建里一个都不该有，
-    /// 默认构建里两个都得在。标了 `cfg_attr(std_packs_off, ignore)` 的测试靠这一条兜底 ——
-    /// ignored 只能是开关关了，不会是包悄悄没编进来。
+    /// 显式选择的标准包在精简构建中仍应注册。
     #[test]
     fn std_packs_are_built_unless_switched_off() {
         let v: serde_json::Value = serde_json::from_str(&manifest_json().unwrap()).unwrap();
@@ -169,17 +167,15 @@ mod tests {
             .map(|p| p.split('@').next().unwrap())
             .collect();
         for pack in ["std-pointcloud", "std-ml"] {
-            if cfg!(std_packs_off) {
-                assert!(
-                    !packs.contains(pack),
-                    "LYFLOW_STD_PACKS=0，manifest 里却有 {pack} 的算子"
-                );
-            } else {
-                assert!(
-                    packs.contains(pack),
-                    "LYFLOW_STD_PACKS 没关，manifest 里却没有 {pack} 的算子: {packs:?}"
-                );
-            }
+            let selected = option_env!("LYFLOW_PACKS")
+                .unwrap_or("")
+                .split(';')
+                .any(|value| value.trim() == pack);
+            assert_eq!(
+                packs.contains(pack),
+                !cfg!(std_packs_off) || selected,
+                "manifest 的 {pack} 与构建选择不一致: {packs:?}"
+            );
         }
     }
 
@@ -297,10 +293,22 @@ mod tests {
         // 新一代真的能干活：编译一张图并拿到 cacheKey
         let doc = serde_json::json!({
             "schemaVersion": 1, "id": "t",
-            "nodes": [{"id": "g", "op": "gen.synthetic"}], "edges": []
+            "nodes": [{"id": "g", "op": "util.reroute"}], "edges": []
         });
-        let plan: serde_json::Value =
-            serde_json::from_str(&fresh.plan(&doc.to_string(), "", &[]).unwrap()).unwrap();
+        let input = RunInput {
+            node_id: "g".into(),
+            port: "in".into(),
+            xyz: vec![0.0, 0.0, 0.0],
+            intensity: vec![],
+            normals: vec![],
+            rgb: vec![],
+        };
+        let plan: serde_json::Value = serde_json::from_str(
+            &fresh
+                .plan_with_inputs(&doc.to_string(), "", &[], None, &[input], &[])
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(plan[0]["nodeId"], "g");
         assert_eq!(plan[0]["cacheKey"].as_str().unwrap().len(), 32);
 
@@ -336,7 +344,7 @@ mod tests {
         let doc = serde_json::json!({
             "schemaVersion": 1, "id": "t",
             "nodes": [
-                {"id": "a", "op": "gen.synthetic", "params": {"pointCount": -1}},
+                {"id": "a", "op": "flow.select", "params": {"path": 42}},
                 {"id": "b", "op": "no.such.op"}
             ],
             "edges": []

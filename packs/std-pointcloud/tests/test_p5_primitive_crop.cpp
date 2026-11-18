@@ -1,5 +1,6 @@
 #include "helpers.h"
 #include "lyflow/cloud_groups.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/pose.h"
 #include <limits>
 
@@ -27,7 +28,6 @@ Data cropPoses(bool two = false, const char* frame = "world") {
   }
   return Data::record(poses::make3DList(a, frame));
 }
-const Json& cropReport(const test::OpCall& c) { return c.outputs.at("quality").asRecord()->data; }
 }
 TEST_CASE(
     "P5 primitive crop exact finite solids preserve channels and overlapping stable source groups") {
@@ -35,28 +35,37 @@ TEST_CASE(
   test::OpCall c;
   auto source = cropCloud();
   c.inputs = {{"cloud", source}, {"poses", cropPoses(true)}};
-  REQUIRE(c.run("cloud.crop_primitives", {{"maxCount", Value::integer(3)}}).ok);
+  REQUIRE(c.run("cloud.query_primitives").ok);
   const auto* ids = c.outputs.at("innerIndices").asIndices();
   REQUIRE(ids);
   CHECK(ids->sourceCloudId == source.asCloud()->id);
   CHECK(ids->values == std::vector<std::int32_t>{0, 1, 3, 4});
-  CHECK(c.outputs.at("inner").asCloud()->rgb.size() == 12);
-  CHECK(c.outputs.at("inner").asCloud()->intensity == std::vector<float>{1, 2, 4, 5});
+  test::OpCall extract;
+  extract.inputs = {{"cloud", source}, {"indices", c.out("innerIndices")}};
+  REQUIRE(extract.run("segment.extract_indices").ok);
+  CHECK(extract.out("selected").asCloud()->rgb.size() == 12);
+  CHECK(extract.out("selected").asCloud()->intensity == std::vector<float>{1, 2, 4, 5});
   CHECK(c.outputs.at("groupIndices").asIndices()->values ==
         std::vector<std::int32_t>{0, 1, 3, 4, 0, 1, 3, 4});
-  CHECK(c.outputs.at("collisionPoses").asRecord()->data["items"].size() == 2);
-  CHECK(c.outputs.at("collisionPoses").asRecord()->data["items"][0]["pickable"] == false);
-  CHECK(c.outputs.at("collisionPoses").asRecord()->data["items"][0]["classLabel"] == "箱体");
-  REQUIRE(c.run("cloud.crop_primitives",
+  test::OpCall judge;
+  judge.inputs = {{"support", c.out("support")}};
+  REQUIRE(judge.run("cloud.classify_primitive_hits", {{"maxCount", Value::integer(3)}}).ok);
+  CHECK(judge.out("collisionPoses").asRecord()->data["items"].size() == 2);
+  CHECK(judge.out("collisionPoses").asRecord()->data["items"][0]["pickable"] == false);
+  CHECK(judge.out("collisionPoses").asRecord()->data["items"][0]["classLabel"] == "箱体");
+  REQUIRE(judge.run("cloud.classify_primitive_hits", {{"maxCount", Value::integer(4)}}).ok);
+  CHECK(judge.out("freePoses").asRecord()->data["items"].size() == 2);
+  CHECK(extract.out("selected").asCloud()->intensity == std::vector<float>{1, 2, 4, 5});
+  REQUIRE(c.run("cloud.query_primitives",
                 {{"shape", Value::text("cylinder")}, {"includeBoundary", Value::boolean(false)}})
               .ok);
   CHECK(c.outputs.at("innerIndices").asIndices()->values == std::vector<std::int32_t>{0});
-  REQUIRE(c.run("cloud.crop_primitives", {{"shape", Value::text("sphere")},
-                                          {"dimensions", Value::text("override")},
-                                          {"size", Value::vec({1, 1, 1})}})
+  REQUIRE(c.run("cloud.query_primitives", {{"shape", Value::text("sphere")},
+                                           {"dimensions", Value::text("override")},
+                                           {"size", Value::vec({1, 1, 1})}})
               .ok);
   CHECK(c.outputs.at("innerIndices").asIndices()->values == std::vector<std::int32_t>{0, 1, 3});
-  CHECK_FALSE(c.run("cloud.crop_primitives", {{"shape", Value::text("sphere")}}).ok);
+  CHECK_FALSE(c.run("cloud.query_primitives", {{"shape", Value::text("sphere")}}).ok);
   CHECK(c.outputs.empty());
   CHECK(source.asCloud()->pointCount() == 6);
 }
@@ -66,23 +75,29 @@ TEST_CASE(
   test::OpCall c;
   const auto source = cropCloud();
   c.inputs = {{"cloud", source}, {"poses", cropPoses()}};
-  REQUIRE(c.run("cloud.remove_primitives",
-                {{"anchor", Value::text("top")}, {"outputMode", Value::text("preserve_order")}})
-              .ok);
-  CHECK(c.outputs.at("cloud").asCloud()->pointCount() == 6);
-  CHECK(std::isnan(c.outputs.at("cloud").asCloud()->xyz[0]));
+  REQUIRE(c.run("cloud.query_primitives", {{"anchor", Value::text("top")}}).ok);
+  test::OpCall remove;
+  remove.inputs = {{"cloud", source}, {"indices", c.out("innerIndices")}};
+  REQUIRE(remove.run("cloud.remove_indices", {{"outputMode", Value::text("preserve_order")}}).ok);
+  CHECK(remove.out("cloud").asCloud()->pointCount() == 6);
+  CHECK(std::isnan(remove.out("cloud").asCloud()->xyz[0]));
   CHECK(std::isfinite(source.asCloud()->xyz[0]));
-  CHECK(c.outputs.at("cloud").asCloud()->rgb == source.asCloud()->rgb);
+  CHECK(remove.out("cloud").asCloud()->rgb == source.asCloud()->rgb);
   CHECK(c.outputs.at("validity").asTensor()->data == std::vector<float>{0, 0, 1, 0, 1, 1});
   PointCloud model;
   model.push(0, 0, 0);
   c.inputs["model"] = Data::cloud(std::move(model));
-  REQUIRE(c.run("cloud.remove_primitives",
+  REQUIRE(c.run("cloud.query_primitives",
                 {{"mode", Value::text("model_radius")}, {"radius", Value::number(.1)}})
               .ok);
   CHECK(c.outputs.at("innerIndices").asIndices()->values == std::vector<std::int32_t>{0});
-  CHECK(c.outputs.at("cloud").asCloud()->intensity == std::vector<float>{2, 3, 4, 5, 6});
-  CHECK_FALSE(c.run("cloud.remove_primitives",
+  remove.inputs["indices"] = c.out("innerIndices");
+  REQUIRE(remove.run("cloud.remove_indices").ok);
+  CHECK(remove.out("cloud").asCloud()->intensity == std::vector<float>{2, 3, 4, 5, 6});
+  remove.inputs["cloud"] = cropCloud();
+  CHECK_FALSE(remove.run("cloud.remove_indices").ok);
+  CHECK(remove.status.portName == "indices");
+  CHECK_FALSE(c.run("cloud.query_primitives",
                     {{"mode", Value::text("model_radius")}, {"radius", Value::number(-1)}})
                   .ok);
   CHECK(c.outputs.empty());
@@ -91,9 +106,9 @@ TEST_CASE("P5 crop validates frames empty instances invalid coordinates and outp
   using namespace lyflow;
   test::OpCall c;
   c.inputs = {{"cloud", cropCloud()}, {"poses", cropPoses(false, "other")}};
-  CHECK_FALSE(c.run("cloud.crop_primitives").ok);
+  CHECK_FALSE(c.run("cloud.query_primitives").ok);
   c.inputs["posesToCloud"] = Data::transform(Transform{});
-  REQUIRE(c.run("cloud.crop_primitives").ok);
+  REQUIRE(c.run("cloud.query_primitives").ok);
   const auto* cloud = c.inputs.at("cloud").asCloud();
   std::vector<cloud_groups::Group> groups;
   std::string frame, why;
@@ -101,16 +116,41 @@ TEST_CASE("P5 crop validates frames empty instances invalid coordinates and outp
                             *c.outputs.at("groupIndices").asIndices(), groups, frame, why));
   CHECK(frame == "world");
   c.inputs = {{"cloud", cropCloud()}, {"poses", Data::record(poses::make3DList(Json::array()))}};
-  REQUIRE(c.run("cloud.crop_primitives").ok);
-  CHECK(c.outputs.at("inner").asCloud()->pointCount() == 0);
-  CHECK(c.outputs.at("outer").asCloud()->pointCount() == 6);
-  CHECK(c.outputs.at("freePoses").asRecord()->data["items"].empty());
+  REQUIRE(c.run("cloud.query_primitives").ok);
+  CHECK(c.out("innerIndices").asIndices()->values.empty());
+  CHECK(c.out("outerIndices").asIndices()->values.size() == 6);
+  CHECK(c.out("support").asRecord()->data["items"].empty());
   auto nanCloud = *c.inputs.at("cloud").asCloud();
   nanCloud.xyz[0] = std::numeric_limits<float>::quiet_NaN();
   c.inputs["cloud"] = Data::cloud(std::move(nanCloud));
-  REQUIRE(c.run("cloud.crop_primitives").ok);
-  CHECK(cropReport(c)["unknownCount"] == 1);
+  REQUIRE(c.run("cloud.query_primitives").ok);
+  CHECK(c.out("support").asRecord()->data["unknownCount"] == 1);
   CHECK(c.outputs.at("invalidIndices").asIndices()->values == std::vector<std::int32_t>{0});
+
+  SUBCASE("Migration preserves old output names and moves writable threshold and output mode") {
+    auto legacy = test::makeGraph({{"source", "util.reroute"},
+                                   {"poses", "util.reroute"},
+                                   {"old", "cloud.remove_primitives", {{"mode", "shape"}}}},
+                                  {{"source.out", "old.cloud"}, {"poses.out", "old.poses"}});
+    legacy["params"] = {{"limit", {{"default", 4}, {"binds", {"old.maxCount"}}}},
+                        {"order", {{"default", "preserve_order"}, {"binds", {"old.outputMode"}}}}};
+    legacy["outputs"] = {{"removed", {{"node", "old"}, {"port", "inner"}}},
+                         {"masked", {{"node", "old"}, {"port", "cloud"}}},
+                         {"quality", {{"node", "old"}, {"port", "quality"}}},
+                         {"hits", {{"node", "old"}, {"port", "groupIndices"}}}};
+    const Json request{{"schemaVersion", 1},
+                       {"rules", {{{"kind", "primitiveCrop.v1"}, {"source", {{"node", "old"}}}}}}};
+    Json migrated;
+    GraphMigrationError issue;
+    REQUIRE_MESSAGE(migrateGraph(ensureRegistry(), legacy, request, migrated, issue),
+                    issue.message);
+    CHECK(migrated["outputs"]["removed"] == Json{{"node", "old__extract"}, {"port", "selected"}});
+    CHECK(migrated["outputs"]["masked"] == Json{{"node", "old__remove"}, {"port", "cloud"}});
+    CHECK(migrated["outputs"]["quality"] == Json{{"node", "old__classify"}, {"port", "quality"}});
+    CHECK(migrated["outputs"]["hits"] == Json{{"node", "old"}, {"port", "groupIndices"}});
+    CHECK(migrated["params"]["limit"]["binds"] == Json::array({"old__classify.maxCount"}));
+    CHECK(migrated["params"]["order"]["binds"] == Json::array({"old__remove.outputMode"}));
+  }
 }
 TEST_CASE(
     "P5 crop unknown support never certifies free geometry and bounded cancellation remains atomic") {
@@ -119,20 +159,27 @@ TEST_CASE(
   auto source = *cropCloud().asCloud();
   source.xyz[0] = std::numeric_limits<float>::quiet_NaN();
   c.inputs = {{"cloud", Data::cloud(source)}, {"poses", cropPoses()}};
-  REQUIRE(c.run("cloud.crop_primitives", {{"maxCount", Value::integer(100)}}).ok);
-  CHECK(c.outputs.at("freePoses").asRecord()->data["items"].empty());
-  CHECK(c.outputs.at("unknownPoses").asRecord()->data["items"].size() == 1);
-  CHECK(c.outputs.at("quality").asRecord()->data["items"][0]["state"] == "unknown");
+  REQUIRE(c.run("cloud.query_primitives").ok);
+  test::OpCall judge;
+  judge.inputs = {{"support", c.out("support")}};
+  REQUIRE(judge.run("cloud.classify_primitive_hits", {{"maxCount", Value::integer(100)}}).ok);
+  CHECK(judge.out("freePoses").asRecord()->data["items"].empty());
+  CHECK(judge.out("unknownPoses").asRecord()->data["items"].size() == 1);
+  CHECK(judge.out("quality").asRecord()->data["items"][0]["state"] == "unknown");
+  REQUIRE(judge.run("cloud.classify_primitive_hits").ok);
+  CHECK(judge.out("quality").asRecord()->data["items"][0]["state"] == "collision");
   CHECK(std::isnan(c.inputs.at("cloud").asCloud()->xyz[0]));
-  REQUIRE(c.run("cloud.crop_primitives",
+  REQUIRE(c.run("cloud.query_primitives",
                 {{"heightUnknown", Value::boolean(true)}, {"maxHeight", Value::number(.1)}})
               .ok);
   CHECK(c.outputs.at("innerIndices").asIndices()->values == std::vector<std::int32_t>{1, 3});
   test::OpCall empty;
   empty.inputs = {{"cloud", Data::cloud(PointCloud{})}, {"poses", cropPoses()}};
-  REQUIRE(empty.run("cloud.crop_primitives").ok);
-  CHECK(empty.outputs.at("freePoses").asRecord()->data["items"].empty());
-  CHECK(empty.outputs.at("unknownPoses").asRecord()->data["items"].size() == 1);
+  REQUIRE(empty.run("cloud.query_primitives").ok);
+  judge.inputs["support"] = empty.out("support");
+  REQUIRE(judge.run("cloud.classify_primitive_hits").ok);
+  CHECK(judge.out("freePoses").asRecord()->data["items"].empty());
+  CHECK(judge.out("unknownPoses").asRecord()->data["items"].size() == 1);
   struct Cancel final : ExecContext {
     mutable int polls = 0;
     int stop;
@@ -144,21 +191,19 @@ TEST_CASE(
     const std::filesystem::path& baseDir() const override { return path; }
     int threadBudget() const override { return 1; }
   };
-  for (const char* id : {"cloud.crop_primitives", "cloud.remove_primitives"})
-    for (int stop : {1, 3}) {
-      CAPTURE(id);
-      CAPTURE(stop);
-      const auto* op = ensureRegistry().find(id);
-      REQUIRE(op);
-      ParamMap params;
-      for (const auto& v : op->params)
-        params[v.name] = v.def;
-      Inputs inputs(c.inputs);
-      std::unordered_map<std::string, Data> output;
-      Outputs outputs(output);
-      Cancel ctx(stop);
-      ParamView view(params, ctx.path);
-      CHECK(op->compute(inputs, view, outputs, ctx).code == "cancelled");
-      CHECK(output.empty());
-    }
+  for (int stop : {1, 3}) {
+    CAPTURE(stop);
+    const auto* op = ensureRegistry().find("cloud.query_primitives");
+    REQUIRE(op);
+    ParamMap params;
+    for (const auto& v : op->params)
+      params[v.name] = v.def;
+    Inputs inputs(c.inputs);
+    std::unordered_map<std::string, Data> output;
+    Outputs outputs(output);
+    Cancel ctx(stop);
+    ParamView view(params, ctx.path);
+    CHECK(op->compute(inputs, view, outputs, ctx).code == "cancelled");
+    CHECK(output.empty());
+  }
 }

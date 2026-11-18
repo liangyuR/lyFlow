@@ -434,6 +434,7 @@ const std::set<std::string>& referenceTypes() {
                                            "cloud.ViewSampling.v1",
                                            "cloud.ImageROI.v1",
                                            "cloud.PrimitiveCrop.v1",
+                                           "cloud.PrimitiveSupport.v1",
                                            "cloud.MaskPrimitiveRemoval.v1",
                                            "cloud.HoleFill.v1",
                                            "inspection.Defects.v1",

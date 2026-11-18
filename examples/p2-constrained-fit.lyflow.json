@@ -17,6 +17,7 @@
     {
       "id": "fit",
       "op": "register.constrained_fit_3d",
+      "opVersion": "2.0.0",
       "params": {
         "maxRmse": 1e-6,
         "maxError": 1e-5
@@ -50,10 +51,6 @@
     "quality": {
       "node": "fit",
       "port": "quality"
-    },
-    "aligned": {
-      "node": "fit",
-      "port": "aligned"
     }
   },
   "params": {

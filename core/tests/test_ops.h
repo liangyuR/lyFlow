@@ -1,6 +1,5 @@
 #pragma once
-// core 测试专用的算子（S6 / ADR-0014）。core 只自带 gen.synthetic 与 util.reroute，
-// 执行器/缓存/子图要的那些「形状」由这里的 test.* 提供，不依赖任何算子包。
+// 执行器、缓存与子图使用的测试算子。
 #include <atomic>
 #include <set>
 #include <chrono>
@@ -16,6 +15,7 @@
 
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
+#include "cloud_test_op.h"
 #include "image_test_op.h"
 #include "param_showcase_op.h"
 
@@ -407,6 +407,7 @@ inline void ensureTestOps() {
   static std::once_flag once;
   std::call_once(once, [] {
     Registry& r = ensureRegistry();
+    registerCloudTestOp(r);
     const Port cloudIn{"cloud", "PointCloud", "Cloud", "", true};
     const Port cloudOut{"cloud", "PointCloud", "Cloud", "", true};
 

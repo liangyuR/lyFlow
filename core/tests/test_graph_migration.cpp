@@ -127,6 +127,47 @@ TEST_CASE("Graph migration scope routes a rule to one subgraph definition with t
   CHECK_FALSE(migrateGraph(registry, graph, request(Json::array({rule})), migrated, error));
 }
 
+TEST_CASE("Offline node splitting rewrites fan-out, scoped outputs and parameter bindings") {
+  auto level = makeGraph({{"old", "test.previous", {{"boundOutside", 3}}}, {"input", "test.raw"}},
+                         {{"input.out", "old.in"}});
+  level["inputs"] = Json::array({{{"name", "aux"},
+                                  {"type", "Record"},
+                                  {"to", Json::array({{{"node", "old"}, {"port", "aux"}}})}}});
+  level["outputs"] = Json::array(
+      {{{"name", "out"}, {"type", "Record"}, {"from", {{"node", "old"}, {"port", "out"}}}}});
+  level["params"] = Json::array(
+      {{{"name", "bound"}, {"binds", Json::array({{{"node", "old"}, {"param", "threshold"}}})}}});
+  auto graph = makeGraph({{"scope_a", "sub:inside"}, {"scope_b", "sub:outside"}}, {});
+  graph["params"] = {{"both", {{"binds", {"scope_a/old.threshold", "scope_b/old.threshold"}}}}};
+  graph["outputs"] = {{"readout", {{"node", "scope_a/old"}, {"port", "out"}}}};
+  graph["subgraphs"] = {{"inside", level}, {"outside", level}};
+
+  auto& inside = graph["subgraphs"]["inside"];
+  using namespace graph_migration;
+  CHECK(inputConnected(inside, "old", "in"));
+  CHECK(inputConnected(inside, "old", "aux"));
+  CHECK(parameterBindings(inside, &graph, "old", "threshold").size() == 2);
+  splitNode(
+      inside, &graph, "old",
+      Json::array({{{"id", "old"}, {"op", "test.new"}}, {{"id", "judge"}, {"op", "test.judge"}}}),
+      {{"in", {{"old", "raw"}, {"judge", "raw"}}}, {"aux", {{"judge", "aux"}}}},
+      {{"out", {{"judge", "value"}}}},
+      {{"threshold", {{"judge", "limit"}}}, {"boundOutside", {{"old", "sampleCount"}}}},
+      Json::array({{{"from", {{"node", "old"}, {"port", "value"}}},
+                    {"to", {{"node", "judge"}, {"port", "observation"}}}}}));
+
+  CHECK(inside["edges"].size() == 3);
+  CHECK(inside["edges"][1]["to"] == Json{{"node", "judge"}, {"port", "raw"}});
+  CHECK(inside["inputs"][0]["to"][0] == Json{{"node", "judge"}, {"port", "aux"}});
+  CHECK(inside["outputs"][0]["from"] == Json{{"node", "judge"}, {"port", "value"}});
+  CHECK(inside["params"][0]["binds"][0] == Json{{"node", "judge"}, {"param", "limit"}});
+  CHECK(inside["nodes"][nodeIndex(inside["nodes"], "old")]["params"]["sampleCount"] == 3);
+  CHECK(graph["outputs"]["readout"] == Json{{"node", "scope_a/judge"}, {"port", "value"}});
+  CHECK(graph["params"]["both"]["binds"] ==
+        Json::array({"scope_a/judge.limit", "scope_b/old.threshold"}));
+  CHECK(graph["subgraphs"]["outside"] == level);
+}
+
 TEST_CASE("Pending contractUpgrade and retired operators require offline migration") {
   for (const auto& pending : {Json(), Json::array(), request(Json::array())}) {
     CAPTURE(pending);

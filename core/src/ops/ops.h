@@ -6,7 +6,6 @@
 
 namespace lyflow::ops {
 
-void registerGenSynthetic(Registry& r);
 void registerUtilReroute(Registry& r);
 void registerFlowOps(Registry& r);
 

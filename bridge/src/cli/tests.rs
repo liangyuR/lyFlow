@@ -780,23 +780,32 @@ fn diff_ignores_ui_and_catches_params() {
 #[test]
 fn diff_merges_defaults_before_comparing() {
     let dir = workspace("diffdefault");
-    let graph = chain(&dir, 311);
-    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&graph).unwrap()).unwrap();
+    let mut doc = json!({
+        "schemaVersion": 1, "id": "diff-default",
+        "nodes": [{"id": "select", "op": "flow.select"}], "edges": []
+    });
+    let graph = dir.join("default.lyflow.json");
+    std::fs::write(&graph, doc.to_string()).unwrap();
     // 默认值从 manifest 现取：写死一个数字会在算子调默认值那天变成假绿
     let manifest = cli(&["manifest"]).first();
-    let default_noise = manifest["operators"]
+    let default_path = manifest["operators"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|op| op["id"] == "gen.synthetic")
+        .find(|op| op["id"] == "flow.select")
         .and_then(|op| op["params"].as_array())
-        .and_then(|ps| ps.iter().find(|p| p["name"] == "noise"))
+        .and_then(|ps| ps.iter().find(|p| p["name"] == "path"))
         .map(|p| p["default"].clone())
-        .expect("manifest 里没有 gen.synthetic.noise");
-    doc["nodes"][0]["params"]["noise"] = default_noise;
+        .expect("manifest 里没有 flow.select.path");
+    doc["nodes"][0]["params"]["path"] = default_path;
     let same = dir.join("same.lyflow.json");
     std::fs::write(&same, doc.to_string()).unwrap();
-    let r = cli(&["diff", &graph, &same.to_string_lossy(), "--json"]);
+    let r = cli(&[
+        "diff",
+        &graph.to_string_lossy(),
+        &same.to_string_lossy(),
+        "--json",
+    ]);
     assert_eq!(r.first()["empty"], true, "{}", r.out);
 }
 

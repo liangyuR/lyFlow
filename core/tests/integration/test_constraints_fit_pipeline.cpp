@@ -56,6 +56,7 @@ TEST_CASE("Geometry constraints constructor feeds pointcloud fitting and graph o
       {{"constant", "register.constraints_3d", Json::object()},
        {"fit", "register.constrained_fit_3d", {{"maxRmse", 2e-6}, {"maxError", 3e-6}}}},
       {{"constant.constraints", "fit.constraints"}});
+  graph["nodes"][1]["opVersion"] = "2.0.0";
   graph["params"] = {
       {"constraintsJson",
        {{"type", "text"}, {"default", items.dump()}, {"binds", {"constant.items"}}}}};

@@ -2,6 +2,9 @@
 
 ## 1.4.5（开发中）
 
+- 邻域高度、料箱计数、深度候选、截面测量、几何体查询和约束拟合可在图里单独取用，并接入各自的尺寸更新或判定节点。旧组合图通过 `lyflow migrate` 的显式规则改写。
+- `workspace.load` 随 `std-geometry` 的工作空间模块提供。YOLO、YOLOX 和 OCR 的 Tensor 解码移入 `std-ml`，`gen.synthetic` 移入 `std-pointcloud`，公开 ID 沿用。
+
 - 涂胶场景通过 `LYFLOW_PACKS=solution-glue` 启用。通用图像响应、卡尺候选、颜色打分和模板定位随 `std-image` 提供，保存图中的算子 ID 沿用。图像和涂胶可在无 PCL/ONNX Runtime 的组合中运行。
 - 涂胶宽度、边距和飞拍卡尺使用带坐标帧及 m/mm 单位的版本化平面标定。旧图用 `lyflow migrate` 的 `planeCalib.v1` 规则显式接入适配节点。未接标定时继续输出像素量测。
 

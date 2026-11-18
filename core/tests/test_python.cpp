@@ -1,3 +1,4 @@
+#include "cloud_test_op.h"
 #include "helpers.h"
 
 #include <cstdlib>
@@ -185,6 +186,7 @@ Status control(const ComputeFn& compute, const char* mode, PythonContext& contex
 
 TEST_CASE("Python configuration is opt-in and dynamic registry families remain independent") {
   auto& reg = ensureRegistry();
+  registerCloudTestOp(reg);
   const auto nativeCount = reg.operators().size();
   char* raw = lyflow_python_status();
   REQUIRE(raw != nullptr);
@@ -200,7 +202,7 @@ TEST_CASE("Python configuration is opt-in and dynamic registry families remain i
   CHECK_FALSE(missing.at("problems").empty());
   CHECK(reg.operators().size() == nativeCount);
   OpCall nativeCall;
-  REQUIRE(nativeCall.run("gen.synthetic", {{"pointCount", Value::integer(2)}}).ok);
+  REQUIRE(nativeCall.run("test.make_cloud", {{"pointCount", Value::integer(2)}}).ok);
   REQUIRE(nativeCall.out("cloud").asCloud() != nullptr);
   CHECK(nativeCall.out("cloud").asCloud()->pointCount() == 2);
   CHECK(python_runtime::configure(reg, "{}").at("configured") == false);

@@ -1,22 +1,26 @@
-# std-ml — LyFlow 标准算子包：推理
+# std-ml — LyFlow 标准算子包：推理与结果解码
 
-版本 0.2.0，默认启用。全仓库唯一一处 onnxruntime 依赖（ADR-0015）。
+默认构建启用 Tensor 解码与 ONNX 推理。
 
 | id | 输入 → 输出 | 参数 |
 |---|---|---|
 | `ml.onnx_run` | `input: Tensor` → `output: Tensor` | `modelPath`、`inputName`、`outputName`、`intraOpThreads`（默认 1）、`modelContract` |
+| `image.yolo_decode`、`image.yolox_decode` | 检测 Tensor 与预处理映射 → 原图像素实例 | 置信度、IoU、候选及结果上限 |
+| `image.ocr_orient` | 识别输入 Tensor、方向概率 Tensor 与布局 → 方向校正的 Tensor 与布局 | `minConfidence` |
+| `image.ocr_ctc_decode` | 识别输出 Tensor 与布局 → 文本和逐行结果 | 字典、轴顺序、输出数值模式与字符过滤 |
 
 `Tensor` 是 core 的端口类型：`shape` + float32 数据，行主序。结果元信息包含形状与 min/max/mean，
 完整数值可通过 `lyflow_output_tensor` 按 `offset` / `count` 切片读取；`Indices` 同样通过 `lyflow_output_indices` 读取 int32 下标。
 C ABI 返回的视图在释放对应 handle 前有效。编辑器 Transport 的 `getOutputTensor` / `getOutputIndices`
-使用二进制载荷（`LYTN` / `LYIX`），格式见 [HTTP 传输契约](../../docs/http-transport.md)。构造张量、解读张量都是领域的事
-（比如 `gap.profile_tensor` 与 `gap.labels_from_logits`），本包只负责「跑一次前向」。
+使用二进制载荷（`LYTN` / `LYIX`），格式见 [HTTP 传输契约](../../docs/http-transport.md)。图像预处理和裁图由 `std-image` 提供。
 模型输出读取前检查元素类型、形状与元素数；仅支持 float32 稠密张量，允许零元素输出。
 其他类型、标量或无效形状返回 `bad_input`，诊断指向 `outputName`。
 
 ## 依赖
 
-onnxruntime 1.32.0（win-x64）。构建前准备一份：
+设置 `LYFLOW_STD_PACKS=0` 和 `LYFLOW_PACKS=std-ml` 可构建纯 Tensor 解码。需要在精简构建中运行模型时，加上 `LYFLOW_MODULES=ml-runtime`。
+
+推理模块使用 onnxruntime 1.32.0（win-x64）。构建前准备一份：
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1

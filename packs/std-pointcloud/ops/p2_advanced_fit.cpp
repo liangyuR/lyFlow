@@ -6,6 +6,8 @@
 #include "../algo/p2_fit.h"
 #include "lyflow/pose.h"
 #include "lyflow/kernel/constraints.h"
+#include "lyflow/graph_migration.h"
+#include "cloud_transform.h"
 #include "lyflow/kernel/metrology.h"
 
 namespace lyflow::ops {
@@ -88,15 +90,9 @@ struct ConstraintQuality {
 };
 
 Vec3 deliveredPoint(const Transform& matrix, const Vec3& source) {
-  const Vec3 rounded = source.cast<float>().cast<double>();
-  Vec3 result;
-  for (int i = 0; i < 3; ++i) {
-    const float* row = matrix.m + 4 * i;
-    const float x = static_cast<float>(rounded[0]), y = static_cast<float>(rounded[1]),
-                z = static_cast<float>(rounded[2]);
-    result[i] = row[0] * x + row[1] * y + row[2] * z + row[3];
-  }
-  return result;
+  const Eigen::Vector3f rounded = source.cast<float>();
+  const auto p = transformPoint(matrix, rounded.data());
+  return {p[0], p[1], p[2]};
 }
 
 ConstraintQuality measured(const std::vector<Constraint>& cs, const Transform& pose,
@@ -262,28 +258,6 @@ Status constrainedFit(const Inputs& in, const ParamView& p, Outputs& out, ExecCo
       quality.maxError > p.number("maxError"))
     return error("交付float32输出未通过约束RMSE或最大误差门限", "constraints",
                  "registration_rejected");
-  PointCloud aligned;
-  if (in.has("cloud")) {
-    const auto* cloud = in.get("cloud").asCloud();
-    if (!cloud || !validate(*cloud).ok)
-      return error("cloud必须是通道一致的有限点云", "cloud");
-    if (cloud->pointCount() > kMaxOutputPoints)
-      return error("对齐输出超过4194304点", "cloud", "resource_limit");
-    if (!transformed(*cloud, rounded, aligned, ctx)) {
-      if (ctx.cancelled())
-        return error("对齐点云已取消", "cloud", "cancelled");
-      return error("对齐点云溢出或法线无效", "cloud");
-    }
-    for (std::size_t i = 0; i < cloud->pointCount(); ++i) {
-      if ((i & 255U) == 0 && ctx.cancelled())
-        return error("对齐点云已取消", "cloud", "cancelled");
-      const Vec3 value = deliveredPoint(native, point(*cloud, i));
-      if (!value.allFinite())
-        return error("交付点云float32溢出", "cloud");
-      for (int axis = 0; axis < 3; ++axis)
-        aligned.xyz[3 * i + axis] = static_cast<float>(value[axis]);
-    }
-  }
   Record q{"cloud.ConstrainedFit.v1",
            {{"sourceFrame", p.text("sourceFrame")},
             {"targetFrame", p.text("targetFrame")},
@@ -300,7 +274,6 @@ Status constrainedFit(const Inputs& in, const ParamView& p, Outputs& out, ExecCo
   if (!values::boundedJson(q.data, why))
     return error("质量记录超过限制：" + why, "constraints", "resource_limit");
   out.set("transform", Data::transform(native));
-  out.set("aligned", Data::cloud(std::move(aligned)));
   out.set("quality", Data::record(std::move(q)));
   return Status::Ok();
 }
@@ -563,18 +536,54 @@ Status poseSearch(const Inputs& in, const ParamView& p, Outputs& out, ExecContex
   out.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
 }
+void migrateConstrainedFit(Json& level, const Json& rule, Json* outer) {
+  using namespace graph_migration;
+  splitRuleKeys(rule, {"kind", "source"});
+  const auto& source = splitSource(level, rule, "register.constrained_fit_3d");
+  const auto id = graph_migration::text(source, "id");
+  Json replacements =
+      Json::array({{{"id", id}, {"op", "register.constrained_fit_3d"}, {"opVersion", "2.0.0"}}});
+  SplitRoutes inputs{{"constraints", {{id, "constraints"}}}, {"initial", {{id, "initial"}}}};
+  SplitRoutes outputs{{"transform", {{id, "transform"}}}, {"quality", {{id, "quality"}}}};
+  SplitRoutes params;
+  for (const char* name :
+       {"sourceFrame", "targetFrame", "mode", "huberDelta", "maxRmse", "maxError", "maxIterations",
+        "translationTolerance", "rotationTolerance"})
+    params[name] = {{id, name}};
+  Json links = Json::array();
+  const bool hasCloud = inputConnected(level, id, "cloud");
+  if (hasCloud) {
+    std::string applyId = id + "__apply";
+    while (nodeIndex(level.at("nodes"), applyId) != level.at("nodes").size())
+      applyId += "_";
+    replacements.push_back({{"id", applyId}, {"op", "transform.apply"}, {"opVersion", "1.1.0"}});
+    inputs["cloud"] = {{applyId, "cloud"}};
+    outputs["aligned"] = {{applyId, "cloud"}};
+    links.push_back({{"from", {{"node", id}, {"port", "transform"}}},
+                     {"to", {{"node", applyId}, {"port", "transform"}}}});
+  }
+  try {
+    splitNode(level, outer, id, std::move(replacements), inputs, outputs, params, std::move(links));
+  } catch (const std::invalid_argument& e) {
+    if (!hasCloud &&
+        std::string_view(e.what()).find(" 的旧输出 aligned 无法迁移") != std::string_view::npos)
+      throw std::invalid_argument(
+          "节点 " + id +
+          " 的 aligned 输出缺少源云，请删除该输出引用或为旧节点接入 cloud 后重新迁移");
+    throw;
+  }
+}
 } // namespace
 
 void registerAdvancedFit3D(Registry& r) {
   OperatorDesc op =
       descriptor("register.constrained_fit_3d", "三维加权几何约束拟合",
                  "weighted mixed point line plane datum 321 constrained rigid fitting");
+  op.version = "2.0.0";
   op.inputs = {{"constraints", "Record", "几何约束",
                 "cloud.Constraints3D.v1，source→target米制约束。", true},
-               {"initial", "Transform", "初值", "可选source→target刚体变换。", false},
-               {"cloud", "PointCloud", "源点云", "可选；输出保通道的对齐点云。", false}};
+               {"initial", "Transform", "初值", "可选source→target刚体变换。", false}};
   op.outputs = {{"transform", "Transform", "变换", "交付float32 source→target。", true},
-                {"aligned", "PointCloud", "对齐点云", "未接cloud时为空云。", true},
                 {"quality", "Record", "前后约束质量", "cloud.ConstrainedFit.v1。", true}};
   op.params = {text("sourceFrame", "源参考帧", "source"),
                text("targetFrame", "目标参考帧", "target"),
@@ -587,9 +596,12 @@ void registerAdvancedFit3D(Registry& r) {
                number("translationTolerance", "平移收敛阈值", 1e-8, 1e-12, 1, "m"),
                number("rotationTolerance", "旋转收敛阈值", 1e-8, 1e-12, 1, "rad")};
   op.doc =
-      "有界局部SE3加权点/点到线/点到面/轴向偏移约束；归一化可观性检查、Huber可选、输入只读。3-2-1要求正交datum及3/2/1及以上约束；拒绝不观测、未收敛或交付float32质量不合格。";
+      "有界局部SE3加权点/点到线/点到面/轴向偏移约束；归一化可观性检查、Huber可选、输入只读。3-2-1要求正交datum及3/2/1及以上约束；拒绝不观测、未收敛或交付float32质量不合格。"
+      "输出变换可接 transform.apply 对齐点云。旧图可用 lyflow migrate 的 constrainedFit.v1 规则离线迁移。";
   op.compute = constrainedFit;
+  op.migrations = {{1, graph_migration::requireSplitMigration, nullptr}};
   r.addOperator(op);
+  r.addGraphMigration({"constrainedFit.v1", {}, migrateConstrainedFit});
   op = descriptor("register.pose_search_3d", "三维工件六轴局部搜索",
                   "six axis Cartesian grid pyramid hierarchical local pose search batch objects");
   op.inputs = {{"source", "PointCloud", "模型云", "原生有限通道，所有工件共享模型。", true},

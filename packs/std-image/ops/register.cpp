@@ -49,7 +49,6 @@ void registerPackOps(Registry& r) {
   ops::registerP2HeightExtraction(r);
   ops::registerP3Markers(r);
   ops::registerP3ShapeMatching(r);
-  ops::registerP3Workspace(r);
   ops::registerP4Annotations(r);
   ops::registerP4Barcodes(r);
   ops::registerP4OcrImage(r);

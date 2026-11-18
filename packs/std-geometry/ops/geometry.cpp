@@ -10,6 +10,10 @@
 #include "lyflow/value.h"
 #include "lyflow/kernel/geometry.h"
 
+namespace lyflow::ops {
+void registerP3Workspace(Registry&);
+}
+
 namespace lyflow::packs::std_geometry {
 void registerPoseOps(Registry&);
 void registerGeometryTransforms(Registry&);
@@ -301,6 +305,9 @@ void registerConstructors(Registry& r) {
 } // namespace
 
 void registerPackOps(Registry& r) {
+#if defined(LYFLOW_WORKSPACE_IO)
+  ops::registerP3Workspace(r);
+#endif
   registerTransformMake(r);
   registerConstraints3D(r);
   registerPoseOps(r);

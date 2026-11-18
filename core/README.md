@@ -13,7 +13,7 @@ include/lyflow/       公共头。零 PCL / OpenCV 头（ADR-0005、ADR-0026）�
   client.hpp          嵌入宿主用的 header-only 封装，只依赖 c_api.h（docs/embedding.md）
 src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
   subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录
-src/ops/              core 自己的四个算子：gen.synthetic / util.reroute / flow.fallback / flow.select。
+src/ops/              core 的透传和调度算子 util.reroute / flow.fallback / flow.select。
                       其余算子都在 ../packs/（ADR-0014）
 third_party/          vendored 单头：nlohmann/json、doctest、xxhash
 tests/                doctest 测试
@@ -37,7 +37,7 @@ M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 
 `opencv2/` 的头只在那个包里，进出一律经它的 `lyflow_cv/adapter.h`，[ADR-0026](../docs/adr/0026-image-data-domain.md)）。
 默认开，找不到时 CMake 直接 FATAL 并打印安装命令。
 
-**onnxruntime 归 `packs/std-ml`**，**yaml-cpp 由 `packs/gap` 与 `packs/std-image` 的工作空间加载使用**
+**onnxruntime 归 `packs/std-ml`**，**yaml-cpp 由 `solution-gap` 导入模块和 `std-geometry` 的 workspace-io 模块使用**
 （[ADR-0015](../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）。前者不在 vcpkg 里，
 构建前跑一次 `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（已 gitignore），
 或者设 `LYFLOW_ONNXRUNTIME_ROOT` 指向已有的一份；缺了 CMake 会直接 FATAL 并打印这条命令。
@@ -50,7 +50,7 @@ M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 
 C:\vcpkg\vcpkg.exe install pcl:x64-windows                  # 标准点云包
 ./scripts/build-vision-deps.ps1                           # 标准图像包固定 OpenCV 5.1.0
 pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
-C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # std-image 工作空间 / gap
+C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # std-geometry 工作空间 / solution-gap
 ```
 
 M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话失效了三个
@@ -298,7 +298,7 @@ id 是否重复、参数默认值与声明类型是否匹配、enum 默认值是
 结果仓的抽样与 bounds、中文路径下的 PCD 往返，以及 M3 的
 缓存命中/LRU 淘汰/plan 预测一致性、并行菱形图与随机取消 100 次、
 bypass 透传与 `bypassed_no_source`、`Any` 推导、迁移链与隐藏参数。
-点云一律由 `gen.synthetic` 现生成，**仓库里不放二进制样例数据**。
+点云测试按用例提供确定的输入。需要标准生成器的用例显式启用 `std-pointcloud`。
 
 > `test::Session` 默认在构造时清空结果仓。缓存是进程级的，不清的话
 > 「第二个用同一张图的测试」会拿到 `skipped` 而不是 `done` —— 那是真实行为，

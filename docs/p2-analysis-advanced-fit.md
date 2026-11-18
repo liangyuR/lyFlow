@@ -24,7 +24,7 @@
 
 桌面与CLI可先使用 `register.constraints_3d` 构造节点：sourceFrame/targetFrame、mode与下游拟合器保持一致，items为最多64KiB的JSON Text参数，可绑定顶层图参数进行覆写。该入口只构造cloud.Constraints3D.v1的小几何约束列表，复用拟合器相同的字段、类型、权重、方向及3-2-1结构校验；不提供通用Any/Record加载或大点云JSON通道。缺省items=[]需要用户配置，空/非法JSON、未知字段和非法约束均报参数诊断；最终几何可观性仍由拟合器验证。约束构造→拟合的真实调度图与顶层Text覆写已纳入同一永久回归组。
 
-新增 `register.constrained_fit_3d`。输入 `constraints` 是 `cloud.Constraints3D.v1` Record；可选 `initial` 是source→target的原生Transform，缺省恒等；可选 `cloud` 是同源坐标的PointCloud。输出 `transform`、`aligned`、`quality`。没有连接cloud时aligned为空原生云，不复制约束几何作为伪造图像或点云。
+`register.constrained_fit_3d@2.0.0` 接收 `cloud.Constraints3D.v1` 约束和可选的原生 `initial` 变换。初值为 source→target，缺省为恒等。输出 `transform` 和 `quality`。需要对齐同源点云时，将变换连入 `transform.apply`。使用 `lyflow migrate --request … --write` 和 `{"kind":"constrainedFit.v1","source":{"node":"fit"}}` 规则迁移旧图，其中 `fit` 为旧节点 ID。
 
 ```json
 {

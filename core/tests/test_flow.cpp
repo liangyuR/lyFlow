@@ -213,13 +213,13 @@ TEST_CASE("图级命名输出：lyflow_run_outputs 按名字给出类型与值")
 TEST_CASE("图输出指向不存在的节点或端口是校验错误") {
   ensureTestOps();
   {
-    const Json doc = graphWithOutputs({N{"g", "gen.synthetic", Json::object()}}, {},
+    const Json doc = graphWithOutputs({N{"g", "test.make_cloud", Json::object()}}, {},
                                       Json{{"a", Json{{"node", "nope"}, {"port", "cloud"}}}});
     const std::string diags = exec::validateGraphJson(doc.dump(), {});
     CHECK(diags.find("unknown_node") != std::string::npos);
   }
   {
-    const Json doc = graphWithOutputs({N{"g", "gen.synthetic", Json::object()}}, {},
+    const Json doc = graphWithOutputs({N{"g", "test.make_cloud", Json::object()}}, {},
                                       Json{{"a", Json{{"node", "g"}, {"port", "nope"}}}});
     const std::string diags = exec::validateGraphJson(doc.dump(), {});
     CHECK(diags.find("unknown_port") != std::string::npos);
@@ -423,9 +423,9 @@ TEST_CASE("输入注入（m8-plan L18）：port 只是输入端口时 compute �
 TEST_CASE("输入注入：端口上已有连线、端口名不存在、与输出注入混用都在校验期报错") {
   ensureTestOps();
   {
-    const Json doc = makeGraph(
-        {N{"g", "gen.synthetic", Json{{"pointCount", 10}}}, N{"m", "test.merge2", Json::object()}},
-        {E{"g.cloud", "m.a"}});
+    const Json doc = makeGraph({N{"g", "test.make_cloud", Json{{"pointCount", 10}}},
+                                N{"m", "test.merge2", Json::object()}},
+                               {E{"g.cloud", "m.a"}});
     std::vector<exec::InjectedInput> inputs{
         exec::InjectedInput{"m", "a", Data::cloud(lineCloud(3, 0.0F))},
         exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
@@ -499,7 +499,7 @@ TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串
   ResultStore::instance().clear();
   constexpr int kRuns = 8;
 
-  const Json doc = makeGraph({N{"g", "gen.synthetic", Json{{"pointCount", 20000}}},
+  const Json doc = makeGraph({N{"g", "test.make_cloud", Json{{"pointCount", 20000}}},
                               N{"t", "test.thin", Json{{"leaf", Json::array({0.03, 0.03, 0.03})}}},
                               N{"m", "test.merge2", Json::object()}},
                              {E{"g.cloud", "t.cloud"}, E{"t.cloud", "m.a"}, E{"g.cloud", "m.b"}});
@@ -561,7 +561,7 @@ TEST_CASE("导入器：注册一种 kind，lyflow_import 走它") {
     if (text.empty()) {
       return Status::Error(Phase::Validate, "bad_input", "空文本");
     }
-    Json doc = makeGraph({N{text, "gen.synthetic", Json::object()}}, {});
+    Json doc = makeGraph({N{text, "test.make_cloud", Json::object()}}, {});
     out = doc.dump();
     return Status::Ok();
   };
@@ -584,7 +584,7 @@ TEST_CASE("缓存命中的 fallback 不会去 demand 备用闭包") {
   ensureTestOps();
   ResultStore::instance().clear();
   // test.counted 是 deterministic=false，换个确定性的源才能命中缓存
-  const Json doc = makeGraph({N{"n_a", "gen.synthetic", Json{{"pointCount", 16}}},
+  const Json doc = makeGraph({N{"n_a", "test.make_cloud", Json{{"pointCount", 16}}},
                               N{"n_b", "test.counted", Json{{"pointCount", 21}}},
                               N{"n_fb", "flow.fallback", Json::object()}},
                              {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});

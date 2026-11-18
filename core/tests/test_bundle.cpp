@@ -238,7 +238,7 @@ TEST_CASE("Bundle：图输出可以指向字段，summary 与 lyflow_run_outputs
                                  Json{{"x", Json{{"node", "n_pair"}, {"port", port}}}});
     CHECK(exec::validateGraphJson(bad.dump(), {}).find("unknown_port") != std::string::npos);
   }
-  const Json notBundle = withOutputs(makeGraph({N{"g", "gen.synthetic", Json::object()}}, {}),
+  const Json notBundle = withOutputs(makeGraph({N{"g", "test.make_cloud", Json::object()}}, {}),
                                      Json{{"x", Json{{"node", "g"}, {"port", "cloud.x"}}}});
   CHECK(exec::validateGraphJson(notBundle.dump(), {}).find("不是 Bundle") != std::string::npos);
 }

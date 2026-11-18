@@ -364,6 +364,25 @@ TEST_CASE("P1 registration gates the delivered float transform and aligned coord
                              {"minInlierRatio", Value::number(1)}})
                     .ok);
   }
+  SUBCASE(
+      "Transform normalizes extreme finite normals and rejects coordinate overflow atomically") {
+    const auto limit = std::numeric_limits<float>::max();
+    PointCloud extreme;
+    extreme.push(limit, 0, 0);
+    extreme.normals = {limit, limit, 0};
+    apply.inputs = {{"cloud", Data::cloud(std::move(extreme))},
+                    {"transform", Data::transform(Transform{})}};
+    REQUIRE(apply.run("transform.apply").ok);
+    const auto& normal = apply.out("cloud").asCloud()->normals;
+    CHECK(normal[0] == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+    CHECK(normal[1] == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+    Transform shifted;
+    shifted.m[3] = limit;
+    apply.inputs["transform"] = Data::transform(shifted);
+    CHECK_FALSE(apply.run("transform.apply").ok);
+    CHECK(apply.status.portName == "cloud");
+    CHECK(apply.outputs.empty());
+  }
 }
 
 TEST_CASE("P1 point-to-plane ICP validates observability and normals") {

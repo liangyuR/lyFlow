@@ -87,10 +87,10 @@
     {
       "id": "defects",
       "op": "depth.defects",
+      "opVersion": "2.0.0",
       "params": {
         "planeFrame": "camera",
-        "distanceThreshold": 0.005,
-        "minCoverage": 0.99
+        "distanceThreshold": 0.005
       },
       "ui": {
         "position": {
@@ -102,18 +102,59 @@
     {
       "id": "profiles",
       "op": "depth.profile_slices",
+      "opVersion": "2.0.0",
       "params": {
         "planeFrame": "camera",
-        "sliceCount": 6,
+        "sliceCount": 6
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 260
+        }
+      }
+    },
+    {
+      "id": "defects_classify",
+      "op": "depth.classify_defects",
+      "opVersion": "1.0.0",
+      "params": {
+        "minCoverage": 0.99
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "profiles_measure",
+      "op": "depth.measure_profile_features",
+      "opVersion": "1.0.0",
+      "params": {
         "aWidth": 2,
-        "bWidth": 2,
+        "bWidth": 2
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 520
+        }
+      }
+    },
+    {
+      "id": "profiles_classify",
+      "op": "depth.classify_profile_features",
+      "opVersion": "1.0.0",
+      "params": {
         "min": 0,
         "max": 1
       },
       "ui": {
         "position": {
           "x": 560,
-          "y": 260
+          "y": 780
         }
       }
     }
@@ -338,6 +379,50 @@
         "node": "profiles",
         "port": "plane"
       }
+    },
+    {
+      "id": "defects-candidates-defects_classify-candidates",
+      "from": {
+        "node": "defects",
+        "port": "candidates"
+      },
+      "to": {
+        "node": "defects_classify",
+        "port": "candidates"
+      }
+    },
+    {
+      "id": "profiles-profiles-profiles_measure-profiles",
+      "from": {
+        "node": "profiles",
+        "port": "profiles"
+      },
+      "to": {
+        "node": "profiles_measure",
+        "port": "profiles"
+      }
+    },
+    {
+      "id": "profiles-sliceInfo-profiles_measure-sliceInfo",
+      "from": {
+        "node": "profiles",
+        "port": "sliceInfo"
+      },
+      "to": {
+        "node": "profiles_measure",
+        "port": "sliceInfo"
+      }
+    },
+    {
+      "id": "profiles_measure-features-profiles_classify-features",
+      "from": {
+        "node": "profiles_measure",
+        "port": "features"
+      },
+      "to": {
+        "node": "profiles_classify",
+        "port": "features"
+      }
     }
   ],
   "params": {
@@ -364,12 +449,12 @@
     "aType": {
       "type": "string",
       "default": "left-most",
-      "binds": ["profiles.aType"]
+      "binds": ["profiles_measure.aType"]
     },
     "bType": {
       "type": "string",
       "default": "right-most",
-      "binds": ["profiles.bType"]
+      "binds": ["profiles_measure.bType"]
     },
     "profileDirection": {
       "type": "string",
@@ -379,7 +464,7 @@
     "attributeMode": {
       "type": "string",
       "default": "x-x",
-      "binds": ["profiles.attributeMode"]
+      "binds": ["profiles_measure.attributeMode"]
     }
   },
   "outputs": {
@@ -456,11 +541,11 @@
       "port": "quality"
     },
     "defects": {
-      "node": "defects",
+      "node": "defects_classify",
       "port": "defects"
     },
     "defectInstances": {
-      "node": "defects",
+      "node": "defects_classify",
       "port": "instances"
     },
     "defectMask": {
@@ -476,7 +561,7 @@
       "port": "overlay"
     },
     "features": {
-      "node": "profiles",
+      "node": "profiles_classify",
       "port": "features"
     },
     "profiles": {
@@ -484,11 +569,11 @@
       "port": "profiles"
     },
     "attributes": {
-      "node": "profiles",
+      "node": "profiles_measure",
       "port": "attributes"
     },
     "attributeValid": {
-      "node": "profiles",
+      "node": "profiles_measure",
       "port": "attributeValid"
     },
     "supports": {
@@ -512,7 +597,7 @@
       "port": "overlay"
     },
     "profilePlot": {
-      "node": "profiles",
+      "node": "profiles_measure",
       "port": "plot"
     }
   }

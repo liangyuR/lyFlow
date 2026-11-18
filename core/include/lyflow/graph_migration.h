@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -40,5 +42,24 @@ void requireEnabled(const nlohmann::json& node);
 void insertEdgeAdapter(nlohmann::json& level, const nlohmann::json& rule,
                        const std::string& adapterOp, const std::string& adapterPort,
                        nlohmann::json params);
+
+struct SplitPort {
+  std::string node;
+  std::string port;
+};
+using SplitRoutes = std::map<std::string, std::vector<SplitPort>>;
+
+void splitRuleKeys(const nlohmann::json& rule, std::initializer_list<const char*> names);
+const nlohmann::json& splitSource(const nlohmann::json& level, const nlohmann::json& rule,
+                                  const char* oldOp);
+nlohmann::json requireSplitMigration(const nlohmann::json&);
+bool inputConnected(const nlohmann::json& level, const std::string& node, const std::string& port);
+std::vector<const nlohmann::json*> parameterBindings(const nlohmann::json& level,
+                                                     const nlohmann::json* outer,
+                                                     const std::string& node,
+                                                     const std::string& param);
+void splitNode(nlohmann::json& level, nlohmann::json* outer, const std::string& nodeId,
+               nlohmann::json replacements, const SplitRoutes& inputs, const SplitRoutes& outputs,
+               const SplitRoutes& params, nlohmann::json links);
 } // namespace graph_migration
 } // namespace lyflow
