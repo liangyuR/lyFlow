@@ -1,6 +1,6 @@
 #pragma once
 // 测试用的小工具：拼 GraphDoc、跑一次 run、把事件收成数组。
-// 刻意不读任何数据文件，点云一律由 gen.synthetic 现生成（仓库不进二进制数据）。
+// 执行测试按需生成或注入点云。
 #include <atomic>
 #include <chrono>
 #include <filesystem>

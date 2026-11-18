@@ -4,9 +4,9 @@
 
 | 参考算子 | 核对的行为与风险 | LyFlow 入口 |
 | --- | --- | --- |
-| CalculateHeightByNeighborCloud | 四邻域、相对/绝对尺寸、点面/层高、最高邻域选择、原始/最大高度、organized与投影索引分支、工作空间裁剪；旧辅助路径还含均值/截距。图像投影会丢失同像素后方点，未支持时以零/负数表达失败，且外部对象pose使用顶面锚点。 | `cloud.neighbor_height`：直接在物体局部米制空间选择四邻域；显式同帧workspace体积；统一支持点面、轴向交点、顶层、均值、最远点、指定高度。每实例有效性与支持数独立输出。 |
+| CalculateHeightByNeighborCloud | 四邻域、相对/绝对尺寸、点面/层高、最高邻域选择、原始/最大高度、organized与投影索引分支、工作空间裁剪；旧辅助路径还含均值/截距。图像投影会丢失同像素后方点，未支持时以零/负数表达失败，且外部对象pose使用顶面锚点。 | `cloud.neighbor_height`：直接在物体局部米制空间选择四邻域；显式同帧workspace体积；统一支持点面、轴向交点、顶层、均值、最远点、指定高度。每实例有效性与支持数独立输出。`pose.apply_height` 按实例 ID 消费轴向高度并维持顶面。 |
 | CalculateTopLayerHeight | 云集合、顶层估计时可降采样、原云提取top/rest、organized输出用NaN占位、隐式世界/相机帧、无层负厚度sentinel。 | `cloud.top_layer`：标准原生分组，显式高度轴与原点；最高满足支持阈值的滑动高度窗；原索引保留采样来源，空/无支持为`valid=false`及`Measurement.ok=false`。 |
-| CloudBasedEmptyToteChecker | 检测对象为空且有限点数超过阈值时抛“存在未识别物体”；没有输出或有效观测证据。 | `cloud.empty_tote`：由宿主提供显式观测有效性，输出unknown/empty/occupied/unrecognized及布尔Value。 |
+| CloudBasedEmptyToteChecker | 检测对象为空且有限点数超过阈值时抛“存在未识别物体”；没有输出或有效观测证据。 | `cloud.tote_observation` 产出同一 ROI 的计数。`cloud.empty_tote` 结合宿主提供的显式观测有效性，输出unknown/empty/occupied/unrecognized及布尔Value。 |
 | CloudToGeometry | 多平面、可选空间聚类、投影最小面积矩形、栅格膨胀与最大占据矩形迭代分解、正向表面分位偏移、支撑点覆盖及组合几何碰撞去重。不是无限平面系数输出。 | `cloud.plane_patches`：固定种子RANSAC加TLS、凸包边方向最小面积外包矩形或占据内接矩形分解，可选距离/法线连通分组、占据覆盖率门控、正向残差分位偏移、已接受几何的支撑点联合覆盖去重，输出真实有限三维矩形体。 |
 | HeightExtraction | 仅正交f32深度；等深/三点平面/MLS曲面；无效深度替换与high/low/both映射。原曲面残差是轴向，平面残差是法向；原替换会丢失真实观察有效性。 | `image.height_extract`：显式正交物理标定，平面法向与局部加权多项式轴向高度；原始观测mask与替换值分离，输出原生f32米制高度和参考深度。 |
 

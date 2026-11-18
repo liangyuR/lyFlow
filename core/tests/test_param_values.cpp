@@ -11,7 +11,7 @@ namespace lyflow::test {
 namespace {
 
 Json showcaseGraph(const Json& params = Json::object()) {
-  return makeGraph({N{"src", "gen.synthetic", Json{{"pointCount", 500}}},
+  return makeGraph({N{"src", "test.make_cloud", Json{{"pointCount", 500}}},
                     N{"show", "test.param_showcase", params}},
                    {E{"src.cloud", "show.cloud"}});
 }
@@ -151,7 +151,7 @@ TEST_CASE("curve 进 cacheKey 与键的书写顺序无关；两种值都原样�
       showcaseGraph(Json{{"response", {{"points", {{0, 0}, {1, 0.5}}}, {"interp", "linear"}}}});
   const Json b = Json::parse(
       R"({"schemaVersion":1,"id":"01TESTTESTTESTTESTTESTTEST","nodes":[
-          {"id":"src","op":"gen.synthetic","params":{"pointCount":500}},
+          {"id":"src","op":"test.make_cloud","params":{"pointCount":500}},
           {"id":"show","op":"test.param_showcase","params":{"response":{"interp":"linear","points":[[0,0],[1,0.5]]}}}],
           "edges":[{"id":"e0","from":{"node":"src","port":"cloud"},"to":{"node":"show","port":"cloud"}}]})");
   const auto keyOf = [](const Json& doc) {

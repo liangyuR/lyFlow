@@ -1,6 +1,6 @@
 # 算子边界迁移计划
 
-状态：M1–M4d 已合并。[M5 Glue 拆分](#m5-glue-拆分)已实现，待合并。M6、M7 待实施。
+状态：M1–M5 已合并。[M6 标准算子职责拆分](#m6-标准算子职责拆分)已实现，待合并。M7 待实施。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
@@ -16,8 +16,9 @@
 | M4b   | 已合并：10项公共算子、原生来源绑定与旧Gap薄适配             | [PR66](https://github.com/liangyuR/lyFlow/pull/66)、[公共算子契约](profile-public-operators.md)                                             |
 | M4c   | 已合并：Gap原生场景、模板/模型、Bundle及显式图升级          | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移](gap-profile-migration.md)                                                 |
 | M4d   | 已合并 | [M4d 收敛切片](#m4d-收敛切片) |
-| M5    | 已实现，待合并 | [M5 切片及验证](#m5-glue-拆分)、[标定连线迁移](glue-integration.md#迁移旧标定连线) |
-| M6–M7 | 待实施 | [后续波次门槛](#波次与完成门槛) |
+| M5    | 已合并 | [M5 切片及验证](#m5-glue-拆分)、[标定连线迁移](glue-integration.md#迁移旧标定连线) |
+| M6    | 已实现，待合并 | [M6 切片与规则](#m6-标准算子职责拆分) |
+| M7    | 待实施 | [后续波次门槛](#波次与完成门槛) |
 
 M1 提升产品/ABI 至 1.4.0，此后各波次保持 1.4 系列 C ABI 布局。M2 交付公开静态 SDK（geometry/metrology 内核）。M3 交付公共 Profile 链与 solution-dts。M4a–M4c 交付稳健拟合公共核、公共 Profile 选点/拟合/度量节点及 solution-gap。版本号与 ABI 规则以 [发包契约](deployment/packaging.md) 为准。
 
@@ -133,12 +134,26 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 **归属整理。** 下列能力可以整节点交付。
 
-- `workspace.load` 归 `std-geometry`，同一工作空间的区域和双向变换一起返回。保留 JSON 与旧 YAML 输入，用[标记定位图](../examples/p3-marker-workspace.lyflow.json)验证 `toWorkspace` 的方向。
-- `image.yolo_decode`、`image.yolox_decode`、`image.ocr_orient`、`image.ocr_ctc_decode` 归 `std-ml`。保留公开 ID、模型布局、坐标回映与 OCR 字典语义。图像预处理、裁图仍归 `std-image`。用原有检测和 OCR 图验证跨包连线。
+- `workspace.load` 归 `std-geometry` 的 `workspace-io` 模块，同一工作空间的区域和双向变换一起返回。保留 JSON 与旧 YAML 输入，用[标记定位图](../examples/p3-marker-workspace.lyflow.json)验证 `toWorkspace` 的方向。
+- `image.yolo_decode`、`image.yolox_decode`、`image.ocr_orient`、`image.ocr_ctc_decode` 归 `std-ml`。保留公开 ID、模型布局、坐标回映与 OCR 字典语义。图像预处理与裁图由 `std-image` 提供。显式启用 `std-ml` 时即可使用解码；`ml-runtime` 模块提供 ONNX 推理，默认开发与正式组合均启用。用原有检测和 OCR 图验证跨包连线。
 - `gen.synthetic` 归 `std-pointcloud`。生成器使用方显式选择该包，纯 core 的用例改用明确输入。默认开发与正式组合仍提供原 ID。
 - `cloud.from_depth` 与 `cloud.to_depth_image` 已分别表达一个转换方向。`pose.project_3d` 与 `pose.project_to_plane` 在[投影图](../examples/p5-pose-project-plane.lyflow.json)中通过位姿、掩膜及其描述衔接。四项保留在 `std-image`，共享计算可以在包内整理。
 
 **旧图与交付。** 拆分切片同批迁移参数绑定、连线、图级输出和随包示例；升级契约并删除被替代的注册和实现。旧图由所属包提供 `lyflow migrate` 离线规则；遇到无法等价映射的输出，诊断指出具体端口与处理方式。仅更换注册包时保留 ID，更新包选择和清单。数值在拥有该行为的最低层验证，图级检查独立取用及重新组合。包选择或链接依赖发生变化时再验证对应构建配置，正式交付沿用[发包契约](deployment/packaging.md)。
+
+**旧标准算子图的迁移请求。** 将用到的规则写进同一个 JSON 请求，再运行 `lyflow migrate <图> --request <请求.json> --write`。每条规则的 `source.node` 填所选图内的旧节点 ID。子图定义可另加 `"scope": {"subgraph": "<定义 ID>"}`。
+
+```json
+{
+  "schemaVersion": 1,
+  "rules": [
+    {"kind": "neighborHeight.v1", "source": {"node": "relative"}},
+    {"kind": "emptyTote.v1", "source": {"node": "tote"}}
+  ]
+}
+```
+
+深度缺陷和轮廓分别用 `depth.defects.v1`、`depth.profile_slices.v1`。裁云或移除几何体用 `primitiveCrop.v1`，约束拟合用 `constrainedFit.v1`。约束拟合旧图如果读取 `aligned`，须接入要对齐的源云或删除该输出引用。邻域高度旧图固定 `source=original` 时迁成原尺寸观测。图参数若允许在测量与原尺寸间切换，迁移前需固定该选择或显式表达两条测量来源。
 
 ## 每次迁移的执行清单
 

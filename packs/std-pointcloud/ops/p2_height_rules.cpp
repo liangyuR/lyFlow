@@ -5,6 +5,7 @@
 #include <tuple>
 
 #include "p1_common.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/pose.h"
 
 namespace lyflow::ops {
@@ -313,68 +314,87 @@ void topLayer(Registry& r) {
 void neighborHeight(Registry& r) {
   auto op = descriptor("cloud.neighbor_height", "邻域支撑面高度估计",
                        "neighbor cloud support surface object height");
-  op.inputs = {{"cloud", "PointCloud", "场景点云", "", true},
+  op.inputs = {{"cloud", "PointCloud", "场景点云", "指定高度或原尺寸模式可省略", false},
                rec("instances", poses::kPoses3DType),
                rec("workspace", poses::kPose3DType, false)};
-  op.outputs = {rec("instances", poses::kPoses3DType), rec("heights", "cloud.NeighborHeights.v1")};
-  op.params = {
-      text("frame", "参考帧", "input"),
-      choice("method", "高度策略", "point_plane",
-             {{"point_plane", "点面距离"},
-              {"axis_intercept", "轴向平面交点"},
-              {"top_layer", "顶层"},
-              {"mean", "均值"},
-              {"farthest", "最远点"},
-              {"provided", "指定高度"}}),
-      choice("direction", "邻域方向", "all",
-             {{"all", "全部"},
-              {"top", "上"},
-              {"left", "左"},
-              {"bottom", "下"},
-              {"right", "右"},
-              {"except_bottom", "除下侧"}}),
-      choice("sizeMode", "邻域尺寸方式", "relative",
-             {{"relative", "相对尺寸"}, {"absolute", "绝对尺寸"}}),
-      number("length", "邻域长度", .1, 1e-9, 1e3, "m"),
-      number("width", "邻域宽度", .1, 1e-9, 1e3, "m"),
-      number("lengthRatio", "长度比例", 1, 1e-6, 100),
-      number("widthRatio", "宽度比例", 1, 1e-6, 100),
-      number("marginX", "横向内缩", 0, 0, 1e3, "m"),
-      number("marginY", "纵向内缩", 0, 0, 1e3, "m"),
-      number("minHeight", "最小相对高度", .001, 0, 1e3, "m"),
-      number("maxHeight", "最大相对高度", 10, 1e-9, 1e6, "m"),
-      number("layerThickness", "层厚", .02, 1e-9, 1e3, "m"),
-      integer("minPoints", "最小邻域支持点数", 20, 3, 1000000),
-      number("planeDistance", "平面距离", .005, 1e-9, 1e3, "m"),
-      number("minInlierRatio", "最小平面支持比例", .5, 0, 1),
-      number("maxPlaneAngle", "支撑面法向容差", 20, 0, 89.9, "deg"),
-      number("providedHeight", "指定高度", .1, 1e-9, 1e3, "m"),
-      choice("source", "尺寸更新策略", "measured",
-             {{"measured", "使用测量"}, {"original", "保留已有高度"}, {"maximum", "较大高度"}})};
+  op.version = "2.0.0";
+  op.migrations = {{1, graph_migration::requireSplitMigration, nullptr}};
+  op.outputs = {rec("heights", "cloud.NeighborHeights.v1")};
+  op.params = {text("frame", "参考帧", "input"),
+               choice("method", "高度策略", "point_plane",
+                      {{"point_plane", "点面距离"},
+                       {"axis_intercept", "轴向平面交点"},
+                       {"top_layer", "顶层"},
+                       {"mean", "均值"},
+                       {"farthest", "最远点"},
+                       {"provided", "指定高度"},
+                       {"original", "原尺寸高度"}}),
+               choice("direction", "邻域方向", "all",
+                      {{"all", "全部"},
+                       {"top", "上"},
+                       {"left", "左"},
+                       {"bottom", "下"},
+                       {"right", "右"},
+                       {"except_bottom", "除下侧"}}),
+               choice("sizeMode", "邻域尺寸方式", "relative",
+                      {{"relative", "相对尺寸"}, {"absolute", "绝对尺寸"}}),
+               number("length", "邻域长度", .1, 1e-9, 1e3, "m"),
+               number("width", "邻域宽度", .1, 1e-9, 1e3, "m"),
+               number("lengthRatio", "长度比例", 1, 1e-6, 100),
+               number("widthRatio", "宽度比例", 1, 1e-6, 100),
+               number("marginX", "横向内缩", 0, 0, 1e3, "m"),
+               number("marginY", "纵向内缩", 0, 0, 1e3, "m"),
+               number("minHeight", "最小相对高度", .001, 0, 1e3, "m"),
+               number("maxHeight", "最大相对高度", 10, 1e-9, 1e6, "m"),
+               number("layerThickness", "层厚", .02, 1e-9, 1e3, "m"),
+               integer("minPoints", "最小邻域支持点数", 20, 3, 1000000),
+               number("planeDistance", "平面距离", .005, 1e-9, 1e3, "m"),
+               number("minInlierRatio", "最小平面支持比例", .5, 0, 1),
+               number("maxPlaneAngle", "支撑面法向容差", 20, 0, 89.9, "deg"),
+               number("providedHeight", "指定高度", .1, 1e-9, 1e3, "m")};
   op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
-    const PointCloud* c;
-    auto s = cloudInput(in, p, c);
-    if (!s.ok)
-      return s;
+    const auto method = p.choice("method");
+    const bool measure = method != "original" && method != "provided";
+    const PointCloud* c = nullptr;
+    if (measure) {
+      if (!in.has("cloud"))
+        return error("邻域测量需要点云", "cloud");
+      if (auto s = cloudInput(in, p, c); !s.ok)
+        return s;
+    }
     Record poses, workspace;
-    s = poseInput(in, "instances", p.text("frame"), poses);
+    auto s = poseInput(in, "instances", p.text("frame"), poses);
     if (!s.ok)
       return s;
-    if (in.has("workspace")) {
+    if (measure && in.has("workspace")) {
       s = poseInput(in, "workspace", p.text("frame"), workspace);
       if (!s.ok || workspace.data["items"].size() != 1)
         return error("workspace必须为单个位姿", "workspace");
     }
     const auto count = poses.data["items"].size();
-    if (count > 256 || static_cast<std::uint64_t>(count) * c->pointCount() * 700 > kWork)
+    if (measure &&
+        (count > 256 || static_cast<std::uint64_t>(count) * c->pointCount() * 700 > kWork))
       return limit();
-    if (p.number("maxHeight") < p.number("minHeight"))
+    if (measure && p.number("maxHeight") < p.number("minHeight"))
       return error("高度区间反向", "maxHeight", "bad_param");
     Json items = Json::array();
     std::uint64_t work = 0;
-    for (auto& obj : poses.data["items"]) {
+    for (const auto& obj : poses.data["items"]) {
       if (ctx.cancelled())
         return Status::Ok();
+      if (!measure) {
+        const double height =
+            method == "original" ? obj["size"][2].get<double>() : p.number("providedHeight");
+        items.push_back({{"id", obj["id"]},
+                         {"valid", true},
+                         {"height", height},
+                         {"axisHeight", height},
+                         {"support", 0},
+                         {"rms", 0.0},
+                         {"direction", "provided"},
+                         {"reason", ""}});
+        continue;
+      }
       const Mat3 rot = rotation(obj);
       const Vec3 old = jvec(obj["size"]), top = jvec(obj["position"]) + rot.col(2) * old.z() * .5;
       const double w =
@@ -389,96 +409,78 @@ void neighborHeight(Registry& r) {
       std::size_t support = 0;
       std::string chosen;
       bool valid = false;
-      if (p.choice("source") == "original" || p.choice("method") == "provided") {
-        best = p.choice("source") == "original" ? old.z() : p.number("providedHeight");
-        axisHeight = best;
-        valid = true;
-        chosen = "provided";
-      } else
-        for (const std::string dir : {"top", "left", "bottom", "right"}) {
-          if (p.choice("direction") != "all" && p.choice("direction") != dir &&
-              !(p.choice("direction") == "except_bottom" && dir != "bottom"))
+      for (const std::string dir : {"top", "left", "bottom", "right"}) {
+        if (p.choice("direction") != "all" && p.choice("direction") != dir &&
+            !(p.choice("direction") == "except_bottom" && dir != "bottom"))
+          continue;
+        if (!charge(work, c->pointCount()))
+          return limit();
+        std::vector<double> depths;
+        PointCloud local;
+        for (std::size_t i = 0; i < c->pointCount(); ++i) {
+          if ((i & 8191) == 0 && ctx.cancelled())
+            return Status::Ok();
+          const Vec3 pt = point(*c, i);
+          if (in.has("workspace") && !inside(pt, workspace.data["items"][0]))
             continue;
-          if (!charge(work, c->pointCount()))
-            return limit();
-          Ids selected;
-          std::vector<double> depths;
-          PointCloud local;
-          for (std::size_t i = 0; i < c->pointCount(); ++i) {
-            if ((i & 8191) == 0 && ctx.cancelled())
-              return Status::Ok();
-            const Vec3 pt = point(*c, i);
-            if (in.has("workspace") && !inside(pt, workspace.data["items"][0]))
-              continue;
-            const Vec3 q = rot.transpose() * (pt - top);
-            const double depth = -q.z();
-            if (depth < p.number("minHeight") || depth > p.number("maxHeight"))
-              continue;
-            const double mx = p.number("marginX"), my = p.number("marginY");
-            bool hit = (dir == "top" && q.y() >= old.y() * .5 && q.y() <= old.y() * .5 + h &&
-                        std::abs(q.x()) <= w * .5 - mx) ||
-                       (dir == "bottom" && q.y() <= -old.y() * .5 && q.y() >= -old.y() * .5 - h &&
-                        std::abs(q.x()) <= w * .5 - mx) ||
-                       (dir == "left" && q.x() <= -old.x() * .5 && q.x() >= -old.x() * .5 - w &&
-                        std::abs(q.y()) <= h * .5 - my) ||
-                       (dir == "right" && q.x() >= old.x() * .5 && q.x() <= old.x() * .5 + w &&
-                        std::abs(q.y()) <= h * .5 - my);
-            if (hit) {
-              local.push(q.x(), q.y(), q.z());
-              depths.push_back(depth);
-            }
-          }
-          if (depths.size() < static_cast<std::size_t>(p.integer("minPoints")))
+          const Vec3 q = rot.transpose() * (pt - top);
+          const double depth = -q.z();
+          if (depth < p.number("minHeight") || depth > p.number("maxHeight"))
             continue;
-          double value = 0, axial = 0, quality = 0;
-          std::size_t n = depths.size();
-          const auto method = p.choice("method");
-          if (method == "point_plane" || method == "axis_intercept") {
-            Fit plane;
-            if (!fit(local, indices(local), p.number("planeDistance"), 128, plane, ctx, work)) {
-              if (work > kWork)
-                return limit();
-              continue;
-            }
-            if (plane.ids.size() < static_cast<std::size_t>(p.integer("minPoints")) ||
-                static_cast<double>(plane.ids.size()) / depths.size() <
-                    p.number("minInlierRatio") ||
-                std::abs(plane.normal.z()) < std::cos(p.number("maxPlaneAngle") * poses::kPi / 180))
-              continue;
-            axial = plane.d / plane.normal.z();
-            value = method == "point_plane" ? std::abs(plane.d) : axial;
-            quality = plane.rms;
-            n = plane.ids.size();
-          } else if (method == "top_layer") {
-            auto l = layer(depths, p.number("layerThickness"), p.integer("minPoints"), false);
-            if (!l.valid)
-              continue;
-            value = axial = l.height;
-            n = l.support;
-          } else if (method == "mean")
-            value = axial = std::accumulate(depths.begin(), depths.end(), 0.0) / depths.size();
-          else
-            value = axial = *std::max_element(depths.begin(), depths.end());
-          if (value < p.number("minHeight") || axial < p.number("minHeight") ||
-              axial > p.number("maxHeight"))
-            continue;
-          if (!valid || value > best) {
-            valid = true;
-            best = value;
-            axisHeight = axial;
-            rms = quality;
-            support = n;
-            chosen = dir;
+          const double mx = p.number("marginX"), my = p.number("marginY");
+          bool hit = (dir == "top" && q.y() >= old.y() * .5 && q.y() <= old.y() * .5 + h &&
+                      std::abs(q.x()) <= w * .5 - mx) ||
+                     (dir == "bottom" && q.y() <= -old.y() * .5 && q.y() >= -old.y() * .5 - h &&
+                      std::abs(q.x()) <= w * .5 - mx) ||
+                     (dir == "left" && q.x() <= -old.x() * .5 && q.x() >= -old.x() * .5 - w &&
+                      std::abs(q.y()) <= h * .5 - my) ||
+                     (dir == "right" && q.x() >= old.x() * .5 && q.x() <= old.x() * .5 + w &&
+                      std::abs(q.y()) <= h * .5 - my);
+          if (hit) {
+            local.push(q.x(), q.y(), q.z());
+            depths.push_back(depth);
           }
         }
-      if (valid) {
-        const double size =
-            p.choice("source") == "maximum" ? std::max(old.z(), axisHeight) : axisHeight;
-        const Vec3 center = top - rot.col(2) * size * .5;
-        if (!std::isfinite(size) || size <= 0 || !center.allFinite())
-          return error("工件高度更新后的尺寸或位置无效", "instances");
-        obj["size"][2] = size;
-        obj["position"] = array(center);
+        if (depths.size() < static_cast<std::size_t>(p.integer("minPoints")))
+          continue;
+        double value = 0, axial = 0, quality = 0;
+        std::size_t n = depths.size();
+        if (method == "point_plane" || method == "axis_intercept") {
+          Fit plane;
+          if (!fit(local, indices(local), p.number("planeDistance"), 128, plane, ctx, work)) {
+            if (work > kWork)
+              return limit();
+            continue;
+          }
+          if (plane.ids.size() < static_cast<std::size_t>(p.integer("minPoints")) ||
+              static_cast<double>(plane.ids.size()) / depths.size() < p.number("minInlierRatio") ||
+              std::abs(plane.normal.z()) < std::cos(p.number("maxPlaneAngle") * poses::kPi / 180))
+            continue;
+          axial = plane.d / plane.normal.z();
+          value = method == "point_plane" ? std::abs(plane.d) : axial;
+          quality = plane.rms;
+          n = plane.ids.size();
+        } else if (method == "top_layer") {
+          auto l = layer(depths, p.number("layerThickness"), p.integer("minPoints"), false);
+          if (!l.valid)
+            continue;
+          value = axial = l.height;
+          n = l.support;
+        } else if (method == "mean")
+          value = axial = std::accumulate(depths.begin(), depths.end(), 0.0) / depths.size();
+        else
+          value = axial = *std::max_element(depths.begin(), depths.end());
+        if (value < p.number("minHeight") || axial < p.number("minHeight") ||
+            axial > p.number("maxHeight"))
+          continue;
+        if (!valid || value > best) {
+          valid = true;
+          best = value;
+          axisHeight = axial;
+          rms = quality;
+          support = n;
+          chosen = dir;
+        }
       }
       items.push_back({{"id", obj["id"]},
                        {"valid", valid},
@@ -494,28 +496,83 @@ void neighborHeight(Registry& r) {
     Record heights{"cloud.NeighborHeights.v1",
                    {{"frame", p.text("frame")}, {"unit", "m"}, {"items", std::move(items)}}};
     std::string why;
-    if (!poses::validate(poses, why))
-      return error("更新后的工件位姿无效：" + why, "instances");
     if (!values::boundedJson(heights.data, why, true))
       return error("邻域高度结果超过有效记录边界：" + why, "instances", "resource_limit");
-    out.set("instances", Data::record(std::move(poses)));
     out.set("heights", Data::record(std::move(heights)));
     return Status::Ok();
   };
   r.addOperator(std::move(op));
 }
 
-void emptyTote(Registry& r) {
-  auto op = descriptor("cloud.empty_tote", "料箱观测状态判定",
-                       "empty tote unknown unrecognized obstacle observation");
+void applyHeight(Registry& r) {
+  auto op = descriptor("pose.apply_height", "按实例高度更新尺寸",
+                       "pose height size update preserve top face");
+  op.inputs = {rec("instances", poses::kPoses3DType), rec("heights", "cloud.NeighborHeights.v1")};
+  op.outputs = {rec("instances", poses::kPoses3DType)};
+  op.params = {
+      choice("source", "尺寸更新策略", "measured",
+             {{"measured", "使用测量"}, {"original", "保留已有高度"}, {"maximum", "较大高度"}})};
+  op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+    Record objects;
+    std::string why;
+    if (!poses::read3DList(in.get("instances"), objects, why))
+      return error("需要米制三维位姿：" + why, "instances");
+    const auto& heights = in.get("heights").asRecord()->data;
+    const auto items = heights.find("items");
+    if (!heights.is_object() || heights.value("frame", Json()) != objects.data["frame"] ||
+        heights.value("unit", "") != "m" || items == heights.end() || !items->is_array())
+      return error("需要与位姿列表同帧的米制高度观测", "heights");
+    std::map<std::string, double> byId;
+    for (const auto& item : *items) {
+      if (!item.is_object() || !item.contains("id") || !item["id"].is_string() ||
+          !item.contains("valid") || !item["valid"].is_boolean())
+        return error("高度观测需要实例 ID 和有效性", "heights");
+      double height = 0;
+      if (item["valid"] == true) {
+        const auto axis = item.find("axisHeight");
+        if (axis == item.end() || !axis->is_number() || !std::isfinite(axis->get<double>()))
+          return error("有效观测需要有限轴向高度", "heights");
+        height = axis->get<double>();
+      }
+      const auto id = item["id"].get<std::string>();
+      if (!byId.try_emplace(id, item["valid"] == true ? height
+                                                      : std::numeric_limits<double>::quiet_NaN())
+               .second)
+        return error("高度观测包含重复的实例 ID", "heights");
+    }
+    const auto source = p.choice("source");
+    for (auto& item : objects.data["items"]) {
+      if (ctx.cancelled())
+        return Status::Ok();
+      const auto result = byId.find(item["id"].get<std::string>());
+      if (source == "original" || result == byId.end() || std::isnan(result->second))
+        continue;
+      const double old = item["size"][2].get<double>();
+      const double size = source == "maximum" ? std::max(old, result->second) : result->second;
+      const Vec3 axis = rotation(item).col(2);
+      const Vec3 top = jvec(item["position"]) + axis * old * .5;
+      const Vec3 center = top - axis * size * .5;
+      if (!std::isfinite(size) || size <= 0 || !center.allFinite())
+        return error("工件高度更新后的尺寸或位置无效", "heights");
+      item["size"][2] = size;
+      item["position"] = array(center);
+    }
+    if (ctx.cancelled())
+      return Status::Ok();
+    out.set("instances", Data::record(std::move(objects)));
+    return Status::Ok();
+  };
+  r.addOperator(std::move(op));
+}
+
+void toteObservation(Registry& r) {
+  auto op = descriptor("cloud.tote_observation", "料箱区域观测统计",
+                       "tote observation point and recognized instance counts");
   op.inputs = {{"cloud", "PointCloud", "有效场景点云", "", true},
                rec("instances", poses::kPoses3DType),
-               rec("observation", values::kValueType),
                rec("roi", poses::kPose3DType, false)};
-  op.outputs = {rec("status", "cloud.EmptyTote.v1"), rec("valid", values::kValueType),
-                rec("empty", values::kValueType), rec("undetected", values::kValueType)};
-  op.params = {text("frame", "参考帧", "input"),
-               integer("maxUndetectedPoints", "允许的未识别点数", 100, 0, 1000000)};
+  op.outputs = {rec("counts", "cloud.ToteObservation.v1")};
+  op.params = {text("frame", "参考帧", "input")};
   op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
     const PointCloud* c;
     auto s = cloudInput(in, p, c);
@@ -530,12 +587,6 @@ void emptyTote(Registry& r) {
       if (!s.ok || roi.data["items"].size() != 1)
         return error("roi必须是单个位姿", "roi");
     }
-    const auto* obs = in.get("observation").asRecord();
-    std::string why;
-    if (!obs || !values::validate(*obs, why) || obs->type != values::kValueType ||
-        obs->data["kind"] != "boolean")
-      return error("observation必须是明确的boolean Value", "observation");
-    const bool valid = obs->data["value"].get<bool>();
     std::size_t n = 0, recognized = 0;
     for (std::size_t i = 0; i < c->pointCount(); ++i) {
       if ((i & 8191) == 0 && ctx.cancelled())
@@ -546,25 +597,128 @@ void emptyTote(Registry& r) {
     for (const auto& item : objects.data["items"])
       if (!in.has("roi") || inside(jvec(item["position"]), roi.data["items"][0]))
         ++recognized;
-    const std::string state = !valid       ? "unknown"
-                              : recognized ? "occupied"
-                              : n > static_cast<std::size_t>(p.integer("maxUndetectedPoints"))
+    if (ctx.cancelled())
+      return Status::Ok();
+    out.set("counts", Data::record({"cloud.ToteObservation.v1",
+                                    {{"frame", p.text("frame")},
+                                     {"observedPoints", n},
+                                     {"recognizedInstances", recognized}}}));
+    return Status::Ok();
+  };
+  r.addOperator(std::move(op));
+}
+
+void emptyTote(Registry& r) {
+  auto op = descriptor("cloud.empty_tote", "料箱观测状态判定",
+                       "empty tote unknown unrecognized obstacle observation");
+  op.version = "2.0.0";
+  op.migrations = {{1, graph_migration::requireSplitMigration, nullptr}};
+  op.inputs = {rec("counts", "cloud.ToteObservation.v1"), rec("observation", values::kValueType)};
+  op.outputs = {rec("status", "cloud.EmptyTote.v1"), rec("valid", values::kValueType),
+                rec("empty", values::kValueType), rec("undetected", values::kValueType)};
+  op.params = {integer("maxUndetectedPoints", "允许的未识别点数", 100, 0, 1000000)};
+  op.compute = [](const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+    const auto& counts = in.get("counts").asRecord()->data;
+    const auto frame = counts.find("frame"), observed = counts.find("observedPoints"),
+               recognized = counts.find("recognizedInstances");
+    const auto count = [&](const Json::const_iterator& field) {
+      return field != counts.end() &&
+             (field->is_number_unsigned() || (field->is_number_integer() && *field >= 0));
+    };
+    if (frame == counts.end() || !frame->is_string() || !count(observed) || !count(recognized))
+      return error("需要带参考帧的非负观测计数", "counts");
+    const auto* obs = in.get("observation").asRecord();
+    std::string why;
+    if (!values::validate(*obs, why) || obs->data["kind"] != "boolean")
+      return error("observation必须是明确的boolean Value", "observation");
+    const bool valid = obs->data["value"].get<bool>();
+    const std::string state = !valid                                  ? "unknown"
+                              : recognized->get<std::uint64_t>() != 0 ? "occupied"
+                              : observed->get<std::uint64_t>() >
+                                      static_cast<std::uint64_t>(p.integer("maxUndetectedPoints"))
                                   ? "unrecognized"
                                   : "empty";
     if (ctx.cancelled())
       return Status::Ok();
     out.set("status", Data::record({"cloud.EmptyTote.v1",
-                                    {{"frame", p.text("frame")},
+                                    {{"frame", *frame},
                                      {"valid", valid},
                                      {"state", state},
-                                     {"observedPoints", n},
-                                     {"recognizedInstances", recognized}}}));
+                                     {"observedPoints", *observed},
+                                     {"recognizedInstances", *recognized}}}));
     out.set("valid", Data::record(values::boolean(valid)));
     out.set("empty", Data::record(values::boolean(state == "empty")));
     out.set("undetected", Data::record(values::boolean(state == "unrecognized")));
     return Status::Ok();
   };
   r.addOperator(std::move(op));
+}
+
+Json splitLink(const std::string& from, const char* output, const std::string& to,
+               const char* input) {
+  return {{"from", {{"node", from}, {"port", output}}}, {"to", {{"node", to}, {"port", input}}}};
+}
+
+void migrateNeighborHeight(Json& level, const Json& rule, Json* outer) {
+  using namespace graph_migration;
+  splitRuleKeys(rule, {"kind", "source"});
+  const auto& old = splitSource(level, rule, "cloud.neighbor_height");
+  const auto id = graph_migration::text(old, "id");
+  const auto apply = id + "_apply";
+  const auto previous = old.value("params", Json::object());
+  const bool original = previous.value("source", "") == "original";
+  for (const auto* binding : parameterBindings(level, outer, id, "source")) {
+    const auto options = binding->value("options", Json::array());
+    require(
+        !options.empty() && binding->value("default", "") != "original" &&
+            std::none_of(options.begin(), options.end(),
+                         [](const auto& item) { return item.value("value", "") == "original"; }),
+        "节点 " + id +
+            " 的 source 绑定会在测量与原尺寸之间切换。请先固定 source，或从尺寸策略绑定中移除 original 并另设测量来源");
+  }
+  if (original)
+    require(parameterBindings(level, outer, id, "method").empty(),
+            "节点 " + id + " 固定使用原尺寸。请删除旧 method 的绑定后迁移");
+  SplitRoutes params{{"source", {{apply, "source"}}}};
+  for (const char* name :
+       {"frame", "method", "direction", "sizeMode", "length", "width", "lengthRatio", "widthRatio",
+        "marginX", "marginY", "minHeight", "maxHeight", "layerThickness", "minPoints",
+        "planeDistance", "minInlierRatio", "maxPlaneAngle", "providedHeight"})
+    params[name] = {{id, name}};
+  if (original)
+    params["method"].clear();
+  splitNode(level, outer, id,
+            Json::array({{{"id", id},
+                          {"op", "cloud.neighbor_height"},
+                          {"opVersion", "2.0.0"},
+                          {"params", original ? Json{{"method", "original"}} : Json::object()}},
+                         {{"id", apply}, {"op", "pose.apply_height"}, {"opVersion", "1.0.0"}}}),
+            {{"cloud", {{id, "cloud"}}},
+             {"workspace", {{id, "workspace"}}},
+             {"instances", {{id, "instances"}, {apply, "instances"}}}},
+            {{"heights", {{id, "heights"}}}, {"instances", {{apply, "instances"}}}}, params,
+            Json::array({splitLink(id, "heights", apply, "heights")}));
+}
+
+void migrateEmptyTote(Json& level, const Json& rule, Json* outer) {
+  using namespace graph_migration;
+  splitRuleKeys(rule, {"kind", "source"});
+  const auto id = graph_migration::text(splitSource(level, rule, "cloud.empty_tote"), "id");
+  const auto counts = id + "_counts";
+  splitNode(
+      level, outer, id,
+      Json::array({{{"id", counts}, {"op", "cloud.tote_observation"}, {"opVersion", "1.0.0"}},
+                   {{"id", id}, {"op", "cloud.empty_tote"}, {"opVersion", "2.0.0"}}}),
+      {{"cloud", {{counts, "cloud"}}},
+       {"instances", {{counts, "instances"}}},
+       {"roi", {{counts, "roi"}}},
+       {"observation", {{id, "observation"}}}},
+      {{"status", {{id, "status"}}},
+       {"valid", {{id, "valid"}}},
+       {"empty", {{id, "empty"}}},
+       {"undetected", {{id, "undetected"}}}},
+      {{"frame", {{counts, "frame"}}}, {"maxUndetectedPoints", {{id, "maxUndetectedPoints"}}}},
+      Json::array({splitLink(counts, "counts", id, "counts")}));
 }
 
 struct UV {
@@ -974,7 +1128,11 @@ void planePatches(Registry& r) {
 void registerP2HeightRules(Registry& r) {
   topLayer(r);
   neighborHeight(r);
+  applyHeight(r);
+  toteObservation(r);
   emptyTote(r);
+  r.addGraphMigration({"neighborHeight.v1", {}, migrateNeighborHeight});
+  r.addGraphMigration({"emptyTote.v1", {}, migrateEmptyTote});
   planePatches(r);
 }
 } // namespace lyflow::ops

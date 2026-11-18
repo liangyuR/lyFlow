@@ -8,6 +8,7 @@
 
 #include "helpers.h"
 #include "lyflow/cloud_groups.h"
+#include "lyflow/graph_migration.h"
 #include "lyflow/pose.h"
 #include "lyflow_cv/adapter.h"
 #include "../ops/p5_projection_common.h"
@@ -22,6 +23,13 @@ Registry inspectionRegistry() {
   Registry r;
   ops::registerP5Inspection(r);
   return r;
+}
+const Json& defectRegions(const test::OpCall& candidates) {
+  return candidates.outputs.at("candidates").asBundle()->field("regions")->asRecord()->data;
+}
+void connectSlices(test::OpCall& measure, const test::OpCall& slices) {
+  measure.inputs = {{"profiles", slices.outputs.at("profiles")},
+                    {"sliceInfo", slices.outputs.at("sliceInfo")}};
 }
 Data imageData(cv::Mat matrix) {
   Image out;
@@ -172,8 +180,11 @@ TEST_CASE(
   });
   f.assign(call);
   REQUIRE_MESSAGE(call.run("depth.defects").ok, call.status.message);
-  const auto& result = call.outputs.at("defects").asRecord()->data;
-  CHECK(result["state"] == "defect");
+  test::OpCall classify(registry);
+  classify.inputs["candidates"] = call.outputs.at("candidates");
+  const auto& result = defectRegions(call);
+  REQUIRE(classify.run("depth.classify_defects").ok);
+  CHECK(classify.outputs.at("defects").asRecord()->data["state"] == "defect");
   REQUIRE(result["items"].size() == 2);
   const auto& up = result["items"][0];
   const auto& down = result["items"][1];
@@ -187,20 +198,30 @@ TEST_CASE(
   CHECK(call.outputs.at("mask").asImage()->at(6, 6, 0) == 128);
   for (const char* mode : {"up", "down"}) {
     REQUIRE(call.run("depth.defects", {{"mode", Value::text(mode)}}).ok);
-    CHECK(call.outputs.at("defects").asRecord()->data["items"].size() == 1);
+    CHECK(defectRegions(call)["items"].size() == 1);
   }
-  REQUIRE(call.run("depth.defects", {{"lengthThreshold", Value::number(.004)},
-                                     {"widthThreshold", Value::number(.004)},
-                                     {"areaThreshold", Value::number(1e-4)},
-                                     {"volumeThreshold", Value::number(1e-5)}})
+  REQUIRE(classify
+              .run("depth.classify_defects", {{"lengthThreshold", Value::number(.004)},
+                                              {"widthThreshold", Value::number(.004)},
+                                              {"areaThreshold", Value::number(1e-4)},
+                                              {"volumeThreshold", Value::number(1e-5)}})
               .ok);
-  CHECK(call.outputs.at("defects").asRecord()->data["state"] == "clear");
-  REQUIRE(call.run("depth.defects", {{"checkLength", Value::boolean(false)},
-                                     {"checkWidth", Value::boolean(false)},
-                                     {"checkArea", Value::boolean(false)},
-                                     {"checkVolume", Value::boolean(false)}})
+  CHECK(classify.outputs.at("defects").asRecord()->data["state"] == "clear");
+  const auto& clear = classify.outputs.at("defects").asRecord()->data;
+  REQUIRE(clear["items"].size() == 2);
+  for (std::size_t i = 0; i < clear["items"].size(); ++i) {
+    auto item = clear["items"][i];
+    item.erase("defect");
+    item.erase("exceeded");
+    CHECK(item == result["items"][i]);
+  }
+  REQUIRE(classify
+              .run("depth.classify_defects", {{"checkLength", Value::boolean(false)},
+                                              {"checkWidth", Value::boolean(false)},
+                                              {"checkArea", Value::boolean(false)},
+                                              {"checkVolume", Value::boolean(false)}})
               .ok);
-  CHECK(call.outputs.at("defects").asRecord()->data["state"] == "clear");
+  CHECK(classify.outputs.at("defects").asRecord()->data["state"] == "clear");
 }
 TEST_CASE(
     "P5 defect coverage and closing never turn missing or zero residual pixels into measured defect volume") {
@@ -212,21 +233,32 @@ TEST_CASE(
                                      {"denoise", Value::boolean(true)},
                                      {"denoiseKernel", Value::integer(3)}})
               .ok);
-  const auto& result = call.outputs.at("defects").asRecord()->data;
+  const auto& result = defectRegions(call);
   REQUIRE(result["items"].size() == 1);
   CHECK(result["items"][0]["support"] == 2);
   CHECK(std::abs(result["items"][0]["area"].get<double>() - 2e-6) < 1e-12);
   CHECK(call.outputs.at("mask").asImage()->at(3, 3, 0) == 0);
+  REQUIRE(result["items"][0]["volume"].get<double>() == doctest::Approx(2e-6 * (1.002f - 1)));
+  test::OpCall classify(registry);
+  f.hole(3, 3);
+  f.assign(call);
+  REQUIRE(call.run("depth.defects").ok);
+  classify.inputs["candidates"] = call.outputs.at("candidates");
+  REQUIRE(classify.run("depth.classify_defects").ok);
+  CHECK(classify.outputs.at("defects").asRecord()->data["state"] == "defect");
+  CHECK(classify.outputs.at("defects").asRecord()->data["valid"] == false);
   Fixture missing;
   missing.hole(4, 4);
   missing.assign(call);
   REQUIRE(call.run("depth.defects").ok);
-  CHECK(call.outputs.at("defects").asRecord()->data["state"] == "unknown");
-  CHECK(call.outputs.at("defects").asRecord()->data["good"].is_null());
+  classify.inputs["candidates"] = call.outputs.at("candidates");
+  REQUIRE(classify.run("depth.classify_defects").ok);
+  CHECK(classify.outputs.at("defects").asRecord()->data["state"] == "unknown");
+  CHECK(classify.outputs.at("defects").asRecord()->data["good"].is_null());
   Fixture equality(3, 3, .001, [](int, int) { return double(1.002f); });
   equality.assign(call);
   REQUIRE(call.run("depth.defects", {{"distanceThreshold", Value::number(double(1.002f) - 1)}}).ok);
-  CHECK(call.outputs.at("defects").asRecord()->data["items"].empty());
+  CHECK(defectRegions(call)["items"].empty());
 }
 TEST_CASE(
     "P5 true mesh plane profiles have metric span heights identities and independent attributes") {
@@ -234,16 +266,21 @@ TEST_CASE(
   test::OpCall call(registry);
   Fixture f(9, 9, .001, [](int x, int) { return 1. + x * .0002; });
   f.assign(call);
-  const std::unordered_map<std::string, Value> params{{"sliceCount", Value::integer(3)},
-                                                      {"aType", Value::text("left-most")},
+  const std::unordered_map<std::string, Value> params{{"aType", Value::text("left-most")},
                                                       {"bType", Value::text("right-most")},
                                                       {"aWidth", Value::number(1)},
                                                       {"bWidth", Value::number(1)}};
-  REQUIRE_MESSAGE(call.run("depth.profile_slices", params).ok, call.status.message);
-  const auto& features = call.outputs.at("features").asRecord()->data;
+  REQUIRE_MESSAGE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(3)}}).ok,
+                  call.status.message);
+  test::OpCall measure(registry), classify(registry);
+  connectSlices(measure, call);
+  REQUIRE_MESSAGE(measure.run("depth.measure_profile_features", params).ok, measure.status.message);
+  classify.inputs["features"] = measure.outputs.at("features");
+  REQUIRE(classify.run("depth.classify_profile_features").ok);
+  const auto& features = classify.outputs.at("features").asRecord()->data;
   CHECK(features["state"] == "good");
   REQUIRE(features["items"].size() == 3);
-  const auto* attribute = call.outputs.at("attributes").asTensor();
+  const auto* attribute = measure.outputs.at("attributes").asTensor();
   REQUIRE(attribute);
   for (float value : attribute->data)
     CHECK(std::abs(value - .008) < 1e-7);
@@ -269,66 +306,140 @@ TEST_CASE(
   CHECK(points->id != f.cloud.id);
   auto changed = params;
   changed["attributeMode"] = Value::text("y-y");
-  REQUIRE(call.run("depth.profile_slices", changed).ok);
-  for (float value : call.outputs.at("attributes").asTensor()->data)
+  test::OpCall independent(registry);
+  connectSlices(independent, call);
+  REQUIRE(independent.run("depth.measure_profile_features", changed).ok);
+  for (float value : independent.outputs.at("attributes").asTensor()->data)
     CHECK(std::abs(value - .0016) < 1e-7);
+  REQUIRE(classify.run("depth.classify_profile_features", {{"max", Value::number(.007)}}).ok);
+  CHECK(classify.outputs.at("features").asRecord()->data["state"] == "ng");
 }
 TEST_CASE("P5 profile feature modes and both region axes operate on real linked intersections") {
   auto registry = inspectionRegistry();
-  test::OpCall call(registry);
+  test::OpCall call(registry), measure(registry);
   Fixture f(9, 9, .001, [](int x, int y) { return 1. + x * .0002 + y * .0003; });
   f.assign(call);
+  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(1)}}).ok);
+  connectSlices(measure, call);
   for (const char* type : {"top", "bottom", "left-most", "right-most", "left-right-inflection",
                            "right-left-inflection"}) {
-    REQUIRE_MESSAGE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(1)},
-                                                      {"aType", Value::text(type)},
-                                                      {"bType", Value::text("bottom")},
-                                                      {"aWidth", Value::number(1)},
-                                                      {"bWidth", Value::number(1)}})
+    REQUIRE_MESSAGE(measure
+                        .run("depth.measure_profile_features", {{"aType", Value::text(type)},
+                                                                {"bType", Value::text("bottom")},
+                                                                {"aWidth", Value::number(1)},
+                                                                {"bWidth", Value::number(1)}})
                         .ok,
-                    call.status.message);
-    const auto& point = call.outputs.at("features").asRecord()->data["items"][0]["a"];
+                    measure.status.message);
+    const auto& point = measure.outputs.at("features").asRecord()->data["items"][0]["a"];
     CHECK(point["valid"] == true);
     const bool right = std::string(type) == "top" || std::string(type) == "right-most" ||
                        std::string(type) == "right-left-inflection";
     CHECK(std::abs(point["x"].get<double>() - (right ? .004 : -.004)) < 1e-7);
   }
-  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(1)},
-                                            {"direction", Value::text("y")},
-                                            {"attributeMode", Value::text("y-y")},
-                                            {"aType", Value::text("top")},
-                                            {"bType", Value::text("bottom")},
-                                            {"aWidth", Value::number(1)},
-                                            {"bWidth", Value::number(1)}})
+  REQUIRE(call.run("depth.profile_slices",
+                   {{"sliceCount", Value::integer(1)}, {"direction", Value::text("y")}})
               .ok);
-  CHECK(std::abs(call.outputs.at("attributes").asTensor()->data[0] - .0024) < 1e-7);
+  connectSlices(measure, call);
+  REQUIRE(measure
+              .run("depth.measure_profile_features", {{"attributeMode", Value::text("y-y")},
+                                                      {"aType", Value::text("top")},
+                                                      {"bType", Value::text("bottom")},
+                                                      {"aWidth", Value::number(1)},
+                                                      {"bWidth", Value::number(1)}})
+              .ok);
+  CHECK(std::abs(measure.outputs.at("attributes").asTensor()->data[0] - .0024) < 1e-7);
   call.inputs["region"] =
       Data::record(poses::make2D("roi", "image", "px", {4, 4}, poses::kPi / 4, {4, 4}));
-  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(2)},
-                                            {"aType", Value::text("left-most")},
-                                            {"bType", Value::text("right-most")},
-                                            {"aWidth", Value::number(1)},
-                                            {"bWidth", Value::number(1)}})
+  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(2)}}).ok);
+  connectSlices(measure, call);
+  REQUIRE(measure
+              .run("depth.measure_profile_features", {{"aType", Value::text("left-most")},
+                                                      {"bType", Value::text("right-most")},
+                                                      {"aWidth", Value::number(1)},
+                                                      {"bWidth", Value::number(1)}})
               .ok);
-  CHECK(call.outputs.at("features").asRecord()->data["validCount"] == 2);
+  CHECK(measure.outputs.at("features").asRecord()->data["validCount"] == 2);
 }
 TEST_CASE("P5 profile holes remain separate chains and flat missing features remain unknown") {
   auto registry = inspectionRegistry();
-  test::OpCall call(registry);
+  test::OpCall call(registry), measure(registry), classify(registry);
   Fixture f(9, 9, .001, [](int x, int) { return x < 4 ? 1. : 1.01; });
   for (int y = 0; y < 9; ++y)
     f.hole(4, y);
   f.assign(call);
-  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(1)},
-                                            {"aWidth", Value::number(1)},
-                                            {"bWidth", Value::number(1)}})
-              .ok);
-  const auto& features = call.outputs.at("features").asRecord()->data;
+  const std::unordered_map<std::string, Value> params{{"aWidth", Value::number(1)},
+                                                      {"bWidth", Value::number(1)}};
+  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(1)}}).ok);
+  connectSlices(measure, call);
+  REQUIRE(measure.run("depth.measure_profile_features", params).ok);
+  classify.inputs["features"] = measure.outputs.at("features");
+  REQUIRE(classify.run("depth.classify_profile_features").ok);
+  const auto& features = classify.outputs.at("features").asRecord()->data;
   CHECK(features["state"] == "unknown");
   CHECK(features["good"].is_null());
   CHECK(features["items"][0]["chainCount"] == 2);
-  CHECK(call.outputs.at("attributeValid").asTensor()->data[0] == 0);
+  CHECK(measure.outputs.at("attributeValid").asTensor()->data[0] == 0);
+
+  Fixture partial(9, 9, .001, [](int x, int y) { return y < 4 ? 1. : 1. + x * .0002; });
+  partial.assign(call);
+  REQUIRE(call.run("depth.profile_slices", {{"sliceCount", Value::integer(2)}}).ok);
+  connectSlices(measure, call);
+  REQUIRE(measure.run("depth.measure_profile_features", params).ok);
+  CHECK(measure.outputs.at("attributeValid").asTensor()->data == std::vector<float>{0.f, 1.f});
+  classify.inputs["features"] = measure.outputs.at("features");
+  REQUIRE(classify.run("depth.classify_profile_features").ok);
+  CHECK(classify.outputs.at("features").asRecord()->data["state"] == "unknown");
+  REQUIRE(classify.run("depth.classify_profile_features", {{"max", Value::number(0)}}).ok);
+  CHECK(classify.outputs.at("features").asRecord()->data["state"] == "ng");
 }
+
+TEST_CASE("旧深度图离线拆分后保留量测、范围绑定和原图输出") {
+  const auto registry = inspectionRegistry();
+  auto old = test::makeGraph(
+      {{"defects", "depth.defects", {{"minCoverage", .99}}},
+       {"profiles", "depth.profile_slices", {{"sliceCount", 2}, {"aWidth", 1}, {"bWidth", 1}}},
+       {"report", "util.reroute"}},
+      {{"profiles.attributes", "report.in"}});
+  old["params"] = {
+      {"maximum", {{"type", "float"}, {"default", 1}, {"binds", {"profiles.max"}}}},
+      {"limit", {{"type", "float"}, {"default", 1}, {"binds", {"defects.lengthThreshold"}}}}};
+  old["outputs"] = {{"defects", {{"node", "defects"}, {"port", "defects"}}},
+                    {"features", {{"node", "profiles"}, {"port", "features"}}},
+                    {"profilePlot", {{"node", "profiles"}, {"port", "plot"}}},
+                    {"points", {{"node", "profiles"}, {"port", "profiles"}}}};
+  const Json request{{"schemaVersion", 1},
+                     {"rules",
+                      {{{"kind", "depth.defects.v1"}, {"source", {{"node", "defects"}}}},
+                       {{"kind", "depth.profile_slices.v1"}, {"source", {{"node", "profiles"}}}}}}};
+  Json graph;
+  GraphMigrationError error;
+  REQUIRE_MESSAGE(migrateGraph(registry, old, request, graph, error), error.message);
+  CHECK(graph["params"]["maximum"]["binds"] == Json::array({"profiles_classify.max"}));
+  CHECK(graph["params"]["limit"]["binds"] == Json::array({"defects_classify.lengthThreshold"}));
+  CHECK(graph["outputs"]["defects"]["node"] == "defects_classify");
+  CHECK(graph["outputs"]["features"]["node"] == "profiles_classify");
+  CHECK(graph["outputs"]["profilePlot"]["node"] == "profiles_measure");
+  CHECK(graph["outputs"]["points"]["node"] == "profiles");
+  bool routed = false;
+  for (const auto& link : graph["edges"])
+    if (link["to"] == Json{{"node", "report"}, {"port", "in"}})
+      routed = link["from"] == Json{{"node", "profiles_measure"}, {"port", "attributes"}};
+  CHECK(routed);
+
+  Fixture fixture(9, 9, .001, [](int x, int) { return 1. + x * .0002; });
+  test::OpCall input(registry);
+  fixture.assign(input);
+  std::vector<exec::InjectedInput> injected;
+  for (const auto* node : {"defects", "profiles"})
+    for (const auto& [port, value] : input.inputs)
+      injected.push_back({node, port, value});
+  test::Session session(graph, {}, {}, false, 0, false, std::move(injected));
+  const auto& events = session.wait();
+  CHECK(events.finalState("defects_classify") == "done");
+  CHECK(events.finalState("profiles_classify") == "done");
+  CHECK(events.finalState("report") == "done");
+}
+
 TEST_CASE(
     "P5 camera calibrated conic circles retain two positive depth solutions and the true tilted circle") {
   auto registry = inspectionRegistry();
@@ -507,7 +618,7 @@ TEST_CASE("P5 perspective hole fill and plane defects use calibrated meter cell 
   CHECK(std::abs(cloud->xyz[cloud->xyz.size() - 3]) < 1e-9);
   CHECK(std::abs(cloud->xyz[cloud->xyz.size() - 2]) < 1e-9);
   REQUIRE(call.run("depth.defects", {{"planeFrame", Value::text("camera")}}).ok);
-  const auto& items = call.outputs.at("defects").asRecord()->data["items"];
+  const auto& items = defectRegions(call)["items"];
   REQUIRE(items.size() == 1);
   const double observedArea = double(1.02f) * double(1.02f) / 14400;
   CHECK(std::abs(items[0]["area"].get<double>() - observedArea) < 1e-12);
@@ -539,7 +650,7 @@ TEST_CASE(
     }
     REQUIRE_MESSAGE(call.run("depth.defects", {{"planeFrame", Value::text("camera")}}).ok,
                     call.status.message);
-    const auto& result = call.outputs.at("defects").asRecord()->data;
+    const auto& result = defectRegions(call);
     REQUIRE(result["items"].size() == 1);
     const double area = 9 * 4. / 10000 * (tilted ? .8 : 1.);
     CHECK(std::abs(result["items"][0]["area"].get<double>() - area) < 1e-12);
@@ -614,14 +725,18 @@ TEST_CASE(
     f.cloud.xyz[1] = static_cast<float>(translation);
     test::OpCall call(registry);
     f.assign(call);
-    REQUIRE_MESSAGE(call.run("depth.defects", {{"mode", Value::text("up")},
-                                               {"lengthThreshold", Value::number(.0001)},
-                                               {"checkWidth", Value::boolean(false)},
-                                               {"checkArea", Value::boolean(false)},
-                                               {"checkVolume", Value::boolean(false)}})
-                        .ok,
+    REQUIRE_MESSAGE(call.run("depth.defects", {{"mode", Value::text("up")}}).ok,
                     call.status.message);
-    const auto& result = call.outputs.at("defects").asRecord()->data;
+    test::OpCall classify(registry);
+    classify.inputs["candidates"] = call.outputs.at("candidates");
+    REQUIRE_MESSAGE(classify
+                        .run("depth.classify_defects", {{"lengthThreshold", Value::number(.0001)},
+                                                        {"checkWidth", Value::boolean(false)},
+                                                        {"checkArea", Value::boolean(false)},
+                                                        {"checkVolume", Value::boolean(false)}})
+                        .ok,
+                    classify.status.message);
+    const auto& result = classify.outputs.at("defects").asRecord()->data;
     CHECK(result.at("state") == "defect");
     CHECK(result.at("good") == false);
     REQUIRE(result.at("items").size() == 1);
@@ -632,7 +747,7 @@ TEST_CASE(
     CHECK(item.at("volume").get<double>() == doctest::Approx(step * step * .125).epsilon(1e-10));
     CHECK(item.at("defect") == true);
     CHECK(item.at("exceeded") == Json::array({"lengthThreshold"}));
-    const auto& instances = call.outputs.at("instances").asRecord()->data.at("items");
+    const auto& instances = classify.outputs.at("instances").asRecord()->data.at("items");
     REQUIRE(instances.size() == 1);
     const auto& pose = instances[0];
     CHECK(pose.at("position")[0].get<double>() == doctest::Approx(translation).epsilon(1e-12));

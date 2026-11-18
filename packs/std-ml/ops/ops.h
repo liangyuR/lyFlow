@@ -6,5 +6,8 @@
 namespace lyflow::ops {
 
 void registerMlOnnxRun(Registry& r);
+void registerYoloDecode(Registry& r);
+void registerYoloxDecode(Registry& r);
+void registerOcrDecode(Registry& r);
 
 } // namespace lyflow::ops

@@ -16,16 +16,31 @@ fn python_cli_and_embedded_execute_identical_graph_and_refresh_without_touching_
     assert!(core.supports_python());
     let executable = std::env::var("LYFLOW_TEST_PYTHON").unwrap_or_else(|_| "python".into());
     let signature_file = root.join("signature.py");
-    std::fs::write(&signature_file, "from lyflow_python import node, Record\nimport hashlib\n@node(id='py.test.signature', version='1.0.0', label='Signature', inputs={'cloud':'PointCloud'}, outputs={'signature':'Record'})\ndef signature(inputs, params, ctx):\n    return {'signature': Record({'sha256':hashlib.sha256(inputs['cloud'].xyz.tobytes()).hexdigest()})}\n").unwrap();
+    std::fs::write(&signature_file, r#"import hashlib
+import numpy as np
+from lyflow_python import node, PointCloud, Record
+
+@node(id='py.test.fixture_cloud', version='1.0.0', label='Fixture cloud',
+      outputs={'cloud':'PointCloud'})
+def fixture(inputs, params, ctx):
+    xyz = np.arange(3000, dtype=np.float32).reshape((1000, 3))
+    intensity = np.arange(1000, dtype=np.float32)
+    return {'cloud': PointCloud(xyz, intensity)}
+
+@node(id='py.test.signature', version='1.0.0', label='Signature',
+      inputs={'cloud':'PointCloud'}, outputs={'signature':'Record'})
+def signature(inputs, params, ctx):
+    return {'signature': Record({'sha256':hashlib.sha256(inputs['cloud'].xyz.tobytes()).hexdigest()})}
+"#).unwrap();
     let config = json!({ "executable": executable,
         "packagePaths": [source.join("python/examples/offset.py"), signature_file],
         "timeoutMs": 60000, "sdkDir": source.join("python") });
     let status: Value =
         serde_json::from_str(&core.configure_python(&config.to_string()).unwrap()).unwrap();
     assert_eq!(status["ready"], true, "{status}");
-    assert_eq!(status["operatorCount"], 2);
+    assert_eq!(status["operatorCount"], 3);
     let graph = json!({"schemaVersion":1,"id":"01J8XQZ4K7N3M2R5V8W1YB6DC1","name":"Python parity",
-        "nodes":[{"id":"source","op":"gen.synthetic","params":{"pointCount":1000,"seed":42,"withIntensity":true}},
+        "nodes":[{"id":"source","op":"py.test.fixture_cloud","params":{}},
                  {"id":"offset","op":"py.example.offset","opVersion":"1.0.0","params":{"offset":0.25}},
                  {"id":"signature","op":"py.test.signature","params":{}}],
         "edges":[{"id":"edge","from":{"node":"source","port":"cloud"},"to":{"node":"offset","port":"cloud"}},
@@ -143,7 +158,7 @@ fn python_cli_and_embedded_execute_identical_graph_and_refresh_without_touching_
         .as_array()
         .unwrap()
         .iter()
-        .any(|op| op["id"] == "gen.synthetic"));
+        .any(|op| op["id"] == "util.reroute"));
     assert!(!manifest["operators"]
         .as_array()
         .unwrap()

@@ -8,54 +8,15 @@
 #include "lyflow/data.h"
 #include "lyflow/manifest.h"
 #include "lyflow/operator.h"
+#include "lyflow/op_params.h"
 #include "lyflow_cv/adapter.h"
 
 namespace lyflow::ops::img {
 
-inline Param intParam(const char* name, const char* label, std::int64_t def, double min, double max,
-                      const char* doc) {
-  Param p;
-  p.name = name;
-  p.type = ParamType::Int;
-  p.label = label;
-  p.doc = doc;
-  p.def = Value::integer(def);
-  p.min = min;
-  p.max = max;
-  return p;
-}
-
-inline Param floatParam(const char* name, const char* label, double def, const char* doc) {
-  Param p;
-  p.name = name;
-  p.type = ParamType::Float;
-  p.label = label;
-  p.doc = doc;
-  p.def = Value::number(def);
-  return p;
-}
-
-inline Param boolParam(const char* name, const char* label, bool def, const char* doc) {
-  Param p;
-  p.name = name;
-  p.type = ParamType::Bool;
-  p.label = label;
-  p.doc = doc;
-  p.def = Value::boolean(def);
-  return p;
-}
-
-inline Param enumParam(const char* name, const char* label, const char* def,
-                       std::initializer_list<EnumOption> options, const char* doc) {
-  Param p;
-  p.name = name;
-  p.type = ParamType::Enum;
-  p.label = label;
-  p.doc = doc;
-  p.def = Value::text(def);
-  p.options = options;
-  return p;
-}
+using op_params::boolParam;
+using op_params::enumParam;
+using op_params::floatParam;
+using op_params::intParam;
 
 /// 位深下拉：u8 / u16 / f32。
 inline Param depthParam(const char* name, const char* label, const char* def, const char* doc) {
@@ -87,13 +48,8 @@ inline Port grayIn(const char* name = "image",
                       nlohmann::json{{"shape", {-1, -1, 1}}});
 }
 
-inline Status badInput(const std::string& message, const char* port = "image") {
-  return Status::Error(Phase::Execute, "bad_input", message, {}, port);
-}
-
-inline Status badParam(const std::string& message, const char* param) {
-  return Status::Error(Phase::Execute, "bad_param", message, param);
-}
+using op_params::badInput;
+using op_params::badParam;
 
 /// OpenCV 的结果写到输出端口。位深 / 通道不被 core 接受时报 internal —— 那是算子自己的 bug。
 inline Status putMat(Outputs& outputs, const char* port, cv::Mat m) {

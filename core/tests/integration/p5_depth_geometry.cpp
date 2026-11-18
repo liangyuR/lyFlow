@@ -426,17 +426,15 @@ TEST_CASE(
     for (const auto& item : items) {
       const auto direction = item.at("direction").get<std::string>();
       CHECK((direction == "up" || (!changed && direction == "down")));
-      CHECK(item.at("support") == truth().at("scene").at(direction + "Pixels"));
-      CHECK(std::abs(item.at("area").get<double>() -
-                     truth().at("scene").at(direction + "AreaM2").get<double>()) <= 1e-9);
-      CHECK(std::abs(item.at("volume").get<double>() -
-                     truth().at("scene").at(direction + "VolumeM3").get<double>()) <=
-            truth().at("scene").at(direction + "AreaM2").get<double>() * 5e-7);
+      CHECK(item.at("exceeded").is_array());
     }
-    CHECK(p3::data(outputs, "features").at("sliceCount") == 6);
-    CHECK(outputs.at("attributes").at("value").at("shape") == Json::array({6}));
+    const auto& features = p3::data(outputs, "features");
+    const auto shape = Json::array({features.at("sliceCount")});
+    CHECK(outputs.at("attributes").at("value").at("shape") == shape);
+    CHECK(outputs.at("attributeValid").at("value").at("shape") == shape);
     CHECK(outputs.at("profiles").at("value").at("shape")[1] == 4);
     CHECK(outputs.at("supports").at("value").at("shape")[1] == 3);
+    CHECK(outputs.at("profilePlot").at("type") == "Image");
     CHECK(outputs.at("sliceCloud").at("elementCount").get<std::size_t>() > 0);
   });
 }

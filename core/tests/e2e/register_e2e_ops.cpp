@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "cloud_test_op.h"
 #include "image_test_op.h"
 #include "param_showcase_op.h"
 #include "stall_test_op.h"
@@ -15,6 +16,7 @@ void registerE2eOps(Registry& r) {
   const char* flag = std::getenv("LYFLOW_TEST_OPS");
   if (flag == nullptr || std::strcmp(flag, "1") != 0)
     return;
+  registerCloudTestOp(r);
   registerParamShowcase(r);
   registerImageTestOps(r);
   registerStallTestOp(r);

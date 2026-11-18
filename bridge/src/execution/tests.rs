@@ -840,26 +840,34 @@ fn encode_image_frame_matches_the_documented_layout() {
     assert!(input(0).pixels_ptr().is_null());
 }
 
+fn run_with_cloud_fixture(test_name: &str) -> bool {
+    if std::env::var("LYFLOW_TEST_OPS").as_deref() == Ok("1") {
+        return true;
+    }
+    let module = module_path!().split_once("::").unwrap().1;
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &format!("{module}::{test_name}")])
+        .env("LYFLOW_TEST_OPS", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    false
+}
+
 #[test]
 fn cancel_stops_a_heavy_run_and_joins_within_a_second() {
-    // 20 个节点、每个都要处理三百万点：不取消的话要跑好几秒。
-    let mut nodes = vec![serde_json::json!(
-        {"id": "n0", "op": "gen.synthetic", "params": {"pointCount": 3000000}}
-    )];
-    let mut edges = Vec::new();
-    for i in 1..20 {
-        nodes.push(serde_json::json!(
-            {"id": format!("n{i}"), "op": "filter.voxel_grid",
-             "params": {"leafSize": [0.001, 0.001, 0.001]}}
-        ));
-        edges.push(serde_json::json!({
-            "id": format!("e{i}"),
-            "from": {"node": format!("n{}", i - 1), "port": "cloud"},
-            "to": {"node": format!("n{i}"), "port": "cloud"}
-        }));
+    if !run_with_cloud_fixture("cancel_stops_a_heavy_run_and_joins_within_a_second") {
+        return;
     }
     let doc = serde_json::json!({
-        "schemaVersion": 1, "id": "t", "nodes": nodes, "edges": edges
+        "schemaVersion": 1, "id": "t",
+        "nodes": [{"id": "n0", "op": "test.make_cloud", "params": {"pointCount": 3000000}}],
+        "edges": []
     });
 
     let started = Instant::now();
@@ -988,8 +996,22 @@ fn isolate_reruns_only_that_node_over_the_abi() {
 /// R5：预览与 isolate 不组合，core 报参数错误。
 #[test]
 fn isolate_is_refused_before_running_anything() {
+    if !run_with_cloud_fixture("isolate_is_refused_before_running_anything") {
+        return;
+    }
+    let graph = |seed| {
+        serde_json::json!({
+            "schemaVersion": 1, "id": "isolate",
+            "nodes": [
+                {"id": "g", "op": "test.make_cloud", "params": {"seed": seed}},
+                {"id": "v", "op": "util.reroute"}
+            ],
+            "edges": [{"id": "e", "from": {"node": "g", "port": "cloud"},
+                       "to": {"node": "v", "port": "in"}}]
+        })
+    };
     let isolate = vec!["v".to_string()];
-    let f = run_spec(two_node_graph(7302), "", &isolate, &[], 0, |_| {});
+    let f = run_spec(graph(7302), "", &isolate, &[], 0, |_| {});
     assert_eq!(f.run_status(), "error");
     let finished = f.kind("run_finished")[0].clone();
     assert_eq!(
@@ -1008,7 +1030,7 @@ fn isolate_is_refused_before_running_anything() {
         f.events
     );
 
-    let preview = run_spec(two_node_graph(7303), "", &isolate, &[], 1, |_| {});
+    let preview = run_spec(graph(7303), "", &isolate, &[], 1, |_| {});
     assert_eq!(preview.run_status(), "error");
     assert_eq!(
         preview.kind("run_finished")[0]["error"]["code"],
@@ -1070,9 +1092,12 @@ fn run_to_node_attaches_unplanned_downstream() {
 /// 与 default 不同的值真的进了 compute；越过图参数自己硬限位的值整次失败、一个节点都不跑。
 #[test]
 fn graph_param_values_reach_the_core_through_params_json() {
+    if !run_with_cloud_fixture("graph_param_values_reach_the_core_through_params_json") {
+        return;
+    }
     let doc = serde_json::json!({
         "schemaVersion": 1, "id": "t",
-        "nodes": [{"id": "g", "op": "gen.synthetic", "params": {"seed": 7305}}],
+        "nodes": [{"id": "g", "op": "test.make_cloud", "params": {"seed": 7305}}],
         "edges": [],
         "params": {"count": {"type": "int", "min": 10, "max": 5000, "default": 3000,
                              "binds": ["g.pointCount"]}}

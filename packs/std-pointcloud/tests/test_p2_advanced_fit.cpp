@@ -8,9 +8,11 @@
 #include "../ops/p1_common.h"
 #include "lyflow/pose.h"
 #include "lyflow/kernel/constraints.h"
+#include "lyflow/graph_migration.h"
 
 namespace lyflow::ops {
 void registerAdvancedFit3D(Registry&);
+void registerTransformApply(Registry&);
 }
 
 namespace {
@@ -22,6 +24,7 @@ const Registry& advancedRegistry() {
   static Registry registry;
   static const bool initialized = [] {
     ops::registerAdvancedFit3D(registry);
+    ops::registerTransformApply(registry);
     return true;
   }();
   (void)initialized;
@@ -124,8 +127,7 @@ TEST_CASE("P2 advanced fit observes mixed weighted point line and plane constrai
     items.push_back(item);
   }
   test::OpCall call(advancedRegistry());
-  call.inputs = {{"constraints", Data::record(constraintRecord(items))},
-                 {"cloud", Data::cloud(source)}};
+  call.inputs = {{"constraints", Data::record(constraintRecord(items))}};
   REQUIRE(call.run("register.constrained_fit_3d",
                    {{"maxRmse", Value::number(2e-6)}, {"maxError", Value::number(3e-6)}})
               .ok);
@@ -138,9 +140,16 @@ TEST_CASE("P2 advanced fit observes mixed weighted point line and plane constrai
   CHECK(q["maxError"].get<double>() < 3e-6);
   REQUIRE(q["items"].size() == items.size());
   double sum = 0, weights = 0, maximum = 0;
-  const auto& aligned = *call.out("aligned").asCloud();
+  test::OpCall apply(advancedRegistry());
+  apply.inputs = {{"cloud", Data::cloud(source)}, {"transform", call.out("transform")}};
+  REQUIRE(apply.run("transform.apply").ok);
+  const auto& aligned = *apply.out("cloud").asCloud();
   CHECK(aligned.intensity == source.intensity);
   CHECK(aligned.rgb == source.rgb);
+  const auto normal = truth.topLeftCorner<3, 3>() * Vec3::UnitZ();
+  CHECK(aligned.normals[0] == doctest::Approx(normal.x()).epsilon(1e-6));
+  CHECK(aligned.normals[1] == doctest::Approx(normal.y()).epsilon(1e-6));
+  CHECK(aligned.normals[2] == doctest::Approx(normal.z()).epsilon(1e-6));
   CHECK(source.xyz == advancedCloud().xyz);
   for (std::size_t i = 0; i < items.size(); ++i) {
     Vec3 error = point(aligned, i) -
@@ -159,6 +168,29 @@ TEST_CASE("P2 advanced fit observes mixed weighted point line and plane constrai
   }
   CHECK(q["weightedRmse"].get<double>() == doctest::Approx(std::sqrt(sum / weights)).epsilon(1e-9));
   CHECK(q["maxError"].get<double>() == doctest::Approx(maximum).epsilon(1e-9));
+
+  SUBCASE("Old saved fit graphs retain referenced point-cloud output only with a source cloud") {
+    auto legacy =
+        test::makeGraph({{"source", "util.reroute"}, {"fit", "register.constrained_fit_3d"}}, {});
+    legacy["nodes"][1]["opVersion"] = "1.0.0";
+    legacy["outputs"] = {{"result", {{"node", "fit"}, {"port", "aligned"}}}};
+    const Json request{{"schemaVersion", 1},
+                       {"rules", {{{"kind", "constrainedFit.v1"}, {"source", {{"node", "fit"}}}}}}};
+    Json migrated;
+    GraphMigrationError issue;
+    CHECK_FALSE(migrateGraph(advancedRegistry(), legacy, request, migrated, issue));
+    CHECK(issue.message.find("aligned") != std::string::npos);
+    CHECK(issue.message.find("接入 cloud") != std::string::npos);
+    legacy["edges"].push_back({{"id", "source-fit"},
+                               {"from", {{"node", "source"}, {"port", "out"}}},
+                               {"to", {{"node", "fit"}, {"port", "cloud"}}}});
+    REQUIRE_MESSAGE(migrateGraph(advancedRegistry(), legacy, request, migrated, issue),
+                    issue.message);
+    CHECK(migrated["nodes"][1]["opVersion"] == "2.0.0");
+    CHECK(migrated["nodes"][2]["op"] == "transform.apply");
+    CHECK(migrated["outputs"]["result"]["node"] == migrated["nodes"][2]["id"]);
+    CHECK(migrated["outputs"]["result"]["port"] == "cloud");
+  }
 }
 
 TEST_CASE("P2 extracted constraint directions retain Eigen stable norm semantics") {
@@ -582,20 +614,18 @@ TEST_CASE("P2 alignment cancellation keeps cancelled classification and atomic o
                                                  cancelled, budget, result);
   CHECK_FALSE(status.ok);
   CHECK(status.code == "cancelled");
-  Json items = Json::array();
-  for (std::size_t i = 0; i < source.pointCount(); ++i)
-    items.push_back(pointConstraint(std::to_string(i), point(source, i), point(source, i)));
   PointCloud large;
   large.xyz.resize(3 * 8193, 0);
-  std::unordered_map<std::string, Data> inputs{
-      {"constraints", Data::record(constraintRecord(items))}, {"cloud", Data::cloud(large)}};
+  std::unordered_map<std::string, Data> inputs{{"transform", Data::transform(Transform{})},
+                                               {"cloud", Data::cloud(std::move(large))}};
   std::unordered_map<std::string, Data> outputs;
-  const auto* op = advancedRegistry().find("register.constrained_fit_3d");
+  const auto* op = advancedRegistry().find("transform.apply");
   REQUIRE(op != nullptr);
   ParamMap params;
   for (const auto& param : op->params)
     params.emplace(param.name, param.def);
   AdvancedCancel duringAlignment;
+  duringAlignment.polls = 1;
   std::filesystem::path base;
   Outputs out(outputs);
   const auto stopped = op->compute(Inputs(inputs), ParamView(params, base), out, duringAlignment);

@@ -99,10 +99,10 @@ Profile 采用有类型、可校验、可由原生缓冲共享的契约。M1 已
 
 - M2 将 `lyflow_std_algo` 配置为独立的 pointcloud-algorithms 模块，仍显式依赖 PCL；DTS 轻量拟合不能直接改接它。公开几何与度量静态核不依赖 PCL，PCL 拟合继续作为独立实现后端。
 - M2 已将 primitive_crop、workspace 和 pose_projection 的跨包私有头依赖替换为公开几何/刚体核；各节点只保留端口、参数和诊断包装，独立核的验证入口见[公共内核](public-kernels.md)。
-- `workspace.load` 的实际读取依赖是 YAML 与轻量位姿契约，不应因为目前位于 image 就要求 OpenCV；归入 geometry 的可选 workspace-io 模块。
+- `workspace.load` 由 `std-geometry` 的 `workspace-io` 模块提供，使用 YAML 和轻量位姿契约。
 - YOLO/OCR 的纯 Tensor 解码归 ml/adapters，纯Tensor/Record数值坐标回映可随解码器迁移；图像采样、重采样和叠画继续归 image。移动前抽取共享检测/OCR记录，避免反向 include。
 - 涂胶量测统一消费版本化 `image.PlaneCalib`，使用显式 m/mm、图像帧、平面帧及归一化齐次 H。旧标定连线可按[接入指南](glue-integration.md)用 `lyflow migrate` 插入显式适配节点。
-- `gen.synthetic` 最终归 std-pointcloud 的 portable-generation。纯 core 从当前 4 个节点收敛为 3 个透传/调度节点，相关测试与发布断言必须先改用明确的 fixture 或启用生成模块。
+- `gen.synthetic` 由 `std-pointcloud` 提供。纯 core 提供三个透传或调度算子，相关测试使用明确的输入。
 - M2 已用显式包/模块声明替换 CMake 包优先级列表，配置期检查环、缺依赖、重复声明及目标提供者冲突；默认关闭的包不会先配置后端再决定跳过。实际组合构建和安装消费仍是每次迁移的独立验收门槛。
 
 ## 包迁移与 ID、版本、图迁移

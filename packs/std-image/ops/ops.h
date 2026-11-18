@@ -34,7 +34,6 @@ void registerP2ModelProjection(Registry& r);
 void registerP2HeightExtraction(Registry& r);
 void registerP3Markers(Registry& r);
 void registerP3ShapeMatching(Registry& r);
-void registerP3Workspace(Registry& r);
 void registerP4Annotations(Registry& r);
 void registerP4Barcodes(Registry& r);
 void registerP4OcrImage(Registry& r);

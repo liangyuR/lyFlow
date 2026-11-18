@@ -24,14 +24,7 @@ inline OperatorDesc descriptor(const char* id, const char* label, const char* en
   return op;
 }
 
-inline Param text(const char* name, const char* label, const char* value) {
-  Param p;
-  p.name = name;
-  p.label = label;
-  p.type = ParamType::String;
-  p.def = Value::text(value);
-  return p;
-}
+using op_params::text;
 
 inline Param vector(const char* name, const char* label, std::vector<double> value,
                     const char* unit = "") {
@@ -46,9 +39,7 @@ inline Param vector(const char* name, const char* label, std::vector<double> val
   return p;
 }
 
-inline Port recordPort(const char* name, const char* type, bool required = true) {
-  return withContract(Port{name, "Record", name, type, required}, {{"recordType", type}});
-}
+using op_params::recordPort;
 
 inline Status image(const Image* image, const char* port = "image", bool gray = false,
                     std::size_t pixels = 16777216) {

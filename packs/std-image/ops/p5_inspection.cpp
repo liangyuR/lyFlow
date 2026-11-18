@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <map>
 #include <numeric>
 
+#include "lyflow/graph_migration.h"
 #include "p5_inspection_common.h"
 
 namespace lyflow::ops {
@@ -500,24 +502,33 @@ Status fillHoles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext
   }
 }
 
-Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+constexpr const char* kDefectCandidates = "inspection.DefectCandidates.v1";
+constexpr const char* kDefectRegions = "inspection.DefectRegions.v1";
+
+struct DefectMetric {
+  const char* field;
+  const char* enabled;
+  const char* threshold;
+  const char* label;
+  const char* unit;
+};
+constexpr std::array<DefectMetric, 4> kDefectMetrics{{
+    {"length", "checkLength", "lengthThreshold", "长度", "m"},
+    {"width", "checkWidth", "widthThreshold", "宽度", "m"},
+    {"area", "checkArea", "areaThreshold", "面积", "m2"},
+    {"volume", "checkVolume", "volumeThreshold", "体积", "m3"},
+}};
+
+Status defectCandidates(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   try {
     Depth view(in, ctx);
     Base base(in, p, view);
     auto roi = selection(in, view);
     const auto mode = p.choice("mode");
-    need(mode == "up" || mode == "down" || mode == "both", "缺陷方向非法");
-    const double threshold = scalar(p, "distanceThreshold", 0, 1e6),
-                 minCoverage = scalar(p, "minCoverage", 0, 1);
-    const int kernel = integer(p, "denoiseKernel", 1, 63),
-              maximum = integer(p, "maxDefects", 1, 256);
+    const double threshold = p.number("distanceThreshold");
+    const auto kernel = static_cast<int>(p.integer("denoiseKernel"));
+    const auto maximum = static_cast<int>(p.integer("maxDefects"));
     need(kernel % 2 == 1, "去噪窗口必须为奇数");
-    const std::array<const char*, 4> enabled{"checkLength", "checkWidth", "checkArea",
-                                             "checkVolume"},
-        limits{"lengthThreshold", "widthThreshold", "areaThreshold", "volumeThreshold"};
-    std::array<double, 4> thresholds{};
-    for (int j = 0; j < 4; ++j)
-      thresholds[j] = scalar(p, limits[j], 0, 1e12);
     const bool include = p.flag("includeInterpolated");
     std::uint64_t work = 0;
     charge(work, view.depth->pixelCount() * 24, ctx);
@@ -552,7 +563,6 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
     Json reports = Json::array(), posesOut = Json::array();
     projection5::RayBudget rays;
     rays.context = &ctx;
-    bool failed = false;
     for (int sign : {1, -1}) {
       if ((mode == "up" && sign < 0) || (mode == "down" && sign > 0))
         continue;
@@ -626,14 +636,9 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
         const std::array<double, 4> metrics{std::max(rectangle.size.width, rectangle.size.height),
                                             std::min(rectangle.size.width, rectangle.size.height),
                                             area, volume};
-        Json exceeded = Json::array();
-        for (int j = 0; j < 4; ++j) {
-          need(std::isfinite(metrics[j]), "缺陷量测非有限");
-          if (p.flag(enabled[j]) && metrics[j] > thresholds[j])
-            exceeded.push_back(limits[j]);
-        }
-        const bool defect = !exceeded.empty();
-        failed |= defect;
+        need(std::all_of(metrics.begin(), metrics.end(),
+                         [](double value) { return std::isfinite(value); }),
+             "缺陷量测非有限");
         const std::string id = "defect-" + std::to_string(reports.size());
         const auto center = localOrigin + bx * rectangle.center.x + by * rectangle.center.y +
                             base.normal * ((low + high) / 2);
@@ -647,8 +652,7 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
                                    std::max(1e-9, double(rectangle.size.height)),
                                    std::max(1e-9, high - low)});
         pose.data["pickable"] = false;
-        pose.data["attributes"] = {{"defect", defect},
-                                   {"direction", sign > 0 ? "up" : "down"},
+        pose.data["attributes"] = {{"direction", sign > 0 ? "up" : "down"},
                                    {"support", points.size()}};
         posesOut.push_back(std::move(pose.data));
         reports.push_back({{"id", id},
@@ -660,36 +664,25 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
                            {"volume", volume},
                            {"meanHeight", sum / points.size()},
                            {"minHeight", low},
-                           {"maxHeight", high},
-                           {"defect", defect},
-                           {"exceeded", exceeded}});
+                           {"maxHeight", high}});
         if (reports.size() > static_cast<std::size_t>(maximum))
           return Status::Error(Phase::Execute, "resource_limit", "累计缺陷超过预算");
       }
     }
     const auto selected = static_cast<std::size_t>(cv::countNonZero(roi));
     const double coverage = static_cast<double>(observed + synthetic) / selected;
-    const bool complete = observed + synthetic > 0 && coverage >= minCoverage;
-    Record result{"inspection.Defects.v1",
+    Record result{kDefectRegions,
                   {{"frame", view.grid.cloudFrame},
                    {"unit", "m"},
                    {"sourceCloudId", std::to_string(view.cloud->id)},
-                   {"state", failed     ? "defect"
-                             : complete ? "clear"
-                                        : "unknown"},
-                   {"valid", complete},
-                   {"good", failed     ? Json(false)
-                            : complete ? Json(true)
-                                       : Json(nullptr)},
                    {"observedCount", observed},
                    {"interpolatedCount", synthetic},
                    {"coverage", coverage},
-                   {"minCoverage", minCoverage},
                    {"areaUnit", "m2"},
                    {"volumeUnit", "m3"},
                    {"areaModel", "observed_depth_orthogonal_footprint"},
                    {"volumeModel", "center_signed_height_times_projected_cell_area"},
-                   {"items", reports}}};
+                   {"items", std::move(reports)}}};
     auto instances = poses::make3DList(posesOut, view.grid.cloudFrame);
     std::string why;
     need(poses::validate(instances, why), "缺陷姿态非法：" + why);
@@ -697,8 +690,10 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
     bounded(result);
     auto maskOut = native(all), heightOut = native(height), overlayOut = native(overlay);
     poll(ctx);
-    out.set("instances", Data::record(std::move(instances)));
-    out.set("defects", Data::record(std::move(result)));
+    Bundle candidates(kDefectCandidates);
+    candidates.set("regions", Data::record(std::move(result)));
+    candidates.set("instances", Data::record(std::move(instances)));
+    out.set("candidates", Data::bundle(std::move(candidates)));
     out.set("mask", Data::image(std::move(maskOut)));
     out.set("height", Data::image(std::move(heightOut)));
     out.set("overlay", Data::image(std::move(overlayOut)));
@@ -713,27 +708,84 @@ Status defects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& 
     return caught(e);
   }
 }
+Status classifyDefects(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+  try {
+    const auto& candidates = *in.get("candidates").asBundle();
+    const auto* regions = candidates.field("regions")->asRecord();
+    Record instances = *candidates.field("instances")->asRecord();
+    need(regions->type == kDefectRegions && instances.type == poses::kPoses3DType,
+         "缺陷候选的区域或位姿记录类型非法", "candidates");
+    Record result{"inspection.Defects.v1", regions->data};
+    auto& items = result.data.at("items");
+    auto& posesOut = instances.data.at("items");
+    need(items.is_array() && posesOut.is_array() && items.size() == posesOut.size(),
+         "缺陷候选的区域与位姿数量不一致", "candidates");
+    bool failed = false;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+      poll(ctx);
+      auto& item = items[i];
+      auto& pose = posesOut[i];
+      need(item.at("id") == pose.at("id"), "缺陷候选的区域与位姿标识不一致", "candidates");
+      Json exceeded = Json::array();
+      for (const auto& metric : kDefectMetrics) {
+        const auto& value = item.at(metric.field);
+        need(values::safeNumber(value) && value.get<double>() >= 0, "缺陷量测非法", "candidates");
+        if (p.flag(metric.enabled) && value.get<double>() > p.number(metric.threshold))
+          exceeded.push_back(metric.threshold);
+      }
+      const bool defect = !exceeded.empty();
+      failed |= defect;
+      item["defect"] = defect;
+      item["exceeded"] = std::move(exceeded);
+      pose["attributes"]["defect"] = defect;
+    }
+    const auto& observed = result.data.at("observedCount");
+    const auto& interpolated = result.data.at("interpolatedCount");
+    const auto& coverage = result.data.at("coverage");
+    need(observed.is_number_unsigned() && interpolated.is_number_unsigned() &&
+             values::safeNumber(coverage) && coverage.get<double>() >= 0 &&
+             coverage.get<double>() <= 1,
+         "缺陷候选的观测统计非法", "candidates");
+    const double minCoverage = p.number("minCoverage");
+    const bool complete = (observed.get<std::size_t>() || interpolated.get<std::size_t>()) &&
+                          coverage.get<double>() >= minCoverage;
+    result.data["state"] = failed ? "defect" : complete ? "clear" : "unknown";
+    result.data["valid"] = complete;
+    result.data["good"] = failed ? Json(false) : complete ? Json(true) : Json(nullptr);
+    result.data["minCoverage"] = minCoverage;
+    out.set("instances", Data::record(std::move(instances)));
+    out.set("defects", Data::record(std::move(result)));
+    return Status::Ok();
+  } catch (const Failure& e) {
+    return e.status;
+  } catch (const std::exception& e) {
+    return caught(e);
+  }
+}
 struct ProfilePoint {
   cv::Vec3d point;
   cv::Vec3i sources;
   double x = 0, h = 0;
   int parent = 0, chain = 0;
 };
+constexpr const char* kProfileSliceInfo = "inspection.ProfileSliceInfo.v1";
+constexpr const char* kProfileFeatures = "inspection.ProfileFeatures.v1";
+
+struct SectionSample {
+  double x, h;
+  int chain;
+};
 struct Feature {
   bool valid = false;
   double x = 0, h = 0, slope = 0;
   int chain = 0;
 };
-Feature feature(const std::vector<ProfilePoint>& points, const ParamView& p, const char* prefix) {
+Feature feature(const std::vector<SectionSample>& points, const ParamView& p, const char* prefix) {
   const std::string key = prefix;
-  const double center = scalar(p, (key + "Center").c_str(), -1e6, 1e6),
-               width = scalar(p, (key + "Width").c_str(), 1e-9, 1e6),
-               threshold = scalar(p, (key + "Gradient").c_str(), 0, 1);
-  const auto mode = p.choice((key + "Type").c_str());
-  need(mode == "left-right-inflection" || mode == "right-left-inflection" || mode == "top" ||
-           mode == "bottom" || mode == "left-most" || mode == "right-most",
-       "剖面特征模式非法");
-  std::vector<const ProfilePoint*> selected;
+  const double center = p.number(key + "Center"), width = p.number(key + "Width"),
+               threshold = p.number(key + "Gradient");
+  const auto mode = p.choice(key + "Type");
+  std::vector<const SectionSample*> selected;
   for (const auto& point : points)
     if (std::abs(point.x - center) <= width / 2)
       selected.push_back(&point);
@@ -744,8 +796,8 @@ Feature feature(const std::vector<ProfilePoint>& points, const ParamView& p, con
   });
   if (mode == "left-right-inflection" || mode == "right-left-inflection") {
     struct Gradient {
-      const ProfilePoint* left;
-      const ProfilePoint* right;
+      const SectionSample* left;
+      const SectionSample* right;
       double slope;
     };
     std::vector<Gradient> gradients;
@@ -790,20 +842,16 @@ Json featureJson(const Feature& f) {
           {"gradient", f.valid ? Json(f.slope) : Json(nullptr)},
           {"chain", f.valid ? Json(f.chain) : Json(nullptr)}};
 }
-Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+Status profileSlices(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
   try {
     Depth view(in, ctx);
     Base base(in, p, view);
-    const int count = integer(p, "sliceCount", 1, 1024),
-              gap = integer(p, "meshPixelDistance", 1, 32),
-              visual = integer(p, "visualizeSlice", 0, 1023);
+    const auto count = static_cast<int>(p.integer("sliceCount"));
+    const auto gap = static_cast<int>(p.integer("meshPixelDistance"));
+    const auto visual = static_cast<int>(p.integer("visualizeSlice"));
     need(visual < count, "可视化截面序号越界");
-    const double edgeLength = scalar(p, "maxEdgeLength", 1e-9, 1e6),
-                 lower = scalar(p, "min", 0, 1e6), upper = scalar(p, "max", 0, 1e6);
-    need(lower <= upper, "截面属性上下限颠倒");
-    const auto direction = p.choice("direction"), mode = p.choice("attributeMode");
-    need((direction == "x" || direction == "y") && (mode == "x-x" || mode == "y-y"),
-         "截面方向或属性模式非法");
+    const double edgeLength = p.number("maxEdgeLength");
+    const auto direction = p.choice("direction");
     cv::Point2d center((view.grid.width - 1) / 2., (view.grid.height - 1) / 2.);
     double width = view.grid.width - 1, height = view.grid.height - 1, angle = 0;
     need(width > 0 && height > 0, "截面需要至少2x2栅格");
@@ -872,18 +920,13 @@ Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
       }
     }
     charge(work, static_cast<std::uint64_t>(triangles.size()) * count * 16, ctx);
-    Tensor output, attributes, attributeValid, supports;
-    attributes.shape = {count};
-    attributeValid.shape = {count};
+    Tensor output, supports;
     PointCloud cloud;
     Indices indices;
     indices.sourceCloudId = cloud.id;
     std::vector<cloud_groups::Group> groups;
     Json reports = Json::array();
-    cv::Mat overlay(view.grid.height, view.grid.width, CV_8UC3, cv::Scalar(24, 24, 24)),
-        plot(256, 512, CV_8UC3, cv::Scalar(16, 16, 16));
-    bool bad = false;
-    int validCount = 0;
+    cv::Mat overlay(view.grid.height, view.grid.width, CV_8UC3, cv::Scalar(24, 24, 24));
     std::size_t unresolvedNormals = 0, nearestNormals = 0;
     for (int slice = 0; slice < count; ++slice) {
       poll(ctx);
@@ -975,14 +1018,6 @@ Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
       std::sort(points.begin(), points.end(), [](const auto& l, const auto& r) {
         return std::tie(l.chain, l.x, l.h) < std::tie(r.chain, r.x, r.h);
       });
-      const auto A = feature(points, p, "a"), B = feature(points, p, "b");
-      const bool valid = A.valid && B.valid;
-      const double value = valid ? std::abs(mode == "x-x" ? A.x - B.x : A.h - B.h) : 0;
-      const bool good = valid && value >= lower && value <= upper;
-      bad |= valid && !good;
-      validCount += valid;
-      attributes.data.push_back(static_cast<float>(value));
-      attributeValid.data.push_back(valid ? 1.f : 0.f);
       const auto begin = cloud.pointCount();
       for (const auto& point : points) {
         indices.values.push_back(static_cast<std::int32_t>(cloud.pointCount()));
@@ -1061,61 +1096,27 @@ Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
       const auto id = "slice-" + std::to_string(slice);
       groups.push_back({id, begin, cloud.pointCount() - begin});
       reports.push_back({{"id", id},
-                         {"valid", valid},
-                         {"good", valid ? Json(good) : Json(nullptr)},
-                         {"value", valid ? Json(value) : Json(nullptr)},
                          {"pointCount", points.size()},
                          {"chainCount", chains.size()},
-                         {"a", featureJson(A)},
-                         {"b", featureJson(B)},
                          {"origin", vec(origin)},
-                         {"direction", vec(along)}});
+                         {"direction", vec(along)},
+                         {"length", length}});
       const auto pa = pixels[0] * (1 - t) + pixels[direction == "x" ? 3 : 1] * t,
                  pb = pixels[direction == "x" ? 1 : 3] * (1 - t) + pixels[2] * t;
       cv::line(overlay, pa, pb, slice == visual ? cv::Scalar(255, 220, 0) : cv::Scalar(0, 160, 255),
                1);
-      if (slice == visual && !points.empty()) {
-        double h0 = points[0].h, h1 = h0;
-        for (const auto& v : points) {
-          h0 = std::min(h0, v.h);
-          h1 = std::max(h1, v.h);
-        }
-        if (h1 - h0 < 1e-9) {
-          h0 -= .001;
-          h1 += .001;
-        }
-        auto pixel = [&](double x, double h) {
-          return cv::Point(static_cast<int>(20 + 472 * (x / length + .5)),
-                           static_cast<int>(236 - 216 * (h - h0) / (h1 - h0)));
-        };
-        for (std::size_t j = 1; j < points.size(); ++j)
-          if (points[j].chain == points[j - 1].chain)
-            cv::line(plot, pixel(points[j - 1].x, points[j - 1].h), pixel(points[j].x, points[j].h),
-                     {96, 192, 255}, 1);
-        if (A.valid)
-          cv::circle(plot, pixel(A.x, A.h), 3, {0, 255, 0}, 1);
-        if (B.valid)
-          cv::circle(plot, pixel(B.x, B.h), 3, {255, 80, 0}, 1);
-      }
     }
     output.shape = {static_cast<std::int64_t>(cloud.pointCount()), 4};
     supports.shape = {static_cast<std::int64_t>(cloud.pointCount()), 3};
     auto grouping = cloud_groups::make(cloud, groups, view.grid.cloudFrame);
     Record result{
-        "inspection.Profiles.v1",
+        kProfileSliceInfo,
         {{"frame", view.grid.cloudFrame},
          {"unit", "m"},
          {"sourceCloudId", std::to_string(view.cloud->id)},
          {"sliceCloudId", std::to_string(cloud.id)},
-         {"state", bad                   ? "ng"
-                   : validCount == count ? "good"
-                                         : "unknown"},
-         {"good", bad                   ? Json(false)
-                  : validCount == count ? Json(true)
-                                        : Json(nullptr)},
-         {"validCount", validCount},
          {"sliceCount", count},
-         {"attributeMode", mode},
+         {"visualizeSlice", visual},
          {"derivation", "triangle_plane_intersection"},
          {"measured", false},
          {"meshPixelDistance", gap},
@@ -1124,21 +1125,18 @@ Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
           "barycentric intensity/RGB; normalized barycentric normals; nearest nonzero normal fallback; zero+unresolved if none"},
          {"nearestNormalCount", nearestNormals},
          {"unresolvedNormalCount", unresolvedNormals},
-         {"items", reports}}};
+         {"items", std::move(reports)}}};
     bounded(result);
     bounded(grouping);
-    auto overlayOut = native(overlay), plotOut = native(plot);
+    auto overlayOut = native(overlay);
     poll(ctx);
     out.set("profiles", Data::tensor(std::move(output)));
-    out.set("attributes", Data::tensor(std::move(attributes)));
-    out.set("attributeValid", Data::tensor(std::move(attributeValid)));
+    out.set("sliceInfo", Data::record(std::move(result)));
     out.set("supports", Data::tensor(std::move(supports)));
     out.set("sliceCloud", Data::cloud(std::move(cloud)));
     out.set("indices", Data::indices(std::move(indices)));
     out.set("groups", Data::record(std::move(grouping)));
-    out.set("features", Data::record(std::move(result)));
     out.set("overlay", Data::image(std::move(overlayOut)));
-    out.set("plot", Data::image(std::move(plotOut)));
     return Status::Ok();
   } catch (const projection5::Cancelled&) {
     return Status::Error(Phase::Execute, "cancelled", "任务已取消");
@@ -1150,6 +1148,200 @@ Status profiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
     return caught(e);
   }
 }
+void plotProfile(cv::Mat& plot, const std::vector<SectionSample>& points, double length,
+                 const Feature& a, const Feature& b) {
+  if (points.empty())
+    return;
+  double h0 = points.front().h, h1 = h0;
+  for (const auto& v : points) {
+    h0 = std::min(h0, v.h);
+    h1 = std::max(h1, v.h);
+  }
+  if (h1 - h0 < 1e-9) {
+    h0 -= .001;
+    h1 += .001;
+  }
+  const auto pixel = [&](double x, double h) {
+    return cv::Point(static_cast<int>(20 + 472 * (x / length + .5)),
+                     static_cast<int>(236 - 216 * (h - h0) / (h1 - h0)));
+  };
+  for (std::size_t i = 1; i < points.size(); ++i)
+    if (points[i].chain == points[i - 1].chain)
+      cv::line(plot, pixel(points[i - 1].x, points[i - 1].h), pixel(points[i].x, points[i].h),
+               {96, 192, 255}, 1);
+  if (a.valid)
+    cv::circle(plot, pixel(a.x, a.h), 3, {0, 255, 0}, 1);
+  if (b.valid)
+    cv::circle(plot, pixel(b.x, b.h), 3, {255, 80, 0}, 1);
+}
+
+Status measureProfiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+  try {
+    const auto& info = *in.get("sliceInfo").asRecord();
+    const auto& tensor = *in.get("profiles").asTensor();
+    need(tensor.shape.size() == 2 && tensor.shape[1] == 4 && tensor.consistent(),
+         "需要 [M,4] 截面交点张量", "profiles");
+    Record result{kProfileFeatures, info.data};
+    auto& items = result.data.at("items");
+    const auto count = result.data.at("sliceCount").get<std::int64_t>();
+    const auto visual = result.data.at("visualizeSlice").get<std::size_t>();
+    need(items.is_array() && count > 0 && count <= 1024 &&
+             items.size() == static_cast<std::size_t>(count) && visual < items.size(),
+         "截面数量或绘图序号非法", "profiles");
+    const auto mode = p.choice("attributeMode");
+    Tensor attributes, attributeValid;
+    attributes.shape = attributeValid.shape = {count};
+    cv::Mat plot(256, 512, CV_8UC3, cv::Scalar(16, 16, 16));
+    std::size_t point = 0;
+    int validCount = 0;
+    for (std::size_t slice = 0; slice < items.size(); ++slice) {
+      poll(ctx);
+      auto& item = items[slice];
+      const auto n = item.at("pointCount").get<std::size_t>();
+      const auto chains = item.at("chainCount").get<std::size_t>();
+      const auto length = item.at("length").get<double>();
+      need(n <= tensor.data.size() / 4 - point && chains <= n && std::isfinite(length) &&
+               length > 1e-12,
+           "截面交点范围或基线长度非法", "profiles");
+      std::vector<SectionSample> points;
+      points.reserve(n);
+      for (std::size_t i = 0; i < n; ++i, ++point) {
+        if ((i & 1023) == 0)
+          poll(ctx);
+        const auto* v = tensor.data.data() + 4 * point;
+        need(v[0] == static_cast<float>(slice) && std::isfinite(v[1]) && std::isfinite(v[2]) &&
+                 std::abs(v[1]) <= length / 2 + 1e-6 * std::max(1., length) &&
+                 std::abs(v[2]) <= 1e6 && v[3] >= 0 && double(v[3]) < double(chains) &&
+                 std::floor(v[3]) == v[3],
+             "截面交点的切片、坐标或链号非法", "profiles");
+        points.push_back({v[1], v[2], static_cast<int>(v[3])});
+      }
+      const auto a = feature(points, p, "a"), b = feature(points, p, "b");
+      const bool valid = a.valid && b.valid;
+      const double value = valid ? std::abs(mode == "x-x" ? a.x - b.x : a.h - b.h) : 0;
+      validCount += valid;
+      attributes.data.push_back(static_cast<float>(value));
+      attributeValid.data.push_back(valid ? 1.f : 0.f);
+      item.erase("length");
+      item["valid"] = valid;
+      item["value"] = valid ? Json(value) : Json(nullptr);
+      item["a"] = featureJson(a);
+      item["b"] = featureJson(b);
+      if (slice == visual)
+        plotProfile(plot, points, length, a, b);
+    }
+    need(point == tensor.data.size() / 4, "存在未归组的截面交点", "profiles");
+    result.data.erase("visualizeSlice");
+    result.data["validCount"] = validCount;
+    result.data["attributeMode"] = mode;
+    bounded(result);
+    out.set("features", Data::record(std::move(result)));
+    out.set("attributes", Data::tensor(std::move(attributes)));
+    out.set("attributeValid", Data::tensor(std::move(attributeValid)));
+    out.set("plot", Data::image(native(std::move(plot))));
+    return Status::Ok();
+  } catch (const Failure& e) {
+    return e.status;
+  } catch (const std::bad_alloc&) {
+    return Status::Error(Phase::Execute, "resource_limit", "截面特征内存不足");
+  } catch (const std::exception& e) {
+    return caught(e);
+  }
+}
+
+Status classifyProfiles(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+  const double lower = p.number("min"), upper = p.number("max");
+  if (lower > upper)
+    return img::badParam("截面属性上下限颠倒", "min");
+  try {
+    Record result{"inspection.Profiles.v1", in.get("features").asRecord()->data};
+    auto& items = result.data.at("items");
+    need(items.is_array() && !items.empty(), "需要非空的截面测量项", "features");
+    bool bad = false, complete = true;
+    for (auto& item : items) {
+      poll(ctx);
+      const bool valid = item.at("valid").get<bool>();
+      const auto& value = item.at("value");
+      need(!valid || values::safeNumber(value), "有效截面的属性值必须有限", "features");
+      const bool good = valid && value.get<double>() >= lower && value.get<double>() <= upper;
+      bad |= valid && !good;
+      complete &= valid;
+      item["good"] = valid ? Json(good) : Json(nullptr);
+    }
+    result.data["state"] = bad ? "ng" : complete ? "good" : "unknown";
+    result.data["good"] = bad ? Json(false) : complete ? Json(true) : Json(nullptr);
+    out.set("features", Data::record(std::move(result)));
+    return Status::Ok();
+  } catch (const Failure& e) {
+    return e.status;
+  } catch (const std::exception& e) {
+    return caught(e);
+  }
+}
+
+using graph_migration::SplitRoutes;
+
+SplitRoutes samePorts(const std::string& node, std::initializer_list<const char*> ports) {
+  SplitRoutes routes;
+  for (const auto* port : ports)
+    routes[port] = {{node, port}};
+  return routes;
+}
+
+void migrateDefects(Json& level, const Json& rule, Json* outer) {
+  using namespace graph_migration;
+  splitRuleKeys(rule, {"kind", "source"});
+  const auto id = text(splitSource(level, rule, "depth.defects"), "id");
+  const auto decision = id + "_classify";
+  auto outputs = samePorts(id, {"mask", "height", "overlay"});
+  outputs.merge(samePorts(decision, {"instances", "defects"}));
+  auto params = samePorts(id, {"planeFrame", "mode", "distanceThreshold", "denoise",
+                               "denoiseKernel", "includeInterpolated", "maxDefects"});
+  params["minCoverage"] = {{decision, "minCoverage"}};
+  for (const auto& metric : kDefectMetrics) {
+    params[metric.enabled] = {{decision, metric.enabled}};
+    params[metric.threshold] = {{decision, metric.threshold}};
+  }
+  splitNode(
+      level, outer, id,
+      Json::array({{{"id", id}, {"op", "depth.defects"}, {"opVersion", "2.0.0"}},
+                   {{"id", decision}, {"op", "depth.classify_defects"}, {"opVersion", "1.0.0"}}}),
+      samePorts(id, {"cloud", "depth", "status", "indexMap", "mapping", "plane", "roi", "mask"}),
+      outputs, params,
+      Json::array({{{"from", {{"node", id}, {"port", "candidates"}}},
+                    {"to", {{"node", decision}, {"port", "candidates"}}}}}));
+}
+
+void migrateProfiles(Json& level, const Json& rule, Json* outer) {
+  using namespace graph_migration;
+  splitRuleKeys(rule, {"kind", "source"});
+  const auto id = text(splitSource(level, rule, "depth.profile_slices"), "id");
+  const auto measure = id + "_measure", decision = id + "_classify";
+  auto outputs =
+      samePorts(id, {"profiles", "supports", "sliceCloud", "indices", "groups", "overlay"});
+  outputs.merge(samePorts(measure, {"attributes", "attributeValid", "plot"}));
+  outputs.merge(samePorts(decision, {"features"}));
+  auto params = samePorts(id, {"planeFrame", "sliceCount", "direction", "meshPixelDistance",
+                               "maxEdgeLength", "visualizeSlice", "includeInterpolated"});
+  params.merge(samePorts(measure, {"attributeMode", "aCenter", "aWidth", "aGradient", "aType",
+                                   "bCenter", "bWidth", "bGradient", "bType"}));
+  params.merge(samePorts(decision, {"min", "max"}));
+  splitNode(
+      level, outer, id,
+      Json::array(
+          {{{"id", id}, {"op", "depth.profile_slices"}, {"opVersion", "2.0.0"}},
+           {{"id", measure}, {"op", "depth.measure_profile_features"}, {"opVersion", "1.0.0"}},
+           {{"id", decision}, {"op", "depth.classify_profile_features"}, {"opVersion", "1.0.0"}}}),
+      samePorts(id, {"cloud", "depth", "status", "indexMap", "mapping", "plane", "region"}),
+      outputs, params,
+      Json::array({{{"from", {{"node", id}, {"port", "profiles"}}},
+                    {"to", {{"node", measure}, {"port", "profiles"}}}},
+                   {{"from", {{"node", id}, {"port", "sliceInfo"}}},
+                    {"to", {{"node", measure}, {"port", "sliceInfo"}}}},
+                   {{"from", {{"node", measure}, {"port", "features"}}},
+                    {"to", {{"node", decision}, {"port", "features"}}}}}));
+}
+
 }
 void registerP5Inspection(Registry& r) {
   auto op = image_p1::descriptor("image.find_circles_3d", "空间圆孔检测",
@@ -1210,13 +1402,22 @@ void registerP5Inspection(Registry& r) {
   auto defect = image_p1::descriptor(
       "depth.defects", "深度平面缺陷检测",
       "depth defect convex concave signed plane physical area volume length width");
+  r.addBundle({kDefectCandidates,
+               "深度缺陷区域候选",
+               "区域物理量、观测覆盖与对应位姿。",
+               "",
+               {{"regions", "Record", "长度、宽度、面积及体积"},
+                {"instances", "Record", "与区域 ID 对齐的空间位姿"}}});
+  defect.version = "2.0.0";
+  defect.migrations = {{1, graph_migration::requireSplitMigration, nullptr}};
   defect.inputs = depthInputs;
   defect.inputs.push_back({"plane", "Plane", "基准平面", "源云同帧", true});
   defect.inputs.push_back({"roi", "Box2D", "像素ROI", "半开区域", false});
   defect.inputs.push_back({"mask", "Image", "区域mask", "同映射尺寸u8", false});
-  defect.outputs = {image_p1::recordPort("instances", poses::kPoses3DType),
-                    image_p1::recordPort("defects", "inspection.Defects.v1"), img::imageOut("mask"),
-                    img::imageOut("height"), img::imageOut("overlay")};
+  defect.outputs = {{"candidates", bundleTypeName(kDefectCandidates), "缺陷候选", "", true},
+                    img::imageOut("mask"),
+                    img::imageOut("height"),
+                    img::imageOut("overlay")};
   defect.params = {image_p1::text("planeFrame", "平面参考帧", "input"),
                    img::enumParam("mode", "缺陷方向", "both",
                                   {{"up", "凸起", ""}, {"down", "凹陷", ""}, {"both", "双向", ""}},
@@ -1224,56 +1425,71 @@ void registerP5Inspection(Registry& r) {
                    number("distanceThreshold", "有符号距离阈值", .000005, 0, 1e6, "m"),
                    img::boolParam("denoise", "闭运算连接", false, "量测仍仅使用真实超阈值支持"),
                    img::intParam("denoiseKernel", "闭运算窗口", 5, 1, 63, "奇数"),
-                   number("minCoverage", "判清晰最低观测覆盖", 1, 0, 1),
                    img::boolParam("includeInterpolated", "显式纳入补值", false, "补值单独计数"),
                    img::intParam("maxDefects", "缺陷结果预算", 256, 1, 256, "")};
-  for (const auto& metric : std::array<std::array<const char*, 4>, 4>{
-           {{{"checkLength", "lengthThreshold", "长度", "m"}},
-            {{"checkWidth", "widthThreshold", "宽度", "m"}},
-            {{"checkArea", "areaThreshold", "面积", "m2"}},
-            {{"checkVolume", "volumeThreshold", "体积", "m3"}}}}) {
-    defect.params.push_back(
-        img::boolParam(metric[0], metric[2], true, "启用后任一项严格超过阈值即缺陷"));
-    defect.params.push_back(number(metric[1], metric[2], 0, 0, 1e12, metric[3]));
-  }
   defect.capabilities.previewable = false;
-  defect.compute = defects;
+  defect.compute = defectCandidates;
   r.addOperator(std::move(defect));
+
+  auto decision = image_p1::descriptor("depth.classify_defects", "深度缺陷判定",
+                                       "depth defect classification coverage dimensional limits");
+  decision.inputs = {{"candidates", bundleTypeName(kDefectCandidates), "缺陷候选", "", true}};
+  decision.outputs = {image_p1::recordPort("instances", poses::kPoses3DType),
+                      image_p1::recordPort("defects", "inspection.Defects.v1")};
+  decision.params = {number("minCoverage", "判清晰最低观测覆盖", 1, 0, 1)};
+  for (const auto& metric : kDefectMetrics) {
+    decision.params.push_back(
+        img::boolParam(metric.enabled, metric.label, true, "启用后任一项严格超过阈值即缺陷"));
+    decision.params.push_back(number(metric.threshold, metric.label, 0, 0, 1e12, metric.unit));
+  }
+  decision.capabilities.previewable = false;
+  decision.compute = classifyDefects;
+  r.addOperator(std::move(decision));
+
   auto profile = image_p1::descriptor(
       "depth.profile_slices", "组织深度轮廓截面",
       "organized depth profile mesh plane intersection inflection gradient width height");
+  profile.version = "2.0.0";
+  profile.migrations = {{1, graph_migration::requireSplitMigration, nullptr}};
   profile.inputs = depthInputs;
   profile.inputs.push_back({"plane", "Plane", "基准平面", "源云同帧", true});
   profile.inputs.push_back(image_p1::recordPort("region", poses::kPose2DType, false));
   profile.outputs = {{"profiles", "Tensor", "截面点", "[M,4] slice,x,height,chain", true},
-                     {"attributes", "Tensor", "属性", "[S]属性，无效由attributeValid标记", true},
-                     {"attributeValid", "Tensor", "属性有效性", "[S]0/1", true},
+                     image_p1::recordPort("sliceInfo", kProfileSliceInfo),
                      {"supports", "Tensor", "源三角顶点索引", "[M,3]对应父cloud", true},
-                     {"sliceCloud", "PointCloud", "截面交点", "插值几何交点，不是直接观测", true},
+                     {"sliceCloud", "PointCloud", "截面交点", "插值几何交点", true},
                      {"indices", "Indices", "交点索引", "指向sliceCloud", true},
                      image_p1::recordPort("groups", cloud_groups::kType),
-                     image_p1::recordPort("features", "inspection.Profiles.v1"),
-                     img::imageOut("overlay"),
-                     img::imageOut("plot")};
+                     img::imageOut("overlay")};
   profile.params = {
       image_p1::text("planeFrame", "平面参考帧", "input"),
       img::intParam("sliceCount", "截面数", 100, 1, 1024, ""),
       img::enumParam("direction", "截面方向", "x", {{"x", "X", ""}, {"y", "Y", ""}}, "区域局部轴"),
-      img::enumParam("attributeMode", "属性模式", "x-x",
-                     {{"x-x", "横向差", ""}, {"y-y", "高度差", ""}}, ""),
       img::intParam("meshPixelDistance", "组织连接像素跨度", 1, 1, 32, "大于1显式允许跨缺测连接"),
       number("maxEdgeLength", "三角边长上限", .05, 1e-9, 1e6, "m"),
       img::intParam("visualizeSlice", "显示截面序号", 0, 0, 1023, "从0开始"),
-      number("min", "属性下限", 0, 0, 1e6, "m"),
-      number("max", "属性上限", .05, 0, 1e6, "m"),
       img::boolParam("includeInterpolated", "纳入补值顶点", false, "默认只使用实测栅格")};
+  profile.capabilities.previewable = false;
+  profile.compute = profileSlices;
+  r.addOperator(std::move(profile));
+
+  auto measure = image_p1::descriptor("depth.measure_profile_features", "组织截面特征测量",
+                                      "depth profile width height features inflection slope");
+  measure.inputs = {{"profiles", "Tensor", "截面点", "[M,4] slice,x,height,chain", true},
+                    image_p1::recordPort("sliceInfo", kProfileSliceInfo)};
+  measure.outputs = {image_p1::recordPort("features", kProfileFeatures),
+                     {"attributes", "Tensor", "属性", "[S]属性，无效由attributeValid标记", true},
+                     {"attributeValid", "Tensor", "属性有效性", "[S]0/1", true},
+                     img::imageOut("plot")};
+  measure.params = {img::enumParam("attributeMode", "属性模式", "x-x",
+                                   {{"x-x", "横向差", ""}, {"y-y", "高度差", ""}}, "")};
   for (const auto* name : {"a", "b"}) {
     const std::string key = name;
-    profile.params.push_back(number((key + "Center").c_str(), "特征区域中心",
+    measure.params.push_back(number((key + "Center").c_str(), "特征区域中心",
                                     name[0] == 'a' ? -.001 : .001, -1e6, 1e6, "m"));
-    profile.params.push_back(number((key + "Width").c_str(), "特征区域宽度", .002, 1e-9, 1e6, "m"));
-    profile.params.push_back(number((key + "Gradient").c_str(), "相对最大梯度阈值", .5, 0, 1));
-    profile.params.push_back(
+    measure.params.push_back(number((key + "Width").c_str(), "特征区域宽度", .002, 1e-9, 1e6, "m"));
+    measure.params.push_back(number((key + "Gradient").c_str(), "相对最大梯度阈值", .5, 0, 1));
+    measure.params.push_back(
         img::enumParam((key + "Type").c_str(), "特征类型",
                        name[0] == 'a' ? "left-right-inflection" : "right-left-inflection",
                        {{"left-right-inflection", "左到右首显著梯度", ""},
@@ -1284,8 +1500,20 @@ void registerP5Inspection(Registry& r) {
                         {"right-most", "最右点", ""}},
                        ""));
   }
-  profile.capabilities.previewable = false;
-  profile.compute = profiles;
-  r.addOperator(std::move(profile));
+  measure.capabilities.previewable = false;
+  measure.compute = measureProfiles;
+  r.addOperator(std::move(measure));
+
+  auto limits = image_p1::descriptor("depth.classify_profile_features", "组织截面属性判定",
+                                     "depth profile dimension acceptance range");
+  limits.inputs = {image_p1::recordPort("features", kProfileFeatures)};
+  limits.outputs = {image_p1::recordPort("features", "inspection.Profiles.v1")};
+  limits.params = {number("min", "属性下限", 0, 0, 1e6, "m"),
+                   number("max", "属性上限", .05, 0, 1e6, "m")};
+  limits.capabilities.previewable = false;
+  limits.compute = classifyProfiles;
+  r.addOperator(std::move(limits));
+  r.addGraphMigration({"depth.defects.v1", {}, migrateDefects});
+  r.addGraphMigration({"depth.profile_slices.v1", {}, migrateProfiles});
 }
 }
