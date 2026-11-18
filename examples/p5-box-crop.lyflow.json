@@ -9,16 +9,8 @@
       "params": {
         "id": "boxA",
         "frame": "world",
-        "position": [
-          0,
-          0,
-          0.5
-        ],
-        "size": [
-          0.125,
-          0.125,
-          0.03125
-        ]
+        "position": [0, 0, 0.5],
+        "size": [0.125, 0.125, 0.03125]
       },
       "ui": {
         "position": {
@@ -33,16 +25,8 @@
       "params": {
         "id": "boxB",
         "frame": "world",
-        "position": [
-          0.25,
-          0,
-          0.5
-        ],
-        "size": [
-          0.0625,
-          0.0625,
-          0.0625
-        ]
+        "position": [0.25, 0, 0.5],
+        "size": [0.0625, 0.0625, 0.0625]
       },
       "ui": {
         "position": {
