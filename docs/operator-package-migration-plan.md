@@ -1,6 +1,6 @@
 # 算子边界迁移计划
 
-状态：M1–M4d 已合并。下一波是 [M5 Glue 拆分](#m5-glue-拆分)，M6、M7 待实施。
+状态：M1–M4d 已合并。[M5 Glue 拆分](#m5-glue-拆分)已实现，待合并。M6、M7 待实施。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
@@ -16,7 +16,8 @@
 | M4b   | 已合并：10项公共算子、原生来源绑定与旧Gap薄适配             | [PR66](https://github.com/liangyuR/lyFlow/pull/66)、[公共算子契约](profile-public-operators.md)                                             |
 | M4c   | 已合并：Gap原生场景、模板/模型、Bundle及显式图升级          | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移](gap-profile-migration.md)                                                 |
 | M4d   | 已合并 | [M4d 收敛切片](#m4d-收敛切片) |
-| M5–M7 | 待实施 | [M5 切片及验证](#m5-glue-拆分)、[后续波次门槛](#波次与完成门槛) |
+| M5    | 已实现，待合并 | [M5 切片及验证](#m5-glue-拆分)、[标定连线迁移](glue-integration.md#迁移旧标定连线) |
+| M6–M7 | 待实施 | [后续波次门槛](#波次与完成门槛) |
 
 M1 提升产品/ABI 至 1.4.0，此后各波次保持 1.4 系列 C ABI 布局。M2 交付公开静态 SDK（geometry/metrology 内核）。M3 交付公共 Profile 链与 solution-dts。M4a–M4c 交付稳健拟合公共核、公共 Profile 选点/拟合/度量节点及 solution-gap。版本号与 ABI 规则以 [发包契约](deployment/packaging.md) 为准。
 
@@ -109,7 +110,7 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | 6 · 飞拍定位与站位测量 | 迁移模板定位，沿用同一套位姿与角度可观测性语义。站位卡尺保留任意法向、近胶/最强内边选择及站点标识。标定消费者改用版本化 `image.PlaneCalib`，旧图复用已有的显式标定升级规则。 | 复用 `test_flyshot.cpp` 的随包图和带行填充的相机输入，检查毫米点表、角度不可观、`pose_fail`、`no_inner`、`no_bead`、`incomplete_bead`。用现有标定迁移夹具验证旧图和单位；边缘选择变化时回放飞拍链。 |
 | 7 · 场景包与交付切换 | 将其余注册、自由搜索与示教流程、测量判定、场景测试、随包图、片段和工具移至 `solutions/glue`。切换包选择、脚本和发布清单，删除旧包入口。 | 复用示教/自由搜索、断胶及人造断胶用例，验证诊断候选不计入正式宽度、覆盖率或判定。核对随包图、片段及工具资源路径。用 `LYFLOW_STD_PACKS=0` 点名场景包和所需标准包，运行颜色与卡尺链，核对 manifest 归属及产物依赖中无 ORT/PCL。 |
 
-**按变更选择验证。** 纯实现迁移复用对应包的测试，图级只检查连线与输出契约。改变选边、候选、补缝或有效性规则时，回放受影响链路的录制帧，对照逐站结果与宿主判定。[Glue 专项脚本](../scripts/check-glue.ps1) 在配置 `LYFLOW_GLUE_DATA` 后执行灰度实帧评估。[彩色评估工具](../packs/glue/tools/glue_color_eval.py) 使用 `LYFLOW_GLUE_COLOR_DATA` 和相应的示教配置。缺少相应数据时，在该切片标记回放待验。精简构建在包依赖定型时验证，依赖再次变化才重验。完整 SDK、桌面和发布矩阵归 M7 及发布门禁。
+**按变更选择验证。** 纯实现迁移复用对应包的测试，图级只检查连线与输出契约。改变选边、候选、补缝或有效性规则时，回放受影响链路的录制帧，对照逐站结果与宿主判定。[Glue 专项脚本](../scripts/check-glue.ps1) 在配置 `LYFLOW_GLUE_DATA` 后执行灰度实帧评估。[彩色评估工具](../solutions/glue/tools/glue_color_eval.py) 使用 `LYFLOW_GLUE_COLOR_DATA` 和相应的示教配置。缺少相应数据时，在该切片标记回放待验。精简构建在包依赖定型时验证，依赖再次变化才重验。完整 SDK、桌面和发布矩阵归 M7 及发布门禁。
 
 公开 ID、参数或 Record 变化时，同片更新受影响的随包图和读取方。保存到磁盘的旧图需要改写时，由 `lyflow migrate` 调用所属包的离线规则。影响 GlueSight 时，在改变契约的切片用配对运行库验证受影响的内置模板、启动所需 ID、彩色节点的 `widthPolicy=extent` 或已有配方的模型 JSON，并注明宿主可接入的版本。类型或状态字段影响 MCP 时验证相应摘要。读取方见 [GlueSight 启动检查](https://github.com/liangyuR/ly-gluesight/blob/main/src-tauri/src/vision.rs)、[内置图模板](https://github.com/liangyuR/ly-gluesight/tree/main/src-tauri/graphs)和 [MCP 摘要](../packages/mcp/src/summary.ts)。
 
@@ -133,10 +134,10 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | ------------------------------------ | --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `gap.ScanPair`                       | gap                   | solution-gap / M4                                          | 保留主/副/合并的相机身份和槽/处理阶段；公共Profile适配独立定义，不把两台都有效当作前提                   |
 | `gap.RoiSet`                         | gap                   | solution-gap / M4                                          | datum/target/seamLeft/seamRight角色与来源信息属于场景；单位及坐标记录显式转换                            |
-| `glue.ResponseMaps`                  | glue                  | std-image / M5 | 扇扫、跟踪和卡尺按同一 frame 读取 response、gray、level。 |
-| `glue.ColorMaps`                     | glue                  | std-image / M5 | 保留 score、luma、state、frame。区分未观测、已观测低分及 ROI 外部。 |
-| `glue.Path`                          | glue                  | solution-glue / M5 | 场景拥有 line/info 的示教与搜索语义，弧长重采样共用几何核。 |
-| `glue.Bead`                          | glue                  | solution-glue / M5                                         | 沿程station及胶路有效性/断胶字段仍按原语义，宿主与片段同步                                               |
+| `glue.ResponseMaps`                  | std-image             | std-image / M5 | 扇扫、跟踪和卡尺按同一 frame 读取 response、gray、level。 |
+| `glue.ColorMaps`                     | std-image             | std-image / M5 | 保留 score、luma、state、frame。区分未观测、已观测低分及 ROI 外部。 |
+| `glue.Path`                          | solution-glue         | solution-glue / M5 | 场景拥有 line/info 的示教与搜索语义，弧长重采样共用几何核。 |
+| `glue.Bead`                          | solution-glue         | solution-glue / M5                                         | 沿程station及胶路有效性/断胶字段仍按原语义，宿主与片段同步                                               |
 | StandardGap的6种导入模式             | gap                   | solution-gap导入模块 / M4                                  | `StandardGap.yml`、`:template`、`:model`及三种`:fine`逐个重写生成图并验证；模型与模板路径/相对资源不改变 |
 | `gap.backup_camera`                  | gap片段               | solution-gap / M4                                          | 备用闭包的demand与choice事件不变                                                                         |
 | `gap.flush_line_end`                 | gap片段               | solution-gap / M4                                          | 新度量端口与线端/朝缝方向一致                                                                            |
@@ -144,9 +145,9 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | `gap.gap_circles`                    | gap片段               | solution-gap / M4                                          | 逐侧圆/先验/基准方向与间隙定义一致                                                                       |
 | `gap.measure_skeleton`               | gap片段               | solution-gap / M4                                          | 完整ROI/Bundle/图输出连接正确，无缺失公共算子                                                            |
 | `gap.locate_model_template_fallback` | gap片段               | solution-gap / M4                                          | 模型失效才请求模板闭包；正常模型路径不启动模板依赖                                                       |
-| `glue.bead_inspect`                  | glue片段              | solution-glue / M5                                         | 路径、宽、断胶、边距及判定的公共/场景schema一致                                                          |
+| `glue.bead_inspect`                  | solution-glue 片段    | solution-glue / M5                                         | 路径、宽、断胶、边距及判定的公共/场景schema一致                                                          |
 | DTS两张默认图及原生源变体            | solutions/dts/graphs  | solutions/dts / M3                                         | 默认/相邻钣金基准选择及宿主注入节点迁移；不能将两张图误合成一种基准定义                                  |
-| gap/glue随包图和工具                 | packs/gap、packs/glue | 对应solutions / M4、M5                                     | 扫描所有图的节点/版本、相对模型/图片路径、工具CLI参数与输出字段；个人工作流不提交到仓库                  |
+| gap/glue随包图和工具                 | solutions/gap、solutions/glue | 对应solutions / M4、M5                                     | 扫描所有图的节点/版本、相对模型/图片路径、工具CLI参数与输出字段；个人工作流不提交到仓库                  |
 | 共享可视化/渲染与模型查看            | core/renderer、editor | 原所属平台层 / M1、M7                                      | 显示明确的mm/m与轴/手性，Bundle新schema适配；不为场景分包复制渲染器                                      |
 | Python SDK/worker及7个示例           | python                | Python执行扩展保留core；示例仍为SDK示例 / M1、M7           | 大数组继续原生/映射缓冲；类型白名单、只读/取消/超时、worker恢复与临时文件清理；新Profile需同步完整codec  |
 | 用户`lib.*`组合库                    | 用户库配置            | 用户场景资产 / M4–M7                                       | 刷新只替换自己的注册集合；缺包保留节点连线并给依赖诊断，`lyflow migrate` 覆盖组合内部和保存路径          |

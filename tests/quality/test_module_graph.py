@@ -164,16 +164,16 @@ lyflow_resolve_packs(ordered consumer)
         with self.subTest(kind='undeclared-selection'):
             self.check_cmake('lyflow_resolve_packs(ordered absent)\n', 'Missing lyFlow pack declaration: absent')
         declarations = '\n'.join(
-            f'include("{(ROOT / "packs" / name / "lyflow_pack_dependencies.cmake").as_posix()}")'
-            for name in ('glue', 'std-image'))
+            f'include("{(ROOT / name / "lyflow_pack_dependencies.cmake").as_posix()}")'
+            for name in ('solutions/glue', 'packs/std-image'))
         with self.subTest(kind='glue-snippet-requires-image-registration'):
-            self.check_cmake(declarations + '\nlyflow_resolve_packs(ordered glue)\n',
-                             'Missing enabled pack std-image; required by glue')
+            self.check_cmake(declarations + '\nlyflow_resolve_packs(ordered solution-glue)\n',
+                             'Missing enabled pack std-image; required by solution-glue')
         with self.subTest(kind='glue-image-registration-is-ordered'):
             self.check_cmake(declarations + '''
-lyflow_resolve_packs(ordered glue std-image)
-if(NOT ordered STREQUAL "std-image;glue")
-  message(FATAL_ERROR "Snippet provider must be enabled before glue: ${ordered}")
+lyflow_resolve_packs(ordered solution-glue std-image)
+if(NOT ordered STREQUAL "std-image;solution-glue")
+  message(FATAL_ERROR "Image package must be enabled before solution-glue: ${ordered}")
 endif()
 ''')
 

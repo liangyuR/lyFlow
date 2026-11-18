@@ -101,7 +101,7 @@ Profile 采用有类型、可校验、可由原生缓冲共享的契约。M1 已
 - M2 已将 primitive_crop、workspace 和 pose_projection 的跨包私有头依赖替换为公开几何/刚体核；各节点只保留端口、参数和诊断包装，独立核的验证入口见[公共内核](public-kernels.md)。
 - `workspace.load` 的实际读取依赖是 YAML 与轻量位姿契约，不应因为目前位于 image 就要求 OpenCV；归入 geometry 的可选 workspace-io 模块。
 - YOLO/OCR 的纯 Tensor 解码归 ml/adapters，纯Tensor/Record数值坐标回映可随解码器迁移；图像采样、重采样和叠画继续归 image。移动前抽取共享检测/OCR记录，避免反向 include。
-- `image.PlaneCalib` 的版本化分支已在 M1 统一为显式 m/mm、frame 与归一化齐次 H；图像私有的非版本化旧解析分支保留至 M5 显式迁移。不能把删除旧分支误记为无行为变化的搬包。
+- 涂胶量测统一消费版本化 `image.PlaneCalib`，使用显式 m/mm、图像帧、平面帧及归一化齐次 H。旧标定连线可按[接入指南](glue-integration.md)用 `lyflow migrate` 插入显式适配节点。
 - `gen.synthetic` 最终归 std-pointcloud 的 portable-generation。纯 core 从当前 4 个节点收敛为 3 个透传/调度节点，相关测试与发布断言必须先改用明确的 fixture 或启用生成模块。
 - M2 已用显式包/模块声明替换 CMake 包优先级列表，配置期检查环、缺依赖、重复声明及目标提供者冲突；默认关闭的包不会先配置后端再决定跳过。实际组合构建和安装消费仍是每次迁移的独立验收门槛。
 

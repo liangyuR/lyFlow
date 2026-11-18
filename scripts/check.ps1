@@ -110,7 +110,7 @@ if (Want "schema") {
   }
 
   Step "glue 图与像素叠画 vs schema"
-  foreach ($graph in Get-ChildItem (Join-Path $root "packs\glue\graphs\*.lyflow.json")) {
+  foreach ($graph in Get-ChildItem (Join-Path $root "solutions\glue\graphs\*.lyflow.json")) {
     python "$PSScriptRoot\validate_schema.py" $graph.FullName (Join-Path $root "schema\graph-doc.schema.json")
     if ($LASTEXITCODE -ne 0) { throw "glue 图 $($graph.Name) 不符合 schema" }
   }

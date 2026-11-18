@@ -5,7 +5,7 @@
 
 一句话：包提供源文件与链接库，LyFlow 在构建期把它们编进同一个 `lyflow_core.dll`。
 
-本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，M3 提供原生Profile处理链与 `solutions/dts` 场景试点，见[DTS迁移指南](dts-profile-migration.md)。M4b新增公共选择/稳健拟合/度量与来源绑定，见[公共Profile契约](profile-public-operators.md)；Gap场景/Bundle/导入图留M4c，glue留M5。
+本页描述当前机制。能力/场景重新分层见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)和[迁移计划](operator-package-migration-plan.md)。M1 新增的 `std-profile` 提供显式数据适配；M2 新增可静态链接的[公共内核](public-kernels.md)和 `std-metrology`，M3 提供原生Profile处理链与 `solutions/dts` 场景试点，见[DTS迁移指南](dts-profile-migration.md)。M4b新增公共选择/稳健拟合/度量与来源绑定，见[公共Profile契约](profile-public-operators.md)；涂胶场景由 `solution-glue` 提供，图像响应、卡尺候选、颜色打分与模板定位归 `std-image`。
 
 包有两类，机制**完全相同**，只是从哪儿找到它们不一样：
 
@@ -30,8 +30,8 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | `std-profile`    | 0.5.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
 | `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.3.1  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
-| `std-image`      | 0.11.0 | ON      | 76项图像、标定、检测适配、识码、OCR/分割适配及深度投影（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
-| `glue`           | 0.3.3  | **OFF** | 20项胶路、宽/断胶/边距、图像响应、颜色与飞拍测量（[README](../packs/glue/README.md)）            | 独立 `opencv-support` 模块；随包片段另要求注册 `std-image`                          |
+| `std-image`      | 0.12.0 | ON      | 83项图像处理、标定、识别适配、深度投影、响应与候选测量（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `solution-glue`  | 0.4.0  | **OFF** | 13项示教与搜索、跟踪、场景卡尺、断胶和判定（[README](../solutions/glue/README.md)）                | `std-image`、OpenCV 支持和几何核，无 PCL/ORT                                            |
 | `solution-gap`   | 0.1.0  | **OFF** | 40项`gap.*`原生场景与临时兼容入口                                                                | 基础PCL；模板/模型/导入/兼容能力按模块启用                                          |
 | `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 

@@ -437,7 +437,7 @@ jobs:
           $libraries = $env:LYFLOW_OPENCV_BIN
           if ($env:LD_LIBRARY_PATH) { $libraries += [IO.Path]::PathSeparator + $env:LD_LIBRARY_PATH }
           "LD_LIBRARY_PATH=$libraries" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image;std-metrology' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
+          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image;std-metrology;solution-glue' -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
           if ($LASTEXITCODE -ne 0) { throw 'Linux 视觉算子配置失败' }
 
       - name: 编译并自检算子契约

@@ -3,7 +3,7 @@
 #include <iterator>
 #include <system_error>
 
-#include "lyflow_cv/plane_calib.h"
+#include "lyflow/calibration.h"
 #include "ops.h"
 
 namespace lyflow::std_image {
@@ -24,19 +24,21 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
   // 整个 Record（{kind, type, data}）或者只有 data 都认
   if (doc.is_object() && doc.contains("data") &&
       (doc.value("kind", nlohmann::json()) != "Record" ||
-       doc.value("type", nlohmann::json()) != kPlaneCalibType)) {
+       doc.value("type", nlohmann::json()) != calibration::kPlaneType)) {
     return Status::Error(Phase::Execute, "bad_param", "标定 Record 的 kind/type 不匹配", "path");
   }
-  const nlohmann::json data = doc.contains("data") && doc["data"].is_object() ? doc["data"] : doc;
-  PlaneCalib calib;
+  Record rec;
+  rec.type = calibration::kPlaneType;
+  if (doc.contains("data") && doc["data"].is_object())
+    rec.data = std::move(doc["data"]);
+  else
+    rec.data = std::move(doc);
+  calibration::Plane calib;
   std::string why;
-  if (!parsePlaneCalib(data, &calib, &why)) {
+  if (!calibration::parsePlane(rec, calib, why, /*allowMissingLegacyUnit=*/true)) {
     return Status::Error(Phase::Execute, "bad_param", "标定文件不是合格的 image.PlaneCalib：" + why,
                          "path");
   }
-  Record rec;
-  rec.type = kPlaneCalibType;
-  rec.data = data;
   outputs.set("calib", Data::record(std::move(rec)));
   return Status::Ok();
 }
@@ -74,8 +76,9 @@ void registerLoadCalib(Registry& r) {
                  "标定",
                  "读取",
                  "单应"};
-  op.doc = "读一份 image.PlaneCalib 的 JSON 文件（整个 Record 或只有 data 都行），出 Record。"
-           "标定属于相机工位：宿主标一次存成文件，产线图经这个节点读，接到量测积木的 calib 口。";
+  op.doc =
+      "读一份 image.PlaneCalib 的 JSON 文件（整个 Record 或只有 data 都行），出 Record。"
+      "标定属于相机工位。原样输出旧标定或版本化标定的内容，旧标定可显式接入 image.upgrade_plane_calib。";
   op.outputs = {Port{"calib", "Record", "Calib", "image.PlaneCalib。", true}};
   Param path;
   path.name = "path";

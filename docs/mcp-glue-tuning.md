@@ -1,6 +1,6 @@
 # glue 的 MCP 调参与评估
 
-本流程基于已合并的 glue 包。检测和量测由 C++ core 执行，真值匹配由 Rust CLI 执行，MCP 管理冻结试验、搜索预算与呈现。先配置 [MCP 服务](mcp.md)，并用 `LYFLOW_PACKS=glue` 构建 core 和 CLI。将 `LYFLOW_WORK_DIR` 设为持久目录，才能在 MCP 重启后续跑。
+本流程基于已合并的 glue 包。检测和量测由 C++ core 执行，真值匹配由 Rust CLI 执行，MCP 管理冻结试验、搜索预算与呈现。先配置 [MCP 服务](mcp.md)，并用 `LYFLOW_PACKS=solution-glue` 构建 core 和 CLI。将 `LYFLOW_WORK_DIR` 设为持久目录，才能在 MCP 重启后续跑。
 
 ## 1. 确认环境与参数入口
 

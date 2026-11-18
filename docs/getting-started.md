@@ -68,12 +68,12 @@ pnpm dev
 默认启用 `std-pointcloud`、`std-image`、`std-ml`。领域包需要在启动或构建前设置：
 
 ```powershell
-$env:LYFLOW_PACKS = 'glue'
+$env:LYFLOW_PACKS = 'solution-glue'
 pnpm core:build
 pnpm dev
 ```
 
-多个领域包用分号分隔，例如 `'gap;dts;glue'`。切换配置前停止正在运行的开发进程；`pnpm core:build` 会重新配置 `build/core`，再启动监视构建，避免后续热重载使用旧包组合。标准包与领域包的说明见 [文档首页](README.md)。
+多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换配置前停止正在运行的开发进程；`pnpm core:build` 会重新配置 `build/core`，再启动监视构建，避免后续热重载使用旧包组合。标准包与领域包的说明见 [文档首页](README.md)。
 
 只开发平台、不需要 PCL / OpenCV / ONNX Runtime 时，可在新的 PowerShell 会话中选择纯平台构建：
 

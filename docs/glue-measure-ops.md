@@ -1,6 +1,6 @@
 # glue 测量算子契约（1.2 / 1.3 系列）
 
-[文档首页](README.md) · [glue 包说明](../packs/glue/README.md) · [测试地图](testing.md)
+[文档首页](README.md) · [glue 包说明](../solutions/glue/README.md) · [测试地图](testing.md)
 
 状态：**契约草案，lyFlow 与 GlueSight 并行开发中**。改动契约前先在两边汇报，再改本文件与实现。
 
@@ -555,7 +555,7 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 ### 参考连法与 GS 侧的判定
 
-随包参考图 `packs/glue/graphs/color.lyflow.json`：示教帧 + 示教线 → `color_model`；生产帧 → `color_map`（接 `n_model.model`）→ 沿示教线的 `color_runs`，
+随包参考图 `solutions/glue/graphs/color.lyflow.json`：示教帧 + 示教线 → `color_model`；生产帧 → `color_map`（接 `n_model.model`）→ 沿示教线的 `color_runs`，
 以及 `color_fan` → `color_track` → `color_runs`。宿主生产时不带示教那两个节点，把配方里的模型 JSON 填进 `n_map.model`。
 
 宿主判每站时先确认目标关联与双侧完整性：可信的完整边界段才能提供完整胶宽；截断片段只保留边界证据，可靠时可形成保守下界，不能以片段中点替代胶中心。
@@ -563,10 +563,10 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 ### 实测（2026-11-06）
 
-合成场景（`packs/glue/tests/test_color.cpp`）：宽 {8, 20, 40} px × 底材 {铸件（马赛克再去马赛克）、镀锌、两侧各一} × 照明 {平、0.4–1.0 渐变}，每站一段、
+合成场景（`solutions/glue/tests/test_color.cpp`）：宽 {8, 20, 40} px × 底材 {铸件（马赛克再去马赛克）、镀锌、两侧各一} × 照明 {平、0.4–1.0 渐变}，每站一段、
 胶宽中位误差 ≤ 1 px；得分若按色度 / 后验概率而不换算面积，铸件上胶宽偏宽 2.3 px。
 
-真实帧（JHEM131GC-XS 去马赛克后的 1280×1024 RGB，`packs/glue/tools/glue_color_eval.py`，示教线手画，模型用第 35 帧建）：
+真实帧（JHEM131GC-XS 去马赛克后的 1280×1024 RGB，`solutions/glue/tools/glue_color_eval.py`，示教线手画，模型用第 35 帧建）：
 
 | 段 | 有胶帧 | 每站有段 | 中心段宽 P10–P90 | 彩色跟踪的有信息覆盖率 | 无胶帧上的段 |
 |---|---|---|---|---|---|

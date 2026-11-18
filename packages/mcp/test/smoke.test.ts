@@ -107,7 +107,7 @@ function payload(result: unknown): Record<string, unknown> {
   return JSON.parse(content.map((c) => c.text ?? '').join('')) as Record<string, unknown>;
 }
 
-/** Real MCP calls cover the tuning lifecycle; synthetic image follows packs/glue/tests/test_glue.cpp. */
+/** Real MCP calls cover the tuning lifecycle; synthetic image follows solutions/glue/tests/test_glue.cpp. */
 async function tuningWorkflow(client: Client, workspace: string): Promise<void> {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const result = await client.callTool({ name, arguments: args });
@@ -120,7 +120,7 @@ async function tuningWorkflow(client: Client, workspace: string): Promise<void> 
   const available = await call('list_operators', { query: 'glue.bead_path' });
   if (!(available['operators'] as { id: string }[]).some((o) => o.id === 'glue.bead_path')) {
     assert.notEqual(
-      process.env['LYFLOW_PACKS']?.split(';').includes('glue'),
+      process.env['LYFLOW_PACKS']?.split(';').includes('solution-glue'),
       true,
       'glue 构建不能跳过生命周期验收',
     );
