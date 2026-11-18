@@ -66,3 +66,8 @@ custom-protocol = ["tauri/custom-protocol"]
 codegen-units = 1
 lto = true
 strip = true
+
+[profile.release-test]
+inherits = "release"
+codegen-units = 16
+lto = "off"

@@ -46,7 +46,7 @@ pnpm e2e --only m3:suitePanels,params_p4
 | `frontend` | windows-2022 | 编辑器 React 18/19 类型、桌面与 React 宿主构建、编辑器及共享可视化单测、MCP 类型/构建/单测。 |
 | `fast` | ubuntu-24.04 | 要求 `frontend` 与 `client` 都成功，不重复运行其测试。 |
 | `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；M2 轻量 SDK 安装与公共核消费。 |
-| `rust` | windows-2022 | 自行编译同组合的 `lyflow_core`（不含测试），再做 Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes`、`profiles`、`host` 集成测试。 |
+| `rust` | windows-2022 | 编译同组合的 `lyflow_core`，以 Tauri 开发配置编译桌面壳和 CLI，再用一次 Cargo 调用运行 lib/bins 单测与 `python_nodes`、`profiles`、`host` 集成测试。桌面前端由 `frontend` 编译。 |
 | `vision` | ubuntu-24.04 | 无 PCL/ORT 的值、几何、图像、度量、Tensor 解码与涂胶场景包编译、算子自检及 CTest。 |
 
 `native`、`rust` 与 `vision` 用 sccache 缓存编译结果，因此关闭了预编译头；源文件必须自己包含所需头文件，不能依赖 PCH。

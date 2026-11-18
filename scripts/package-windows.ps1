@@ -76,7 +76,7 @@ try {
         Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
     $buildExit = $LASTEXITCODE
     if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
-    & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
+    & cargo test --locked --profile release-test --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
         Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
     $testExit = $LASTEXITCODE
     if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }

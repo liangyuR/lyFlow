@@ -118,7 +118,7 @@ vcpkg 只把本次现编的包推到源里，从 Actions 缓存恢复的包不�
 
 发布门禁覆盖固定依赖、core 单测、完整标准包的 Rust 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合及 packaging/release.json 声明的必需算子、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
 
-Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`；固定 `LYFLOW_STD_PACKS=1`，执行日常纯平台构建中因缺少标准包而忽略的测试。`host` 启用 IPC/执行层测试而无需桌面资源。CLI 产物仍由无默认特性的 `cargo build --release --bin lyflow` 生成。单测失败保留 Cargo 退出码与日志并停止，不进入暂存及 ZIP 生成。
+Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --locked --profile release-test --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`。固定 `LYFLOW_STD_PACKS=1`，执行日常纯平台构建因缺少标准包而忽略的测试。`host` 启用 IPC 和执行层测试。`release-test` 保留发布级优化，关闭 LTO 并行生成代码。交付的 CLI 由无默认特性的 `cargo build --release --bin lyflow` 生成，继续使用 LTO。单测失败时保留 Cargo 退出码与日志，并在暂存前停止。
 
 已删除打包入口中的 ZIP 解压消费验收、独立 runner 验收 job、`package:verify` 入口、固定 GS 客户端消费工程及专用合成场景/损坏资产负向探针。DLL 身份读取由 `scripts/inspect-runtime.ps1` 和本地 Rust 探针完成，不解压 ZIP，不运行外部 C++/Rust 消费场景。SDK 消费工程保留在本地 `pnpm check`，日常 CI 仅编译与单元测试。
 
