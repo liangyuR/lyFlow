@@ -25,21 +25,41 @@ function Assert-Runtime([string]$Directory) {
     $actualVersion = (Get-Content -LiteralPath (Join-Path $Directory 'VERSION_NUMBER') -Raw).Trim()
     if ($actualVersion -ne $version) { throw "ONNX Runtime 版本不符：$actualVersion，预期 $version" }
 }
+function Assert-Archive([string]$Path) {
+    if ((Get-Item -LiteralPath $Path).Length -ne $expectedBytes -or
+        (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+        throw "ONNX Runtime 归档字节数或 SHA256 不符：$Path"
+    }
+}
 if (Test-Path -LiteralPath $dest) {
     Assert-Runtime $dest
     Write-Host "ONNX Runtime $version 已验证：$dest"
     exit 0
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $archive) -Force | Out-Null
-if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+if (Test-Path -LiteralPath $archive -PathType Leaf) {
+    Assert-Archive $archive
+} else {
     if ($Offline) { throw '离线模式下未找到固定 ONNX Runtime 归档' }
-    $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$name.zip"
-    Write-Host "下载官方 CPU 资产：$url"
-    Invoke-WebRequest -Uri $url -OutFile $archive
-}
-if ((Get-Item -LiteralPath $archive).Length -ne $expectedBytes -or
-    (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
-    throw "ONNX Runtime 官方归档字节数或 SHA256 不符：$archive"
+    $urls = @(
+        "https://github.com/microsoft/onnxruntime/releases/download/v$version/$name.zip",
+        "https://downloads.sourceforge.net/project/onnx-runtime.mirror/v$version/$name.zip"
+    )
+    $pending = $archive + '.' + [Guid]::NewGuid().ToString('N') + '.part'
+    for ($i = 0; $i -lt $urls.Count; $i++) {
+        try {
+            Write-Host "下载固定 CPU 归档：$($urls[$i])"
+            Invoke-WebRequest -Uri $urls[$i] -OutFile $pending
+            Assert-Archive $pending
+            Move-Item -LiteralPath $pending -Destination $archive
+            break
+        } catch {
+            if ($i -eq $urls.Count - 1) { throw }
+            Write-Warning "微软原始地址不可用，尝试镜像并校验同一归档：$($_.Exception.Message)"
+        } finally {
+            if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
+        }
+    }
 }
 $stage = [IO.Path]::GetFullPath((Join-Path $root ('build/onnxruntime-stage-' + [Guid]::NewGuid().ToString('N'))))
 $workspacePrefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
