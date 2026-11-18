@@ -56,8 +56,8 @@ class ReleaseIdentityTests(unittest.TestCase):
 
     def test_extra_missing_and_retired_pack_identities_cannot_claim_official_revision(self):
         packs = self.configuration['packs']
-        self.check(packs=packs + ['solution-dts'])
-        self.check(packs=packs[:-1])
+        self.check(packs=packs + ['external-test-pack'])
+        self.check(packs=[name for name in packs if name != 'solution-dts'])
         self.check(packs=['gap' if name == 'solution-gap' else name for name in packs])
 
     def test_empty_partial_and_additional_explicit_modules_are_not_release_combination(self):
@@ -65,6 +65,7 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.check(modules=[])
         self.check(modules=modules[:-1])
         self.check(modules=modules + ['profile-robust-kernel'])
+        self.check(modules=modules + ['gap-compat'])
 
     def test_release_contract_is_the_only_combination_source(self):
         alternate = dict(self.configuration, packs=['custom-scene'], modules=['custom-module'])
@@ -95,6 +96,8 @@ class ReleaseIdentityTests(unittest.TestCase):
                     self.assertEqual(version, root_version, str(cmake.relative_to(ROOT)))
         self.assertNotIn('gap', self.configuration['packs'])
         self.assertIn('solution-gap', self.configuration['packs'])
+        self.assertIn('solution-dts', self.configuration['packs'])
+        self.assertIn('solution-glue', self.configuration['packs'])
         self.assertNotIn('gap.fit_line', self.configuration['requiredOperators'])
         self.assertNotIn('gap.flush', self.configuration['requiredOperators'])
 

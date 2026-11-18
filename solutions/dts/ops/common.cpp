@@ -23,10 +23,9 @@ int integer(const nlohmann::json& data, const char* field) {
 
 Status cancelledStatus() { return Status::Error(Phase::Execute, "cancelled", "DTS轮廓计算已取消"); }
 
-nlohmann::json requireGraphMigration(const nlohmann::json&) {
+nlohmann::json rejectLegacyProfileNode(const nlohmann::json&) {
   throw std::invalid_argument(
-      "旧DTS节点需要dtsProfile.v1图级迁移（unit=mm、plane=XZ、sampleOrder=acquisition）：运行 lyflow migrate "
-      "<图> --profile-source <dts.profile_in节点> --profile-frame <frame> --profile-source-id <sourceId> --write");
+      "旧DTS节点消费毫米点云，请确认单位、坐标帧与采样顺序后用原生Profile重新搭图");
 }
 
 Status sceneError(const std::exception& error, const char* port) {
@@ -145,22 +144,22 @@ nlohmann::json faceToJson(const Face& face) {
           {"pz", face.line.pz},  {"dx", face.line.dx},  {"dz", face.line.dz}};
 }
 
-Line2D metricGeometry(const Line2D& legacy) {
-  Line2D result = legacy;
+Line2D metricGeometry(const Line2D& millimeters) {
+  Line2D result = millimeters;
   for (int i = 0; i < 2; ++i) {
-    result.point[i] = static_cast<float>(static_cast<double>(legacy.point[i]) * .001);
-    if (legacy.hasSegment) {
-      result.start[i] = static_cast<float>(static_cast<double>(legacy.start[i]) * .001);
-      result.end[i] = static_cast<float>(static_cast<double>(legacy.end[i]) * .001);
+    result.point[i] = static_cast<float>(static_cast<double>(millimeters.point[i]) * .001);
+    if (millimeters.hasSegment) {
+      result.start[i] = static_cast<float>(static_cast<double>(millimeters.start[i]) * .001);
+      result.end[i] = static_cast<float>(static_cast<double>(millimeters.end[i]) * .001);
     }
   }
   return result;
 }
 
-Point2D metricGeometry(const Point2D& legacy) {
-  Point2D result = legacy;
+Point2D metricGeometry(const Point2D& millimeters) {
+  Point2D result = millimeters;
   for (int i = 0; i < 2; ++i)
-    result.p[i] = static_cast<float>(static_cast<double>(legacy.p[i]) * .001);
+    result.p[i] = static_cast<float>(static_cast<double>(millimeters.p[i]) * .001);
   return result;
 }
 
@@ -188,8 +187,4 @@ Line2D lineMillimeters(const nlohmann::json& data) {
   return line;
 }
 
-const nlohmann::json* recordData(const Data& data, const char* type) {
-  const auto* record = data.asRecord();
-  return record && (!type || record->type == type) ? &record->data : nullptr;
-}
 } // namespace lyflow::dts

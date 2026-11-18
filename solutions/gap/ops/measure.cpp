@@ -2,13 +2,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <limits>
-#include <set>
 #include <string>
+#include <utility>
 
 #include "gap_ops.h"
 #include "profile_inspection.h"
-#include "lyflow/kernel/profile_dimensions.h"
+#include "lyflow/op_params.h"
+#include "lyflow/kernel/geometry.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -27,33 +27,6 @@ lyflow::Line2D segmentOf(const Eigen::Vector2f& start, const Eigen::Vector2f& en
   seg.dir[0] = n > 0 ? d.x() / n : 1.0f;
   seg.dir[1] = n > 0 ? d.y() / n : 0.0f;
   return seg;
-}
-
-Status judge(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  lyflow::Measurement m = *inputs.get("value").asMeasurement();
-  const double nominal = params.number("nominal");
-  const double upper = params.number("upper");
-  const double lower = params.number("lower");
-  const double margin = params.number("margin");
-  const bool patrol = params.flag("patrol");
-
-  m.hasLimits = true;
-  m.nominal = nominal;
-  m.upper = nominal + upper;
-  m.lower = nominal + lower;
-  if (!m.ok || !std::isfinite(m.value)) {
-    m.verdict = "fail";
-  } else if (m.value > m.upper) {
-    m.verdict = patrol ? "margin" : "high";
-  } else if (m.value < m.lower) {
-    m.verdict = patrol ? "margin" : "low";
-  } else if (margin > 0 && (m.value > m.upper - margin || m.value < m.lower + margin)) {
-    m.verdict = "margin";
-  } else {
-    m.verdict = "ok";
-  }
-  outputs.set("value", Data::measurement(std::move(m)));
-  return Status::Ok();
 }
 
 // ------------------------------------------------------------ 软装夹角（corner）
@@ -95,10 +68,17 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
   if (std::fabs(det) < 1e-6F) {
     return Status::Error(Phase::Execute, "invalid_geometry", "两条翼面线近乎平行，交点不成立");
   }
-  const Eigen::Vector2f pL(left.point[0], left.point[1]);
-  const Eigen::Vector2f pR(right.point[0], right.point[1]);
-  const Eigen::Vector2f w = pR - pL;
-  const Eigen::Vector2f vertex = pL + ((w.x() * dR.y() - w.y() * dR.x()) / det) * dL;
+  auto wingLeft = left;
+  auto wingRight = right;
+  wingLeft.hasSegment = wingRight.hasSegment = false;
+  kernel::Intersections2D intersection;
+  kernel::GeometryIssue issue;
+  if (!kernel::intersect2D(wingLeft, wingRight, 1e-6, intersection, issue) ||
+      intersection.points.size() != 1)
+    return Status::Error(Phase::Execute, "invalid_geometry", "两条翼面线没有可表示的顶点");
+  const auto intersectionPoint = intersection.points.front();
+  const Eigen::Vector2f vertex(static_cast<float>(intersectionPoint.x),
+                               static_cast<float>(intersectionPoint.y));
 
   // 夹角取「两条翼面各自从顶点出发的方向」之间的角，∈ (0, 180)。直接拿 dir 点乘不行：
   // dir 的正负是拟合给的，60° 的尖角会被算成 120°。
@@ -223,45 +203,28 @@ Status cornerGeometry(const Inputs& in, const ParamView& p, Outputs& out, ExecCo
 }
 }
 
-void registerJudge(Registry& r) {
+void registerPatrolPolicy(Registry& r) {
   OperatorDesc op;
-  op.id = "gap.judge";
+  op.id = "gap.apply_patrol";
   op.version = "1.0.0";
-  op.label = "间隙面差判定";
+  op.label = "间隙面差巡检判定";
   op.category = "间隙/测量";
-  op.keywords = {"gap and flush judgement",
-                 "tolerance check",
-                 "quality verdict",
-                 "OK",
-                 "NG",
-                 "公差判定",
-                 "质量判定",
-                 "巡检",
-                 "judge",
-                 "tolerance",
-                 "公差"};
-  op.doc = "按标称值与上下偏差判定，不做任何统计；上游 ok=false 或值非有限一律判 fail。"
-           "margin 是「接近边界」的宽度，patrol 是巡检模式：超差只标 margin，不判 NG —— "
-           "那时 verdict 里分不出「接近边界」和「已经超差」。";
-  op.inputs = {Port{"value", "Measurement", "Value", "待判定的测量值。", true}};
-  op.outputs = {Port{"value", "Measurement", "Value", "带判定字段的测量值。", true}};
-
-  Param patrol;
-  patrol.name = "patrol";
-  patrol.type = ParamType::Bool;
-  patrol.label = "Patrol";
-  patrol.doc = "巡检模式：超差也只标 margin，不判 high/low。";
-  patrol.def = Value::boolean(false);
-
-  op.params = {
-      numParam("nominal", "Nominal", 0.0, "标称值。"),
-      numParam("upper", "Upper Deviation", 1.0, "上偏差（相对标称值）。"),
-      numParam("lower", "Lower Deviation", -1.0, "下偏差（相对标称值，通常是负数）。"),
-      numParam("margin", "Margin", 0.0, "离边界多近算 margin。0 = 不标。"),
-      patrol,
-  };
+  op.doc = "读取公差比较结果。巡检时将 high/low 标为 margin，无效量测标为 fail。";
+  op.inputs = {{"value", "Measurement", "公差比较", "接收标准量测公差比较。", true}};
+  op.outputs = {{"value", "Measurement", "判定结果", "保持读数、单位和限值。", true}};
+  op.params = {op_params::boolParam("patrol", "巡检", false, "巡检超差时仅标 margin。")};
   op.capabilities = {false, true, true};
-  op.compute = &judge;
+  op.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext&) {
+    Measurement result = *in.get("value").asMeasurement();
+    if (!result.ok || !std::isfinite(result.value))
+      result.verdict = "fail";
+    else if (!result.hasLimits || result.verdict.empty())
+      return op_params::badInput("需要已完成的公差比较结果", "value");
+    else if (params.flag("patrol") && (result.verdict == "high" || result.verdict == "low"))
+      result.verdict = "margin";
+    out.set("value", Data::measurement(std::move(result)));
+    return Status::Ok();
+  };
   r.addOperator(std::move(op));
 }
 

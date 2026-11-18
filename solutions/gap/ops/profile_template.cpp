@@ -40,15 +40,6 @@ GapCloud nativeCloud(const PointCloud& cloud) {
   result.is_dense = false;
   return result;
 }
-/// 只为了把 protected 的 registerCloud2DICPOutcome 露出来。run() 永远不会被调到。
-class PackAlignment final : public ::detection::Alignment {
-public:
-  int64_t run(const GapCloud&, const GapCloud&) override { return 0; }
-  using ::detection::Alignment::registerCloud2DICPOutcome;
-};
-
-// ---- Layer 1 信赖域。原实现在 GapDetection.cpp 的匿名命名空间里，没有导出。
-
 struct Se2Delta {
   Eigen::Vector2f translation = Eigen::Vector2f::Zero();
   float rotationRad = 0.0F;
@@ -103,22 +94,13 @@ Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f& reference, const Eigen::
 
 // ---------------------------------------------------------------------------
 
-dom::AlignmentConfiguration configFromOptions(const AlignmentOptions& p) {
-  dom::AlignmentConfiguration c;
-  c.method = "ICP";
-  c.save_result = false;
-  c.using_camera = "Both";
-  c.icp.max_matching_distance = p.maxMatchingDist;
-  c.icp.max_fitness_distance = p.maxFitnessDist;
-  c.icp.max_iteration_count = static_cast<int>(p.maxIterations);
-  c.icp.minimum_score = static_cast<int>(p.minScore);
-  c.icp.neighbor_count = static_cast<int>(p.normalKnn);
-  c.icp.bidirectional = p.bidirection;
-  c.robustness.degenerate_ratio = p.degenerateRatio;
-  c.robustness.global_coarse = p.globalCoarse;
-  c.robustness.trust_region.max_translation_mm = p.trustTranslation;
-  c.robustness.trust_region.max_rotation_deg = p.trustRotation;
-  return c;
+dom::IcpConfiguration configFromOptions(const AlignmentOptions& p) {
+  return {p.maxMatchingDist,
+          p.maxFitnessDist,
+          static_cast<int>(p.maxIterations),
+          static_cast<int>(p.minScore),
+          static_cast<int>(p.normalKnn),
+          p.bidirection};
 }
 
 dom::InitialPoseMode poseModeFromOptions(const AlignmentOptions& p) {
@@ -170,8 +152,7 @@ Status alignClouds(const PointCloud& targetCloud, const PointCloud& leftCloud,
     return Status::Error(Phase::Execute, "bad_input", "点云或模板是空的", {}, "cloud");
   }
 
-  PackAlignment aligner;
-  aligner.setConfiguration(configFromOptions(options));
+  const auto config = configFromOptions(options);
   const double trustTranslation = options.trustTranslation;
   const double trustRotation = options.trustRotation;
   const bool globalCoarse = options.globalCoarse;
@@ -183,7 +164,8 @@ Status alignClouds(const PointCloud& targetCloud, const PointCloud& leftCloud,
     SideOutcome side;
     if (ctx.cancelled())
       return side;
-    side.outcome = aligner.registerCloud2DICPOutcome(source, target, initialPose);
+    side.outcome =
+        ::detection::alignCloud2D(source, target, initialPose, config, options.degenerateRatio);
     if (side.outcome.success) {
       side.outcome.transform =
           applyTrustRegion(trustReference, side.outcome.transform, trustTranslation, trustRotation,
@@ -204,10 +186,8 @@ Status alignClouds(const PointCloud& targetCloud, const PointCloud& leftCloud,
     // 全局粗配的目标点数因此翻倍，与模板那一侧（左右各一片）的点数量级对齐。
     GapCloud mergedTarget(target);
     mergedTarget += target;
-    PackAlignment globalAligner;
-    globalAligner.setConfiguration(configFromOptions(options));
-    const auto global =
-        globalAligner.registerCloud2DICPOutcome(mergedTemplate, mergedTarget, initial.transform);
+    const auto global = ::detection::alignCloud2D(mergedTemplate, mergedTarget, initial.transform,
+                                                  config, options.degenerateRatio);
     globalScore = global.score;
     if (global.success) {
       sideInitialPose = global.transform;

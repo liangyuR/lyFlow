@@ -12,7 +12,7 @@
 | `action`      | `retain` 原地保留、`move` 整体迁包、`split` 拆分职责（可在同包或跨包）、`solution` 归入场景包。 |
 | `wave`        | 计划完成归属调整的波次 `M0`–`M7`。                                                |
 
-`retiredOperators` 记录已退役的 ID 及替代它们的算子，供 `lyflow migrate` 的诊断与文档引用。行按 `id` 排序。
+`retiredOperators` 记录已退役的 ID 及可用的替代算子，供诊断与文档引用。`replacedBy: []` 表示需要按业务目标重新搭图。行按 `id` 排序。
 
 清单不记录端口、参数、版本、源码位置或验收证据：契约以各包的代码与测试为准，验收证据写在 PR 描述里。
 

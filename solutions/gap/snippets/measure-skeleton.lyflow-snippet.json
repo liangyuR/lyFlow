@@ -56,11 +56,23 @@
       "opVersion": "2.0.1"
     },
     {
-      "id": "judgeFlush",
-      "op": "gap.judge",
+      "id": "judgeFlushTolerance",
+      "op": "metrology.compare_tolerance",
       "ui": {
         "position": {
           "x": 500,
+          "y": 0
+        },
+        "title": "比较段差"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "judgeFlush",
+      "op": "gap.apply_patrol",
+      "ui": {
+        "position": {
+          "x": 760,
           "y": 0
         },
         "title": "判定段差"
@@ -97,11 +109,23 @@
       "opVersion": "2.0.0"
     },
     {
-      "id": "judgeGap",
-      "op": "gap.judge",
+      "id": "judgeGapTolerance",
+      "op": "metrology.compare_tolerance",
       "ui": {
         "position": {
           "x": 500,
+          "y": 380
+        },
+        "title": "比较间隙"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "judgeGap",
+      "op": "gap.apply_patrol",
+      "ui": {
+        "position": {
+          "x": 760,
           "y": 380
         },
         "title": "判定间隙"
@@ -148,7 +172,7 @@
         "port": "value"
       },
       "to": {
-        "node": "judgeFlush",
+        "node": "judgeFlushTolerance",
         "port": "value"
       }
     },
@@ -178,13 +202,13 @@
         "port": "value"
       },
       "to": {
+        "node": "judgeGapTolerance",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
         "node": "judgeGap",
-        "port": "value"
-      }
-    },
-    {
-      "from": {
-        "node": "gap",
         "port": "value"
       },
       "to": {
@@ -194,7 +218,7 @@
     },
     {
       "from": {
-        "node": "flush",
+        "node": "judgeFlush",
         "port": "value"
       },
       "to": {
@@ -300,6 +324,26 @@
       "to": {
         "node": "bundle",
         "port": "circleFeature"
+      }
+    },
+    {
+      "from": {
+        "node": "judgeFlushTolerance",
+        "port": "value"
+      },
+      "to": {
+        "node": "judgeFlush",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
+        "node": "judgeGapTolerance",
+        "port": "value"
+      },
+      "to": {
+        "node": "judgeGap",
+        "port": "value"
       }
     }
   ],

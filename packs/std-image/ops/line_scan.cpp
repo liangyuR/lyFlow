@@ -196,13 +196,22 @@ std::vector<Run> caliperRuns(const Field& response, P2 c, P2 n, double half,
 std::vector<Run> caliperRuns(const std::vector<double>& samples, double half,
                              const RunSplitSpec& spec, std::vector<Run>* rawOut,
                              double* validFraction) {
+  if (validFraction) {
+    const auto n = std::count_if(samples.begin(), samples.end(), [](double x) { return x >= 0.0; });
+    *validFraction = samples.empty() ? 0.0 : static_cast<double>(n) / samples.size();
+  }
+  auto raw = rawCaliperRuns(samples, half, spec);
+  auto merged = mergeCaliperRuns(raw, spec);
+  if (rawOut)
+    *rawOut = std::move(raw);
+  return merged;
+}
+
+std::vector<Run> rawCaliperRuns(const std::vector<double>& samples, double half,
+                                const RunSplitSpec& spec) {
   const int count = static_cast<int>(samples.size());
   const auto valid = [&](int i) { return samples[i] >= 0.0; };
   const auto value = [&](int i) { return valid(i) ? samples[i] : 0.0; };
-  if (validFraction) {
-    const auto n = std::count_if(samples.begin(), samples.end(), [](double x) { return x >= 0.0; });
-    *validFraction = count > 0 ? static_cast<double>(n) / count : 0.0;
-  }
   auto tAt = [&](int i) { return -half + i * kCaliperStep; };
   const double thr = spec.segmentMin;
   std::vector<Run> raw;
@@ -260,6 +269,10 @@ std::vector<Run> caliperRuns(const std::vector<double>& samples, double half,
     }
     i = j + 1;
   }
+  return raw;
+}
+
+std::vector<Run> mergeCaliperRuns(const std::vector<Run>& raw, const RunSplitSpec& spec) {
   std::vector<Run> merged;
   for (const Run& r : raw) {
     if (!merged.empty() && r.lo - merged.back().hi <= spec.mergeGap &&
@@ -277,8 +290,6 @@ std::vector<Run> caliperRuns(const std::vector<double>& samples, double half,
       merged.push_back(r);
     }
   }
-  if (rawOut)
-    *rawOut = std::move(raw);
   return merged;
 }
 

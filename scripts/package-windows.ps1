@@ -252,6 +252,10 @@ try {
     $inspectionPath = Join-Path $stage 'inspection.json'
     & (Join-Path $PSScriptRoot 'inspect-runtime.ps1') -RuntimeDir $runtime -ReportPath $inspectionPath
     $inspection = Get-Content -LiteralPath $inspectionPath -Raw | ConvertFrom-Json
+    $auditedManifest = Join-Path $diagnostics 'operator-manifest.json'
+    Write-ReleaseJson -Value $inspection.manifest -Path $auditedManifest
+    & python (Join-Path $root 'scripts/check-operator-package-audit.py') --manifest $auditedManifest
+    Assert-ReleaseExit 'Staged native operator registrations and retired identities'
     if ($inspection.engineVersion -ne $version) { throw 'Staged DLL version differs from source product version.' }
     if ($inspection.abiVersion -isnot [string] -or $inspection.abiVersion -cne $version -or $inspection.abiVersion -cne $inspection.engineVersion) { throw 'Staged DLL ABI must be a string exactly equal to the product and engine version.' }
     if ($inspection.sourceRevision -isnot [string] -or ($inspection.sourceRevision -cne $revision -and -not ($AllowDirty -and $inspection.sourceRevision -ceq ''))) { throw 'Staged DLL source revision differs from HEAD. Only -AllowDirty diagnostics may use an empty compiled source revision.' }
@@ -281,6 +285,9 @@ try {
     Assert-ReleaseExit 'Installed P4 CLI saved default/override/default contracts'
     & python (Join-Path $root 'tests/release/p5_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p5-cli')
     Assert-ReleaseExit 'Installed P5 CLI native lineage and saved parameter contracts'
+    & python (Join-Path $root 'tests/release/scene_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'scene-cli')
+    Assert-ReleaseExit 'Installed Gap, DTS and Glue CLI scene contracts'
+    Test-InstalledSdkConsumer -Root $root -Prefix $sdk -Workspace (Join-Path $diagnostics 'sdk-consumer')
     & python (Join-Path $root 'bridge/tests/p6_delivery_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --core (Join-Path $sdk 'bin/lyflow_core.dll') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p6-cli')
     Assert-ReleaseExit 'Installed P6 CLI native frame recording replay logging and publication contracts'
     foreach ($relative in $configuration.requiredSdkFiles) {

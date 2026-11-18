@@ -206,19 +206,43 @@ ColorParams colorParams(const ColorScene& sc) {
   return p;
 }
 
+Json makeColorRunGraph(std::vector<N> nodes, std::vector<E> edges) {
+  const auto decision =
+      std::find_if(nodes.begin(), nodes.end(), [](const N& n) { return n.id == "n_runs"; });
+  REQUIRE(decision != nodes.end());
+  Json sampling = Json::object();
+  for (const char* key :
+       {"stationStep", "sRange", "searchHalf", "split", "segmentMin", "peakMin"}) {
+    if (decision->params.contains(key)) {
+      sampling[key] = decision->params[key];
+      decision->params.erase(key);
+    }
+  }
+  nodes.push_back({"n_observe", "image.color_caliper", std::move(sampling)});
+  for (E& e : edges) {
+    if (e.to == "n_runs.line")
+      e.to = "n_observe.line";
+    else if (e.to == "n_runs.maps")
+      e.to = "n_observe.maps";
+  }
+  edges.push_back({"n_observe.observation", "n_runs.observation"});
+  return makeGraph(nodes, edges);
+}
+
 Json colorGraph(const ColorParams& p) {
-  return makeGraph({N{"n_teach", "io.load_image", Json{{"source", "inputs"}}},
-                    N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
-                    N{"n_line", "glue.polyline", p.line}, N{"n_model", "glue.color_model", p.model},
-                    N{"n_map", "glue.color_map", p.map}, N{"n_runs", "glue.color_runs", p.runs}},
-                   {E{"n_teach.image", "n_model.image"}, E{"n_line.line", "n_model.line"},
-                    E{"n_load.image", "n_map.image"}, E{"n_model.model", "n_map.model"},
-                    E{"n_map.maps", "n_runs.maps"}, E{"n_line.line", "n_runs.line"}});
+  return makeColorRunGraph(
+      {N{"n_teach", "io.load_image", Json{{"source", "inputs"}}},
+       N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+       N{"n_line", "glue.polyline", p.line}, N{"n_model", "glue.color_model", p.model},
+       N{"n_map", "glue.color_map", p.map}, N{"n_runs", "glue.merge_color_runs", p.runs}},
+      {E{"n_teach.image", "n_model.image"}, E{"n_line.line", "n_model.line"},
+       E{"n_load.image", "n_map.image"}, E{"n_model.model", "n_map.model"},
+       E{"n_map.maps", "n_runs.maps"}, E{"n_line.line", "n_runs.line"}});
 }
 
 struct ColorRun {
   std::string status;
-  Json model, runs;
+  Json model, observed, runs;
   cv::Mat score, state;
 };
 
@@ -236,6 +260,9 @@ ColorRun runColor(const Json& doc, const cv::Mat& teach, const cv::Mat& frame) {
   r.model = recordOf(d);
   REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_runs", "runs", d));
   r.runs = recordOf(d);
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_observe", "observation", d));
+  REQUIRE(d.asBundle());
+  r.observed = recordOf(*d.asBundle()->field("stations"));
   REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_map", "maps", d));
   const Bundle* b = d.asBundle();
   REQUIRE(b);
@@ -313,7 +340,8 @@ Data splitBeadMaps(double gap, float valley, bool sideBand = false, double from 
 }
 
 Json runColorMaps(const Json& doc, const Data& maps, const char* node, const char* port) {
-  Session session(doc, {}, {}, false, 0, false, {exec::InjectedInput{node, "maps", maps}});
+  const auto sampled = std::string_view(node) == "n_runs" ? "n_observe" : node;
+  Session session(doc, {}, {}, false, 0, false, {exec::InjectedInput{sampled, "maps", maps}});
   REQUIRE(session.wait().runStatus() == "ok");
   Data result;
   REQUIRE(exec::ResultStore::instance().get(session.runId(), node, port, result));
@@ -422,6 +450,8 @@ TEST_CASE(
     wet.streakHalo = halo;
     const ColorRun merged = runColor(colorGraph(p), render(teach), render(wet));
     REQUIRE(merged.status == "ok");
+    const auto& observed = merged.observed["stations"][20];
+    REQUIRE(observed["runs"].size() == 2);
     std::vector<double> err;
     for (const Json& st : merged.runs["stations"]) {
       const Json* c = centralRun(st, 4.0);
@@ -752,15 +782,15 @@ TEST_CASE("glue 彩色：有相邻完整胶宽的长低分内谷恢复整胶，�
                         {"正常主胶旁的远侧弱色条", 18, 0.25F, true, true},
                         {"正常主胶旁的近侧弱色条", 9, 0.25F, true, true}};
   const Json doc =
-      makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
-                 N{"n_runs", "glue.color_runs",
-                   Json{{"searchHalf", 80},
-                        {"sRange", {20, 180}},
-                        {"stationStep", 4},
-                        {"split", "half_max"},
-                        {"mergeUnknownGap", 16},
-                        {"mergeWidthMax", 90}}}},
-                {E{"n_line.line", "n_runs.line"}});
+      makeColorRunGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                         N{"n_runs", "glue.merge_color_runs",
+                           Json{{"searchHalf", 80},
+                                {"sRange", {20, 180}},
+                                {"stationStep", 4},
+                                {"split", "half_max"},
+                                {"mergeUnknownGap", 16},
+                                {"mergeWidthMax", 90}}}},
+                        {E{"n_line.line", "n_runs.line"}});
   for (const auto& c : cases) {
     CAPTURE(c.name);
     const Json runs =
@@ -863,13 +893,13 @@ TEST_CASE("glue 彩色 extent：反光裂分合成超预期宽胶，真实背景
     const Json track = runColorMaps(makeGraph({N{"n_track", "glue.color_track", params}}, {}),
                                     input, "n_track", "track");
     const Json runsDoc =
-        makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
-                   N{"n_runs", "glue.color_runs",
-                     Json{{"searchHalf", 80},
-                          {"sRange", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"mergeWidthMax", 30}}}},
-                  {E{"n_line.line", "n_runs.line"}});
+        makeColorRunGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                           N{"n_runs", "glue.merge_color_runs",
+                             Json{{"searchHalf", 80},
+                                  {"sRange", {20, 180}},
+                                  {"widthPolicy", "extent"},
+                                  {"mergeWidthMax", 30}}}},
+                          {E{"n_line.line", "n_runs.line"}});
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     if (background) {
       CHECK(track["points"].empty());
@@ -904,13 +934,13 @@ TEST_CASE("glue 彩色 extent：搜索、ROI、图像截断保留原因；只有
         inspection::colorMapsBundle(std::move(maps), cv::Size(cause == "image" ? 116 : 201, 241));
     const double half = cause == "caliper" ? 16 : 80;
     const Json runsDoc =
-        makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
-                   N{"n_runs", "glue.color_runs",
-                     Json{{"searchHalf", half},
-                          {"sRange", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"mergeWidthMax", 30}}}},
-                  {E{"n_line.line", "n_runs.line"}});
+        makeColorRunGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                           N{"n_runs", "glue.merge_color_runs",
+                             Json{{"searchHalf", half},
+                                  {"sRange", {20, 180}},
+                                  {"widthPolicy", "extent"},
+                                  {"mergeWidthMax", 30}}}},
+                          {E{"n_line.line", "n_runs.line"}});
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     for (const Json& station : runs["stations"]) {
       REQUIRE(station["runs"].size() == 1);
@@ -977,13 +1007,13 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
     }
     const Data input = inspection::colorMapsBundle(std::move(maps), cv::Size(201, 241));
     const Json runsDoc =
-        makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
-                   N{"n_runs", "glue.color_runs",
-                     Json{{"searchHalf", 80},
-                          {"sRange", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"mergeWidthMax", 30}}}},
-                  {E{"n_line.line", "n_runs.line"}});
+        makeColorRunGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                           N{"n_runs", "glue.merge_color_runs",
+                             Json{{"searchHalf", 80},
+                                  {"sRange", {20, 180}},
+                                  {"widthPolicy", "extent"},
+                                  {"mergeWidthMax", 30}}}},
+                          {E{"n_line.line", "n_runs.line"}});
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     for (const Json& station : runs["stations"]) {
       const double y = station["center"][1].get<double>();
@@ -1043,8 +1073,8 @@ TEST_CASE("glue 彩色 extent：宽胶中间的反光带宽过合并上限仍并
     const Data input = inspection::colorMapsBundle(std::move(maps), cv::Size(201, 241));
     const std::string line =
         "[[" + std::to_string(centre) + ",220],[" + std::to_string(centre) + ",20]]";
-    const Json runsDoc = makeGraph(
-        {N{"n_line", "glue.polyline", Json{{"points", line}}}, N{"n_runs", "glue.color_runs",
+    const Json runsDoc = makeColorRunGraph(
+        {N{"n_line", "glue.polyline", Json{{"points", line}}}, N{"n_runs", "glue.merge_color_runs",
                                                                  Json{{"searchHalf", 80},
                                                                       {"sRange", {20, 180}},
                                                                       {"widthPolicy", "extent"},
@@ -1098,13 +1128,13 @@ TEST_CASE("glue 彩色 extent：局部鼓包比邻站宽、中间被反光或浅
     }
     const Data input = inspection::colorMapsBundle(std::move(maps), cv::Size(201, 241));
     const Json runs = runColorMaps(
-        makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
-                   N{"n_runs", "glue.color_runs",
-                     Json{{"searchHalf", 80},
-                          {"sRange", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"mergeWidthMax", 30}}}},
-                  {E{"n_line.line", "n_runs.line"}}),
+        makeColorRunGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                           N{"n_runs", "glue.merge_color_runs",
+                             Json{{"searchHalf", 80},
+                                  {"sRange", {20, 180}},
+                                  {"widthPolicy", "extent"},
+                                  {"mergeWidthMax", 30}}}},
+                          {E{"n_line.line", "n_runs.line"}}),
         input, "n_runs", "runs");
     int bulges = 0;
     for (const Json& station : runs["stations"]) {

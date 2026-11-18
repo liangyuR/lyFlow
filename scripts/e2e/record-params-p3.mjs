@@ -5,7 +5,7 @@
 //   params-p3-manage.png       配方管理：选中有失配的「车型B·尾门」，失配报告与建议
 // 不接进 run.mjs（截图会改动仓库文件）。图与配方放在临时目录里，跑完删掉。
 //
-//   LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import;gap-compat' node scripts/e2e/record-params-p3.mjs     # 自己起 tauri dev
+//   LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import' node scripts/e2e/record-params-p3.mjs     # 自己起 tauri dev
 //   LYFLOW_E2E_ATTACH=1 node scripts/e2e/record-params-p3.mjs      # 连到已经开着的实例
 
 import fs from 'node:fs';

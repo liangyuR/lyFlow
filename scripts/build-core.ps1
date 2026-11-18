@@ -99,14 +99,14 @@ foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST
   $value = [Environment]::GetEnvironmentVariable($name)
   if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }
 }
+$buildTargets = if ($runTests) { "" } else { " --target lyflow_core lyflow-dump-manifest" }
 $line = "call `"$vcvars`" >nul 2>&1" +
         " && `"$cmake`" -S `"$source`" -B `"$build`" -G Ninja" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
         " -DLYFLOW_OP_PACKS=`"$packs`" -DLYFLOW_STD_PACKS=`"$stdPacks`"" +
         " -DLYFLOW_PACKS=`"$repoPacks`" -DLYFLOW_MODULES=`"$modules`"" + $releaseArgs +
-        " && `"$cmake`" --build `"$build`" --target lyflow_core lyflow-dump-manifest"
-if ($runTests) { $line += " lyflow-core-tests" }
+        " && `"$cmake`" --build `"$build`"$buildTargets"
 
 cmd /c $line
 if ($LASTEXITCODE -ne 0) { throw "core 构建失败 (exit $LASTEXITCODE)" }

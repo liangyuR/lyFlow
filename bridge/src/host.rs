@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use crate::core_ffi::{self, RunInput};
+use crate::core_ffi::{self, RunInput, RunProfileInput};
 use crate::graph::GraphDoc;
 
 /// 一片要注入的点云。`intensity` 可以是空的，其余通道（法线、RGB）目前用不上，
@@ -21,21 +21,39 @@ pub struct Cloud {
     pub intensity: Vec<f32>,
 }
 
-/// 宿主持有的点云会话表。`run_graph` 拿到 `sceneId` 时问它要注入项。
+#[derive(Default)]
+pub struct SceneInputs {
+    pub clouds: Vec<RunInput>,
+    pub profiles: Vec<RunProfileInput>,
+}
+
+/// 宿主持有的采集会话表。`run_graph` 收到 `sceneId` 后从这里取得同一帧的注入项。
 ///
-/// 实现通常就是「查会话表 → 调 [`inputs_for_source_op`]」：按**算子 id**而不是
-/// 节点 id 找源节点，用户在编辑器里怎么重命名节点都不影响产线（ADR-0017 的动机）。
+/// 用 [`source_node_id`] 按算子 ID 查找源节点，编辑器重命名节点后仍可注入。
 pub trait SceneProvider: Send + Sync {
-    /// 把宿主持有的某个点云会话，按 graph 里的源节点组装成注入项。
-    ///
-    /// 找不到会话 → `Err`（给人看的中文提示，`run_graph` 原样交给前端）；
-    /// graph 里没有可注入的源节点 → `Err`。
-    fn inputs(
+    /// 从会话组装原生 Profile 或点云注入。错误原样返回前端。
+    fn scene_inputs(
         &self,
         scene_id: &str,
         graph: &GraphDoc,
         manifest: &serde_json::Value,
-    ) -> Result<Vec<RunInput>, String>;
+    ) -> Result<SceneInputs, String> {
+        self.inputs(scene_id, graph, manifest)
+            .map(|clouds| SceneInputs {
+                clouds,
+                ..SceneInputs::default()
+            })
+    }
+
+    /// 只注入点云的宿主可继续实现此方法。
+    fn inputs(
+        &self,
+        _scene_id: &str,
+        _graph: &GraphDoc,
+        _manifest: &serde_json::Value,
+    ) -> Result<Vec<RunInput>, String> {
+        Err("宿主未提供场景数据".into())
+    }
 }
 
 /// 宿主对 IPC 层的全部旋钮。全是 `Option`，`None` 一律表示「和 LyFlow 桌面壳一样」。
@@ -47,8 +65,7 @@ pub struct HostConfig {
     /// `LYFLOW_LIBRARY_DIRS`。给 `Some(vec![])` 就是「这个宿主不要库算子」。
     pub library_dirs: Option<Vec<PathBuf>>,
     pub python: Option<crate::python_settings::PythonRuntimeConfig>,
-    /// 点云注入的来源。`None` 时带 `sceneId` 的 `run_graph` 直接报错，
-    /// 而不是静默地跑一张没注入的图。
+    /// 场景输入来源。`None` 时带 `sceneId` 的 `run_graph` 会报错。
     pub scenes: Option<Arc<dyn SceneProvider>>,
     /// 开发期热重载（ADR-0009）。`false` 时不起 watcher 线程。
     /// 按 git 依赖引 LyFlow 的宿主本来就没有可盯的 CMake 产物（`watch_source()` 是 None），
@@ -202,36 +219,33 @@ pub fn resolve_path_str(cfg: &HostConfig, s: &str) -> Result<String, String> {
 
 // ------------------------------------------------------------------ 注入
 
-/// 按**算子 id**找图里唯一的源节点，把 `clouds` 装配成注入项。宿主的
-/// [`SceneProvider`] 通常就是「查会话表拿到 `clouds`，再调它」。
-///
-/// ADR-0017：注入是整节点级的 —— 被注入的节点 compute 整个不跑，所以它声明的
-/// **每个**输出端口都要有一片云。少给一个在 core 那边的表现是
-/// 「算子没有写输出端口 X」，离现场太远，所以在这里就挡住。
-pub fn inputs_for_source_op(
-    graph: &GraphDoc,
-    manifest: &serde_json::Value,
-    source_op: &str,
-    clouds: &BTreeMap<String, Cloud>,
-) -> Result<Vec<RunInput>, String> {
+/// 在图的顶层按算子 ID 找到唯一的源节点。
+pub fn source_node_id<'a>(graph: &'a GraphDoc, source_op: &str) -> Result<&'a str, String> {
     let matched: Vec<&str> = graph
         .nodes
         .iter()
         .filter(|n| n.op == source_op)
         .map(|n| n.id.as_str())
         .collect();
-    let node_id = match matched.as_slice() {
-        [one] => *one,
-        [] => return Err(format!("图里没有 {source_op} 节点，注入无处可去")),
-        many => {
-            return Err(format!(
-                "图里有 {} 个 {source_op} 节点（{}），不知道该注入哪一个",
-                many.len(),
-                many.join("、")
-            ))
-        }
-    };
+    match matched.as_slice() {
+        [one] => Ok(*one),
+        [] => Err(format!("图里没有 {source_op} 节点，注入无处可去")),
+        many => Err(format!(
+            "图里有 {} 个 {source_op} 节点（{}），不知道该注入哪一个",
+            many.len(),
+            many.join("、")
+        )),
+    }
+}
 
+/// 将点云装配为源节点的全部输出。注入命中时源节点整节点跳过计算。
+pub fn inputs_for_source_op(
+    graph: &GraphDoc,
+    manifest: &serde_json::Value,
+    source_op: &str,
+    clouds: &BTreeMap<String, Cloud>,
+) -> Result<Vec<RunInput>, String> {
+    let node_id = source_node_id(graph, source_op)?;
     let ports = output_ports(manifest, source_op)?;
     let mut inputs = Vec::with_capacity(ports.len());
     for port in ports {

@@ -1,6 +1,6 @@
 # xyz-gap-inspector 接入指南
 
-本页说明间隙与段差业务宿主如何使用 LyFlow 的现有接口，以及平台与宿主的职责边界。平台能力以 [嵌入指南](embedding.md)、[图数据模型](graph-doc.md)、[gap 算子包](../solutions/gap/README.md) 和 [HTTP 契约](http-transport.md) 为准；本页不表示外部业务仓库已经完成迁移。旧主版本须按 [Gap 原生迁移](gap-profile-migration.md) 核验并显式升级，不能只改节点版本。
+本页说明间隙与段差业务宿主如何使用 LyFlow 的现有接口，以及平台与宿主的职责边界。平台能力以 [嵌入指南](embedding.md)、[图数据模型](graph-doc.md)、[gap 算子包](../solutions/gap/README.md) 和 [HTTP 契约](http-transport.md) 为准。旧主版本图按业务目标在当前版本重搭，参见 [Gap 原生轮廓场景](gap-profile-migration.md)。
 
 ## 职责分工
 

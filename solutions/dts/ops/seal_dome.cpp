@@ -72,7 +72,7 @@ void registerSealDome(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_dome";
   op.version = "3.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr},
+  op.migrations = {{1, rejectLegacyProfileNode, nullptr},
                    {2, nullptr, &profile_contract::keepInputs}};
   op.label = "胶条主体提取";
   op.category = "DTS/胶条";

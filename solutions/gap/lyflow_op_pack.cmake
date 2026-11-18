@@ -3,7 +3,6 @@ set(GAP_OP_SOURCES
   "${LYFLOW_PACK_DIR}/ops/common.cpp"
   "${LYFLOW_PACK_DIR}/ops/result_bundle.cpp"
   "${LYFLOW_PACK_DIR}/ops/snippets.cpp"
-  "${LYFLOW_PACK_DIR}/ops/graph_migration.cpp"
   "${LYFLOW_PACK_DIR}/ops/fit.cpp"
   "${LYFLOW_PACK_DIR}/ops/measure.cpp"
   "${LYFLOW_PACK_DIR}/ops/groove.cpp"
@@ -32,7 +31,7 @@ set(GAP_TESTS
   "${LYFLOW_PACK_DIR}/tests/test_profile_circles.cpp"
   "${LYFLOW_PACK_DIR}/tests/test_profile_measurement_ops.cpp"
   "${LYFLOW_PACK_DIR}/tests/test_profile_inspection.cpp")
-set(_gap_links lyflow_gap_geometry lyflow_gap_model_adapters lyflow_profile_contract lyflow_metrology_kernel)
+set(_gap_links lyflow_gap_geometry lyflow_gap_model_adapters lyflow_profile_contract lyflow_metrology_kernel lyflow_geometry_kernel)
 set(_gap_defines _USE_MATH_DEFINES _ENABLE_EXTENDED_ALIGNED_STORAGE)
 if(TARGET lyflow_gap_template)
   list(APPEND GAP_OP_SOURCES
@@ -50,7 +49,6 @@ if(TARGET lyflow_gap_model)
 endif()
 if(TARGET lyflow_gap_import)
   list(APPEND GAP_OP_SOURCES "${LYFLOW_PACK_DIR}/ops/import_standard_gap.cpp")
-  list(APPEND GAP_TESTS "${LYFLOW_PACK_DIR}/tests/test_profile_graph_upgrade.cpp")
   if(TARGET lyflow_gap_template AND TARGET lyflow_gap_model)
     list(APPEND GAP_TESTS "${LYFLOW_PACK_DIR}/tests/test_import_bundle.cpp")
   endif()
@@ -59,20 +57,13 @@ if(TARGET lyflow_gap_import)
 endif()
 
 foreach(_gap_test IN LISTS GAP_TESTS)
-  foreach(_gap_cap TEMPLATE MODEL IMPORT COMPAT)
+  foreach(_gap_cap TEMPLATE MODEL IMPORT)
     string(TOLOWER "${_gap_cap}" _gap_cap_name)
     if(TARGET lyflow_gap_${_gap_cap_name})
       set_property(SOURCE "${_gap_test}" APPEND PROPERTY COMPILE_DEFINITIONS LYFLOW_GAP_${_gap_cap}=1)
     endif()
   endforeach()
 endforeach()
-if(TARGET lyflow_gap_compat)
-  list(APPEND GAP_OP_SOURCES
-    "${LYFLOW_PACK_DIR}/ops/measure_reference.cpp"
-    "${LYFLOW_PACK_DIR}/ops/legacy_model_cache.cpp")
-  list(APPEND _gap_links lyflow_gap_compat)
-  list(APPEND _gap_defines LYFLOW_GAP_COMPAT=1)
-endif()
 
 # 随包的片段（m8-plan L14）：snippets/*.lyflow-snippet.json 编进包里，经 manifest 的 snippets 段
 # 给出（ops/snippets.cpp 注册）。按字节写成十六进制数组：不受 MSVC 字符串字面量长度的限制，
@@ -99,7 +90,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GAP_SNIPPETS})
 
 lyflow_op_pack(
   NAME solution-gap
-  VERSION 0.2.0
+  VERSION 0.3.0
   DEFAULT OFF
   SOURCES ${GAP_OP_SOURCES}
   TEST_SOURCES ${GAP_TESTS}
@@ -112,6 +103,7 @@ lyflow_op_pack(
 
 install(FILES "${LYFLOW_PACK_DIR}/../../docs/gap-profile-migration.md" DESTINATION docs)
 install(FILES "${LYFLOW_PACK_DIR}/README.md" DESTINATION examples/gap)
+install(FILES "${LYFLOW_PACK_DIR}/tools/lyflow_ab.py" DESTINATION examples/gap/tools)
 install(DIRECTORY "${LYFLOW_PACK_DIR}/snippets/"
         DESTINATION examples/gap/snippets FILES_MATCHING PATTERN "*.lyflow-snippet.json"
         PATTERN "model-with-template-fallback.lyflow-snippet.json" EXCLUDE)

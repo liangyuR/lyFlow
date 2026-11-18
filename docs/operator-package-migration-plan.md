@@ -1,6 +1,6 @@
 # 算子边界迁移计划
 
-状态：M1–M6 已合并。下一波是 [M7 退役与统一交付](#m7-退役与统一交付)。
+状态：M1–M6 已合并。[M7 退役与统一交付](#m7-退役与统一交付)已实现，待合并。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
@@ -18,7 +18,7 @@
 | M4d   | 已合并 | [M4d 收敛切片](#m4d-收敛切片) |
 | M5    | 已合并 | [M5 切片及验证](#m5-glue-拆分)、[标定连线迁移](glue-integration.md#迁移旧标定连线) |
 | M6    | 已合并 | [M6 切片与规则](#m6-标准算子职责拆分) |
-| M7    | 待实施 | [场景职责、退役与统一交付](#m7-退役与统一交付) |
+| M7    | 已实现，待合并 | [场景职责、退役与统一交付](#m7-退役与统一交付) |
 
 M1 提升产品/ABI 至 1.4.0。M2 交付公开静态 SDK（geometry/metrology 内核）。M3 交付公共 Profile 链与 solution-dts。M4a–M4c 交付稳健拟合公共核、公共 Profile 选点/拟合/度量节点及 solution-gap。各发行系列的版本号与 ABI 规则以[发包契约](deployment/packaging.md)为准。
 
@@ -255,12 +255,12 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 | DTS 退役候选 | 切换条件与验收 |
 | --- | --- |
-| `dts.geometry_to_metric` | 用显式单位与原生几何核对米制点线、毫米面差和垂足，不把旧版“毫米数值标为 Meter”纳入标准换算。移除仍会插入历史桥的规则及其专用用例；随包图和当前宿主均不再消费旧桥时退役。[历史规则](../solutions/dts/ops/graph_migration.cpp) |
+| `dts.geometry_to_metric` | 用显式单位与原生几何核对米制点线、毫米面差和垂足，不把旧版“毫米数值标为 Meter”纳入标准换算。移除仍会插入历史桥的规则及其专用用例；随包图和当前宿主均不再消费旧桥时退役。 |
 | `dts.profile_in` | 明确核对旧 PointCloud 注入和宽松 CSV 调用方，切换为 `profile.input` 原生 Profile 注入或带显式契约的 CSV。将仍引用旧入口的默认图和相邻基准图切换到各自原生版本，验证单位、平面、帧、采样顺序及两种基准选择。对应宿主及安装示例切换完成后再删除入口，同片清理只为旧节点生成请求的 CLI 选项、帮助和测试。[默认原生图](../solutions/dts/graphs/default-profile.lyflow.json) · [相邻基准原生图](../solutions/dts/graphs/adjacent-profile.lyflow.json) |
 
 | 实施切片 | 交付内容 | 验收 |
 | --- | --- | --- |
-| 1 · 退役 Gap 旧黑盒 | 从历史对照工具移除向新图注入 `gap.measure_reference` 的路径；需要历史比较时直接读取已有基线 CSV。同片删除该节点的注册、专用旧引擎与缓存、`gap-compat` 模块及其构建、发布和工具引用。清单允许退役项表达“无等价替代”。 | 导入一份 StandardGap 配置，生成图只使用当前节点；对照工具可直接比较新图输出与基线。运行库不导出旧 ID，读取含它的图时能定位该节点。退役后无同名别名、兼容开关或调用旧引擎的回退路径。[黑盒契约](../solutions/gap/ops/measure_reference.cpp) · [现有工具](../solutions/gap/tools/lyflow_ab.py) |
+| 1 · 退役 Gap 旧黑盒 | 从历史对照工具移除向新图注入 `gap.measure_reference` 的路径；需要历史比较时直接读取已有基线 CSV。同片删除该节点的注册、专用旧引擎与缓存、`gap-compat` 模块及其构建、发布和工具引用。清单允许退役项表达“无等价替代”。 | 导入一份 StandardGap 配置，生成图只使用当前节点；对照工具可直接比较新图输出与基线。运行库不导出旧 ID，读取含它的图时能定位该节点。退役后无同名别名、兼容开关或调用旧引擎的回退路径。[历史对照工具](../solutions/gap/tools/lyflow_ab.py) |
 | 2 · 统一正式包 | 以一份发布配置交付标准算子包及 `solution-gap`、`solution-dts`、`solution-glue`。在现行正式组合中加入 DTS，移除已退役模块，保留现用导入、模板、模型能力与 OpenCV、PCL 等标准依赖。三个场景继续由各自的包注册。同步安装资产、依赖缓存身份和发包文档。[发布清单](../packaging/release.json) | 从同一暂存运行库读取 manifest，核对三个场景的关键能力和所属包，以及已退役的 Gap、DTS 入口缺席。用安装后的 CLI 分别运行 StandardGap 导入图、[DTS 轮廓图](../solutions/dts/graphs/default-profile.lyflow.json)和 [Glue 测量图](../solutions/glue/graphs/measure.lyflow.json)，为各图提供对应输入。用现有源码树外 SDK 消费工程验证安装路径与资源解析。 |
 | 3 · 验证 Agent 使用发布契约搭图 | Agent 从旧资料中提取输入、目标输出、参数绑定、单位和帧；通过 MCP 查询新版节点并生成单独的候选图。对公开端口或参数已变化的用户组合，在当前编辑器保存组合后，用外层图验证绑定。[MCP 图工具](mcp.md) | 在切片 2 的同一候选版本上，以一条 M6 拆分过的业务链完成下述端到端验证。发布说明给出新版搭图示例、退役入口和已知语义差异。 |
 

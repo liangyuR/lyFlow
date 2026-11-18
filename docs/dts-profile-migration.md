@@ -1,43 +1,21 @@
-# DTS Profile 图迁移
+# DTS 原生图切换
 
-DTS v1 的轮廓是毫米 XZ 点云；旧点/线即使带 `Meter` 标签，数值仍是毫米。当前公共处理使用显式 `Profile`，场景点/线输出为真实米。不能只把场景节点版本改为 2，也不能从标签推断单位。
+先确认历史业务使用的钣金基准和正号，再选择 [默认基准](../solutions/dts/graphs/default-profile.lyflow.json) 或 [相邻基准](../solutions/dts/graphs/adjacent-profile.lyflow.json)。以旧图的输入、参数和命名输出为依据，在新版搭建独立候选图。
 
-先预览迁移，确认来源声明后再保存：
+## 输入
+
+- 采集宿主将完整原生 Profile 注入 `profile.input` 的 `profile` 输出。由宿主声明实际的单位、坐标帧、手性和来源，同时保留采集顺序、有效性、原始索引与可用通道。[原生轮廓与嵌入示例](../examples/m3-native-profile.md)
+- 文件调试用严格 CSV v1。XZ 轮廓可用 `x,z` 或 `x,z,intensity` 表头。文件数值使用毫米以外的单位时，同步更新输入节点的 `unit` 和其他实际坐标描述。
 
 ```powershell
-lyflow migrate old.lyflow.json --profile-source n_in --profile-frame scanner --profile-source-id sensor-1
-lyflow migrate old.lyflow.json --profile-source n_in --profile-frame scanner --profile-source-id sensor-1 --write
+lyflow run solutions/dts/graphs/default-profile.lyflow.json --set 'n_in.source="file"' --set 'n_in.path="C:/data/profile.csv"' --outputs --summary
+lyflow run solutions/dts/graphs/adjacent-profile.lyflow.json --input 'n_in.profile=C:/data/profile.lypr' --outputs --summary
 ```
 
-三个参数必须同时提供且各一次。来源必须精确为 `dts.profile_in@1.0.0:profile`；CLI 声明已知 v1 的 `unit=mm`、`plane=XZ`、`handedness=right`、`sampleOrder=acquisition`。有反射手性时，把下面的请求存为 JSON 文件，将 `handedness` 设为 `reflected`，再运行 `lyflow migrate <graph> --request <file.json> --write`。
+旧 `dts.profile_in` 点云输入已退役。使用旧文件作为需求参考时，与来源方确认 NaN、低强度和有效性掩码分别表示什么，再转换成原生轮廓或严格 CSV。
 
-```json
-{
-  "schemaVersion": 1,
-  "rules": [
-    {
-      "kind": "dtsProfile.v1",
-      "source": { "node": "n_in", "op": "dts.profile_in", "opVersion": "1.0.0", "port": "profile" },
-      "profile": {
-        "frame": "scanner",
-        "sourceId": "sensor-1",
-        "unit": "mm",
-        "plane": "XZ",
-        "handedness": "right",
-        "sampleOrder": "acquisition"
-      },
-      "adapterId": "declared_profile"
-    }
-  ]
-}
-```
+## 输出和判定
 
-迁移只在 CLI 离线执行；图顶层仍带旧 `contractUpgrade` 请求的文件直接运行 `lyflow migrate <graph> --write`。多来源图在 `rules` 中分别声明，每项必须匹配完整同源八节点消费链；CLI 的单组三参数只选择一条来源链。未知外部来源、未来版本、缺链、混用来源、旁路节点或未声明的外部消费边都会拒绝迁移并给出诊断，原文件不改。
+将下游直接连到 DTS 场景算子发布的米制点和线。旧 `dts.geometry_to_metric` 已退役。历史几何上的 `Meter` 标签可能曾对应毫米工作坐标，重建时应核对真实单位。
 
-子图使用显式定义作用域：CLI 的 `--profile-source inside/n_in` 对应 rule 的 `"scope":{"subgraph":"inside"}`，而 `source.node` 仍为子图内的 `n_in`。作用域选择 GraphDoc 的全局 `subgraphs` 定义，使用此定义的所有实例一起升级；子图参数、接口、图级命名输出及相对资源路径保留。外部库图应对库的原始 `.lyflow.json` 资产运行同一命令，不会通过主图的库引用修改外部文件。M1 原请求没有子图作用域字段；未退休的嵌套 M1 请求不能通过猜测补出来源。
-
-迁移保留原节点 ID、UI、分组、原参数和绑定，插入 `profile.from_cloud`，将清洗/分面改为公共算子，将五个场景节点升为 v3，连接 `flush.footInfo → bundle.footInfo`，并删除只用于几何指纹比对的 `pick_metal.metal → flush.metal`、`pick_metal.metal → bundle.metal`、`flush.foot → bundle.foot` 连线。旧宿主仍向原来源节点的 PointCloud 输出注入。已有明确来源的 M1 几何桥保留节点身份，升级为 `dts.geometry_to_metric@2` 的 `sourceContract=dts.geometry.v2` 米制直通，避免再次乘 `0.001`。单独迁移旧桥时，v1 来源声明仍保留毫米换算行为。
-
-CLI 使用同目录临时文件后改名保存，并移除顶层 `contractUpgrade`。编辑器和宿主加载时不执行迁移：文档仍带 `contractUpgrade` 时只报 `migration_required` 错误诊断，提示先运行 `lyflow migrate <graph> --write`；`meta.contractUpgradeHistory` 作为普通元数据原样保留，不锁定后续拓扑修改。
-
-`migrate --write` 只在原生校验没有错误时写入。旧 M1 请求可能已经生成合法的边界适配报告，但其 v1 DTS 消费链仍会返回 `migration_required`；此时 CLI 拒绝写入，不能把 M1 结构报告当作整图可执行证明。提供完整 M3 来源声明后再迁移。原生结构报告与 `GraphDoc::apply_migration` 仍可用于明确只处理结构的宿主；该写回不代表图已通过执行校验。
+`dts.flush` 接收根部记录并输出毫米 Measurement、米制垂足和毫米垂足记录。`DtsProfileBundle.v3` 提供毫米面差和工作坐标，供宿主使用实际公差作业务判定。两种基准图分别验证选面及有效性，再核对相同设备样本上的业务结果。[DTS 结果契约](../solutions/dts/README.md)

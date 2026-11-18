@@ -220,51 +220,6 @@ Status overallRoi(const Data& primary, const Data& secondary, const OverallRoiOp
   result = std::move(output);
   return Status::Ok();
 }
-Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* heightAnchor,
-                   const Record* heightContext, const DatumWindowOptions& options,
-                   GeometryResult& result, ExecContext& context) {
-  if (context.cancelled())
-    return cancelled();
-  if ((heightAnchor != nullptr) != (heightContext != nullptr))
-    return bad("高度锚框与上下文必须成对提供", "heightAnchor");
-  if (options.startMm < 0 || options.lengthMm <= 0 || options.heightMm < 0)
-    return bad("基准窗口毫米距离参数非法", "", "bad_param");
-  ProfileDescriptor space, other;
-  std::string why;
-  if (!inputBox(anchor, &anchorContext, space, why))
-    return bad(why, "anchorContext");
-  if (heightAnchor && !inputBox(*heightAnchor, heightContext, other, why))
-    return bad(why, "heightContext");
-  if (heightAnchor && !profile_contract::sameSpace(space, other))
-    return bad("水平锚框与高度锚框必须处于同一量测空间", "heightContext");
-  const auto& a = *anchor.asBox2D();
-  const auto& h = heightAnchor ? *heightAnchor->asBox2D() : a;
-  const double start = static_cast<float>(options.startMm / 1000.);
-  const double length = static_cast<float>(options.lengthMm / 1000.);
-  const double height = static_cast<float>(options.heightMm / 1000.);
-  Box2D box;
-  if (options.side == "left") {
-    box.max[0] = static_cast<float>(a.min[0] - start);
-    box.min[0] = static_cast<float>(box.max[0] - length);
-  } else {
-    box.min[0] = static_cast<float>(a.max[0] + start);
-    box.max[0] = static_cast<float>(box.min[0] + length);
-  }
-  box.min[1] = static_cast<float>(h.min[1] - height);
-  box.max[1] = static_cast<float>(h.max[1] + height);
-  GeometryResult output;
-  output.box = Data::box2d(box);
-  output.context = profile_contract::geometryContext(space);
-  output.status = {"gap.DatumWindow.v2",
-                   {{"side", options.side},
-                    {"startMm", options.startMm},
-                    {"lengthMm", options.lengthMm},
-                    {"heightMm", options.heightMm}}};
-  if (context.cancelled())
-    return cancelled();
-  result = std::move(output);
-  return Status::Ok();
-}
 Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gapLeftContext,
                         const Data& gapRight, const Record& gapRightContext,
                         const RollCropOptions& options, RollCropResult& result,
@@ -411,34 +366,6 @@ void registerProfileRegionOps(Registry& registry) {
     return Status::Ok();
   };
   registry.addOperator(std::move(overall));
-  auto datum = description("gap.datum_window", "原生方向基准范围构建");
-  datum.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
-  datum.inputs = {{"anchor", "Box2D", "水平锚框", "定义窗口水平位置。", true},
-                  {"anchorContext", "Record", "水平上下文", "profile.Geometry.v3。", true},
-                  {"heightAnchor", "Box2D", "高度锚框", "可选独立高度范围。", false},
-                  {"heightContext", "Record", "高度上下文", "与高度锚框成对。", false}};
-  datum.outputs = {{"box", "Box2D", "基准窗口", "沿明确方向推出的窗口。", true},
-                   {"context", "Record", "窗口上下文", "锚框所在空间。", true},
-                   {"status", "Record", "参数记录", "实际窗口定义。", true}};
-  datum.params = {choice("side", "left", {"left", "right"}), mm("startMm", 0), mm("lengthMm", 13),
-                  mm("heightMm", 2.5)};
-  datum.compute = [](const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
-    const auto* a = in.get("anchorContext").asRecord();
-    const auto* h = in.get("heightContext").asRecord();
-    GeometryResult result;
-    auto status = datumWindow(in.get("anchor"), *a,
-                              in.has("heightAnchor") ? &in.get("heightAnchor") : nullptr, h,
-                              {params.choice("side"), params.number("startMm"),
-                               params.number("lengthMm"), params.number("heightMm")},
-                              result, ctx);
-    if (!status.ok)
-      return status;
-    out.set("box", std::move(result.box));
-    out.set("context", Data::record(std::move(result.context)));
-    out.set("status", Data::record(std::move(result.status)));
-    return Status::Ok();
-  };
-  registry.addOperator(std::move(datum));
   auto roll = description("gap.roll_anchored_crop", "原生零件随动裁剪");
   roll.migrations.push_back({2, nullptr, &profile_contract::keepInputs});
   roll.inputs = {

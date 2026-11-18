@@ -19,7 +19,7 @@ void registerPackOps(Registry& registry) {
   profile_scene::registerProfileBundles(registry);
   profile_scene::registerProfileFeatureBundles(registry);
   profile_scene::registerProfileScanOps(registry);
-  profile_scene::registerProfileCameraGuard(registry);
+  profile_scene::registerCameraSelection(registry);
   profile_scene::registerProfileRegionOps(registry);
   profile_scene::registerProfileBundleOps(registry);
   profile_model::registerProfileModelOps(registry);
@@ -30,16 +30,23 @@ void registerPackOps(Registry& registry) {
   profile_scene::registerProfileGapCircles(registry);
   profile_scene::registerProfileMeasurementOps(registry);
   profile_scene::registerProfileInspection(registry);
-  registerJudge(registry);
+  registerPatrolPolicy(registry);
   registerResultBundle(registry);
-#ifdef LYFLOW_GAP_COMPAT
-  registerMeasureReference(registry);
-#endif
+  registry.addRetiredOperator("gap.measure_reference",
+                              "请在当前版本重新导入 StandardGap 配置，再读取图的测量输出");
+  registry.addRetiredOperator("gap.datum_window", "请用 geometry.anchored_window 构造米制窗口");
+  registry.addRetiredOperator("gap.camera_guard",
+                              "请连接 profile.compare_overlap 与 gap.select_camera");
+  registry.addRetiredOperator("gap.judge",
+                              "请连接 metrology.compare_tolerance 与 gap.apply_patrol");
+  for (const char* id :
+       {"gap.fit_line", "gap.flush", "gap.gap", "gap.nearest_to_line", "gap.point_offset",
+        "gap.selected_point", "gap.to_measurement_frame", "gap.drop_non_finite"})
+    registry.addRetiredOperator(id, "请在当前版本重新导入 StandardGap 配置或按业务目标重新搭图");
 #ifdef LYFLOW_GAP_IMPORT
   registerStandardGapImporter(registry);
 #endif
   registerSnippets(registry);
-  registerGraphMigrations(registry);
 }
 } // namespace lyflow::packs::gap
 namespace lyflow::packs::solution_gap {

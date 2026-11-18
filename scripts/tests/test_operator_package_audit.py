@@ -38,10 +38,12 @@ class OperatorPackageLedger(unittest.TestCase):
             'duplicate': lambda d: d['operators'].insert(1, copy.deepcopy(d['operators'][0])),
             'retired still active': lambda d: d['retiredOperators'].append({'id': d['operators'][0]['id'], 'replacedBy': [d['operators'][1]['id']]}),
             'unknown replacement': lambda d: d['retiredOperators'][0].update(replacedBy=['missing.op']),
+            'wrong replacement field': lambda d: d['retiredOperators'][0].update(replacedBy=''),
         }
         for name, mutate in cases.items():
             with self.subTest(name):
                 self.assertTrue(self.problems(mutate))
+        self.assertEqual(self.problems(lambda d: d['retiredOperators'][0].update(replacedBy=[])), [])
 
     def test_python_examples_follow_node_declarations(self):
         self.assertTrue(self.problems(examples=self.examples + ['py.example.extra']))

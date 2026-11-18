@@ -53,7 +53,7 @@ void registerProfileBundle(Registry& r) {
   op.id = "dts.profile_bundle";
   op.version = "3.0.0";
   op.migrations = {
-      {1, requireGraphMigration, nullptr},
+      {1, rejectLegacyProfileNode, nullptr},
       {2, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
          return profile_contract::retireInputs(inputs, {"metal", "foot"});
        }}};

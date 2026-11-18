@@ -23,7 +23,7 @@
 | 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2；完整领域场景需带 `gap;dts`。 |
 | 桌面构建产物 | `pnpm e2e:packaged` | 同一套桌面交互断言验证构建产物，不等于运行库/SDK 发包验证。 |
 | 浏览器宿主 | `pnpm e2e:http` | HTTP 传输、结果取数与 React 宿主链路。 |
-| Windows 发包 | `pnpm run package` | 固定标准包、solution-glue、solution-gap，生成运行库/SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
+| Windows 发包 | `pnpm run package` | 固定标准包、solution-glue、solution-gap、solution-dts，生成运行库/SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
 
 桌面完整验收及按分组复验：
 
@@ -70,7 +70,8 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 | 图像响应、法向候选与颜色模型 | `packs/std-image/tests/test_line_scan.cpp`、`packs/std-image/tests/test_color_model.cpp`。 |
 | 标准算子组合与旧图拆分 | `packs/std-pointcloud/tests/test_p2_height_rules.cpp`、`test_p2_advanced_fit.cpp`、`test_p5_primitive_crop.cpp` 及 `packs/std-image/tests/test_p5_inspection.cpp`。节点拆分公共规则在 `core/tests/test_graph_migration.cpp`。 |
 | 涂胶搜索、示教、灰度/彩色测量与飞拍场景 | `solutions/glue/tests/`，涵盖随包彩色、灰度和飞拍图。 |
-| Gap/DTS 场景、导入器与旧图离线迁移规则 | `solutions/gap/tests/`、`solutions/dts/tests/`，迁移夹具在各自 `tests/fixtures/`；不放 `core/tests`。 |
+| Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`。 |
+| 锚框窗口、重叠高度观测和公差比较 | 几何计算在 `kernels/tests/test_geometry.cpp`，窗口空间检查在 `packs/std-geometry/tests/test_geometry.cpp`，观测在 `packs/std-profile/tests/test_compare_overlap.cpp`，比较在 `packs/std-metrology/tests/test_metrology.cpp`。 |
 | 安装后的 CLI/SDK 交付契约（EXACT 版本、链接与依赖闭包、覆盖生效与还原、身份绑定、CLI 与嵌入宿主一致） | `tests/release/*_contract.py`、`tests/release/p5_sdk_consumer/`、`bridge/tests/p6_delivery_contract.py`；产品版本取自 `scripts/release-common.ps1` 的 `Get-ReleaseVersion` 等单一来源，不在测试里写死。对应数值判据在 `core/tests/integration/p4_recognition.cpp`、`p5_depth_geometry.cpp` 及各包测试。 |
 | 算子分包清单（字段、Python 示例 ID、与 manifest 的 ID 及包归属一致） | `scripts/tests/test_operator_package_audit.py` 测检查脚本本身；CI 的 `quality` 检查清单，`native`、`vision` 用各自 manifest 以 `--subset` 核对。 |
 | Rust 封送、IPC、命令行选项/退出码、宿主及跨进程缓存 | `bridge/src/*/tests.rs`、`bridge/tests/`；客户端在 `crates/lyflow-client/`。 |

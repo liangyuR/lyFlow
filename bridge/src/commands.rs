@@ -381,17 +381,15 @@ pub fn run_graph<R: Runtime>(
     let cfg = host::config(&app);
     let graph_path = resolve_opt(&cfg, graphPath)?;
 
-    // 点云注入（ADR-0017）。宿主没配 SceneProvider 时直接报错 —— 静默地跑一张
-    // 没注入的图，表现是 dts.profile_in 那条「这次运行没有注入轮廓」，离现场太远。
     let inputs = match sceneId {
         Some(id) => {
             let provider = cfg
                 .scenes
                 .as_ref()
-                .ok_or("这个宿主不支持点云注入（没有配置 SceneProvider）")?;
-            provider.inputs(&id, &doc, &manifest_value()?)?
+                .ok_or("这个宿主没有配置 SceneProvider，无法注入场景数据")?;
+            provider.scene_inputs(&id, &doc, &manifest_value()?)?
         }
-        None => Vec::new(),
+        None => host::SceneInputs::default(),
     };
 
     let core = core_ffi::core()?;
@@ -419,8 +417,8 @@ pub fn run_graph<R: Runtime>(
             force: &force,
             preview,
             params_json: params_json.as_deref(),
-            inputs: &inputs,
-            profile_inputs: &[],
+            inputs: &inputs.clouds,
+            profile_inputs: &inputs.profiles,
         },
     )
 }

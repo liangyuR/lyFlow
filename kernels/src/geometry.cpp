@@ -701,6 +701,37 @@ bool transformGeometry2D(const Geometry2D& geometry, const Transform& transform,
   return true;
 }
 
+bool anchoredWindow(const Box2D& anchor, const Box2D& heightAnchor, bool left, double offset,
+                    double length, double heightPadding, Box2D& out, std::string& why) {
+  if (!std::isfinite(offset) || !std::isfinite(length) || !std::isfinite(heightPadding) ||
+      offset < 0 || length <= 0 || heightPadding < 0) {
+    why = "窗口偏移与高度扩展必须为非负值，长度必须为正值";
+    return false;
+  }
+  const double edge = left ? anchor.min[0] - offset : anchor.max[0] + offset;
+  const double lo = left ? edge - length : edge;
+  const double hi = left ? edge : edge + length;
+  const double bottom = heightAnchor.min[1] - heightPadding;
+  const double top = heightAnchor.max[1] + heightPadding;
+  if (!nativeFloat(lo) || !nativeFloat(hi) || !nativeFloat(bottom) || !nativeFloat(top)) {
+    why = "窗口坐标超出可表示范围";
+    return false;
+  }
+  Box2D window;
+  window.unit = anchor.unit;
+  window.min[0] = static_cast<float>(lo);
+  window.max[0] = static_cast<float>(hi);
+  window.min[1] = static_cast<float>(bottom);
+  window.max[1] = static_cast<float>(top);
+  if (window.min[0] >= window.max[0]) {
+    why = "窗口长度在当前坐标量级无法表示";
+    return false;
+  }
+  out = window;
+  why.clear();
+  return true;
+}
+
 bool transformPlane(const Plane& source, const Transform& transform, Plane& out,
                     GeometryIssue& issue) {
   issue = {};

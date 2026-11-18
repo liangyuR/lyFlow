@@ -96,7 +96,7 @@ void registerPickMetal(Registry& r) {
   OperatorDesc op;
   op.id = "dts.pick_metal";
   op.version = "3.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr},
+  op.migrations = {{1, rejectLegacyProfileNode, nullptr},
                    {2, nullptr, &profile_contract::keepInputs}};
   op.label = "钣金基准面提取";
   op.category = "DTS/钣金";

@@ -250,7 +250,7 @@ if (view.valid()) {
 
 ## 注入内存里的采样数据
 
-生产采集无需先写临时 PCD。原生 `gap.read_scan` v2 的两个输入为 `Profile`，按[Profile 宿主协议](profile-host-protocol.md)构造 `capturedPrimary`、`capturedSecondary`：显式声明单位、传感器帧、XZ 分析平面、手性、acquisition 采样顺序、物理来源和原始槽数，附带 validity/sourceIndices 及实际可选通道。工作流须使用原生契约，并明确量测帧；旧图先按[Gap 迁移指南](gap-profile-migration.md)升级。
+生产采集无需先写临时 PCD。原生 `gap.read_scan` 的两个轮廓输入为 `Profile`，按[Profile 宿主协议](profile-host-protocol.md)构造 `capturedPrimary`、`capturedSecondary`：显式声明单位、传感器帧、XZ 分析平面、手性、acquisition 采样顺序、物理来源和原始槽数，附带 validity/sourceIndices 及实际可选通道。工作流须使用原生契约，并明确量测帧；跨主版本的旧图按[Gap 原生场景指南](gap-profile-migration.md)重搭。
 
 ```cpp
 lyflow::InputProfile primary = std::move(capturedPrimary);
@@ -428,15 +428,14 @@ fn main() {
 `REMOVE_UNUSED_COMMANDS` 的话要把这些命令写进自己的 capability，
 否则它们会在宏展开时被悄悄裁掉。
 
-### 注入点云
+### 注入场景数据
 
 前端点「运行」时把一个 `sceneId` 交给 `run_graph`（`TauriTransport` 已经在传了）。
-Rust 侧据此找到宿主自己持有的那一片云，按 [ADR-0017](adr/0017-graph-outputs-injection-importers.md)
-组装成注入项：
+Rust 侧据此找到宿主持有的采集会话，组装源节点的注入输出。[图级输出与注入](adr/0017-graph-outputs-injection-importers.md)
 
 ```rust
 use std::collections::BTreeMap;
-use lyflow_lib::host::{Cloud, SceneProvider};
+use lyflow_lib::host::{self, Cloud, SceneProvider};
 
 impl SceneProvider for MyScenes {
     fn inputs(&self, scene_id: &str, graph: &lyflow_lib::GraphDoc, manifest: &serde_json::Value)
@@ -446,23 +445,35 @@ impl SceneProvider for MyScenes {
             .get(scene_id).cloned()
             .ok_or("点云会话已失效，请重新读取一次")?;
         let mut by_port = BTreeMap::new();
-        by_port.insert("profile".to_string(), Cloud { xyz: frame.xyz, intensity: frame.intensity });
-        host::inputs_for_source_op(graph, manifest, "dts.profile_in", &by_port)
+        by_port.insert("cloud".to_string(), Cloud { xyz: frame.xyz, intensity: frame.intensity });
+        host::inputs_for_source_op(graph, manifest, "io.load_pcd", &by_port)
     }
 }
 ```
 
-三条约定，和 C++ 那边是同一套：
+注入原生 Profile 的宿主实现 `scene_inputs`，一次返回同一帧的注入数据。这里 `session_profile` 取得宿主已保存的 `RunProfileInput`，包含描述符、有效性及原始索引。
 
-1. **注入是整节点级的。** 被注入的节点 compute 整个不跑，所以它声明的**每个**
-   输出端口都要给一项 —— `inputs_for_source_op` 会照着 manifest 逐个检查。
+```rust
+use lyflow_lib::host::{self, SceneInputs, SceneProvider};
+
+impl SceneProvider for MyProfiles {
+    fn scene_inputs(&self, scene_id: &str, graph: &lyflow_lib::GraphDoc, _manifest: &serde_json::Value)
+        -> Result<SceneInputs, String>
+    {
+        let mut profile = self.session_profile(scene_id)?;
+        profile.node_id = host::source_node_id(graph, "profile.input")?.to_owned();
+        profile.port = "profile".into();
+        Ok(SceneInputs { profiles: vec![profile], ..SceneInputs::default() })
+    }
+}
+```
+
+1. **注入是整节点级的。** 注入替代源节点的计算，因此需要提供所有输出端口。
 2. **按 op 找源节点，不按节点 id。** 节点 id 是图作者随手起的名字，用户在编辑器里
    重命名一个节点就该停产线的话，这个耦合太贵了。图里有 0 个或多个该 op 的节点都报错。
-3. **注入数据的摘要进 cacheKey。** 换一片云一定重算；不进键的现象是
-   「产线上两台车量出一模一样的值」。
+3. **注入数据参与 cacheKey。** 换一条轮廓或换一片云会使相关节点重新计算。
 
-没配 `scenes` 的宿主收到带 `sceneId` 的 `run_graph` 会直接报错，而不是静默地跑一张
-没注入的图 —— 后者的表现是算子那句「这次运行没有注入轮廓」，离现场太远。
+宿主通过 `scenes` 注册提供方后即可使用带 `sceneId` 的 `run_graph`。
 
 ### 路径与 workspace_root
 

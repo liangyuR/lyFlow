@@ -5,6 +5,8 @@
 #include <limits>
 #include <vector>
 
+#include "helpers.h"
+#include "lyflow_cv/color_caliper.h"
 #include "lyflow_cv/line_scan.h"
 
 namespace line_scan = lyflow::std_image::line_scan;
@@ -109,4 +111,35 @@ TEST_CASE("图像扇形扫描：没有有效方向时默认不出峰，includeIn
   CHECK(fan.peaks[1].angle == -164.0);
   CHECK(fan.peaks[2].angle == -148.0);
   CHECK(std::isnan(fan.peaks[0].score));
+}
+
+TEST_CASE("图像彩色卡尺：独立读取未合并色段与观测边界") {
+  using namespace lyflow;
+  namespace inspection = std_image::inspection;
+  inspection::ColorMaps maps;
+  maps.frame = {3, 0, 12, 6};
+  maps.score = cv::Mat::zeros(maps.frame.size(), CV_32F);
+  maps.luma = cv::Mat::zeros(maps.frame.size(), CV_32F);
+  maps.state = cv::Mat::zeros(maps.frame.size(), CV_32F);
+  maps.score.colRange(3, 10).setTo(1);
+  maps.score.col(6).setTo(std::numeric_limits<float>::quiet_NaN());
+  maps.state.col(6).setTo(1);
+
+  test::OpCall call;
+  call.inputs["maps"] = inspection::colorMapsBundle(std::move(maps), {22, 6});
+  call.inputs["line"] = inspection::polylineRecord({0, 3}, {{9, 4}, {9, 1}}, {{0, -1}, {0, -1}});
+  REQUIRE(call.run("image.color_caliper", {{"searchHalf", Value::number(12)}}).ok);
+  const Bundle* result = call.out("observation").asBundle();
+  REQUIRE(result);
+  const auto& stations = result->field("stations")->asRecord()->data.at("stations");
+  REQUIRE(stations.size() == 1);
+  const auto& row = stations.at(0);
+  REQUIRE(row.at("runs").size() == 2);
+  CHECK(row.at("runs").at(0).at("hiCause") == "highlight");
+  CHECK(row.at("runs").at(1).at("loCause") == "highlight");
+  std::set<std::string> causes;
+  for (const auto& span : row.at("unknownSpans"))
+    causes.insert(span.at("cause").get<std::string>());
+  CHECK(causes == std::set<std::string>{"highlight", "image", "roi"});
+  CHECK(result->field("trace")->asTensor()->shape == std::vector<std::int64_t>{1, 49, 2});
 }

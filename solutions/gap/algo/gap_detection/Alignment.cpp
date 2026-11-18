@@ -5,22 +5,15 @@
  * Author: jianming huang <jianming.huang@xyzrobotics.ai>, 2023/03/07
  */
 #include "gap_detection/Alignment.hpp"
-#include "gap_detection/Converter.hpp"
 
 #include "algo/icp2d.h"
 #include "algo/profile_geometry.h"
-#include "std_bridge.hpp"
 
-#include <pcl/io/pcd_io.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <Eigen/Eigenvalues>
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <iomanip>
 #include <limits>
-#include <optional>
-#include <sstream>
 #include <vector>
 
 namespace detection {
@@ -152,45 +145,11 @@ Eigen::Matrix3f lockDegenerateDirections(const Eigen::Matrix3f& init_pose_2d,
   return corrected_delta * init_pose_2d;
 }
 
-std::optional<Eigen::Vector2f> robustCloudCenter(const PointCloud& cloud) {
-  std::vector<float> xs;
-  std::vector<float> ys;
-  xs.reserve(cloud.size());
-  ys.reserve(cloud.size());
-  for (const auto& point : cloud) {
-    if (!std::isfinite(point.x) || !std::isfinite(point.y))
-      continue;
-    xs.push_back(point.x);
-    ys.push_back(point.y);
-  }
-  if (xs.empty())
-    return std::nullopt;
-
-  const auto median = [](std::vector<float>* values) {
-    const auto middle = values->begin() + values->size() / 2;
-    std::nth_element(values->begin(), middle, values->end());
-    const float upper = *middle;
-    if (values->size() % 2 != 0)
-      return upper;
-    const auto lower = std::max_element(values->begin(), middle);
-    return (*lower + upper) * 0.5F;
-  };
-  return Eigen::Vector2f{median(&xs), median(&ys)};
-}
-
 } // namespace
 
-Alignment::Alignment() {
-  left_camera_cloud_.reset(new PointCloud);
-  right_camera_cloud_.reset(new PointCloud);
-  left_cloud_.reset(new PointCloud);
-  right_cloud_.reset(new PointCloud);
-  scale_ = 1000;
-}
-
-AlignmentOutcome Alignment::registerCloud2DICPOutcome(const PointCloud& src, const PointCloud& tgt,
-                                                      const Eigen::Matrix3f& init_pose_2d) {
-  const auto& params = configuration_.icp;
+AlignmentOutcome alignCloud2D(const PointCloud& src, const PointCloud& tgt,
+                              const Eigen::Matrix3f& init_pose_2d,
+                              const domain::IcpConfiguration& params, double degenerateRatio) {
   double max_matching_dist = params.max_matching_distance / 1000;
   double max_fitness_dist = params.max_fitness_distance / 1000;
   int max_iteration_num = params.max_iteration_count;
@@ -238,9 +197,8 @@ AlignmentOutcome Alignment::registerCloud2DICPOutcome(const PointCloud& src, con
     if (analysis.valid) {
       degenerate_eigenvalue_ratio =
           analysis.eigenvalues.minCoeff() / analysis.eigenvalues.maxCoeff();
-      final_pose =
-          lockDegenerateDirections(init_pose_2d, pose_2d, analysis,
-                                   configuration_.robustness.degenerate_ratio, &degenerate_locked);
+      final_pose = lockDegenerateDirections(init_pose_2d, pose_2d, analysis, degenerateRatio,
+                                            &degenerate_locked);
     }
   }
 
@@ -250,182 +208,4 @@ AlignmentOutcome Alignment::registerCloud2DICPOutcome(const PointCloud& src, con
   return outcome;
 }
 
-AlignmentOutcome Alignment::alignOutcome(const PointCloud& src, const PointCloud& tgt,
-                                         const Eigen::Matrix3f& init_pose_2d) {
-  const auto& params = configuration_;
-  const auto& method = params.method;
-  if (method == "ICP") {
-    return registerCloud2DICPOutcome(src, tgt, init_pose_2d);
-  }
-  throw std::runtime_error("Not Implemented Method");
-}
-
-void Alignment::saveAlignmentResult(const PointCloud& target, const Eigen::Matrix3f& transform) {
-  PointCloud::Ptr transformed_cloud(new PointCloud);
-  const auto transform_3d = conv::EigenMatrix3fto4f(transform.inverse(), conv::kZ);
-  pcl::transformPointCloud(target, *transformed_cloud, transform_3d);
-  pcl::io::savePCDFile(save_template_path_ + "/reg" + std::to_string(align_times_++) + ".pcd",
-                       *transformed_cloud, true);
-}
-
-Eigen::Isometry2f Alignment::align(const PointCloud& src, const PointCloud& tgt,
-                                   const Eigen::Matrix3f& init_pose_2d) {
-  const auto outcome = alignOutcome(src, tgt, init_pose_2d);
-  gap::core::IcpQuality metric;
-  metric.component = alignment_component_;
-  metric.score = outcome.score;
-  metric.bidirectional = outcome.bidirectional;
-  metric.success = outcome.success;
-  metric.transform = outcome.transform;
-  metric.degenerate_eigenvalue_ratio = outcome.degenerate_eigenvalue_ratio;
-  metric.degenerate_locked = outcome.degenerate_locked;
-  icp_metrics_.push_back(std::move(metric));
-  if (!outcome.success) {
-    std::ostringstream message;
-    message << "ICP Failed: score=" << std::fixed << std::setprecision(2) << outcome.score
-            << ", minimum_score=" << configuration_.icp.minimum_score;
-    throw std::runtime_error(message.str());
-  }
-  if (configuration_.save_result)
-    saveAlignmentResult(tgt, outcome.transform);
-  return Eigen::Isometry2f(outcome.transform);
-}
-
-void Alignment::preprocess(const PointCloud& left_camera_cloud,
-                           const PointCloud& right_camera_cloud, bool allow_single_camera,
-                           bool skip_roi_crop,
-                           const std::optional<OverallCropOverride>& override_crop) {
-  roll_crop_applied_ = false;
-  roll_crop_reverted_ = false;
-  // put cloud in x-y plane from x-z plane
-  PointCloud::Ptr left_camera_cloud_xy(new PointCloud);
-  PointCloud::Ptr right_camera_cloud_xy(new PointCloud);
-  if (no_trans_) {
-    axis_trans_ = Eigen::Matrix4f::Identity();
-    left_camera_cloud_xy = left_camera_cloud.makeShared();
-    right_camera_cloud_xy = right_camera_cloud.makeShared();
-  } else {
-    axis_trans_ =
-        conv::swapCloudAxis(left_camera_cloud, left_camera_cloud_xy.get(), conv::kY, conv::kZ);
-    conv::swapCloudAxis(right_camera_cloud, right_camera_cloud_xy.get(), conv::kY, conv::kZ);
-  }
-
-  // Extract cloud in ROI. Auto mode keeps the configured width and height, but follows the
-  // robust centre of the currently selected camera clouds.
-  const auto& roi = configuration_.overall_roi.values;
-  std::array<double, 4> resolved_roi = roi;
-  constexpr double kUnboundedMm = 1e7;
-  const std::array<double, 4> unbounded_roi{-kUnboundedMm, -kUnboundedMm, kUnboundedMm,
-                                            kUnboundedMm};
-  if (skip_roi_crop) {
-    // Unbounded box: keeps cropBox2D's drop-non-finite semantics without deleting any
-    // finite point. resolved_overall_roi_mm_ is replaced by the kept clouds' bounding box below.
-    resolved_roi = unbounded_roi;
-    if (override_crop) {
-      // Roll-anchored window: a real box that follows the part, so it is reported as-is and the
-      // bounding-box diagnostic below is skipped.
-      resolved_roi = override_crop->box_mm;
-      roll_crop_applied_ = true;
-    }
-  } else if (configuration_.overall_roi_mode == domain::OverallRoiMode::kAutoCenter) {
-    const auto left_center = robustCloudCenter(*left_camera_cloud_xy);
-    const auto right_center = robustCloudCenter(*right_camera_cloud_xy);
-    std::optional<Eigen::Vector2f> center;
-    if (configuration_.using_camera == "Left") {
-      center = left_center;
-    } else if (configuration_.using_camera == "Right") {
-      center = right_center;
-    } else if (left_center && right_center) {
-      center = (*left_center + *right_center) * 0.5F;
-    } else {
-      center = left_center ? left_center : right_center;
-    }
-
-    if (center) {
-      const double half_width = (roi[2] - roi[0]) * 0.5;
-      const double half_height = (roi[3] - roi[1]) * 0.5;
-      const double center_x_mm = static_cast<double>((*center).x()) * 1000.0;
-      const double center_y_mm = static_cast<double>((*center).y()) * 1000.0;
-      resolved_roi = {center_x_mm - half_width, center_y_mm - half_height, center_x_mm + half_width,
-                      center_y_mm + half_height};
-    }
-  }
-  resolved_overall_roi_mm_ = resolved_roi;
-  // cropBox2D appends, so the destinations are cleared here to make a second pass (the
-  // roll-anchored crop's revert path) equivalent to a first one.
-  const auto apply_crop = [&](const std::array<double, 4>& box_mm) {
-    Eigen::Matrix2f roi_matrix;
-    roi_matrix << box_mm[0], box_mm[2], box_mm[1], box_mm[3];
-    roi_matrix /= 1000;
-    left_camera_cloud_->clear();
-    right_camera_cloud_->clear();
-    gap_std::roiCrop2D(*left_camera_cloud_xy, left_camera_cloud_.get(), roi_matrix);
-    gap_std::roiCrop2D(*right_camera_cloud_xy, right_camera_cloud_.get(), roi_matrix);
-  };
-  apply_crop(resolved_roi);
-  if (roll_crop_applied_) {
-    // Point-count failsafe: a crop derived from mislabelled rolls must never starve the
-    // measurement, so anything below the floor discards the window and redoes the unbounded
-    // pass. Only the cameras the configuration actually uses are checked -- a "Left"/"Right"
-    // configuration legitimately leaves the other side empty until the copy step below.
-    const std::size_t kept_left = left_camera_cloud_->size();
-    const std::size_t kept_right = right_camera_cloud_->size();
-    const std::size_t minimum = override_crop->min_points_kept;
-    bool insufficient = false;
-    if (configuration_.using_camera == "Left") {
-      insufficient = kept_left < minimum;
-    } else if (configuration_.using_camera == "Right") {
-      insufficient = kept_right < minimum;
-    } else if (allow_single_camera) {
-      insufficient = kept_left + kept_right < minimum;
-    } else {
-      insufficient = kept_left < minimum || kept_right < minimum;
-    }
-    if (insufficient) {
-      roll_crop_applied_ = false;
-      roll_crop_reverted_ = true;
-      resolved_roi = unbounded_roi;
-      resolved_overall_roi_mm_ = resolved_roi;
-      apply_crop(resolved_roi);
-    }
-  }
-  if (skip_roi_crop && !roll_crop_applied_) {
-    // Honest diagnostics: no window was applied, so record what actually survived.
-    double min_x = std::numeric_limits<double>::infinity(), min_y = min_x;
-    double max_x = -min_x, max_y = -min_y;
-    for (const auto* cloud : {left_camera_cloud_.get(), right_camera_cloud_.get()}) {
-      for (const auto& point : *cloud) {
-        min_x = std::min(min_x, static_cast<double>(point.x));
-        min_y = std::min(min_y, static_cast<double>(point.y));
-        max_x = std::max(max_x, static_cast<double>(point.x));
-        max_y = std::max(max_y, static_cast<double>(point.y));
-      }
-    }
-    if (min_x <= max_x)
-      resolved_overall_roi_mm_ = {min_x * 1000.0, min_y * 1000.0, max_x * 1000.0, max_y * 1000.0};
-  }
-
-  // copy used camera cloud to the unused camera
-  const auto& using_camera = configuration_.using_camera;
-  if (using_camera == "Left") {
-    pcl::copyPointCloud(*left_camera_cloud_, *right_camera_cloud_);
-  } else if (using_camera == "Right") {
-    pcl::copyPointCloud(*right_camera_cloud_, *left_camera_cloud_);
-  }
-  // smooth cloud [TODO@Jianming]
-
-  const bool primary_empty = left_camera_cloud_->empty();
-  const bool secondary_empty = right_camera_cloud_->empty();
-  const bool no_usable_points = allow_single_camera && using_camera == "Both"
-                                    ? primary_empty && secondary_empty
-                                    : primary_empty || secondary_empty;
-  if (no_usable_points) {
-    std::ostringstream message;
-    message << "no points after preprocessing (primary=" << left_camera_cloud_->size()
-            << ", secondary=" << right_camera_cloud_->size() << ", using_camera=" << using_camera
-            << ", bounds_mm=[" << resolved_roi[0] << ", " << resolved_roi[1] << ", "
-            << resolved_roi[2] << ", " << resolved_roi[3] << "])";
-    throw std::runtime_error(message.str());
-  }
-}
 } // namespace detection

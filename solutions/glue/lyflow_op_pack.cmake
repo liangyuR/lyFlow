@@ -24,7 +24,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GLUE_SNIPPETS})
 
 lyflow_op_pack(
   NAME         solution-glue
-  VERSION      0.4.0
+  VERSION      0.5.0
   DEFAULT      OFF
   SOURCES      ${GLUE_SOURCES}
   TEST_SOURCES ${GLUE_TESTS}
@@ -32,3 +32,11 @@ lyflow_op_pack(
   INCLUDES     "${LYFLOW_PACK_DIR}" "${GLUE_GENERATED}"
   LINK         lyflow_opencv_support lyflow_geometry_kernel
 )
+
+install(FILES "${LYFLOW_PACK_DIR}/README.md" DESTINATION examples/glue)
+install(DIRECTORY "${LYFLOW_PACK_DIR}/graphs/" DESTINATION examples/glue/graphs
+        FILES_MATCHING PATTERN "*.lyflow.json")
+install(DIRECTORY "${LYFLOW_PACK_DIR}/tools/" DESTINATION examples/glue/tools
+        FILES_MATCHING PATTERN "*.py")
+install(FILES "${LYFLOW_PACK_DIR}/../../docs/glue-integration.md"
+              "${LYFLOW_PACK_DIR}/../../docs/glue-measure-ops.md" DESTINATION docs)

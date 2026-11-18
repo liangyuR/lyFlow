@@ -4,7 +4,7 @@
 //   params-p2-types.png  面板最大化，transform 与 curve 两个新控件在画面里
 // 不接进 run.mjs（截图会改动仓库文件）。
 //
-//   LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import;gap-compat' node scripts/e2e/record-params-p2.mjs     # 自己起 tauri dev
+//   LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import' node scripts/e2e/record-params-p2.mjs     # 自己起 tauri dev
 //   LYFLOW_E2E_ATTACH=1 node scripts/e2e/record-params-p2.mjs      # 连到已经开着的实例（要带 LYFLOW_TEST_OPS=1 启动）
 
 import fs from 'node:fs';

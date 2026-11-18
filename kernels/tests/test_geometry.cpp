@@ -10,6 +10,25 @@
 using namespace lyflow;
 using namespace lyflow::kernel;
 
+TEST_CASE("Anchored window constructs left and right ranges with an independent height anchor") {
+  Box2D anchor, height, window;
+  anchor.min[0] = -.006F;
+  anchor.max[0] = -.004F;
+  height.min[1] = .180F;
+  height.max[1] = .185F;
+  std::string why;
+  for (const bool left : {true, false}) {
+    REQUIRE(anchoredWindow(anchor, height, left, .0012345, .0137891, .0025678, window, why));
+    CHECK(window.min[0] == doctest::Approx(left ? -.0210236 : -.0027655).epsilon(1e-6));
+    CHECK(window.max[0] == doctest::Approx(left ? -.0072345 : .0110236).epsilon(1e-6));
+    CHECK(window.min[1] == doctest::Approx(.1774322).epsilon(1e-6));
+    CHECK(window.max[1] == doctest::Approx(.1875678).epsilon(1e-6));
+  }
+  const auto previous = window.min[0];
+  CHECK_FALSE(anchoredWindow(anchor, height, true, 0, 0, 0, window, why));
+  CHECK(window.min[0] == previous);
+}
+
 TEST_CASE("Public geometry kernel preserves relation definitions, units and atomic failures") {
   Point2D point;
   point.p[0] = 3;

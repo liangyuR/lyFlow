@@ -2,7 +2,7 @@
 
 本场景处理一条激光轮廓，输出测量有效性与毫米面差。胶条主体、半径带、两族钣金、根部优先级和业务正号属于此场景；公共清洗、分片、TLS/代数圆拟合和有符号点线测量分别由 `std-profile` 与公开静态内核提供。
 
-`packs/dts` 已迁至本目录。旧 `dts.profile_clean` 和 `dts.split_faces` 计算注册已删除，没有第二份算法。启用时显式选择依赖闭包：
+统一运行库包含本包。开发时可用以下命令构建轻量轮廓组合。
 
 ```powershell
 cmake -S core -B build/profile-dts -G Ninja `
@@ -16,39 +16,33 @@ ctest --test-dir build/profile-dts --output-on-failure
 
 ## 原生轮廓与算法
 
-两张随包图均保留旧源 `n_in:dts.profile_in@1` 的 PointCloud 注入端口，紧接显式 `profile.from_cloud`，声明 `mm/XZ/right/acquisition`、`frame=dts-scan`、`sourceId=dts-source`。之后是 `profile.clean@1` 保槽模式与 `profile.split_faces@2`。裸云的声明必须由调用方确认；不推断未知外部节点的单位、帧或采样序。
+两张图从 `profile.input` 的 `profile` 输出读取原生轮廓，先用 `profile.clean` 保槽清洗，再用 `profile.split_faces` 分面。默认文件输入声明毫米、XZ 轮廓、右手坐标和采集顺序。使用设备输入时由宿主声明实际单位、坐标帧、手性、采样顺序和来源。
 
-DTS v2 计算节点接受 `Profile`，要求 `XZ/acquisition`，按声明将有效槽显式转换到毫米工作坐标，保留原描述和源列映射。清洗在原槽窗中运行中值，无效中心不补洞；分片比较相邻有效采样列，分片内部才建立按 x 排序的索引视图。公共 `profile.Faces.v2` 的 `i0/i1` 是 `active_samples` 偏移，不能直接当原采集列。
+DTS 计算节点接受 `Profile`，要求 `XZ/acquisition`，按声明将有效槽显式转换到毫米工作坐标，保留原描述和源列映射。清洗在原槽窗中运行中值，无效中心不补洞；分片比较相邻有效采样列，分片内部才建立按 x 排序的索引视图。公共 `profile.Faces.v2` 的 `i0/i1` 是 `active_samples` 偏移，不能直接当原采集列。
 
-TLS、代数圆、滑窗、硬半径带与退化阈值继续使用原毫米数值标度；不替换为 PCL/RANSAC。`default.lyflow.json` 选择默认 `angleToApexDeg=-55` 面族，`adjacent.lyflow.json` 选择 `-120`。两种基准定义分别保留，已知失败不变成成功。
+TLS、代数圆、滑窗、硬半径带与退化阈值继续使用原毫米数值标度；不替换为 PCL/RANSAC。`default-profile.lyflow.json` 选择默认的 `angleToApexDeg=-55` 面族。`adjacent-profile.lyflow.json` 选择 `-120` 面族。
 
 ## 节点与单位
 
 | 节点                     | 版本  | 契约                                                                                              |
 | ------------------------ | ----- | ------------------------------------------------------------------------------------------------- |
-| `dts.profile_in`         | 1.0.0 | 旧 PointCloud I/O/注入源壳；CSV 仍为 `x,z[,intensity]` 毫米，不承担公共轮廓算法。                 |
 | `dts.seal_dome`          | 3.0.0 | `clean:Profile,faces:Record` → `dome:DtsDome.v3,apex:Line2D`。                                    |
 | `dts.pick_metal`         | 3.0.0 | `clean,faces,dome` → `metal:Line2D,pick:DtsMetalPick.v3,metalContext:Record`。                    |
 | `dts.seal_root`          | 3.0.0 | `clean,faces,dome,pick` → `root:DtsRoot.v3,point:Point2D,pointContext:Record`。                   |
 | `dts.flush`              | 3.0.0 | `root` → `flush:Measurement,foot:Point2D,footInfo:DtsFlush.v3`。                                  |
 | `dts.profile_bundle`     | 3.0.0 | 汇总 `faces,dome,pick,root,flush,footInfo` → `DtsProfileBundle.v3`。                              |
-| `dts.geometry_to_metric` | 2.0.0 | 显式 `dts.geometry.v1` 位置/端点乘 0.001；显式 `dts.geometry.v2` 已是米，保留节点身份并原样通过。 |
 
-所有裸 `Line2D/Point2D` 的位置和端点在 v2 都是真米，方向不缩放。先按原实现收窄为毫米 float，再转米，保持 M1 桥的舍入顺序。旧 `Unit2D::Meter` 标签不是旧数值已为米的证据。`Measurement` 继续携带自身 `unit=mm`，不通过几何单位桥。
+裸 `Line2D` 和 `Point2D` 的位置和端点输出为米，方向保持单位长度。场景先形成毫米 float 工作坐标，再将原生几何转米。`Measurement` 的业务读数以 `unit=mm` 发布。
 
 场景 Record 均含 `schemaVersion=3` 与 `workingUnit=mm`，不嵌入轮廓上下文或内容指纹；下游按 Record 类型读取，不再核对它们与当前轮廓的绑定。`DtsRoot.v3` 另外区分 `legacySortedIndex/activeIndex/slotIndex/sourceIndex`。
 
 `DtsMetalPick.v3` 保存旧 float 毫米 `metalLineMm`，根记录携带同一份基准线；面差只读根记录里的这条线，调用公共 `signedPointLine(...,DeclaredUnit)`，不将米制 float 回算毫米，也不重新归一化旧 float 单位方向。`DtsFlush.v3.footMm` 保存旧毫米 float 垂足，面差有效时汇总从它写出 `perpendicular`。`pointContext/metalContext` 是 `profile.Geometry.v3`，只声明所在坐标帧、分析平面和手性，供公共测量节点组合。
 
-`dts.flush` 不再有 `metal` 输入，`dts.profile_bundle` 不再有 `metal` 与 `foot` 输入；`lyflow migrate` 把 2.x 节点升到 3.0.0 时删除这些连线。
-
 ## 宿主、升级与结果
 
-旧宿主仍可按唯一 `dts.profile_in` 源节点的 `profile` 端口注入毫米 PointCloud；输出注入会跳过整个源 compute。新宿主使用 `default-profile.lyflow.json` 或 `adjacent-profile.lyflow.json`：源节点 `n_in` 改为 `profile.input`，通过 M1 原生 Profile 输入接口注入完整 Profile，保留 NaN 槽、有限无效槽、全部通道与原源索引。全图运行会执行旧图中的旧源，不应向下游适配器注入后期待旧源自动消失。宿主中的帧、来源身份和 intensity 有效性含义需要显式配置；这里的兼容源壳不证明仓库外 `dts-check` 已同步升级。
+使用 `default-profile.lyflow.json` 或 `adjacent-profile.lyflow.json` 时，宿主将完整 Profile 注入 `profile.input` 的 `profile` 输出。输入保留 NaN 槽、有限无效槽、全部可用通道和原源索引。为历史图重搭输入和几何连线时，先确认数据契约。[DTS 原生图切换](../../docs/dts-profile-migration.md)
 
-历史图不能靠改 ID 或空参数迁移变为 v2。使用原生图级 `dtsProfile.v1` 精确请求声明已知 v1 来源及轮廓语义；没有证据的旧计算节点拒绝执行，保留可查看的原图和连线。几何桥的 v1 参数迁移只保留明确的旧 v1 换算契约；完整图升级才可把桥声明改为 v2 真米直通。
-
-兼容源壳和旧几何桥只服务 M3–M6 过渡，M7 切换与交付退役时清理，不能无限期保留算法别名。两张图的六个顶层输出名保持 `flush/metal/root/bundle/faces/dome`；`bundle` 含 `ok/flushMm/root/dome/pick/faces/pieces/metal`，面差有效时另含 `perpendicular`，全部嵌入坐标明确为毫米工作坐标，整轮廓不塞入 Record。
+两张图发布六个顶层输出 `flush`、`metal`、`root`、`bundle`、`faces` 和 `dome`。`bundle` 含 `ok`、`flushMm`、`root`、`dome`、`pick`、`faces`、`pieces` 和 `metal`，面差有效时还含 `perpendicular`。嵌入坐标使用毫米工作坐标。
 
 合格标准、跨轮廓汇总、跨站位统计、设备采集与生产许可继续属于宿主。`Measurement` 的 verdict 与公差不在本图填写，失败或未运行不会被汇总为合格。
 
@@ -59,7 +53,7 @@ TLS、代数圆、滑窗、硬半径带与退化阈值继续使用原毫米数�
 拿各样本**头三条**轮廓写成 CSV 跑 `lyflow eval`（`data/lyflow-eval/dts/`，不进本仓库）：
 
 ```powershell
-lyflow eval solutions\dts\graphs\default.lyflow.json `
+lyflow eval solutions\dts\graphs\default-profile.lyflow.json `
   --samples-glob "<...>\data\lyflow-eval\dts\*.csv" --bind n_in.path `
   --set 'n_in.source="file"' --metric outputs.flush
 ```
@@ -111,6 +105,6 @@ B 的 −0.11 mm 是稳定偏置（三条一致）；A 第 0 条的 +0.21 mm 是
 
 ## 测试
 
-`tests/test_dts_ops.cpp` 保留两条 3200 点实测、A/B/D 现场读数、A/B 与原 Python 差值门槛以及空/NaN/暗/无胶条失败路径；新增原生槽与通道/源索引、配套几何、缺字段/跨帧拒绝、八种旧 float 正号组合、原生/旧云实际图注入和取消回归。数据夹具原样迁移，没有为让 D 样本对齐而改算法。
+`tests/test_dts_ops.cpp` 保留两条 3200 点实测、A/B/D 现场读数、A/B 与原 Python 差值门槛以及空/NaN/暗/无胶条失败路径；新增原生槽与通道/源索引、配套几何、缺字段/跨帧拒绝、八种 float 正号组合、两种基准图的原生轮廓注入、退役诊断和取消回归。数据夹具原样迁移，没有为让 D 样本对齐而改算法。
 
 公共核方法回归在 `kernels/tests/test_profile.cpp`，公共处理节点回归在 `packs/std-profile/tests/test_processing.cpp`。软件图与宿主验证不代替扫描器、机器人、现场质量、吞吐或耐久验收。

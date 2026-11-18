@@ -1,4 +1,4 @@
-set(_geometry_modules geometry-kernel)
+set(_geometry_modules geometry-kernel profile-contract)
 set(_geometry_optional workspace-io)
 if(LYFLOW_STD_PACKS)
   list(APPEND _geometry_modules workspace-io)

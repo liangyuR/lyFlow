@@ -5,6 +5,7 @@
 
 #include "helpers.h"
 #include "lyflow/value.h"
+#include "lyflow_profile/context.h"
 
 using namespace lyflow;
 
@@ -72,6 +73,25 @@ double distance(Data a, Data b) {
 }
 
 } // namespace
+
+TEST_CASE("Anchored window accepts plain geometry and rejects incompatible height frames") {
+  Box2D anchor;
+  anchor.max[0] = 1;
+  anchor.max[1] = 2;
+  test::OpCall call;
+  call.inputs["anchor"] = Data::box2d(anchor);
+  REQUIRE(call.run("geometry.anchored_window", {{"frame", Value::text("world")}}).ok);
+  CHECK(call.out("context").asRecord()->data["frame"] == "world");
+  ProfileDescriptor a, b;
+  a.frame = "world";
+  b = a;
+  b.frame = "other";
+  call.inputs["anchorContext"] = Data::record(profile_contract::geometryContext(a));
+  call.inputs["heightAnchor"] = Data::box2d(anchor);
+  call.inputs["heightContext"] = Data::record(profile_contract::geometryContext(b));
+  CHECK(call.run("geometry.anchored_window").code == "space_mismatch");
+  CHECK(call.outputs.empty());
+}
 
 TEST_CASE("geometry constructors normalize geometry without changing plane equation") {
   test::OpCall c;

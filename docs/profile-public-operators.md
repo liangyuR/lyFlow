@@ -69,7 +69,7 @@ M4b 曾保留旧节点的端口和参数并改为调用同一公开 C++ 核；�
 
 冻结旧运行库对照中，42 个已有定义直线场景的字段及浮点位一致；量测对照 293 个场景中，281 个已有定义场景一致，另有 12 个预期变化：8 个重合圆心、3 个像素单位、1 个 float 溢出。已有定义场景包含预期失败边界，不能把 281 解释为全部成功的测量，也不能宣称所有历史输入兼容。这些是软件数值与错误契约证据，不是现场精度或吞吐验收。此后点线面差、轮廓直线最近样本和 `gap.measure_reference` 的旧引擎改用公共 `signedPointLine` 的双精度计算，相对上述 float 结果只差舍入，按各自测试声明的容差验证，不再与冻结运行库逐位一致；`metrology.flush_point_line` 2.0.1、`profile.nearest_to_line` 2.0.1、`gap.measure_reference` 1.0.1 以 patch 版本隔离缓存。
 
-M4c 将旧 8 个通用 Gap ID 从正式注册中移除。历史图需要明确来源声明和 `gapProfile.v1` 整图升级，不能静默重标为新端口。双头 `[2,6,1280]` 槽协议、相机来源/逻辑角色、模板/模型模块、六种导入器和六个片段的验收状态见[完整计划](operator-package-migration-plan.md)。
+M4c 将旧 8 个通用 Gap ID 从正式注册中移除。当前版本按原业务目标重新搭图，并明确声明来源和分析空间。双头 `[2,6,1280]` 槽协议、相机来源/逻辑角色、模板/模型模块、六种导入器和六个片段的验收状态见[完整计划](operator-package-migration-plan.md)。
 
 公开静态接口为 `profile_features.h`（`lyflow::profile_robust_kernel`）和 `profile_dimensions.h`（`lyflow::metrology_kernel`），无需 Registry、执行图或加载 core DLL；安装 SDK 用法和隔离消费门禁见[公共内核](public-kernels.md)。
 

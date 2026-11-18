@@ -1,6 +1,6 @@
 # solution-glue — LyFlow 领域算子包：涂胶检测
 
-版本 0.4.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "solution-glue"`（与别的领域包一起：`"solution-gap;solution-dts;solution-glue"`）。
+版本 0.5.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "solution-glue"`（与别的领域包一起：`"solution-gap;solution-dts;solution-glue"`）。
 
 彩色跟踪和量宽对胶内高光、低置信度色谷采用同一套受约束合并：邻站或稳定历史胶宽可以扩大搜索范围，但明确背景不可跨越，合并宽度与中心须符合参考并优于原片段。外边被遮住时保留不完整标记，不用参考宽度替代实测；参数与输出契约见 [彩色测量算子](../../docs/glue-measure-ops.md#13-彩色测量算子)。
 
@@ -135,7 +135,8 @@ GlueSight 从 1.2 起只用下面 6 个算子，判定（有无胶、像不像�
 | `glue.color_map` 胶色得分图 | `image`、`model?` → `maps: Bundle<glue.ColorMaps>` | 每像素胶的面积占比 ∈ [0, 1]；高光、暗区是 NaN（无信息），明显比胶暗的是 0；只算 roi 那一块 |
 | `glue.color_fan` 彩色扇形扫描 | `maps` → `scan: Record<glue.FanScan>` | `glue.fan_scan` 用在得分图上 |
 | `glue.color_track` 彩色粗跟踪 | `maps`、`fan?` → `line`、`track: Record<glue.Track>` | 高光挡住的步记为无信息、不计入 maxGap；另给 `coverageInformative` |
-| `glue.color_runs` 彩色横向卡尺 | `maps`、`line` → `runs: Record<glue.LateralRuns>` | 每站的胶色段与无信息区间（原因），段两边各是真边还是被高光截断；被高光劈开的胶并回一段 |
+| `image.color_caliper` 彩色卡尺观测 | `maps`、`line` → `observation: Bundle<image.ColorCaliper.v1>` | 每站原始色段、边界原因、采样分类和无信息区间 |
+| `glue.merge_color_runs` 胶色卡尺补缝 | `observation` → `runs: Record<glue.ColorRuns.v1>`、`overlay` | 用邻站参考宽度和中心补缝，保留 `extent` 和观测状态 |
 
 **无信息不是断胶**：高光、暗区挡住的站要由宿主判成「未检」。`part_edges` 仍按灰度量（`grayOf`），彩色帧照样能接。
 

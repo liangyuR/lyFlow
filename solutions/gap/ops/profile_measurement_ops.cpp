@@ -9,7 +9,7 @@
 #include "profile_bundle_ops.h"
 #include "profile_circles.h"
 #include "profile_feature_bundle.h"
-#include "profile_regions.h"
+#include "lyflow/kernel/geometry.h"
 
 namespace lyflow::packs::gap::profile_scene {
 namespace {
@@ -199,48 +199,39 @@ Status datumDirection(const Inputs& in, const ParamView& params, Outputs& out, E
     return status;
   const auto role = params.choice("role");
   const auto* height = rois.role(role);
-  const auto* heightContext = rois.context(role);
   const bool datumRight = rois.info->data["datumSide"] == "right";
   const bool right = role == "target" ? !datumRight : datumRight;
   const std::size_t side = right ? 3 : 2;
-  GeometryResult window;
-  if (const auto status = datumWindow(*rois.boxes[side], *rois.contexts[side]->asRecord(), height,
-                                      heightContext->asRecord(),
-                                      {right ? "right" : "left", params.number("startMm"),
-                                       params.number("lengthMm"), params.number("heightMm")},
-                                      window, ctx);
-      !status.ok)
-    return status;
+  Box2D box;
+  std::string why;
+  if (!kernel::anchoredWindow(*rois.boxes[side]->asBox2D(), *height->asBox2D(), !right,
+                              params.number("startMm") / 1000., params.number("lengthMm") / 1000.,
+                              params.number("heightMm") / 1000., box, why))
+    return Status::Error(Phase::Execute, "bad_param", why, "lengthMm");
+  const auto window = Data::box2d(box);
+  const auto& windowContext = *rois.contexts[side];
   contract::SelectionResult selected;
-  if (const auto status =
-          crop(*scan.merged, window.box, Data::record(window.context), selected, ctx);
-      !status.ok)
+  if (const auto status = crop(*scan.merged, window, windowContext, selected, ctx); !status.ok)
     return status;
   auto values = lineValues(params);
   values["segmentPoints"] = Value::integer(0);
   values["endpoints"] = Value::text("inlier_ends");
-  contract::RobustLineInputs input{selected.profile,
-                                   window.box,
-                                   Data::record(window.context),
-                                   *rois.boxes[side],
-                                   *rois.contexts[side],
-                                   {},
-                                   {}};
+  contract::RobustLineInputs input{
+      selected.profile, window, windowContext, *rois.boxes[side], *rois.contexts[side], {}, {}};
   contract::RobustLineResult fit;
   if (const auto status =
           contract::fitRobustLine(input, ParamView(values, params.baseDir()), fit, ctx);
       !status.ok)
     return status;
   Data feature;
-  std::string why;
   if (!lineFeatureOf(fit, feature, why))
     return bad(why, "feature");
   if (ctx.cancelled())
     return cancelled();
   publishFit(fit, out);
   out.set("feature", std::move(feature));
-  out.set("window", window.box);
-  out.set("windowContext", Data::record(std::move(window.context)));
+  out.set("window", window);
+  out.set("windowContext", windowContext);
   return Status::Ok();
 }
 Status seamCircles(const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {

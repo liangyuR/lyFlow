@@ -500,16 +500,6 @@ nlohmann::json rollParams(const Config& c) {
   return p;
 }
 
-nlohmann::json guardParams(const Config& c) {
-  nlohmann::json p;
-  p["onDisagree"] = textOr(c.guard, "on_disagree", "record");
-  p["maxDeltaMm"] = numberOr(c.guard, "max_delta_mm", 0.5);
-  p["sampleStep"] = numberOr(c.guard, "sample_step_mm", 0.5);
-  p["halfWindow"] = numberOr(c.guard, "half_window_mm", 0.25);
-  p["minSamples"] = intOr(c.guard, "min_samples", 20);
-  return p;
-}
-
 const char* refMethod(const std::string& refType) {
   if (refType == "line end")
     return "line_end";
@@ -519,7 +509,7 @@ const char* refMethod(const std::string& refType) {
 }
 
 struct Tail {
-  std::string flushNode, gapNode, circlesNode, bundleNode;
+  std::string flushNode, gapNode, circlesNode, bundleNode, judgedFlush, judgedGap;
   std::vector<std::string> modelPathBinds, inputDirBinds, templateDirBinds, circleOffsetBinds;
 };
 struct BoundRef {
@@ -686,10 +676,24 @@ SceneFields readScene(Builder& g, const Config& c, Tail& tail, bool fine) {
     s = {load, "secondary"};
     sourceInfo = {load, "sourceInfo"};
     if (guard) {
+      const auto mode = textOr(c.guard, "on_disagree", "record");
       const auto gate =
-          g.node("n_camera_guard", "gap.camera_guard", guardParams(c), 0, 3, "双相机一致性检查");
+          g.node("n_camera_guard", "gap.select_camera",
+                 {{"onDisagree", mode}, {"maxDeltaMm", numberOr(c.guard, "max_delta_mm", .5)}}, 1,
+                 3, "选择相机");
       wire(g, p, gate, "primary");
       wire(g, s, gate, "secondary");
+      if (mode != "off") {
+        const auto observation =
+            g.node("n_camera_observation", "profile.compare_overlap",
+                   {{"sampleStep", numberOr(c.guard, "sample_step_mm", .5) / 1000.},
+                    {"halfWindow", numberOr(c.guard, "half_window_mm", .25) / 1000.},
+                    {"minSamples", intOr(c.guard, "min_samples", 20)}},
+                   0, 3, "观测双路重叠高度差");
+        wire(g, p, observation, "primary");
+        wire(g, s, observation, "secondary");
+        g.edge(observation, "observation", gate, "observation");
+      }
       p = {gate, "primary"};
       s = {gate, "secondary"};
       guardQuality = {gate, "quality"};
@@ -771,11 +775,11 @@ BoundRef fineDatum(Builder& g, const Config& c, const std::string& prefix, const
   const auto cfg = child(c.flush, "base_direction");
   const auto& anchor = rois.boxes[c.anchorKind == "gap_left" ? 2 : 3];
   const auto& height = rois.boxes[c.heightKind == "flush_base" ? 0 : 1];
-  const auto win = g.node(prefix + "n_datum_box", "gap.datum_window",
+  const auto win = g.node(prefix + "n_datum_box", "geometry.anchored_window",
                           {{"side", c.datumWindowSide},
-                           {"startMm", numberOr(cfg, "start_mm", .6)},
-                           {"lengthMm", numberOr(cfg, "length_mm", 13.4)},
-                           {"heightMm", numberOr(cfg, "height_mm", 2.5)}},
+                           {"offset", numberOr(cfg, "start_mm", .6) / 1000.},
+                           {"length", numberOr(cfg, "length_mm", 13.4) / 1000.},
+                           {"heightPadding", numberOr(cfg, "height_mm", 2.5) / 1000.}},
                           8, row, "方向基准窗口");
   wireBound(g, anchor, win, "anchor", "anchorContext");
   wireBound(g, height, win, "heightAnchor", "heightContext");
@@ -1079,17 +1083,22 @@ Ref circleFeature(Builder& g, const Config& c, const Located& at, const FlushCha
     g.edge(node, port, make, port);
   return {make, "feature"};
 }
-void judges(Builder& g, const Config& c, const Tail& tail) {
+void judges(Builder& g, const Config& c, Tail& tail) {
   const YAML::Node sections[2] = {c.flush, c.gap};
   const std::string sources[2] = {tail.flushNode, tail.gapNode};
   for (int i = 0; i < 2; ++i) {
     const auto limits = child(sections[i], "tolerances");
-    const auto node = g.node("n_judge_" + std::to_string(i), "gap.judge",
-                             {{"nominal", numberOr(limits, "nominal", 0)},
-                              {"upper", numberOr(limits, "up_deviation", 0)},
-                              {"lower", numberOr(limits, "low_deviation", 0)}},
-                             15, i * 2, i == 0 ? "判定段差" : "判定间隙");
-    g.edge(sources[i], "value", node, "value");
+    const auto suffix = std::to_string(i);
+    const auto comparison = g.node("n_compare_" + suffix, "metrology.compare_tolerance",
+                                   {{"nominal", numberOr(limits, "nominal", 0)},
+                                    {"upper", numberOr(limits, "up_deviation", 0)},
+                                    {"lower", numberOr(limits, "low_deviation", 0)}},
+                                   15, i * 2, i == 0 ? "比较段差公差" : "比较间隙公差");
+    auto& policy = i == 0 ? tail.judgedFlush : tail.judgedGap;
+    policy = g.node("n_judge_" + suffix, "gap.apply_patrol", nullptr, 16, i * 2,
+                    i == 0 ? "判定段差" : "判定间隙");
+    g.edge(sources[i], "value", comparison, "value");
+    g.edge(comparison, "value", policy, "value");
   }
 }
 std::string finish(Builder& g, const Config& c, const Tail& tail, bool fine) {
@@ -1104,8 +1113,8 @@ std::string finish(Builder& g, const Config& c, const Tail& tail, bool fine) {
   if (!c.notes.empty())
     doc["meta"]["importNotes"] = c.notes;
   doc["outputs"] = {
-      {"gap", {{"node", tail.gapNode}, {"port", "value"}, {"label", "间隙"}}},
-      {"flush", {{"node", tail.flushNode}, {"port", "value"}, {"label", "段差"}}},
+      {"gap", {{"node", tail.judgedGap}, {"port", "value"}, {"label", "间隙"}}},
+      {"flush", {{"node", tail.judgedFlush}, {"port", "value"}, {"label", "段差"}}},
       {"bundle", {{"node", tail.bundleNode}, {"port", "bundle"}, {"label", "结果汇总"}}}};
   auto offsets = tail.circleOffsetBinds;
   offsets.insert(offsets.begin(), tail.gapNode + ".offsetMm");
@@ -1124,6 +1133,11 @@ std::string finish(Builder& g, const Config& c, const Tail& tail, bool fine) {
                      {"default", numberOr(c.flush, "scale", 1)},
                      {"binds", {tail.flushNode + ".gain"}},
                      {"doc", "无量纲段差倍率。"}}},
+                   {"patrol",
+                    {{"type", "bool"},
+                     {"default", false},
+                     {"binds", {tail.judgedFlush + ".patrol", tail.judgedGap + ".patrol"}},
+                     {"doc", "巡检时超差标为边界预警。"}}},
                    {"inputDir",
                     {{"type", "path"},
                      {"default", "."},
@@ -1217,8 +1231,8 @@ Status buildPipeline(const Config& c, bool fine, std::string& graphJson) {
     bundleParams["cropStatus"] = "skipped:no_model_roi";
   tail.bundleNode =
       g.node("n_bundle", "gap.result_bundle", bundleParams, 15, 5, "原生场景结果汇总");
-  g.edge(tail.gapNode, "value", tail.bundleNode, "gap");
-  g.edge(tail.flushNode, "value", tail.bundleNode, "flush");
+  g.edge(tail.judgedGap, "value", tail.bundleNode, "gap");
+  g.edge(tail.judgedFlush, "value", tail.bundleNode, "flush");
   wire(g, at.scan, tail.bundleNode, "scan");
   wire(g, at.rois, tail.bundleNode, "rois");
   g.edge(tail.circlesNode, "quality", tail.bundleNode, "fits");

@@ -732,7 +732,7 @@ function VerdictTallyChips() {
     const ng = readings
       .filter((r) => verdictTone(r.verdict) === 'ng')
       .map((r) => `${describeEventNode(doc, ops, r.id).names.join(' › ')}.${r.port}`);
-    // 没测出来、但接着的判定节点判了的（量测 → gap.judge）：判定那边已经记成 NG，这一个不再算一次「未测出」
+    // 没测出来、但接着的判定节点判了的：判定那边已经记成 NG，这一个不再算一次「未测出」
     const judged = new Set(readings.filter((r) => r.verdict).map((r) => r.id));
     const feedsJudge = (r: { id: string; port: string }) => {
       const at = locateEventNode(doc, r.id);

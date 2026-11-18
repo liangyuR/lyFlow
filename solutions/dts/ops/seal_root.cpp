@@ -71,7 +71,7 @@ void registerSealRoot(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_root";
   op.version = "3.0.0";
-  op.migrations = {{1, requireGraphMigration, nullptr},
+  op.migrations = {{1, rejectLegacyProfileNode, nullptr},
                    {2, nullptr, &profile_contract::keepInputs}};
   op.label = "胶条根部定位";
   op.category = "DTS/胶条";

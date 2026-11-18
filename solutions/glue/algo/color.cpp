@@ -11,6 +11,11 @@ using lyflow::std_image::color::ColorPlanes;
 using lyflow::std_image::color::ColorSample;
 using lyflow::std_image::color::ColorScorer;
 using lyflow::std_image::color::ColorState;
+using lyflow::std_image::inspection::caliperOffset;
+using lyflow::std_image::inspection::informative;
+using lyflow::std_image::inspection::outside;
+using lyflow::std_image::inspection::samplesBeyond;
+using lyflow::std_image::inspection::scoreKind;
 using lyflow::std_image::line_scan::kCaliperStep;
 using lyflow::std_image::line_scan::sampleCaliper;
 
@@ -130,27 +135,23 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
 
 namespace {
 
-bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,
-                      double boundarySpan, double glueSpan, const std::vector<char>* outside) {
-  const int count = static_cast<int>(score.size());
-  if (from < 0 || from >= count || score[static_cast<std::size_t>(from)] >= 0 ||
-      (outside && (*outside)[static_cast<std::size_t>(from)]))
+bool backgroundBeyond(const std::vector<CaliperSampleKind>& kinds, int from, int dir,
+                      double boundarySpan, double glueSpan) {
+  const int count = static_cast<int>(kinds.size());
+  if (from < 0 || from >= count || informative(kinds[from]) || outside(kinds[from]))
     return false;
   int i = from;
   for (; i >= 0 && i < count; i += dir) {
-    const auto k = static_cast<std::size_t>(i);
-    if (outside && (*outside)[k])
+    const auto kind = kinds[static_cast<std::size_t>(i)];
+    if (outside(kind))
       break;
-    if (score[k] >= 0) {
-      if (score[k] < segmentMin || std::abs(i - from) * kCaliperStep > glueSpan)
+    if (informative(kind)) {
+      if (kind != CaliperSampleKind::Signal || std::abs(i - from) * kCaliperStep > glueSpan)
         return true;
-      // 高光与另一片背景（暗区、明确背景）交界处的过渡像素会带一点胶色：只有一窄条、紧接着又不是胶的，不算胶
       int j = i;
-      while (j >= 0 && j < count && score[static_cast<std::size_t>(j)] >= segmentMin &&
-             !(outside && (*outside)[static_cast<std::size_t>(j)]))
+      while (j >= 0 && j < count && kinds[static_cast<std::size_t>(j)] == CaliperSampleKind::Signal)
         j += dir;
-      const bool closed =
-          j >= 0 && j < count && !(outside && (*outside)[static_cast<std::size_t>(j)]);
+      const bool closed = j >= 0 && j < count && !outside(kinds[static_cast<std::size_t>(j)]);
       return closed && std::abs(j - i) * kCaliperStep <= std::max(4.0, 0.1 * glueSpan);
     }
   }
@@ -159,69 +160,28 @@ bool backgroundBeyond(const std::vector<double>& score, int from, int dir, doubl
 
 } // namespace
 
-bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
-                               double segmentMin, double reference,
-                               const std::vector<char>* outside, double minRatio) {
-  const int count = static_cast<int>(score.size());
-  const int lo = static_cast<int>(std::ceil((r->lo + half) / kCaliperStep - 1e-6)) - 1;
-  const int hi = static_cast<int>(std::floor((r->hi + half) / kCaliperStep + 1e-6)) + 1;
-  // 无信息区一直延伸到卡尺端点或 ROI / 图像外时看不到它后面是什么：有邻站参考宽时由下面的宽度门兜底，
-  // 没有参考时要求无信息区至少和可见胶一样宽
+bool completeAgainstBackground(Run* r, const std::vector<CaliperSampleKind>& kinds, double half,
+                               double reference, double minRatio) {
+  const int count = static_cast<int>(kinds.size());
+  const auto [lo, hi] = samplesBeyond(*r, half, count);
   const double span = std::isfinite(reference) ? 0.0 : r->width();
-  // 无信息区比可见胶还宽、之后才又见到胶色：那是另一处胶（宽胶上的反光带不会比胶本身宽，见 mergeAcrossGaps）
   const double glueSpan = r->width();
-  const bool loBg = !r->loComplete && lo >= 0 &&
-                    backgroundBeyond(score, lo, -1, segmentMin, span, glueSpan, outside);
-  const bool hiBg = !r->hiComplete && hi < count &&
-                    backgroundBeyond(score, hi, 1, segmentMin, span, glueSpan, outside);
+  const bool loBg = !r->loComplete && backgroundBeyond(kinds, lo, -1, span, glueSpan);
+  const bool hiBg = !r->hiComplete && backgroundBeyond(kinds, hi, 1, span, glueSpan);
   if (!loBg && !hiBg)
     return false;
   if (std::isfinite(reference) && r->width() < minRatio * reference)
     return false;
   if (loBg) {
-    r->lo = -half + (lo + 1) * kCaliperStep;
+    r->lo = caliperOffset(half, lo + 1);
     r->loComplete = true;
   }
   if (hiBg) {
-    r->hi = -half + (hi - 1) * kCaliperStep;
+    r->hi = caliperOffset(half, hi - 1);
     r->hiComplete = true;
   }
   r->completeEdges = r->loComplete && r->hiComplete;
   return true;
-}
-
-const char* causeName(ColorCause c) {
-  switch (c) {
-  case ColorCause::Highlight:
-    return "highlight";
-  case ColorCause::Dark:
-    return "dark";
-  case ColorCause::Outside:
-    return "outside";
-  case ColorCause::None:
-    break;
-  }
-  return "none";
-}
-
-ColorCause causeAt(const cv::Mat& state, cv::Rect frame, P2 p) {
-  if (!finite(p))
-    return ColorCause::Outside;
-  const int x0 = static_cast<int>(std::floor(p.x)), y0 = static_cast<int>(std::floor(p.y));
-  ColorCause worst = ColorCause::None;
-  for (int dy = 0; dy < 2; ++dy) {
-    for (int dx = 0; dx < 2; ++dx) {
-      const cv::Point q(x0 + dx, y0 + dy);
-      if (!frame.contains(q))
-        return ColorCause::Outside;
-      const int s = static_cast<int>(state.at<float>(q.y - frame.y, q.x - frame.x));
-      if (s == static_cast<int>(ColorState::Highlight))
-        worst = ColorCause::Highlight;
-      else if (s == static_cast<int>(ColorState::Dark) && worst == ColorCause::None)
-        worst = ColorCause::Dark;
-    }
-  }
-  return worst;
 }
 
 ColorTrainResult trainColorModel(const cv::Mat& rgb, const PolylineView& line,
@@ -375,28 +335,27 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
       std::vector<char> background(score.size());
       for (std::size_t i = 0; i < score.size(); ++i)
         background[i] = score[i] >= 0.0 && score[i] < 0.5 * spec.runs.segmentMin;
-      std::vector<char> outside, noInfo;
+      std::vector<CaliperSampleKind> kinds;
+      std::vector<char> noInfo;
       if (spec.extent) {
-        outside.resize(score.size());
+        kinds.resize(score.size());
         noInfo.resize(score.size());
         const cv::Rect& in = R.valid();
         for (std::size_t i = 0; i < score.size(); ++i) {
-          const P2 q = p + n * (-spec.searchHalf + kCaliperStep * static_cast<double>(i));
-          outside[i] = !(q.x >= in.x && q.y >= in.y && q.x + 1 < in.x + in.width &&
-                         q.y + 1 < in.y + in.height);
-          noInfo[i] = score[i] < 0 && !outside[i];
+          const P2 q = p + n * caliperOffset(spec.searchHalf, static_cast<int>(i));
+          const bool off = !(q.x >= in.x && q.y >= in.y && q.x + 1 < in.x + in.width &&
+                             q.y + 1 < in.y + in.height);
+          kinds[i] = off ? CaliperSampleKind::Outside : scoreKind(score[i], spec.runs.segmentMin);
+          noInfo[i] = score[i] < 0 && !off;
         }
       }
       mergeAcrossGaps(&rs, background, spec.searchHalf,
                       std::max(spec.runs.mergeGap, spec.mergeUnknownGap),
                       spec.extent ? 2.0 * spec.searchHalf : spec.runs.mergeWidthMax, &guide,
                       spec.extent ? &noInfo : nullptr);
-      if (spec.extent) {
-        // 胶边外侧是成片的饱和 / 过暗背景时，这条边看得见，不当作被遮挡
+      if (spec.extent)
         for (Run& x : rs)
-          completeAgainstBackground(&x, score, spec.searchHalf, spec.runs.segmentMin, wMed,
-                                    &outside);
-      }
+          completeAgainstBackground(&x, kinds, spec.searchHalf, wMed);
       rs.erase(std::remove_if(rs.begin(), rs.end(),
                               [&](const Run& x) {
                                 return (x.width() < spec.widthMin &&
@@ -432,14 +391,10 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         // 一侧是真边、另一侧走出 ROI / 图像（胶贴着画面边）：位置仍可信，只是看不到全宽。
         // 有稳定宽度时按真边 + 半个参考宽取中心，否则取可见片段中点；宽度不进历史
         if (incomplete && !ambiguous && r->loComplete != r->hiComplete) {
-          const int count = static_cast<int>(outside.size());
-          const int beyond =
-              r->loComplete
-                  ? static_cast<int>(std::floor((r->hi + spec.searchHalf) / kCaliperStep + 1e-6)) +
-                        1
-                  : static_cast<int>(std::ceil((r->lo + spec.searchHalf) / kCaliperStep - 1e-6)) -
-                        1;
-          if (beyond >= 0 && beyond < count && outside[static_cast<std::size_t>(beyond)]) {
+          const int count = static_cast<int>(kinds.size());
+          const auto [lo, hi] = samplesBeyond(*r, spec.searchHalf, count);
+          const int beyond = r->loComplete ? hi : lo;
+          if (beyond >= 0 && beyond < count && outside(kinds[static_cast<std::size_t>(beyond)])) {
             const bool known = steady && r->width() < wMed;
             edgeOnly = known ? (r->loComplete ? r->lo + 0.5 * wMed : r->hi - 0.5 * wMed) : r->mid();
             incomplete = false;

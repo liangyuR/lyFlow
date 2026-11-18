@@ -168,30 +168,9 @@ if (Want "sdk") {
       -CliPath (Join-Path $root "bridge\target\debug\lyflow.exe")
   if ($LASTEXITCODE -ne 0) { throw "安装布局产出失败" }
 
-  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-  $vsPath = & $vswhere -latest -products * `
-      -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-  $cmake  = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-  $ninja  = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
-  if (-not (Test-Path $cmake)) { $cmake = "cmake" }
-  if (-not (Test-Path $ninja)) { $ninja = "ninja" }
-
-  $consumerVersion = (Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
-  $consumerSrc   = Join-Path $root "examples\consumer"
-  $consumerBuild = Join-Path $env:TEMP "lyflow-consumer-build"
-  if (Test-Path $consumerBuild) { Remove-Item -Recurse -Force $consumerBuild }
-  # 消费方工程刻意不带 vcpkg 工具链：它只该依赖安装目录，不该依赖 LyFlow 的构建环境。
-  $line = "call `"$vcvars`" >nul 2>&1" +
-          " && `"$cmake`" -S `"$consumerSrc`" -B `"$consumerBuild`" -G Ninja" +
-          " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo" +
-          " -DLYFLOW_CONSUMER_VERSION=$consumerVersion -DCMAKE_PREFIX_PATH=`"$($prefix -replace '\\', '/')`"" +
-          " && `"$cmake`" --build `"$consumerBuild`""
-  cmd /c $line
-  if ($LASTEXITCODE -ne 0) { throw "examples/consumer 编译失败" }
-
-  & (Join-Path $consumerBuild "embed_minimal.exe")
-  if ($LASTEXITCODE -ne 0) { throw "embed_minimal 跑合成图失败" }
+  . (Join-Path $PSScriptRoot 'release-common.ps1')
+  $consumer = Reset-ReleaseDirectory -Path (Join-Path $env:TEMP 'lyflow-consumer-build') -Parent $env:TEMP
+  Test-InstalledSdkConsumer -Root $root -Prefix $prefix -Workspace $consumer
 }
 
 if (Want "frontend") {
