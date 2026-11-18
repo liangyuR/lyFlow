@@ -11,10 +11,8 @@ endfunction()
 
 function(lyflow_setup_gap_geometry)
   _lyflow_gap_static(lyflow_gap_geometry
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/GapUtils.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/Converter.cpp")
-  target_link_libraries(lyflow_gap_geometry PUBLIC lyflow_std_algo lyflow_data_contract
-    PRIVATE lyflow_metrology_kernel)
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/GapUtils.cpp")
+  target_link_libraries(lyflow_gap_geometry PUBLIC lyflow_std_algo lyflow_data_contract)
 endfunction()
 
 function(lyflow_setup_gap_template)
@@ -43,23 +41,8 @@ function(lyflow_setup_gap_import)
   target_link_libraries(lyflow_gap_import INTERFACE lyflow_yaml_support)
 endfunction()
 
-function(lyflow_setup_gap_compat)
-  _lyflow_gap_static(lyflow_gap_compat
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_core/MeasurementEngine.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_core/MeasurementTypes.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/GapDetection.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_detection/DetectionConfigurationAdapter.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_ml/OnnxRoiPredictor.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/algo/gap_io/Sha256.cpp")
-  target_link_libraries(lyflow_gap_compat PUBLIC lyflow_gap_template lyflow_gap_model lyflow_gap_import
-    PRIVATE lyflow_onnx_support)
-  if(MSVC)
-    target_compile_options(lyflow_gap_compat PRIVATE /wd4275)
-  endif()
-endfunction()
-
 lyflow_declare_module(NAME gap-geometry TARGET lyflow_gap_geometry SETUP lyflow_setup_gap_geometry
-  REQUIRES pointcloud-algorithms data-contract metrology-kernel)
+  REQUIRES pointcloud-algorithms data-contract)
 lyflow_declare_module(NAME gap-template TARGET lyflow_gap_template SETUP lyflow_setup_gap_template
   REQUIRES gap-geometry)
 lyflow_declare_module(NAME gap-model-adapters TARGET lyflow_gap_model_adapters SETUP lyflow_setup_gap_model_adapters
@@ -68,5 +51,3 @@ lyflow_declare_module(NAME gap-model TARGET lyflow_gap_model SETUP lyflow_setup_
   REQUIRES gap-model-adapters ml-runtime)
 lyflow_declare_module(NAME gap-import TARGET lyflow_gap_import SETUP lyflow_setup_gap_import
   REQUIRES yaml-support)
-lyflow_declare_module(NAME gap-compat TARGET lyflow_gap_compat SETUP lyflow_setup_gap_compat
-  REQUIRES gap-template gap-model gap-import onnx-support)

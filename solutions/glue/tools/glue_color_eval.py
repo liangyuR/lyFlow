@@ -17,7 +17,7 @@ mmPerPx（报告里另给 mm）。
 modelFrom = 前面某一条的 name：不另建模，用那一条的模型（例如绕圈胶丝用同一相机直胶段示教的模型）。
 
 每条：示教帧 + 示教线 → glue.color_model；frames 范围里的每一帧 → glue.color_map（模型 JSON 填进参数）→ 沿示教线
-glue.color_runs，另跑 glue.color_fan → glue.color_track（锚点 = 示教线第一个点，扇区 = 示教方向 ± 30°）。
+image.color_caliper → glue.merge_color_runs，另跑 glue.color_fan → glue.color_track（锚点 = 示教线第一个点，扇区 = 示教方向 ± 30°）。
 逐帧列出：中心有段的站占比、中心落在无信息区间的站占比（高光 / 暗区）、有信息却没有段的站占比、中心段宽度、
 跟踪的覆盖率，与两个打分节点的耗时。真实帧是现场数据：报告、叠画都写到仓库外（--out，默认 %TEMP%\\lyflow-glue-color）。
 """
@@ -89,7 +89,10 @@ def production_graph(e: dict, model: dict) -> dict:
     pts = e["points"]
     W = e.get("beadWidth", 30)
     runs = {"stationStep": 4, "searchHalf": max(40, W + 20)} | e.get("runs", {})
-    reach = runs["searchHalf"] + 8
+    sample_keys = {"stationStep", "sRange", "searchHalf", "split", "segmentMin", "peakMin"}
+    sampling = {key: value for key, value in runs.items() if key in sample_keys}
+    merging = {key: value for key, value in runs.items() if key not in sample_keys}
+    reach = sampling["searchHalf"] + 8
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     roi = e.get("roi") or [min(xs) - reach, min(ys) - reach, max(xs) - min(xs) + 2 * reach,
                            max(ys) - min(ys) + 2 * reach]
@@ -100,15 +103,19 @@ def production_graph(e: dict, model: dict) -> dict:
         [node("n_load", "io.load_image", {"source": "file"}),
          node("n_line", "glue.polyline", {"points": json.dumps(pts)}),
          node("n_map", "glue.color_map", {"model": json.dumps(model), "roi": roi}),
-         node("n_runs", "glue.color_runs", runs),
+         node("n_observe", "image.color_caliper", sampling),
+         node("n_runs", "glue.merge_color_runs", merging),
          node("n_fan", "glue.color_fan", {"anchor": t["anchor"], "sector": t["sector"], "radial": t["radial"]}),
          node("n_track", "glue.color_track", {"anchor": t["anchor"], "zone": t["zone"], "bearingRange": t["sector"],
                                               "widthMax": 2 * W, "searchHalf": max(40, W + 20)}
               | {k: v for k, v in t.items() if k not in ("anchor", "sector", "zone", "radial")}),
-         node("n_truns", "glue.color_runs", runs)],
-        [("n_load.image", "n_map.image"), ("n_map.maps", "n_runs.maps"), ("n_line.line", "n_runs.line"),
+         node("n_tobserve", "image.color_caliper", sampling),
+         node("n_truns", "glue.merge_color_runs", merging)],
+        [("n_load.image", "n_map.image"), ("n_map.maps", "n_observe.maps"), ("n_line.line", "n_observe.line"),
+         ("n_observe.observation", "n_runs.observation"),
          ("n_map.maps", "n_fan.maps"), ("n_map.maps", "n_track.maps"), ("n_fan.scan", "n_track.fan"),
-         ("n_map.maps", "n_truns.maps"), ("n_track.line", "n_truns.line")],
+         ("n_map.maps", "n_tobserve.maps"), ("n_track.line", "n_tobserve.line"),
+         ("n_tobserve.observation", "n_truns.observation")],
         {"runs": "n_runs.runs", "track": "n_track.track", "trackRuns": "n_truns.runs"})
 
 

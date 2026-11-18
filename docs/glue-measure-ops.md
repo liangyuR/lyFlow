@@ -363,8 +363,8 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 ```
 示教：io.load_image(RGB) ─image──┐
       glue.polyline（示教线）─line─┴→ glue.color_model ─model→（宿主存进配方）
-生产：io.load_image(RGB) → glue.color_map（model）─maps─┬────────────────────────────────→ glue.color_runs（line = 示教线）
-                                                        └→ glue.color_fan ─scan→ glue.color_track ─line→ glue.color_runs
+生产：io.load_image(RGB) → glue.color_map（model）→ image.color_caliper → glue.merge_color_runs
+                                                  ↑ line 可取示教线或 glue.color_track 的跟踪结果
 ```
 
 | id | 名称 | 输入 → 输出 | 一步做什么 |
@@ -373,7 +373,8 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 | `glue.color_map` | 胶色得分图 | `image`、`model?` → `maps` | 按模型给 roi 里每个像素打「胶的面积占比」，三态分开，打包成一个 Bundle |
 | `glue.color_fan` | 彩色扇形扫描 | `maps` → `scan`、`overlay` | `glue.fan_scan` 原样用在得分图上 |
 | `glue.color_track` | 彩色粗跟踪 | `maps`、`fan?` → `line`、`track`、`overlay` | `glue.track_path` 的彩色版；高光、暗区挡住的步不计入 maxGap |
-| `glue.color_runs` | 彩色横向卡尺 | `maps`、`line` → `runs`、`overlay` | 每站全部胶色段与无信息区间，输出 `glue.LateralRuns` 的超集 |
+| `image.color_caliper` | 彩色卡尺观测 | `maps`、`line` → `observation` | 原始色段与无信息区间，可单独读取 |
+| `glue.merge_color_runs` | 胶色卡尺补缝 | `observation` → `runs`、`overlay` | 用邻站证据恢复色段，提供 `glue.ColorRuns.v1` |
 
 输入图要求全分辨率 u8 RGB / RGBA（RGBA 去掉 alpha），通道顺序 RGB；单通道、其他位深、预览缩小图都是 `bad_input`（「彩色算子需要 RGB」），
 灰度相机走 1.2 的 `glue.response` 链路。坐标、角度、胶路、布站、JSON 数值（不舍入）、确定性的约定同上文「约定」。
@@ -510,40 +511,42 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 显式 `extent` 策略对完整候选保留宽度下限，不完整片段保留为无信息证据，不因完整胶宽超过 `widthMax` 丢弃胶点；搜索仍固定在 `±searchHalf`，合并总宽最多 `2 × searchHalf`，接受窗改为 `±acceptOffsetRatio × searchHalf`。
 真实背景阻断、有限合并缝、邻站/历史合并证据及连续性门保持有效。两个候选都落在接受窗、中心距离差不超过 `max(1 px, 0.1 × widthMax)` 且次候选峰值至少为首候选的 80% 时，该步记为歧义，不任意选边。
 不完整边界的候选也不以片段中点参与拟合，沿上一个可靠方向继续有限搜索。两种情况例外：
-一条边外侧是饱和或过暗的背景时按真边处理（规则同 `glue.color_runs`，参考宽取稳定的宽度历史）；
+一条边外侧是饱和或过暗的背景时按真边处理（规则同 `glue.merge_color_runs`，参考宽取稳定的宽度历史）；
 一侧是真边、另一侧走出 ROI / 图像（胶贴着画面边）时照样出胶点，有稳定宽度历史时中心取真边加半个参考宽，否则取可见片段中点，这类胶点的宽度不进历史。
 
 `glue.Track` 回显 `widthPolicy`，并给出 `ambiguousS[]`（歧义步）和 `incompleteS[]`（非歧义但边界不完整的步，包含高光/暗区/观测边界，不等同可靠截断）。
 这两类步都计入 `unknownS`/`unknownSteps`，不计 `maxGap`；宽度值只来自完整边界胶点。没有有效方向峰时两数组为空、原有统计为 `null`。
 
-### 1.3.5 `glue.color_runs` 彩色横向卡尺
+### 1.3.5 彩色卡尺与胶色补缝
 
-端口同 `glue.lateral_runs`（`maps` 换成 `Bundle<glue.ColorMaps>`），overlay 多一个 role `unknown`（无信息区间）。
+`image.color_caliper` 沿 `line` 在 `Bundle<glue.ColorMaps>` 上采样，输出 `Bundle<image.ColorCaliper.v1>` 的三个字段。图级输出可直接取 `observation.stations`。
 
-| 参数 | 类型 | 单位 | 默认 | 范围 | 说明 |
-|---|---|---|---|---|---|
-| `stationStep`、`sRange`、`searchHalf`、`split`、`mergeWidthMax` | | | 同第 4 节 | | |
-| `segmentMin` | float | — | 0.3 | 0–1 | 分段门限：得分 > 它的相邻采样连成一段 |
-| `peakMin` | float | — | 0.6 | 0–1 | 段的得分峰值下限 |
-| `mergeGap` | float | px | 8 | ≥ 0 | 无明确背景的短缝合并上限；不查峰值比 |
-| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 无明确背景的高光/低分内谷合并上限；大于 0 时启用邻站自适应，0 时关闭自适应。range 策略的总宽受 mergeWidthMax 限制 |
-| `widthPolicy` | enum | — | range | range / extent | range 保留 mergeWidthMax；extent 在固定 searchHalf 内恢复完整宽度，合并上限为 2 × searchHalf |
+- `stations` 是 `image.ColorCaliperStations.v1`，包含站距、使用的弧长区间、卡尺半长，以及逐站的中心、法向、原始色段和 `unknownSpans`。原始色段保留 `lo`、`hi`、`peak`、两侧完整性及边界原因。
+- `trace` 是形状为 `[站,采样,2]` 的 Tensor。最后一轴依次为得分和分类码，每 0.5 px 一个采样。码 0–8 依次表示明确背景、弱得分、达到分段门限、未分类无信息、高光、暗区、未区分的外部、ROI 外、图像外。
+- `line` 是布站时使用的图像折线。补缝节点用它绘制路径。
+
+`glue.merge_color_runs` 只接这份观测。旧图中采样参数绑到观测节点，补缝和宽度策略绑到场景节点。其 `overlay` 包含胶路、站位卡尺、补缝结果及无信息区段。
+
+| 节点 | 参数 | 默认 | 说明 |
+|---|---|---|---|
+| `image.color_caliper` | `stationStep`、`sRange`、`searchHalf`、`split` | 同第 4 节 | 布站与分段 |
+| `image.color_caliper` | `segmentMin`、`peakMin` | 0.3、0.6 | 分段与段峰值下限 |
+| `glue.merge_color_runs` | `mergeGap` | 8 px | 无明确背景的短缝合并上限 |
+| `glue.merge_color_runs` | `mergeUnknownGap` | 16 px | 高光或低分内谷的合并上限，0 关闭邻站自适应 |
+| `glue.merge_color_runs` | `widthPolicy`、`mergeWidthMax` | range、90 px | range 采用合并宽度上限，extent 的合并上限为 2 × searchHalf |
 
 分段与半高取边同第 4 节（`caliperRuns`），彩色分支不做无条件短缝合并。两段之间任何采样明确为背景（有限得分 < `segmentMin / 2`）都禁止合并；饱和高光和未饱和低分色谷本身不是明确背景。没有邻站参考时，允许缝宽为 `max(mergeGap, mergeUnknownGap)`。
 
-`color_runs` 首遍按上述固定范围提取每站最近段，取得全局宽度中位数；同时保留原片段，按「相对全局中位数的宽度偏差 + 2 × 中心偏移」比较原片段与首遍合并段，选择参考候选，避免侧条并入后污染邻站参考。再筛掉宽度不在全局中位数 0.7–1.3 倍范围、或中心偏移超过其一半的站。每站从其余站选弧长最近的至多 5 个参考，至少需要 3 个。第二遍使用这些首遍候选的宽度和中心中位数，不用自适应合并后的结果回填参考。`color_track` 使用稳定历史宽度作为同类参考。
+`glue.merge_color_runs` 首遍按上述固定范围提取每站最近段，取得全局宽度中位数；同时保留原片段，按「相对全局中位数的宽度偏差 + 2 × 中心偏移」比较原片段与首遍合并段，选择参考候选，避免侧条并入后污染邻站参考。再筛掉宽度不在全局中位数 0.7–1.3 倍范围、或中心偏移超过其一半的站。每站从其余站选弧长最近的至多 5 个参考，至少需要 3 个。第二遍使用这些首遍候选的宽度和中心中位数，不用自适应合并后的结果回填参考。`color_track` 使用稳定历史宽度作为同类参考。
 
 有参考时，缝宽上限可扩大到 `max(mergeGap, mergeUnknownGap, 参考宽度 / 2)`；合并宽度必须在参考的 0.7–1.3 倍内，中心偏差不超过参考宽度的 30%。合并结果的「宽度偏差 + 2 × 中心偏差」必须优于每个参与的原片段，避免吞掉原本正确的主胶。参考只约束合并，不能替代当站实测宽度；无法恢复的外边仍保留 incomplete 与 cause，不进行宽度插值或按标称值补齐。
 
-输出 `glue.LateralRuns` 的超集：
+输出 `glue.ColorRuns.v1` 包含 `source: "color"`、`mergeUnknownGap`、`widthPolicy` 与完整的布站和观测范围。
 
-- 顶层多 `source = "color"`、`mergeUnknownGap`；
-- 每站多 `infoFraction`（卡尺采样中得分有效的占比）、`unknownSpans[{lo, hi, cause}]`（同一原因的连续无效采样，`lo` / `hi` 是首末采样的 t，
-  cause = `highlight` / `dark` / `outside`：双线性四邻点里有出块的算 outside，否则有高光的算 highlight，否则 dark）；`validFraction` 是采样在块里的占比；
-- 每段多 `loCause` / `hiCause`（`edge` 降到半高以下的真边 / `caliper` 顶到卡尺端点 / `highlight` / `dark` / `outside` 被无信息截断）、
-  `meanScore`（段内有效采样得分的均值）、`unknownWidth`（段内无效采样的宽度，px）；`edgeLo`、`edgeHi`、`depth`、`sharpness` 为 `null`，`level` 恒为 1。
+- 每站的 `infoFraction` 表示得分有效的采样占比，`validFraction` 表示落在观测图块内的采样占比。 `unknownSpans[{lo, hi, cause}]` 按无信息的相同原因分段。
+- 补缝后的段包含 `lo`、`hi`、`width`、`mid`、`peak`、`parts`、完整性和边界原因。 `meanScore` 为段内有效得分的均值，`unknownWidth` 为段内无信息样本占用的宽度（px）。
+- `extent` 返回卡尺覆盖内的全部候选，宿主负责关联目标并应用规格。
 
-`glue.LateralRuns` 回显 `widthPolicy`。`extent` 不丢弃超预期宽候选；仍返回所有候选，由宿主关联目标及判规格。
 `loComplete`/`hiComplete` 只有观测到真边才为 true。搜索端点原因保持 `caliper`；有合法原图尺寸元数据时，`extent` 将原先 `outside` 细分为 `roi` 与 `image`，同样用于 `unknownSpans[].cause`；旧模式或缺少原图尺寸仍为 `outside`。
 `highlight` 与 `dark` 本身是无信息原因，不能当作宽度下界。`extent` 下一条边外侧先是无信息采样时，继续往外看：
 走过这段无信息区后先遇到明确不是胶的采样（得分 < `segmentMin`），说明胶在这里结束、外侧是饱和或过暗的背景（打磨面反光、黑色零件），
@@ -555,8 +558,7 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 ### 参考连法与 GS 侧的判定
 
-随包参考图 `solutions/glue/graphs/color.lyflow.json`：示教帧 + 示教线 → `color_model`；生产帧 → `color_map`（接 `n_model.model`）→ 沿示教线的 `color_runs`，
-以及 `color_fan` → `color_track` → `color_runs`。宿主生产时不带示教那两个节点，把配方里的模型 JSON 填进 `n_map.model`。
+随包参考图 `solutions/glue/graphs/color.lyflow.json`：示教帧 + 示教线 → `color_model`；生产帧 → `color_map`（接 `n_model.model`）→ `image.color_caliper` → `glue.merge_color_runs`。卡尺折线可用示教线，也可用 `color_fan` → `color_track` 的折线输出。宿主生产时不带示教那两个节点，把配方里的模型 JSON 填进 `n_map.model`。
 
 宿主判每站时先确认目标关联与双侧完整性：可信的完整边界段才能提供完整胶宽；截断片段只保留边界证据，可靠时可形成保守下界，不能以片段中点替代胶中心。
 有多个无法区分的候选、中心落入 `unknownSpans` 或观察范围不足时为未知；只有充分观察到有效背景且没有目标，才可判为缺胶。`quality.separation`、`glueSpread`、`saturatedFraction` 可作示教验收的依据。

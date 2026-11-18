@@ -9,12 +9,6 @@ struct OverallRoiOptions {
   std::string mode = "fixed";
   std::string usingCamera = "Both";
 };
-struct DatumWindowOptions {
-  std::string side = "left";
-  double startMm = 0;
-  double lengthMm = 13;
-  double heightMm = 2.5;
-};
 struct GeometryResult {
   Data box;
   Record context;
@@ -36,9 +30,6 @@ struct RollCropResult {
 };
 Status overallRoi(const Data& primary, const Data& secondary, const OverallRoiOptions& options,
                   GeometryResult& result, ExecContext& context);
-Status datumWindow(const Data& anchor, const Record& anchorContext, const Data* heightAnchor,
-                   const Record* heightContext, const DatumWindowOptions& options,
-                   GeometryResult& result, ExecContext& context);
 Status rollAnchoredCrop(const Data& scan, const Data& gapLeft, const Record& gapLeftContext,
                         const Data& gapRight, const Record& gapRightContext,
                         const RollCropOptions& options, RollCropResult& result,

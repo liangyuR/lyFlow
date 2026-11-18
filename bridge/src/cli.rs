@@ -55,7 +55,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--input <nodeId>.<port>=<file.pcd|file.lypr>]...
         --input：把点云或完整 LYPR Profile 注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
                  整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.lypr
-                 --input n_scan.secondary=b.lypr 直接喂原生 gap.read_scan。
+                 --input n_in.profile=scan.lypr 直接提供给 profile.input。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
@@ -80,9 +80,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --set 先应用再解析，所以「这组 --set 之后生效值是什么」一条命令。
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
   lyflow migrate  <graph> [--request <file.json>] [--write]
-                          [--profile-source <node|subgraph/node> --profile-frame <frame> --profile-source-id <id>]
-        离线迁移：图级请求取 --request 文件，或 DTS 选项拼出的 dtsProfile.v1 规则，或图自带的 contractUpgrade；
-        之后报告逐节点迁移。--write 把两者一并原子写回。--request 与 DTS 选项不能同时给。
+        离线迁移读取 --request 文件或图自带的 contractUpgrade，之后报告逐节点迁移。
+        --write 把迁移结果原子写回。
   lyflow manifest [--check]
   lyflow python settings|refresh
   lyflow python configure --config <python-nodes.json>
@@ -1412,7 +1411,7 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(
             err,
-            "用法：lyflow migrate <graph> [--request <file.json>] [--profile-source <node|subgraph/node> --profile-frame <frame> --profile-source-id <id>] [--write]",
+            "用法：lyflow migrate <graph> [--request <file.json>] [--write]",
         );
         return EXIT_USAGE;
     };
@@ -1424,22 +1423,10 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             EXIT_USAGE,
         );
     }
-    let profile_options = ["profile-source", "profile-frame", "profile-source-id"];
-    let dts = profile_options
-        .iter()
-        .any(|name| parsed.one(name).is_some());
-    if dts && parsed.one("request").is_some() {
-        return fail(
-            err,
-            "--request 与 --profile-source/--profile-frame/--profile-source-id 不能同时给",
-            EXIT_USAGE,
-        );
-    }
     let mut loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
-    // 图级迁移请求：--request 文件 → DTS 选项拼出的规则 → 图自带的 contractUpgrade（交给 core 自己读）
     let request: Option<Option<String>> = if let Some(file) = parsed.one("request") {
         let text = match std::fs::read_to_string(file) {
             Ok(t) => t,
@@ -1455,42 +1442,6 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 )
             }
         }
-    } else if dts {
-        if profile_options.iter().any(|name| {
-            parsed.many(name).len() != 1 || parsed.one(name).map_or(true, |v| v.is_empty())
-        }) {
-            return fail(
-                err,
-                "DTS升级必须同时明确 --profile-source、--profile-frame、--profile-source-id",
-                EXIT_USAGE,
-            );
-        }
-        let source_path = parsed.one("profile-source").unwrap();
-        let parts: Vec<&str> = source_path.split('/').collect();
-        if parts.len() > 2 || parts.iter().any(|part| part.is_empty()) {
-            return fail(
-                err,
-                "--profile-source 为节点ID或子图定义ID/节点ID；库图请直接迁移图资产",
-                EXIT_USAGE,
-            );
-        }
-        let source = parts[parts.len() - 1];
-        let mut request = loaded
-            .doc
-            .contract_upgrade
-            .clone()
-            .unwrap_or_else(|| json!({"schemaVersion":1,"rules":[]}));
-        let Some(rules) = request["rules"].as_array_mut() else {
-            return fail(err, "已有contractUpgrade请求无有效rules", EXIT_USAGE);
-        };
-        let mut rule = json!({"kind":"dtsProfile.v1", "source":{"node":source,"op":"dts.profile_in","opVersion":"1.0.0","port":"profile"},
-            "profile":{"frame":parsed.one("profile-frame").unwrap(),"sourceId":parsed.one("profile-source-id").unwrap(),"unit":"mm","plane":"XZ","handedness":"right","sampleOrder":"acquisition"},
-            "adapterId":format!("{source}_profile_contract")});
-        if parts.len() == 2 {
-            rule["scope"] = json!({"subgraph":parts[0]});
-        }
-        rules.push(rule);
-        Some(Some(request.to_string()))
     } else if loaded.doc.contract_upgrade.is_some() {
         Some(None)
     } else {
@@ -2608,9 +2559,6 @@ const VALUE_OPTS: &[&str] = &[
     "node",
     "only",
     "input",
-    "profile-source",
-    "profile-frame",
-    "profile-source-id",
     "request",
     "recipe",
 ];

@@ -35,11 +35,23 @@
       "opVersion": "2.0.0"
     },
     {
-      "id": "judge",
-      "op": "gap.judge",
+      "id": "judgeTolerance",
+      "op": "metrology.compare_tolerance",
       "ui": {
         "position": {
           "x": 500,
+          "y": 0
+        },
+        "title": "比较公差"
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "judge",
+      "op": "gap.apply_patrol",
+      "ui": {
+        "position": {
+          "x": 760,
           "y": 0
         },
         "title": "判定间隙"
@@ -74,7 +86,7 @@
         "port": "value"
       },
       "to": {
-        "node": "judge",
+        "node": "judgeTolerance",
         "port": "value"
       }
     },
@@ -96,6 +108,16 @@
       "to": {
         "node": "gap",
         "port": "rightContext"
+      }
+    },
+    {
+      "from": {
+        "node": "judgeTolerance",
+        "port": "value"
+      },
+      "to": {
+        "node": "judge",
+        "port": "value"
       }
     }
   ],

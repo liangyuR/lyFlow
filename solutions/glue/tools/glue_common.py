@@ -32,7 +32,7 @@ def die(message: str) -> None:
 
 
 def find_lyflow(explicit: str | None = None) -> Path:
-    """带 glue 包的 lyflow.exe：--lyflow / LYFLOW_EXE，否则 bridge/target/{release,debug} 里最新的那个。"""
+    """优先用显式路径或 SDK 内的 CLI，再尝试最近构建的带 Glue 包的 CLI。"""
     candidates = []
     if explicit or os.environ.get("LYFLOW_EXE"):
         candidates = [Path(explicit or os.environ["LYFLOW_EXE"])]
@@ -42,6 +42,7 @@ def find_lyflow(explicit: str | None = None) -> Path:
             if exe.exists():
                 candidates.append(exe)
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates.insert(0, ROOT / "bin" / "lyflow.exe")
     for exe in candidates:
         if not exe.exists():
             continue

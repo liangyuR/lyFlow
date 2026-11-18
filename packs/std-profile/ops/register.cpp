@@ -16,6 +16,7 @@ void registerProfileAnalysis(Registry&);
 void registerProfileSelection(Registry&);
 void registerProfileMerge(Registry&);
 void registerProfileRegionSelection(Registry&);
+void registerCompareOverlap(Registry&);
 #ifdef LYFLOW_PROFILE_PCL_FILTER
 void registerProfileRadiusOutlier(Registry&);
 #endif
@@ -217,6 +218,7 @@ void registerPackOps(Registry& r) {
   registerProfileSelection(r);
   registerProfileMerge(r);
   registerProfileRegionSelection(r);
+  registerCompareOverlap(r);
 #ifdef LYFLOW_PROFILE_PCL_FILTER
   registerProfileRadiusOutlier(r);
 #endif

@@ -38,6 +38,8 @@ bool intersect2D(const Geometry2D& a, const Geometry2D& b, double tolerance, Int
 bool projectPoint2D(const Point2D& point, const Line2D& line, bool clamp, Point2D& out,
                     GeometryIssue& issue);
 bool midpoint2D(const Point2D& a, const Point2D& b, Point2D& out, GeometryIssue& issue);
+bool anchoredWindow(const Box2D& anchor, const Box2D& heightAnchor, bool left, double offset,
+                    double length, double heightPadding, Box2D& out, std::string& why);
 bool transformGeometry2D(const Geometry2D& geometry, const Transform& transform, Unit2D expected,
                          Geometry2D& out, GeometryIssue& issue);
 bool transformPlane(const Plane& plane, const Transform& transform, Plane& out,

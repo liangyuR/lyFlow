@@ -17,7 +17,7 @@ endif()
 
 lyflow_op_pack(
   NAME std-profile
-  VERSION 0.5.0
+  VERSION 0.6.0
   DEFAULT ON
   SOURCES ${STD_PROFILE_SOURCES}
   TEST_SOURCES ${STD_PROFILE_TESTS}

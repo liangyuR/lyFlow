@@ -6,24 +6,9 @@
 
 不带 --model 比的是配置/模板路径，带 --model 比的是现场在用的模型 ROI 路径。
 
-图由 C++ 导入器产（`StandardGap.yml:template:fine` / `StandardGap.yml:model:fine`）—— 与编辑器、CLI 同一份实现，
-不再有第二套 Python 生成器。导入器只拿 (文本, baseDir)，所以每份配置先暂存一份夹具（配置 + 模板目录 +
-setting.yml）；点云不进夹具，跑每个样本时用 `--set` 把读盘节点指到那两个文件。黑盒对照 `n_ref`
-（`gap.measure_reference`）导入器不产，这里补进图里，接在读盘节点的 primary / secondary 上。
-
-**历史对拍工具。** M7 起 gap 包的行为已有意偏离基线（ROI 只搬中心、fit_line 的 toward、
-固定半径全路径生效、flush 默认带符号等），出现不一致是预期的；它不再是验收门槛，
-只用来看偏离落在哪些样本上、偏了多少。
-
-比三件事：
-  1. 成功/失败状态一致
-  2. 成功样本的 gap、flush 与基线 |Δ| ≤ 0.002 mm
-  3. 同一张图里 gap.measure_reference 与拆分算子之差 ≤ 0.002 mm
-
-另外**只报不判**地对一次现场值（数据目录的 manifest.csv，两位小数）：那是另一套口径，
-容差 0.006 mm，用来回答「这条路径是不是现场跑的那条」。
-
-前三条全部通过退出 0，否则 1。
+图由 StandardGap 导入器生成。暂存配置和模板，再按样本向图提供两片点云。
+用已有 results.csv 比对执行状态及 gap、flush，默认容差为 0.002 mm。
+现场值（manifest.csv）另行显示，默认容差为 0.006 mm。
 """
 from __future__ import annotations
 
@@ -44,7 +29,6 @@ FIELD_TOLERANCE_MM = 0.006
 
 # 拆分算子里读值的节点。判定节点在它们下游，值一样。
 SPLIT_NODES = {"flush": "n_flush", "gap": "n_gap"}
-REFERENCE_NODE = "n_ref"
 # 读盘节点：模板/模型路径只有 n_load；带回退的图还有备用闭包里的 b_n_load
 LOAD_NODES = ("n_load", "b_n_load")
 IMPORT_KIND = {False: "StandardGap.yml:template:fine", True: "StandardGap.yml:model:fine"}
@@ -86,24 +70,6 @@ def import_graph(lyflow: Path, config: Path, kind: str, out: Path) -> tuple[dict
     return json.loads(out.read_text(encoding="utf-8")), ""
 
 
-def add_reference(doc: dict, config: Path, model: str | None) -> None:
-    """黑盒对照：导入器不产，补一个 gap.measure_reference 接在 n_load 上。直接改 JSON 而不走
-    `lyflow patch` —— 点云要到运行时才 --set 进来，patch 的整图校验在那之前过不了。"""
-    params = {
-        "configPath": str(config),
-        "deriveTemplateDir": False,
-        "templateDir": str(config.parent / config.stem),
-    }
-    if model:
-        params["useModel"] = True
-        params["modelPath"] = model
-    doc["nodes"].append({"id": REFERENCE_NODE, "op": "gap.measure_reference", "params": params,
-                         "ui": {"position": {"x": 0, "y": 900}, "title": "黑盒对照"}})
-    for port in ("primary", "secondary"):
-        doc["edges"].append({"id": f"e_ref_{port}", "from": {"node": "n_load", "port": port},
-                             "to": {"node": REFERENCE_NODE, "port": port}})
-
-
 def read_field_values(manifest: Path, samples: list[dict]) -> dict[str, dict[str, float]]:
     """现场值：manifest.csv 的 value 列，按 **left_cloud 路径** join 到样本。
     按 (序列号, 测点, 维度) join 会把同一测点相隔 50 秒的两次测量（R4_16/R4_17）
@@ -127,10 +93,11 @@ def read_field_values(manifest: Path, samples: list[dict]) -> dict[str, dict[str
 
 
 def default_lyflow() -> Path | None:
-    """取**最新**的那一个 —— release 里常常留着一份不带算子包的旧产物，
-    按固定顺序挑会让整份 A/B 静默地全跑成「算子不存在」。"""
+    """优先取 SDK 的 CLI，开发环境取最近构建的 CLI。"""
     here = Path(__file__).resolve()
-    # packs/gap/tools/ -> 仓库根
+    installed = here.parents[3] / "bin" / "lyflow.exe"
+    if installed.is_file():
+        return installed
     found = []
     for repo in (here.parents[3], Path.home() / "project" / "LyFlow"):
         for profile in ("release", "debug"):
@@ -157,8 +124,8 @@ def to_float(text: str) -> float | None:
         return None
 
 
-def sample_sets(doc: dict, primary: Path, secondary: Path, sample_id: str) -> list[str]:
-    """把图里的读盘节点指到这个样本的两片点云，黑盒对照记上样本号。"""
+def sample_sets(doc: dict, primary: Path, secondary: Path) -> list[str]:
+    """把图里的读盘节点指到这个样本的两片点云。"""
     present = {n["id"] for n in doc["nodes"]}
     args: list[str] = []
     for node in LOAD_NODES:
@@ -167,8 +134,6 @@ def sample_sets(doc: dict, primary: Path, secondary: Path, sample_id: str) -> li
         args += ["--set", f"{node}.source=" + json.dumps("files"),
                  "--set", f"{node}.primaryFile=" + json.dumps(str(primary)),
                  "--set", f"{node}.secondaryFile=" + json.dumps(str(secondary))]
-    if REFERENCE_NODE in present:
-        args += ["--set", f"{REFERENCE_NODE}.sampleId=" + json.dumps(sample_id)]
     return args
 
 
@@ -258,6 +223,8 @@ def main(argv: list[str]) -> int:
     if args.only:
         wanted = set(args.only)
         samples = [s for s in samples if s["sample_id"] in wanted]
+    if not samples:
+        raise SystemExit("数据集没有匹配的样本")
 
     model = str(args.model.resolve()) if args.model else None
     if model:
@@ -280,10 +247,6 @@ def main(argv: list[str]) -> int:
                 print(f"  {sample_id}: 导入失败 {why}", file=sys.stderr)
                 graphs[str(config)] = None
             else:
-                add_reference(doc, config, model)
-                with graph_path.open("w", encoding="utf-8", newline="\n") as f:
-                    json.dump(doc, f, ensure_ascii=False, indent=2)
-                    f.write("\n")
                 graphs[str(config)] = (graph_path, doc, staged.parent)
         entry = graphs[str(config)]
         if entry is None:
@@ -294,7 +257,7 @@ def main(argv: list[str]) -> int:
             continue
         graph_path, doc, base_dir = entry
         sets = sample_sets(doc, (root / pcd["primary"]).resolve(),
-                           (root / pcd["secondary"]).resolve(), sample_id)
+                           (root / pcd["secondary"]).resolve())
         values, errors = run_graph(lyflow, graph_path, base_dir, sets)
         base = baseline.get(sample_id, {})
         row = {
@@ -302,8 +265,6 @@ def main(argv: list[str]) -> int:
             "baselineGap": to_float(base.get("gap_mm", "")),
             "baselineFlush": to_float(base.get("flush_mm", "")),
             "baselineSuccess": (base.get("success", "") or "").lower() == "true",
-            "refGap": measurement(values, REFERENCE_NODE, "gap"),
-            "refFlush": measurement(values, REFERENCE_NODE, "flush"),
             "splitGap": measurement(values, SPLIT_NODES["gap"], "value"),
             "splitFlush": measurement(values, SPLIT_NODES["flush"], "value"),
             "errors": errors,
@@ -311,8 +272,6 @@ def main(argv: list[str]) -> int:
         row["splitSuccess"] = row["splitGap"] is not None and row["splitFlush"] is not None
         row["dGap"] = delta(row["splitGap"], row["baselineGap"])
         row["dFlush"] = delta(row["splitFlush"], row["baselineFlush"])
-        row["dRefGap"] = delta(row["splitGap"], row["refGap"])
-        row["dRefFlush"] = delta(row["splitFlush"], row["refFlush"])
         # 现场值：只报不判 —— 两位小数、另一套构建，不是本脚本的通过判据
         row["fieldGap"] = (field.get(sample_id) or {}).get("gap")
         row["fieldFlush"] = (field.get(sample_id) or {}).get("flush")
@@ -329,12 +288,6 @@ def main(argv: list[str]) -> int:
                 problems.append(f"{name} 一边有值一边没有")
             elif b is not None and abs(b - s) > args.tolerance:
                 problems.append(f"{name} Δ={abs(b - s):.5f}")
-            d = row[f"dRef{key}"]
-            r = row[f"ref{key}"]
-            if (r is None) != (s is None):
-                problems.append(f"{name} 与黑盒对照一边有值一边没有")
-            elif d is not None and d > args.tolerance:
-                problems.append(f"{name} 与黑盒对照 Δ={d:.5f}")
         row["problems"] = problems
         rows.append(row)
         print(f"  {sample_id}: {'ok' if not problems else '；'.join(problems)}", file=sys.stderr)

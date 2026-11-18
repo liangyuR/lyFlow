@@ -159,7 +159,7 @@ TEST_CASE(
   CHECK(desc->migrations[1].fromMajor == 2);
   CHECK(desc->migrations[2].fromMajor == 3);
   CHECK_THROWS_WITH_AS(desc->migrations[0].apply(Json::object()),
-                       doctest::Contains("graph_upgrade_required"), std::invalid_argument);
+                       doctest::Contains("重新导入 StandardGap"), std::invalid_argument);
 }
 
 TEST_CASE(

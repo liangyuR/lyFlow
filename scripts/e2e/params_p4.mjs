@@ -70,7 +70,7 @@ function cliHasGap() {
 /** CLI 带没带 gap 包。不带就返回原因与重编命令：e2e 里不现编（一编几十分钟），也不静默跳过（跳过的分组照样「全绿」）。 */
 function gapCliProblem() {
   const rebuild =
-    '先在仓库根重编：$env:LYFLOW_PACKS="solution-gap;solution-dts"; $env:LYFLOW_MODULES="gap-template;gap-model;gap-import;gap-compat"; cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features';
+    '先在仓库根重编：$env:LYFLOW_PACKS="solution-gap;solution-dts"; $env:LYFLOW_MODULES="gap-template;gap-model;gap-import"; cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features';
   if (!fs.existsSync(CLI)) return `找不到 ${CLI}。${rebuild}`;
   if (!cliHasGap())
     return `${CLI} 里没有 gap.notch_width（编它时 LYFLOW_PACKS 没带 gap）。${rebuild}`;
@@ -99,7 +99,7 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
   );
   if (!hasGap) {
     report.section(
-      `${title}（未验：app 的 core 没有 gap 包，设 LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import;gap-compat'）`,
+      `${title}（未验：app 的 core 没有 gap 包，设 LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import'）`,
     );
     report.fail('app 里有 gap.notch_width', 'LYFLOW_PACKS 没带 gap');
     return;

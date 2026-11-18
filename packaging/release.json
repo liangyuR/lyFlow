@@ -17,9 +17,10 @@
     "std-image",
     "std-ml",
     "solution-glue",
-    "solution-gap"
+    "solution-gap",
+    "solution-dts"
   ],
-  "modules": ["gap-template", "gap-model", "gap-import", "gap-compat"],
+  "modules": ["gap-template", "gap-model", "gap-import"],
   "requiredSdkFiles": [
     "include/lyflow/kernel/geometry.h",
     "include/lyflow/kernel/rigid.h",
@@ -91,7 +92,13 @@
     "examples/gap/snippets/flush-selected-point.lyflow-snippet.json",
     "examples/gap/snippets/gap-circles.lyflow-snippet.json",
     "examples/gap/snippets/measure-skeleton.lyflow-snippet.json",
-    "examples/gap/snippets/model-with-template-fallback.lyflow-snippet.json"
+    "examples/gap/snippets/model-with-template-fallback.lyflow-snippet.json",
+    "examples/dts/default-profile.lyflow.json",
+    "examples/dts/adjacent-profile.lyflow.json",
+    "examples/glue/graphs/color.lyflow.json",
+    "examples/glue/graphs/measure.lyflow.json",
+    "examples/glue/tools/glue_synth.py",
+    "examples/gap/tools/lyflow_ab.py"
   ],
   "requiredRuntimeFiles": [
     "python/examples/profile_copy.py",
@@ -155,7 +162,6 @@
     "glue.color_map",
     "glue.color_fan",
     "glue.color_track",
-    "glue.color_runs",
     "gap.load_profile_pair",
     "gap.roi_from_labels",
     "profile.fit_line_robust",
@@ -280,7 +286,19 @@
     "profile.fit_line",
     "profile.transform_pair",
     "metrology.profile_gap_flush",
-    "metrology.signed_point_line"
+    "metrology.signed_point_line",
+    "geometry.anchored_window",
+    "profile.compare_overlap",
+    "metrology.compare_tolerance",
+    "gap.select_camera",
+    "gap.apply_patrol",
+    "image.color_caliper",
+    "glue.merge_color_runs",
+    "dts.seal_dome",
+    "dts.pick_metal",
+    "dts.seal_root",
+    "dts.flush",
+    "dts.profile_bundle"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",

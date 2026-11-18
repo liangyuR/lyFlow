@@ -65,8 +65,10 @@ def validate(data, example_ids, exported=None, subset=False):
     require(len(retired_ids) == len(retired) and not retired_ids & set(ids), '退役 ID 重复或仍在活动清单中')
     native_ids = {row['id'] for row in native if 'id' in row}
     for row in retired:
-        require(set(row) == {'id', 'replacedBy'} and row.get('replacedBy') and set(row['replacedBy']) <= native_ids,
-                f"{row.get('id')}: 退役记录须只含 id、replacedBy，且替代算子已登记")
+        replacements = row.get('replacedBy')
+        require(set(row) == {'id', 'replacedBy'} and isinstance(replacements, list)
+                and all(isinstance(op, str) and op in native_ids for op in replacements),
+                f"{row.get('id')}: 退役记录须提供已登记的替代算子列表，允许空列表")
     if exported is not None:
         packs = {row['id']: row['currentPack'] for row in native if 'id' in row and 'currentPack' in row}
         for identifier, pack in sorted(exported.items()):

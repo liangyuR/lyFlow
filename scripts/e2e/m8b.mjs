@@ -316,7 +316,7 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     JSON.stringify(doc.edges),
   );
 
-  // 3. 插入「测点骨架」片段：8 个节点，对外的 8 个输入全都接到 locate_template 那唯一的一对输出上
+  // 3. 插入「测点骨架」片段：10 个节点，对外的 8 个输入全都接到 locate_template 那唯一的一对输出上
   const droppedSkeleton = await dropFromPalette(
     cdp,
     '[data-testid="snippet-gap.measure_skeleton"]',
@@ -324,11 +324,11 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   );
   mustOk(droppedSkeleton === 'ok', '插入「测点骨架」', droppedSkeleton);
   doc = await docOf(cdp);
-  report.eq('一共 10 个节点（模板路径测点）', doc.nodes.length, 10);
+  report.eq('一共 12 个节点（模板路径测点）', doc.nodes.length, 12);
   report.eq(
-    '一共 20 条边：1 条拖入时自动连的 + 11 条片段内部的 + 8 条插入时自动连的',
+    '一共 29 条边：1 条拖入时自动连的 + 20 条片段内部的 + 8 条插入时自动连的',
     doc.edges.length,
-    20,
+    29,
   );
   const intoSkeleton = doc.edges.filter((e) => e.from.node === locate);
   report.eq('骨架的 8 个对外输入都接在 locate_template 上', intoSkeleton.length, 8);
@@ -348,9 +348,9 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     window.__lyflow.stores.graph.getState().setParam(${lit(locate)}, 'templateDir', ${lit(scene.templates)});
     return true;
   `);
-  const judges = nodeByOp(doc, 'gap.judge');
+  const judges = nodeByOp(doc, 'metrology.compare_tolerance');
   for (const j of judges) {
-    const nominal = j.ui?.title === '判定段差' ? 1 : 4;
+    const nominal = j.ui?.title === '比较段差' ? 1 : 4;
     await cdp.eval(
       `window.__lyflow.stores.graph.getState().setParam(${lit(j.id)}, 'nominal', ${nominal}); return true;`,
     );
@@ -656,7 +656,7 @@ async function suiteBundlePeek(cdp, report) {
     )
     .catch(() => null);
   mustOk(win !== null, '开出了一个 Peek 窗');
-  report.eq('端口类型是 Bundle<gap.ScanPair>', win.type, 'Bundle<gap.ScanPair>');
+  report.eq('端口类型是 Bundle<gap.ScanPair.v3>', win.type, 'Bundle<gap.ScanPair.v3>');
   report.eq('默认视图是字段表', win.view, 'fields');
   const fields = await cdp
     .waitFor(

@@ -4,7 +4,7 @@
   "name": "涂胶测量 · 彩色胶条（1.3 彩色测量算子示例）",
   "meta": {
     "app": "lyflow/1.3.0",
-    "note": "docs/glue-measure-ops.md「1.3 彩色测量算子」的参考连法。示教：示教帧 + 示教线 → glue.color_model 出颜色模型（宿主把 n_model.model 的 JSON 存进配方）。生产：glue.color_map 打一次分（maps 一条线接给下游），沿示教线布彩色卡尺，或扇形扫描 → 彩色粗跟踪 → 彩色卡尺。宿主生产时不带 n_teach / n_model，把配方里的模型 JSON 填进 n_map.model 参数。判定（有无胶、无信息的站算不算、断胶）归宿主。拿文件跑：lyflow run <图> --set n_teach.source='\"file\"' --set n_teach.path='\"<示教帧>\"' --set n_load.source='\"file\"' --set n_load.path='\"<帧>\"' --param points='\"[[640,900],[640,300]]\"' --outputs。"
+    "note": "docs/glue-measure-ops.md「1.3 彩色测量算子」的参考连法。示教：示教帧 + 示教线 → glue.color_model 出颜色模型（宿主把 n_model.model 的 JSON 存进配方）。生产：glue.color_map 打一次分（maps 一条线接给下游），沿示教线或彩色跟踪路径布卡尺。image.color_caliper 提供原始观测，glue.merge_color_runs 根据邻站证据补缝。宿主生产时不带 n_teach / n_model，把配方里的模型 JSON 填进 n_map.model 参数。判定（有无胶、无信息的站算不算、断胶）归宿主。拿文件跑：lyflow run <图> --set n_teach.source='\"file\"' --set n_teach.path='\"<示教帧>\"' --set n_load.source='\"file\"' --set n_load.path='\"<帧>\"' --param points='\"[[640,900],[640,300]]\"' --outputs。"
   },
   "params": {
     "points": {
@@ -141,8 +141,8 @@
       }
     },
     {
-      "id": "n_taught",
-      "op": "glue.color_runs",
+      "id": "n_taught_observation",
+      "op": "image.color_caliper",
       "opVersion": "1.0.0",
       "params": {
         "stationStep": 10,
@@ -153,7 +153,20 @@
           "x": 780,
           "y": 0
         },
-        "title": "彩色卡尺 · 示教线"
+        "title": "彩色卡尺观测"
+      }
+    },
+    {
+      "id": "n_taught",
+      "op": "glue.merge_color_runs",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1040,
+          "y": 0
+        },
+        "title": "胶色卡尺补缝"
       }
     },
     {
@@ -183,8 +196,8 @@
       }
     },
     {
-      "id": "n_runs",
-      "op": "glue.color_runs",
+      "id": "n_runs_observation",
+      "op": "image.color_caliper",
       "opVersion": "1.0.0",
       "params": {},
       "ui": {
@@ -192,7 +205,20 @@
           "x": 1300,
           "y": 180
         },
-        "title": "彩色卡尺 · 跟踪胶路"
+        "title": "彩色卡尺观测"
+      }
+    },
+    {
+      "id": "n_runs",
+      "op": "glue.merge_color_runs",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1560,
+          "y": 180
+        },
+        "title": "胶色卡尺补缝"
       }
     }
   ],
@@ -248,7 +274,7 @@
         "port": "maps"
       },
       "to": {
-        "node": "n_taught",
+        "node": "n_taught_observation",
         "port": "maps"
       }
     },
@@ -259,7 +285,7 @@
         "port": "line"
       },
       "to": {
-        "node": "n_taught",
+        "node": "n_taught_observation",
         "port": "line"
       }
     },
@@ -303,7 +329,7 @@
         "port": "maps"
       },
       "to": {
-        "node": "n_runs",
+        "node": "n_runs_observation",
         "port": "maps"
       }
     },
@@ -314,8 +340,30 @@
         "port": "line"
       },
       "to": {
-        "node": "n_runs",
+        "node": "n_runs_observation",
         "port": "line"
+      }
+    },
+    {
+      "id": "n_taught_observation_to_merge",
+      "from": {
+        "node": "n_taught_observation",
+        "port": "observation"
+      },
+      "to": {
+        "node": "n_taught",
+        "port": "observation"
+      }
+    },
+    {
+      "id": "n_runs_observation_to_merge",
+      "from": {
+        "node": "n_runs_observation",
+        "port": "observation"
+      },
+      "to": {
+        "node": "n_runs",
+        "port": "observation"
       }
     }
   ],
@@ -344,6 +392,11 @@
       "node": "n_runs",
       "port": "runs",
       "label": "彩色卡尺 · 跟踪胶路"
+    },
+    "taughtObserved": {
+      "node": "n_taught_observation",
+      "port": "observation.stations",
+      "label": "示教线原始观测"
     }
   }
 }

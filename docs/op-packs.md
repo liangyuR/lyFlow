@@ -25,22 +25,22 @@ core 本身提供 `util.reroute`、`flow.fallback`、`flow.select`
 | 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
-| `std-geometry`   | 0.8.0  | ON      | 几何、位姿、坐标变换、刚体关系与三维约束构造，含可选的工作空间读取                                                 | geometry-kernel、原生契约与标准库，工作空间读取使用 workspace-io / yaml-cpp                                 |
-| `std-metrology`  | 0.4.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
-| `std-profile`    | 0.5.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
+| `std-geometry`   | 0.9.0  | ON      | 几何、位姿、坐标变换、刚体关系与三维约束构造，含可选的工作空间读取                                                 | geometry-kernel、原生契约与标准库，工作空间读取使用 workspace-io / yaml-cpp                                 |
+| `std-metrology`  | 0.5.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
+| `std-profile`    | 0.6.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
 | `std-pointcloud` | 0.7.0  | ON      | 点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
 | `std-ml`         | 0.4.0  | ON      | YOLO、YOLOX 及 OCR 的 Tensor 解码、`ml.onnx_run`                                                 | 解码使用原生数据契约，`ml-runtime` 使用 ONNX Runtime                                                                        |
-| `std-image`      | 0.13.0 | ON      | 图像处理、标定、识别适配、深度投影、响应与候选测量（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV及识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
-| `solution-glue`  | 0.4.0  | **OFF** | 13项示教与搜索、跟踪、场景卡尺、断胶和判定（[README](../solutions/glue/README.md)）                | `std-image`、OpenCV 支持和几何核，无 PCL/ORT                                            |
-| `solution-gap`   | 0.1.0  | **OFF** | 40项`gap.*`原生场景与临时兼容入口                                                                | 基础PCL；模板/模型/导入/兼容能力按模块启用                                          |
-| `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
+| `std-image`      | 0.14.0 | ON      | 图像处理、标定、识别适配、深度投影、响应与候选测量（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV及识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `solution-glue`  | 0.5.0  | **OFF** | 13项示教与搜索、跟踪、场景卡尺、断胶和判定（[README](../solutions/glue/README.md)）                | `std-image`、OpenCV 支持和几何核，无 PCL/ORT                                            |
+| `solution-gap`   | 0.3.0  | **OFF** | `gap.*` 原生场景、StandardGap 导入器与片段                                                                | 基础PCL；模板、模型、导入能力按模块启用                                          |
+| `solution-dts`   | 0.3.0  | **OFF** | 5 项 `dts.*` 胶条面差场景节点；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
 
 ```powershell
 $env:LYFLOW_PACKS = "solution-gap"
-$env:LYFLOW_MODULES = "gap-template;gap-model;gap-import;gap-compat"
+$env:LYFLOW_MODULES = "gap-template;gap-model;gap-import"
 pnpm check          # 或 pnpm check:gap
 ```
 

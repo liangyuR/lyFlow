@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lyflow-python"
-version = "1.4.5"
+version = "2.0.0"
 description = "LyFlow custom Python node SDK and worker"
 readme = "README.md"
 requires-python = ">=3.11"

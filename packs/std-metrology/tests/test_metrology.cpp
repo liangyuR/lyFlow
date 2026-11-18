@@ -1,9 +1,51 @@
 #include <doctest/doctest.h>
 
+#include <limits>
+
 #include "helpers.h"
 #include "lyflow/calibration.h"
 
 using namespace lyflow;
+
+TEST_CASE("Tolerance comparison respects inclusive limits and preserves input readout and units") {
+  struct Case {
+    double value;
+    double margin;
+    bool valid;
+    const char* verdict;
+  };
+  const Case cases[] = {{3.5, 0, true, "ok"},
+                        {2.5, 0, true, "ok"},
+                        {4.5, 0, true, "ok"},
+                        {4.6, 0, true, "high"},
+                        {2.4, 0, true, "low"},
+                        {4.45, .1, true, "margin"},
+                        {2.55, .1, true, "margin"},
+                        {3.5, 0, false, "fail"},
+                        {std::numeric_limits<double>::quiet_NaN(), 0, true, "fail"},
+                        {std::numeric_limits<double>::infinity(), 0, true, "fail"}};
+  for (const auto& test : cases) {
+    CAPTURE(test.value);
+    Measurement input;
+    input.value = test.value;
+    input.ok = test.valid;
+    input.unit = "mm";
+    input.message = "upstream";
+    test::OpCall call;
+    call.inputs["value"] = Data::measurement(input);
+    REQUIRE(call.run("metrology.compare_tolerance",
+                     {{"nominal", Value::number(3.5)}, {"margin", Value::number(test.margin)}})
+                .ok);
+    const auto* result = call.out("value").asMeasurement();
+    CHECK(result->verdict == test.verdict);
+    CHECK(result->ok == input.ok);
+    CHECK(result->unit == input.unit);
+    CHECK(result->message == input.message);
+    CHECK(result->hasLimits);
+    CHECK(result->lower == 2.5);
+    CHECK(result->upper == 4.5);
+  }
+}
 
 TEST_CASE(
     "Portable calibrated distance: moved operator retains ID version units and frame contract") {

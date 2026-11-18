@@ -45,19 +45,19 @@ public:
 
   bool empty() const { return data_.empty() || valid_.empty(); }
   const cv::Rect& valid() const { return valid_; }
+  bool containsFootprint(P2 p) const {
+    return !empty() && p.x >= valid_.x && p.y >= valid_.y &&
+           p.x < double(valid_.x) + valid_.width - 1 && p.y < double(valid_.y) + valid_.height - 1;
+  }
 
   /// 双线性采样。四个邻点有一个不在可信区里就返回 kInvalid。
   double at(double x, double y) const {
-    if (empty() || !std::isfinite(x) || !std::isfinite(y))
+    if (!containsFootprint({x, y}))
       return kInvalid;
     const double fx = std::floor(x);
     const double fy = std::floor(y);
     const int x0 = static_cast<int>(fx);
     const int y0 = static_cast<int>(fy);
-    if (x0 < valid_.x || y0 < valid_.y || x0 + 1 >= valid_.x + valid_.width ||
-        y0 + 1 >= valid_.y + valid_.height) {
-      return kInvalid;
-    }
     const double ax = x - fx;
     const double ay = y - fy;
     const float* r0 = data_.ptr<float>(y0 - origin_.y) + (x0 - origin_.x);
@@ -147,6 +147,9 @@ std::vector<Run> caliperRuns(const Field& response, P2 c, P2 n, double half,
 std::vector<Run> caliperRuns(const std::vector<double>& samples, double half,
                              const RunSplitSpec& spec, std::vector<Run>* raw = nullptr,
                              double* validFraction = nullptr);
+std::vector<Run> rawCaliperRuns(const std::vector<double>& samples, double half,
+                                const RunSplitSpec& spec);
+std::vector<Run> mergeCaliperRuns(const std::vector<Run>& raw, const RunSplitSpec& spec);
 
 /// 边缘陡度的组成：edgeLo / edgeHi 是两条边内外各 edgeProbe 的灰度差，depth 是暗度。取不到全是 NaN。
 struct RunEdges {

@@ -54,7 +54,7 @@ struct Call : test::OpCall {
   Call() : OpCall(packRegistry()) {}
 };
 
-/// default.lyflow.json 那条链，一步一步手搓。一步出错就停在那里，
+/// default-profile.lyflow.json 那条链，一步出错就停在那里，
 /// `failedOp` 记住是哪一步 —— 失败路径的用例断言的就是它。
 Data nativeCloud(PointCloud cloud) {
   ProfileDescriptor descriptor;
@@ -472,35 +472,47 @@ TEST_CASE("DTS v2 flush retains legacy float direction arithmetic and all busine
       }
 }
 
-TEST_CASE("DTS v2 real graphs run through legacy cloud and native profile injection") {
-  const Data raw = Data::cloud(resampled(td::kZ1000, nullptr));
+TEST_CASE("DTS native graphs preserve both datum choices and the host result contract") {
   const Data native = nativeCloud(resampled(td::kZ1000, nullptr));
-  for (const auto* variant : {"default", "adjacent"})
-    for (const bool nativeInput : {false, true}) {
-      CAPTURE(std::string(variant));
-      CAPTURE(nativeInput);
-      const auto path =
-          std::filesystem::path(LYFLOW_EXAMPLES_DIR).parent_path() / "solutions" / "dts" /
-          "graphs" /
-          (std::string(variant) + (nativeInput ? "-profile.lyflow.json" : ".lyflow.json"));
-      std::ifstream input(path);
-      REQUIRE(input.good());
-      const auto graph = nlohmann::json::parse(input);
-      test::Session run(graph, {}, {}, false, 1, false,
-                        {{"n_in", "profile", nativeInput ? native : raw}});
-      const auto& log = run.wait();
-      INFO(nlohmann::json(log.events).dump());
-      REQUIRE(log.runStatus() == "ok");
-      Data result;
-      REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_bundle", "bundle", result));
-      CHECK(result.asRecord()->type == "DtsProfileBundle.v3");
-      CHECK(result.asRecord()->data["ok"] == true);
-      CHECK(result.asRecord()->data["flushMm"].get<double>() ==
-            (std::string(variant) == "default" ? 29.405751121893076 : 0.028393018568152684));
-      REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_clean", "clean", result));
-      REQUIRE(result.asProfile());
-      CHECK(result.asProfile()->pointCount() == static_cast<std::size_t>(td::kPoints));
-    }
+  int defaultFace = -1;
+  for (const std::string variant : {"default", "adjacent"}) {
+    CAPTURE(variant);
+    const auto path = std::filesystem::path(LYFLOW_EXAMPLES_DIR).parent_path() / "solutions" /
+                      "dts" / "graphs" / (variant + "-profile.lyflow.json");
+    std::ifstream input(path);
+    REQUIRE(input.good());
+    const auto graph = nlohmann::json::parse(input);
+    test::Session run(graph, {}, {}, false, 1, false, {{"n_in", "profile", native}});
+    const auto& log = run.wait();
+    INFO(nlohmann::json(log.events).dump());
+    REQUIRE(log.runStatus() == "ok");
+    Data result;
+    REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_bundle", "bundle", result));
+    const auto* bundle = result.asRecord();
+    REQUIRE(bundle);
+    CHECK(bundle->type == "DtsProfileBundle.v3");
+    CHECK(bundle->data["ok"] == true);
+    CHECK(bundle->data["workingUnit"] == "mm");
+    CHECK(bundle->data.contains("perpendicular"));
+    const auto currentFace = bundle->data.at("pick").at("faceIndex").get<int>();
+    if (variant == "default")
+      defaultFace = currentFace;
+    else
+      CHECK(currentFace != defaultFace);
+    const double expected = variant == "default" ? 29.405751121893076 : 0.028393018568152684;
+    CHECK(bundle->data["flushMm"].get<double>() == doctest::Approx(expected).epsilon(1e-6));
+    REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_flush", "foot", result));
+    REQUIRE(result.asPoint2D());
+    CHECK(result.asPoint2D()->unit == Unit2D::Meter);
+    REQUIRE(exec::ResultStore::instance().get(run.runId(), "n_clean", "clean", result));
+    const auto* clean = result.asProfile();
+    REQUIRE(clean);
+    CHECK(clean->pointCount() == static_cast<std::size_t>(td::kPoints));
+    CHECK(clean->descriptor.unit == "mm");
+    CHECK(clean->descriptor.plane == "XZ");
+    CHECK(clean->descriptor.frame == "dts-scan");
+    CHECK(clean->descriptor.sampleOrder == "acquisition");
+  }
 }
 
 TEST_CASE("DTS v2 cancellation leaves native inputs and scene outputs unchanged") {
@@ -557,7 +569,7 @@ TEST_CASE("DTS v2 cancellation leaves native inputs and scene outputs unchanged"
 
 TEST_CASE("DTS v2 adjacent datum preserves the original A and B no-metal-face failures") {
   const auto path = std::filesystem::path(LYFLOW_EXAMPLES_DIR).parent_path() / "solutions" / "dts" /
-                    "graphs" / "adjacent.lyflow.json";
+                    "graphs" / "adjacent-profile.lyflow.json";
   std::ifstream input(path);
   REQUIRE(input.good());
   const auto graph = nlohmann::json::parse(input);
@@ -567,12 +579,29 @@ TEST_CASE("DTS v2 adjacent datum preserves the original A and B no-metal-face fa
       continue;
     CAPTURE(tag);
     test::Session run(graph, {}, {}, false, 1, false,
-                      {{"n_in", "profile", Data::cloud(cloudOf(field.x, field.z, field.n))}});
+                      {{"n_in", "profile", nativeCloud(cloudOf(field.x, field.z, field.n))}});
     const auto& log = run.wait();
     REQUIRE(log.runStatus() == "error");
     CHECK(log.finalState("n_metal") == "error");
     CHECK(log.nodeEvent("n_metal", "error")["error"]["code"] == "no_metal_face");
     Data absent;
     CHECK_FALSE(exec::ResultStore::instance().get(run.runId(), "n_flush", "flush", absent));
+  }
+}
+
+TEST_CASE("DTS retired operators report the obsolete node and next input contract") {
+  const std::pair<const char*, const char*> cases[] = {{"dts.profile_in", "profile.input"},
+                                                       {"dts.geometry_to_metric", "Point2D"},
+                                                       {"dts.profile_clean", "profile.clean"},
+                                                       {"dts.split_faces", "profile.split_faces"}};
+  for (const auto& [retired, hint] : cases) {
+    CAPTURE(std::string(retired));
+    const auto graph = test::makeGraph({{"old", retired}}, {});
+    const auto plan = nlohmann::json::parse(exec::planGraphJson(graph.dump(), {}, {}));
+    INFO(plan.dump());
+    CHECK(std::any_of(plan.begin(), plan.end(), [hint](const auto& item) {
+      return item.value("nodeId", "") == "old" && item.value("code", "") == "migration_required" &&
+             item.value("message", "").find(hint) != std::string::npos;
+    }));
   }
 }

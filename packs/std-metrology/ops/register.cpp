@@ -10,6 +10,7 @@ namespace lyflow::packs::std_metrology {
 void registerProfileMetrology(Registry&);
 void registerProfileGapFlush(Registry&);
 void registerProfileDimensions(Registry&);
+void registerCompareTolerance(Registry&);
 namespace {
 
 Status calibratedDistance(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&) {
@@ -49,6 +50,7 @@ void registerPackOps(Registry& registry) {
   registerProfileGapFlush(registry);
   registerProfileMetrology(registry);
   registerProfileDimensions(registry);
+  registerCompareTolerance(registry);
 }
 
 } // namespace lyflow::packs::std_metrology

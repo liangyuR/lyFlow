@@ -1,6 +1,13 @@
 # 版本变更
 
-## 1.4.5（开发中）
+## 2.0.0（开发中）
+
+- 同一 Windows 运行库交付 Gap、DTS 和 Glue 三个场景包及其配套标准算子。
+- StandardGap 导入图使用独立的锚窗、轮廓重叠观测和公差比较节点。Glue 彩色卡尺可以单独输出原始观测，也可交给场景节点按邻站补缝。
+- DTS 使用原生 Profile 和显式几何单位。Gap 历史黑盒退役，历史对照工具直接读取基线 CSV。
+- 1.x 图用于核对业务目标、输入和参数。本主版本用当前算子重新搭图，旧文件保持原样。见[退役与搭图说明](operator-package-migration-plan.md#m7-退役与统一交付)。
+
+## 1.4.5（已合并）
 
 - 邻域高度、料箱计数、深度候选、截面测量、几何体查询和约束拟合可在图里单独取用，并接入各自的尺寸更新或判定节点。旧组合图通过 `lyflow migrate` 的显式规则改写。
 - `workspace.load` 随 `std-geometry` 的工作空间模块提供。YOLO、YOLOX 和 OCR 的 Tensor 解码移入 `std-ml`，`gen.synthetic` 移入 `std-pointcloud`，公开 ID 沿用。

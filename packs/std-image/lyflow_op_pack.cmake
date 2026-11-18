@@ -4,7 +4,7 @@ file(GLOB STD_IMAGE_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         std-image
-  VERSION      0.13.0
+  VERSION      0.14.0
   DEFAULT      ON
   SOURCES      ${STD_IMAGE_SOURCES}
   TEST_SOURCES ${STD_IMAGE_TESTS}

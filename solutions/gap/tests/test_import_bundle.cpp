@@ -173,7 +173,6 @@ TEST_CASE(
     CHECK(!d->label.empty());
   }
 
-  // 与编辑器新建节点（store/graph.ts 写 opVersion: op.version）一致：算子以后升主版本时导入的图能自动迁移
   std::unordered_map<std::string, std::string> versions;
   const nlohmann::json manifest = nlohmann::json::parse(ensureRegistry().toManifestJson());
   for (const auto& o : manifest["operators"]) {
@@ -564,7 +563,7 @@ TEST_CASE(
     "方向基准：默认不生成节点；配了 long_plane 就长出「窗 → 裁 → 拟」；锚可分别指定；写错就报错") {
   SUBCASE("默认不生成任何节点") {
     const nlohmann::json doc = importText("StandardGap.yml:template:fine", kConfig, nullptr);
-    CHECK_FALSE(hasOp(doc, "gap.datum_window"));
+    CHECK_FALSE(hasOp(doc, "geometry.anchored_window"));
     CHECK_FALSE(hasEdge(doc, "n_fit_base", "refLine"));
     // 一个方向相关的参数都不写进图，留给算子默认的 free
     CHECK(nodeById(doc, "n_fit_base")["params"]["dirMode"] == "free");
@@ -576,11 +575,11 @@ TEST_CASE(
                    withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
                                  " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
                    nullptr);
-    REQUIRE(hasOp(doc, "gap.datum_window"));
+    REQUIRE(hasOp(doc, "geometry.anchored_window"));
     const auto& win = nodeById(doc, "n_datum_box")["params"];
     CHECK(win["side"] == "left");
-    CHECK(win["lengthMm"] == 13.0);
-    CHECK(win["heightMm"] == 2.5);
+    CHECK(win["length"] == .013);
+    CHECK(win["heightPadding"] == .0025);
     const auto& base = nodeById(doc, "n_fit_base")["params"];
     CHECK(base["dirMode"] == "fixed");
     CHECK(base["dirNominalDeg"] == 3.0);
@@ -815,7 +814,11 @@ TEST_CASE(
                                       "gap.to_measurement_frame",
                                       "gap.flush",
                                       "gap.gap",
-                                      "gap.point_offset"};
+                                      "gap.point_offset",
+                                      "gap.measure_reference",
+                                      "gap.camera_guard",
+                                      "gap.datum_window",
+                                      "gap.judge"};
   for (const auto* kind :
        {"StandardGap.yml", "StandardGap.yml:template", "StandardGap.yml:model",
         "StandardGap.yml:fine", "StandardGap.yml:template:fine", "StandardGap.yml:model:fine"}) {
@@ -823,6 +826,12 @@ TEST_CASE(
     const auto doc = import(kind, fixture.point);
     REQUIRE(doc.is_object());
     const bool fine = std::string(kind).find("fine") != std::string::npos;
+    CHECK(hasEdgeFrom(doc, "n_compare_0", "n_judge_0", "value"));
+    CHECK(hasEdgeFrom(doc, "n_compare_1", "n_judge_1", "value"));
+    CHECK(hasEdgeFrom(doc, "n_judge_0", "n_bundle", "flush"));
+    CHECK(hasEdgeFrom(doc, "n_judge_1", "n_bundle", "gap"));
+    CHECK(doc["outputs"]["flush"]["node"] == "n_judge_0");
+    CHECK(doc["outputs"]["gap"]["node"] == "n_judge_1");
     for (const auto& node : doc["nodes"]) {
       CHECK(retired.count(node["op"].get<std::string>()) == 0);
       if (node["op"] == "metrology.flush_point_line") {
@@ -883,6 +892,24 @@ TEST_CASE(
     }
     CHECK(validationErrors(doc).empty());
   }
+  for (const auto* action : {"record", "off"}) {
+    CAPTURE(std::string(action));
+    std::string yaml = kConfig;
+    const auto at = yaml.find("common_settings:\n") + std::strlen("common_settings:\n");
+    yaml.insert(at, "  camera_guard: {enabled: true, on_disagree: " + std::string(action) +
+                        ", sample_step_mm: 0.5, half_window_mm: 0.25}\n");
+    const auto doc = importText("StandardGap.yml:template", yaml, nullptr);
+    CHECK(hasOp(doc, "gap.select_camera"));
+    const bool observes = std::string(action) == "record";
+    CHECK(hasOp(doc, "profile.compare_overlap") == observes);
+    CHECK(hasEdgeFrom(doc, "n_camera_observation", "n_camera_guard", "observation") == observes);
+    if (observes) {
+      const auto& observation = nodeById(doc, "n_camera_observation")["params"];
+      CHECK(observation["sampleStep"] == .0005);
+      CHECK(observation["halfWindow"] == .00025);
+    }
+    CHECK(validationErrors(doc).empty());
+  }
 }
 TEST_CASE(
     "Native imported template and model workflows execute highlevel and true granular graphs consistently") {
@@ -910,12 +937,16 @@ TEST_CASE(
       const auto flush = result(session, "n_flush", "value"),
                  gap = result(session, "n_gap", "value"),
                  bundle = result(session, "n_bundle", "bundle");
+      const auto flushJudged = result(session, "n_judge_0", "value"),
+                 gapJudged = result(session, "n_judge_1", "value");
       REQUIRE(flush.asMeasurement());
       REQUIRE(gap.asMeasurement());
       CHECK(flush.asMeasurement()->ok);
       CHECK(gap.asMeasurement()->ok);
       CHECK(flush.asMeasurement()->unit == "mm");
       CHECK(gap.asMeasurement()->unit == "mm");
+      CHECK(bundle.asRecord()->data["flush"]["verdict"] == flushJudged.asMeasurement()->verdict);
+      CHECK(bundle.asRecord()->data["gap"]["verdict"] == gapJudged.asMeasurement()->verdict);
       CHECK(bundle.asRecord()->data["roi_source"] == (useModel ? "model" : "config"));
       if (!fine) {
         referenceFlush = flush.asMeasurement()->value;

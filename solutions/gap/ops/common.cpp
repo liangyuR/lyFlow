@@ -44,26 +44,6 @@ Eigen::Matrix2f toRoiMatrix(const lyflow::Box2D& box) {
   return roi;
 }
 
-std::vector<double> transformToJson(const Eigen::Matrix3f& m) {
-  std::vector<double> out(9);
-  for (int r = 0; r < 3; ++r) {
-    for (int c = 0; c < 3; ++c)
-      out[static_cast<std::size_t>(r * 3 + c)] = m(r, c);
-  }
-  return out;
-}
-
-std::string fileStamp(const std::filesystem::path& p) {
-  if (p.empty())
-    return {};
-  std::error_code ec;
-  const auto size = std::filesystem::file_size(p, ec);
-  const auto time = std::filesystem::last_write_time(p, ec);
-  if (ec)
-    return {};
-  return std::to_string(size) + ":" + std::to_string(time.time_since_epoch().count());
-}
-
 void setMeasurement(Outputs& outputs, const char* port, double valueMm, bool ok,
                     const std::string& message) {
   lyflow::Measurement m;

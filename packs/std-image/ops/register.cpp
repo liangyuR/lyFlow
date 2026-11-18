@@ -2,6 +2,7 @@
 // 调用顺序就是 manifest 里的顺序，也是算子面板里的顺序。
 #include "ops.h"
 
+#include "lyflow_cv/color_caliper.h"
 #include "lyflow_cv/inspection.h"
 #include "lyflow_cv/template_pose.h"
 
@@ -63,6 +64,7 @@ void registerPackOps(Registry& r) {
   registerPartEdges(r);
   lyflow::std_image::color::registerColorMap(r);
   lyflow::std_image::color::registerColorFan(r);
+  lyflow::std_image::inspection::registerColorCaliper(r);
   lyflow::std_image::template_pose::registerLocate(r);
   registerPlaneCalibUpgrade(r);
 }

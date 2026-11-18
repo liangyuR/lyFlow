@@ -1,8 +1,8 @@
-# Gap 原生轮廓场景与旧图升级
+# Gap 原生轮廓场景与旧图重搭
 
 [分包迁移计划](operator-package-migration-plan.md) · [Profile 契约](profile-data-contract.md) · [公共算子](profile-public-operators.md)
 
-本页说明 Gap 原生场景的运行契约与旧图升级方式。模板、模型的合成夹具不能替代现场工件验收。
+本页说明 Gap 原生场景的运行契约与旧图重搭方式。模板、模型的合成夹具不能替代现场工件验收。
 
 ## 包与能力
 
@@ -14,7 +14,6 @@
 | `gap-template` | 模板读取、ICP、候选选择和业务 ROI；对实际模板 Profile 应用变换后才发布量测帧几何。                                                        |
 | `gap-model`    | 常驻 ONNX 推理能力，经 `ml-runtime` 使用 ORT；没有此能力时不注册推理执行入口。                                                            |
 | `gap-import`   | StandardGap YAML 导入，需要 yaml-cpp；选定模式的全部算子必须可用，否则导入失败并说明缺少的能力，不返回悬空工作流。                        |
-| `gap-compat`   | 临时保留 `gap.measure_reference` 的真实旧引擎；依赖模板、模型和导入模块，按迁移计划退役。它不是新原生场景的计算后端。                     |
 
 SDK 随构建能力交付片段：基础场景为五份，模板与模型能力同时存在时增加原子定位回退片段；正式完整组合为六份。安装文件与 manifest 的能力集合保持一致。
 
@@ -57,64 +56,12 @@ StandardGap 提供自动、模板、模型三种模式，各有高层与细粒�
 
 ROI 底图可引用原生 Profile 或 Bundle 的单层采样字段，例如 `templates.left`、`templates.right`；显示按声明的分析平面、单位及有效性掩码取数。计算失败的部分输出不进入正式结果仓，不能把诊断候选描述为可发布量测。
 
-## 旧图的显式升级
+## 旧图重搭与策略节点
 
-旧裸点云图不能只改 `opVersion`。没有明确声明时，旧主版本返回 `graph_upgrade_required`，要求使用 core 的 `gapProfile.v1` 图级升级。请求指定精确旧起点节点、版本及端口、整段节点集合，以及传感器与量测声明，例如：
+当前发行版通过 StandardGap 导入器生成可运行的原生图。早期裸点云图可作为业务与参数参考。重新搭图时，从已知资料确认传感器和模板的单位、采样槽序、分析平面、手性及坐标帧。旧入口诊断会定位节点并给出替代路径。
 
-```json
-{
-  "schemaVersion": 1,
-  "rules": [
-    {
-      "kind": "gapProfile.v1",
-      "source": { "node": "n_scan", "op": "gap.read_scan", "opVersion": "1.1.0", "port": "scan" },
-      "profiles": {
-        "primary": {
-          "sourceId": "camera-A",
-          "unit": "m",
-          "fileFrame": "file",
-          "sensorFrame": "sensor",
-          "fileHandedness": "right"
-        },
-        "secondary": {
-          "sourceId": "camera-B",
-          "unit": "m",
-          "fileFrame": "file",
-          "sensorFrame": "sensor",
-          "fileHandedness": "right"
-        }
-      },
-      "measurement": { "frame": "measurement", "plane": "XY" },
-      "alreadyAligned": true,
-      "component": {
-        "style": "blocks",
-        "nodes": [
-          "n_scan",
-          "n_locate",
-          "n_line",
-          "n_ref",
-          "n_flush",
-          "n_circles",
-          "n_gap",
-          "n_bundle"
-        ]
-      },
-      "adapterIdPrefix": "native_gap"
-    }
-  ]
-}
-```
+- 细粒度方向基准窗口使用 `geometry.anchored_window`，将配置中的起点、长度和高度扩展由毫米换算为米。几何节点输出 `box/context`。选用哪个角色窗口由 StandardGap 图决定。
+- 原始轮廓经 `profile.compare_overlap` 生成独立观测。Gap 的 `gap.select_camera` 应用记录、择相机或报错策略，检测上限仍以毫米配置，保留实际传感器身份。
+- 段差和间隙读数经 `metrology.compare_tolerance`、`gap.apply_patrol` 后进入命名输出与结果汇总。顶层 `patrol` 默认关闭，打开时已超差的读数输出 `margin`。
 
-`component.nodes` 必须列出实际完整闭包，示例节点列表不能直接套到任意工作流。细粒度请求用 `style=fine`，精确锚定旧 `gap.load_profile_pair` 1.0.0 的 primary 端口。模板帧/手性与已知默认契约不一致时，还须给出 `templates={unit,fileFrame,templateFrame,handedness}`，不能通过 ICP 推断反射。该历史升级器只接受已知旧数值契约的 `unit=m`，传感器或模板文件为毫米时不能靠声明自动缩放，须先明确调整图或重新导入。
-
-把请求存为 JSON 文件，运行 `lyflow migrate <graph> --request <file.json> --write` 离线迁移；`planeCalib.v1`、`dtsGeometry.v1` 请求同样经 `--request` 提交。图顶层仍带旧 `contractUpgrade` 的文件直接运行 `lyflow migrate <graph> --write`。编辑器与宿主加载不执行升级，遇到 `contractUpgrade` 只报 `migration_required`。
-
-升级前核验原图及已知旧版本；未知、未来版本、无来源的外部注入、跨组件未知消费者及未支持结构均拒绝推断。升级由 CLI 核验后整图写回，保留 UI、其他元数据、合法顶层参数及命名输出；涉及单位换算的动态绑定、无法证明同源的 source/datumSide 覆盖会明确拒绝。共享子图以 `scope.subgraph` 指定，提升参数使用原生 SubgraphDef 数组与对象绑定格式，不支持把内部节点路径冒充提升参数；迁移是一次性的，已迁移的图再跑同一请求会因起点不再匹配而失败。合法参数绑定只移除升级器新增的显式默认值，原图已有的显式值与绑定冲突仍拒绝；图顶层与共享子图提升参数分别核验。动态单位/布局/definition、可能更换实际相机的标签 row 绑定不能安全转换时明确拒绝，模型原槽路径也不接受已压缩采样的声明。
-
-升级器按当前运行库注册的算子版本写出节点，直接生成本页描述的契约：不连任何来源端口，`profile.merge` 只带 `channelPolicy`，选点锚点经 `profile.bind_geometry` 声明为轮廓所在空间。
-
-规则由 solution-gap 注册，与[历史 DTS 升级](dts-profile-migration.md)共用 core 的离线迁移入口，各宿主不再实现转换。
-
-旧通用 ID `gap.fit_line`、`gap.selected_point`、`gap.nearest_to_line`、`gap.drop_non_finite`、`gap.to_measurement_frame`、`gap.flush`、`gap.gap`、`gap.point_offset` 随消费者迁移退出正式注册。旧源码及真正兼容引擎的最终删除按迁移计划进行，不能将“未参与当前构建”记作全部历史行为已验收。
-
-回归保留了旧 corner/groove/notch、圆拟合约束、候选与失败策略的原夹具和数值容差。这些是软件与合成夹具验收，不代表现场精度、真实相机、PLC、客户模型、遮挡工况或产线吞吐验收。
+模型与模板定位仍按各自能力注册。细粒度模型的 `gap.infer_profile` 保留双头有限输入、类数与固定槽序的错误契约。六组 Bundle 的组装与拆分入口都由当前 StandardGap 导入图或片段实际消费，各角色始终取自选中的原子定位结果。

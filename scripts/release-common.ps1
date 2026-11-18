@@ -62,3 +62,27 @@ function Write-ReleaseJson {
     param([object]$Value, [string]$Path)
     $Value | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
 }
+
+function Test-InstalledSdkConsumer {
+    param([string]$Root, [string]$Prefix, [string]$Workspace)
+    $vs = Get-ReleaseVisualStudio
+    $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvars64.bat'
+    $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+    $ninja = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
+    if (-not (Test-Path $cmake)) { $cmake = 'cmake' }
+    if (-not (Test-Path $ninja)) { $ninja = 'ninja' }
+    $version = Get-ReleaseVersion -Root $Root
+    $source = Join-Path $Workspace 'src'
+    $build = Join-Path $Workspace 'build'
+    New-Item -ItemType Directory -Path $source -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Root 'examples/consumer/CMakeLists.txt') -Destination $source
+    $line = "call `"$vcvars`" >nul 2>&1" +
+        " && `"$cmake`" -S `"$source`" -B `"$build`" -G Ninja" +
+        " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo" +
+        " -DLYFLOW_CONSUMER_VERSION=$version -DCMAKE_PREFIX_PATH=`"$($Prefix.Replace('\', '/'))`"" +
+        " && `"$cmake`" --build `"$build`""
+    cmd /c $line
+    Assert-ReleaseExit 'Build installed SDK consumer'
+    & (Join-Path $build 'embed_minimal.exe')
+    Assert-ReleaseExit 'Run installed SDK consumer'
+}

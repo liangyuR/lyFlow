@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "bead.h"
+#include "lyflow_cv/color_caliper.h"
 #include "lyflow_cv/color_model.h"
 
 namespace lyflow::packs::solution_glue {
@@ -29,15 +30,9 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
 
 /// 按 backgroundBeyond 把段 `r` 外侧是背景的不完整边认作真边；`reference` 有限时，认边后的宽度须不小于它的 `minRatio` 倍
 /// （半条胶落在高光里时只剩半宽，不能当完整胶宽）。`half` 是卡尺半长，采样间距 0.5 px。返回是否改了边。
-bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
-                               double segmentMin, double reference,
-                               const std::vector<char>* outside = nullptr, double minRatio = 0.7);
-
-/// 卡尺上一个采样无信息的原因。
-enum class ColorCause { None, Highlight, Dark, Outside };
-const char* causeName(ColorCause c);
-/// state 图（f32，按 frame 摆回图像坐标）上 p 的双线性四邻点里最「重」的无信息原因：出块 > 高光 > 暗区。
-ColorCause causeAt(const cv::Mat& state, cv::Rect frame, P2 p);
+using lyflow::std_image::inspection::CaliperSampleKind;
+bool completeAgainstBackground(Run* r, const std::vector<CaliperSampleKind>& kinds, double half,
+                               double reference, double minRatio = 0.7);
 
 // ------------------------------------------------------------------ 建模（glue.color_model）
 
@@ -95,7 +90,7 @@ struct ColorTrackSpec {
   double steadyIqrRatio = 0.3;
   double dirWindow = 48;
   double infoMin = 0.5;
-  double mergeUnknownGap = 16; ///< 同 glue.color_runs：被高光 / 暗区隔开的两段并成一段再挑胶点
+  double mergeUnknownGap = 16; ///< 被高光 / 暗区隔开的两段并成一段再挑胶点
 };
 
 struct ColorTrackResult {

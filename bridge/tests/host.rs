@@ -14,9 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lyflow_lib::core_ffi::RunInput;
+use lyflow_lib::core_ffi::{self, RunProfileInput};
 use lyflow_lib::graph::GraphDoc;
-use lyflow_lib::host::{self, Cloud, HostConfig, SceneProvider};
+use lyflow_lib::host::{self, Cloud, HostConfig, SceneInputs, SceneProvider};
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
 use tauri::Listener;
 
@@ -56,19 +56,38 @@ struct Scenes {
 }
 
 impl SceneProvider for Scenes {
-    fn inputs(
+    fn scene_inputs(
         &self,
         scene_id: &str,
         graph: &GraphDoc,
-        manifest: &serde_json::Value,
-    ) -> Result<Vec<RunInput>, String> {
+        _manifest: &serde_json::Value,
+    ) -> Result<SceneInputs, String> {
         let sessions = self.sessions.lock().unwrap();
         let cloud = sessions
             .get(scene_id)
             .ok_or("点云会话已失效，请重新读取一次")?;
-        let mut by_port = BTreeMap::new();
-        by_port.insert("profile".to_string(), cloud.clone());
-        host::inputs_for_source_op(graph, manifest, "dts.profile_in", &by_port)
+        let node_id = host::source_node_id(graph, "profile.input")?;
+        let count = (cloud.xyz.len() / 3) as u32;
+        Ok(SceneInputs {
+            profiles: vec![RunProfileInput {
+                node_id: node_id.to_string(),
+                port: "profile".into(),
+                xyz: cloud.xyz.clone(),
+                intensity: cloud.intensity.clone(),
+                normals: Vec::new(),
+                rgb: Vec::new(),
+                descriptor_json: serde_json::json!({
+                    "schemaVersion": 1, "frame": "dts-scan", "unit": "mm", "plane": "XZ",
+                    "handedness": "right", "sampleOrder": "acquisition",
+                    "sourceId": "fixture-scanner", "sourceCount": count,
+                })
+                .to_string(),
+                validity: vec![1; count as usize],
+                source_indices: (0..count).collect(),
+                retained: None,
+            }],
+            ..SceneInputs::default()
+        })
     }
 }
 
@@ -154,10 +173,10 @@ fn invoke(
 }
 
 fn dts_default_graph() -> serde_json::Value {
-    let path = repo_root().join("solutions/dts/graphs/default.lyflow.json");
+    let path = repo_root().join("solutions/dts/graphs/default-profile.lyflow.json");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读不到 {}: {e}", path.display()));
-    serde_json::from_str(&text).expect("default.lyflow.json 不是合法 JSON")
+    serde_json::from_str(&text).expect("DTS 默认轮廓图不是合法 JSON")
 }
 
 /// 等到本次 run 的 `run_finished` 出现。超时就把收到的事件打出来 ——
@@ -216,7 +235,7 @@ fn manifest_and_core_info_over_ipc() {
 // ------------------------------------------------------------------ 注入
 
 /// 端到端：宿主注入一条轮廓 → 图跑完 → 图级命名输出里有 flush，
-/// 且 `dts.profile_in` 是被注入的（compute 整个没跑）。
+/// 且 `profile.input` 使用了注入的原生轮廓。
 #[test]
 #[cfg_attr(
     not(dts_pack),
@@ -255,6 +274,12 @@ fn run_graph_injects_the_host_profile() {
         "n_in 上没有 stats.provided=true，注入没生效：{:#?}",
         events_of(&all, &run_id)
     );
+    let core = core_ffi::core().unwrap();
+    let clean = core
+        .output_profile(&run_id, "n_clean", "clean", 0, 0)
+        .unwrap();
+    let descriptor: serde_json::Value = serde_json::from_str(clean.descriptor_json()).unwrap();
+    assert_eq!(descriptor["sourceId"], "fixture-scanner");
 
     // 图级命名输出的键集合只由图决定，不由运行结果决定（ADR-0017）——
     // 所以 flush 一定在，missing 与否不在本测试的关心范围内。
@@ -357,7 +382,7 @@ fn scene_id_without_a_provider_is_an_error() {
         }),
     )
     .unwrap_err();
-    assert!(err.contains("不支持点云注入"), "{err}");
+    assert!(err.contains("没有配置 SceneProvider"), "{err}");
 }
 
 // ------------------------------------------------------------------ 路径
@@ -459,7 +484,7 @@ fn one_cloud(port: &str) -> BTreeMap<String, Cloud> {
 
 #[test]
 fn inputs_for_source_op_finds_the_single_source_node() {
-    let g = graph_of(&[("a", "src.one"), ("b", "dts.profile_clean")]);
+    let g = graph_of(&[("a", "src.one"), ("b", "util.reroute")]);
     let got =
         host::inputs_for_source_op(&g, &tiny_manifest(), "src.one", &one_cloud("profile")).unwrap();
     assert_eq!(got.len(), 1);
@@ -471,7 +496,7 @@ fn inputs_for_source_op_finds_the_single_source_node() {
 
 #[test]
 fn inputs_for_source_op_rejects_a_graph_without_the_source() {
-    let g = graph_of(&[("b", "dts.profile_clean")]);
+    let g = graph_of(&[("b", "util.reroute")]);
     let err = host::inputs_for_source_op(&g, &tiny_manifest(), "src.one", &one_cloud("profile"))
         .unwrap_err();
     assert!(err.contains("图里没有 src.one 节点"), "{err}");

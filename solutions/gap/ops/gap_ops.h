@@ -9,7 +9,6 @@
 #include <Eigen/Core>
 
 #include "domain/detection/DetectionTypes.hpp"
-#include "gap_ml/OnnxRoiPredictor.hpp"
 #include "lyflow/data.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -35,27 +34,14 @@ lyflow::PointCloud fromPcl(const GapCloud& cloud);
 /// Box2D（米）→ 原算法的 ROI 矩阵：col(0)=min，col(1)=max。
 Eigen::Matrix2f toRoiMatrix(const lyflow::Box2D& box);
 
-/// Eigen 的 3x3 SE(2) 变换 → JSON 数组（行主序 9 个数），Record 里存变换用。
-std::vector<double> transformToJson(const Eigen::Matrix3f& m);
-
 /// 把一个 Measurement 塞进输出端口，顺手写一条日志。
 void setMeasurement(Outputs& outputs, const char* port, double valueMm, bool ok,
                     const std::string& message);
 
-/// 文件大小 + mtime，读不到返回空串。externalKey 与模型缓存键都用它。
-std::string fileStamp(const std::filesystem::path& p);
-
-/// 按「模型路径 + mtime」缓存的 OnnxRoiPredictor（H2）。构造失败返回 nullptr、
-/// message 是一句人话；指针归缓存所有，调用方不接管。
-const ::gap::ml::OnnxRoiPredictor* predictorFor(const std::filesystem::path& model,
-                                                std::string* message);
-
 // ------------------------------------------------------------------ 注册函数
-void registerJudge(Registry& r);
-void registerMeasureReference(Registry& r);
+void registerPatrolPolicy(Registry& r);
 void registerResultBundle(Registry& r);
 void registerStandardGapImporter(Registry& r);
 void registerSnippets(Registry& r);
-void registerGraphMigrations(Registry& r);
 
 } // namespace lyflow::packs::gap

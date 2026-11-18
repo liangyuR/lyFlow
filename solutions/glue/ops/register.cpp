@@ -22,7 +22,7 @@ void registerPackOps(Registry& r) {
   // 1.3 的彩色测量算子：RGB 帧上的颜色模型与得分图，判定同样归宿主
   registerColorModel(r);
   registerColorTrack(r);
-  registerColorRuns(r);
+  registerMergeColorRuns(r);
   // 片段引用上面的算子；自检在注册表填满之后才跑
   registerSnippets(r);
 }

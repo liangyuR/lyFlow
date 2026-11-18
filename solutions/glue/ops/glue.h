@@ -53,7 +53,7 @@ void registerTrackPath(Registry& r);
 void registerPolyline(Registry& r);
 void registerColorModel(Registry& r);
 void registerColorTrack(Registry& r);
-void registerColorRuns(Registry& r);
+void registerMergeColorRuns(Registry& r);
 
 using lyflow::std_image::inspection::badColorImage;
 using lyflow::std_image::inspection::badImage;

@@ -118,7 +118,8 @@ TEST_CASE("native gap assets pin executable versions and expose only available c
   CHECK(registry.validate().empty());
   for (const char* retired :
        {"gap.fit_line", "gap.selected_point", "gap.nearest_to_line", "gap.drop_non_finite",
-        "gap.to_measurement_frame", "gap.flush", "gap.gap", "gap.point_offset"}) {
+        "gap.to_measurement_frame", "gap.flush", "gap.gap", "gap.point_offset",
+        "gap.measure_reference", "gap.camera_guard", "gap.datum_window", "gap.judge"}) {
     CHECK(registry.find(retired) == nullptr);
     CHECK(registry.retiredOperatorHint(retired) != nullptr);
   }
@@ -178,47 +179,32 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("gap judgement keeps inclusive limits margin patrol and failed measurement semantics") {
-  const auto evaluate = [](double value, bool ok = true, double margin = 0, bool patrol = false) {
-    Measurement measurement;
-    measurement.value = value;
-    measurement.ok = ok;
-    measurement.unit = "mm";
-    measurement.message = "upstream evidence";
+TEST_CASE("Gap applies patrol independently to pre-compared measurements") {
+  for (const auto* verdict : {"high", "low", "margin", "ok", "fail"}) {
+    Measurement compared;
+    compared.value = 4.6;
+    compared.ok = std::string(verdict) != "fail";
+    compared.unit = "mm";
+    compared.hasLimits = true;
+    compared.nominal = 3.5;
+    compared.lower = 2.5;
+    compared.upper = 4.5;
+    compared.verdict = verdict;
     test::OpCall call;
-    call.inputs["value"] = Data::measurement(measurement);
-    REQUIRE(call.run("gap.judge", {{"nominal", Value::number(3.5)},
-                                   {"upper", Value::number(1)},
-                                   {"lower", Value::number(-1)},
-                                   {"margin", Value::number(margin)},
-                                   {"patrol", Value::boolean(patrol)}})
-                .ok);
-    const auto result = *call.out("value").asMeasurement();
-    CHECK(result.unit == "mm");
-    CHECK(result.message == measurement.message);
-    CHECK(result.hasLimits);
-    CHECK(result.nominal == 3.5);
-    CHECK(result.lower == 2.5);
-    CHECK(result.upper == 4.5);
-    CHECK(measurement.verdict.empty());
-    return result.verdict;
-  };
-  CHECK(evaluate(3.5) == "ok");
-  CHECK(evaluate(2.5) == "ok");
-  CHECK(evaluate(4.5) == "ok");
-  CHECK(evaluate(4.6) == "high");
-  CHECK(evaluate(2.4) == "low");
-  CHECK(evaluate(4.45, true, .1) == "margin");
-  CHECK(evaluate(2.55, true, .1) == "margin");
-  CHECK(evaluate(4.6, true, 0, true) == "margin");
-  CHECK(evaluate(2.4, true, 0, true) == "margin");
-  CHECK(evaluate(3.5, false) == "fail");
-  CHECK(evaluate(std::numeric_limits<double>::quiet_NaN()) == "fail");
-  CHECK(evaluate(std::numeric_limits<double>::infinity(), true, 0, true) == "fail");
+    call.inputs["value"] = Data::measurement(compared);
+    REQUIRE(call.run("gap.apply_patrol").ok);
+    CHECK(call.out("value").asMeasurement()->verdict == verdict);
+    REQUIRE(call.run("gap.apply_patrol", {{"patrol", Value::boolean(true)}}).ok);
+    const auto& actual = *call.out("value").asMeasurement();
+    const bool outOfTolerance = std::string(verdict) == "high" || std::string(verdict) == "low";
+    CHECK(actual.verdict == (outOfTolerance ? "margin" : verdict));
+    CHECK(actual.value == compared.value);
+    CHECK(actual.unit == compared.unit);
+    CHECK(actual.upper == compared.upper);
+  }
 }
 
-TEST_CASE(
-    "native gap historical majors require explicit graph upgrade without unsafe automatic edits") {
+TEST_CASE("native gap historical majors point to rebuilding the graph") {
   for (const auto& entry :
        {std::make_pair("gap.read_scan", "1.1.0"), std::make_pair("gap.result_bundle", "1.0.0"),
         std::make_pair("gap.result_bundle", "2.0.0")}) {
@@ -239,7 +225,8 @@ TEST_CASE(
     bool blocked = false;
     for (const auto& diagnostic : diagnostics.items()) {
       CHECK(diagnostic.migration == nullptr);
-      if (diagnostic.status.message.find("graph_upgrade_required") != std::string::npos)
+      if (diagnostic.status.code == "migration_required" &&
+          diagnostic.status.message.find("重新导入 StandardGap") != std::string::npos)
         blocked = true;
     }
     CHECK(blocked);
