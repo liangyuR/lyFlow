@@ -91,7 +91,7 @@ fn modules(root: &Path) -> Result<Vec<String>> {
         {
             let name = path.file_name().unwrap().to_string_lossy().to_lowercase();
             let is_crt = name.starts_with("vcruntime")
-                || name.starts_with("msvcp")
+                || (name.starts_with("msvcp") && name != "msvcp_win.dll")
                 || name.starts_with("concrt")
                 || name.starts_with("vcomp");
             require(
