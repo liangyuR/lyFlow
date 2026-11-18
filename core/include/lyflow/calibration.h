@@ -98,15 +98,19 @@ struct Plane {
   }
 };
 
-inline bool parsePlane(const Record& record, Plane& out, std::string& why) {
+inline bool parsePlane(const Record& record, Plane& out, std::string& why,
+                       bool allowMissingLegacyUnit = false) {
   const auto& d = record.data;
+  const bool versioned = d.contains("schemaVersion");
+  const auto unit = d.find("unit");
   if (record.type != kPlaneType || !d.is_object() || !values::boundedJson(d, why) ||
-      !d.contains("H") || !d["H"].is_array() || d["H"].size() != 9 || !d.contains("unit") ||
-      (d["unit"] != "m" && d["unit"] != "mm")) {
+      !d.contains("H") || !d["H"].is_array() || d["H"].size() != 9 ||
+      (unit == d.end() ? (versioned || !allowMissingLegacyUnit)
+                       : (*unit != "m" && *unit != "mm"))) {
     why = "需要 image.PlaneCalib，H 为九个有限数且 unit 为 m/mm";
     return false;
   }
-  if (d.contains("schemaVersion")) {
+  if (versioned) {
     if (!d["schemaVersion"].is_number_integer() || d["schemaVersion"] != 1 ||
         !d.contains("imageFrame") || !d["imageFrame"].is_string() || !d.contains("planeFrame") ||
         !d["planeFrame"].is_string() || d["imageFrame"].get_ref<const std::string&>().empty() ||
@@ -140,9 +144,11 @@ inline bool parsePlane(const Record& record, Plane& out, std::string& why) {
     why = "H 必须可逆";
     return false;
   }
-  plane.unit = d["unit"].get<std::string>();
-  plane.metersPerUnit = plane.unit == "mm" ? 0.001 : 1;
-  if (d.contains("schemaVersion")) {
+  if (unit != d.end()) {
+    plane.unit = unit->get<std::string>();
+    plane.metersPerUnit = plane.unit == "mm" ? 0.001 : 1;
+  }
+  if (versioned) {
     plane.imageFrame = d["imageFrame"].get<std::string>();
     plane.planeFrame = d["planeFrame"].get<std::string>();
   }

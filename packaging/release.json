@@ -16,7 +16,7 @@
     "std-pointcloud",
     "std-image",
     "std-ml",
-    "glue",
+    "solution-glue",
     "solution-gap"
   ],
   "modules": ["gap-template", "gap-model", "gap-import", "gap-compat"],

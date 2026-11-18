@@ -12,43 +12,11 @@
 
 #include "exec/result_store.h"
 #include "helpers.h"
+#include "lyflow/calibration.h"
 #include "lyflow_cv/adapter.h"
-#include "lyflow_cv/plane_calib.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
-
-TEST_CASE("PlaneCalib versioned contract: image and portable consumers share normalized mapping") {
-  Record old;
-  old.type = calibration::kPlaneType;
-  old.data = {{"H", {2e-40, 0, 0, 0, 2e-40, 0, 0, 0, 4e-40}}};
-  Record upgraded;
-  std::string why;
-  REQUIRE(calibration::upgradeLegacyPlane(old, "mm", "camera", "table", upgraded, why));
-  calibration::Plane portable;
-  std_image::PlaneCalib image;
-  REQUIRE(calibration::parsePlane(upgraded, portable, why));
-  REQUIRE(std_image::parsePlaneCalib(upgraded.data, &image, &why));
-  CHECK(image.canonical);
-  CHECK(image.imageFrame == "camera");
-  CHECK(image.planeFrame == "table");
-  double x = 0, y = 0, xx = 0, yy = 0;
-  REQUIRE(portable.map(10, 20, x, y));
-  REQUIRE(image.map(10, 20, &xx, &yy));
-  CHECK(x == xx);
-  CHECK(y == yy);
-  CHECK(std_image::planeCalibJson(image) == upgraded.data);
-  auto malformed = upgraded.data;
-  malformed["unit"] = "cm";
-  CHECK_FALSE(std_image::parsePlaneCalib(malformed, &image, &why));
-  test::OpCall node;
-  node.inputs["calib"] = Data::record(old);
-  REQUIRE(node.run("image.upgrade_plane_calib", {{"missingUnit", Value::text("mm")},
-                                                 {"imageFrame", Value::text("camera")},
-                                                 {"planeFrame", Value::text("table")}})
-              .ok);
-  CHECK(node.out("calib").asRecord()->data == upgraded.data);
-}
 
 namespace {
 
@@ -115,9 +83,9 @@ TEST_CASE("image.board_calib：已知单应画出的棋盘 —— 恢复的单�
   Data d;
   REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_calib", "calib", d));
   const Json data = d.asRecord()->data;
-  std_image::PlaneCalib calib;
+  calibration::Plane calib;
   std::string why;
-  REQUIRE(std_image::parsePlaneCalib(data, &calib, &why));
+  REQUIRE(calibration::parsePlane(*d.asRecord(), calib, why));
   CHECK(calib.unit == "mm");
   CHECK(data["rms"].get<double>() < 0.02);
   CHECK(std::fabs(data["mmPerPx"].get<double>() - 0.125) < 0.01);
@@ -127,7 +95,10 @@ TEST_CASE("image.board_calib：已知单应画出的棋盘 —— 恢复的单�
   for (const auto& pr : pairs) {
     const cv::Point2d a = mapH(G, pr[0]), b = mapH(G, pr[1]);
     const double want = std::hypot(pr[1].x - pr[0].x, pr[1].y - pr[0].y);
-    CHECK(std::fabs(calib.distance(a.x, a.y, b.x, b.y) - want) <= 0.05);
+    cv::Point2d mappedA, mappedB;
+    REQUIRE(calib.map(a.x, a.y, mappedA.x, mappedA.y));
+    REQUIRE(calib.map(b.x, b.y, mappedB.x, mappedB.y));
+    CHECK(std::fabs(cv::norm(mappedB - mappedA) - want) <= 0.05);
   }
 }
 
@@ -149,9 +120,11 @@ TEST_CASE(
   const std::filesystem::path dir =
       std::filesystem::temp_directory_path() / std::filesystem::u8path("lyflow-标定");
   std::filesystem::create_directories(dir);
-  std_image::PlaneCalib calib;
-  calib.H = {0.04, 0.001, -3.5, -0.002, 0.041, 7.25, 1e-6, -2e-6, 1.0};
-  const Json data = std_image::planeCalibJson(calib);
+  const Json data = {{"H", {0.04, 0.001, -3.5, -0.002, 0.041, 7.25, 1e-6, -2e-6, 1.0}},
+                     {"schemaVersion", 1},
+                     {"unit", "mm"},
+                     {"imageFrame", "camera"},
+                     {"planeFrame", "table"}};
   const std::filesystem::path full = dir / std::filesystem::u8path("工位标定.json");
   const std::filesystem::path bare = dir / std::filesystem::u8path("只有data.json");
   std::ofstream(full, std::ios::binary)
@@ -163,7 +136,7 @@ TEST_CASE(
     Data d;
     REQUIRE(exec::ResultStore::instance().get(s.runId(), "n", "calib", d));
     CHECK(d.asRecord()->type == "image.PlaneCalib");
-    CHECK(d.asRecord()->data["H"] == data["H"]);
+    CHECK(d.asRecord()->data == data);
   }
 }
 
@@ -185,7 +158,7 @@ TEST_CASE("image.load_calib：不能把其他类型的 Record 当作标定") {
   const auto file = std::filesystem::temp_directory_path() / "lyflow-wrong-calib-type.json";
   std::ofstream(file) << Json{{"kind", "Record"},
                               {"type", "other.Type"},
-                              {"data", std_image::planeCalibJson(std_image::PlaneCalib{})}}
+                              {"data", {{"H", {1, 0, 0, 0, 1, 0, 0, 0, 1}}, {"unit", "mm"}}}}
                              .dump();
   Session s(makeGraph({N{"n", "image.load_calib", Json{{"path", file.u8string()}}}}, {}));
   const Json e = s.wait().nodeEvent("n", "error");

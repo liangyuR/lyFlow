@@ -5,9 +5,9 @@
 #include "lyflow_cv/compat.h"
 #include <opencv2/imgproc.hpp>
 
+#include "lyflow/calibration.h"
 #include "lyflow/overlay.h"
 #include "lyflow_cv/adapter.h"
-#include "lyflow_cv/plane_calib.h"
 #include "ops.h"
 
 namespace lyflow::std_image {
@@ -46,7 +46,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   if (Hm.empty()) {
     return Status::Error(Phase::Execute, "no_board", "角点退化，算不出单应", "pattern");
   }
-  PlaneCalib calib;
+  calibration::Plane calib;
   for (int k = 0; k < 9; ++k)
     calib.H[k] = Hm.at<double>(k / 3, k % 3);
   calib.unit = "mm";
@@ -55,7 +55,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   int spacingN = 0;
   for (std::size_t k = 0; k < corners.size(); ++k) {
     double X = 0, Y = 0;
-    calib.map(corners[k].x, corners[k].y, &X, &Y);
+    calib.map(corners[k].x, corners[k].y, X, Y);
     const double e = std::hypot(X - board[k].x, Y - board[k].y);
     sumSq += e * e;
     maxErr = std::max(maxErr, e);
@@ -69,7 +69,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   ctx.log(LogLevel::Info,
           "标定残差 RMS " + std::to_string(rms) + " mm，约 " + std::to_string(mmPerPx) + " mm/px");
 
-  nlohmann::json data = planeCalibJson(calib);
+  nlohmann::json data{{"H", calib.H}, {"unit", calib.unit}};
   data["rms"] = rms;
   data["maxError"] = maxErr;
   data["mmPerPx"] = mmPerPx;
@@ -77,7 +77,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   data["square"] = square;
   data["imageSize"] = {img->width, img->height};
   Record rec;
-  rec.type = kPlaneCalibType;
+  rec.type = calibration::kPlaneType;
   rec.data = std::move(data);
   outputs.set("calib", Data::record(std::move(rec)));
 

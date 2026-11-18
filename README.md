@@ -79,19 +79,19 @@ MCP 同时使用 HTTP 后端与本地 CLI；配置完成后，先调用 `get_env
 | [std-pointcloud](packs/std-pointcloud/README.md) | 点云读写、滤波、分割、拟合、配准与量测 | 启用         |
 | [std-image](packs/std-image/README.md)           | 图像处理、标定、深度图与点云转换       | 启用         |
 | [std-ml](packs/std-ml/README.md)                 | ONNX Runtime 推理                      | 启用         |
-| [glue](packs/glue/README.md)                     | 胶路、胶宽、断胶、边距与判定           | 按需启用     |
+| [solution-glue](solutions/glue/README.md)            | 胶路、胶宽、断胶、边距与判定           | 按需启用     |
 | [solution-gap](solutions/gap/README.md)          | 间隙与段差测量                         | 按需启用     |
 | [solution-dts](solutions/dts/README.md)          | 车门胶条面差                           | 按需启用     |
 
 开发涂胶流程时，在构建或启动前指定：
 
 ```powershell
-$env:LYFLOW_PACKS = 'glue'
+$env:LYFLOW_PACKS = 'solution-glue'
 pnpm core:build
 pnpm dev
 ```
 
-多个领域包用分号分隔，例如 `'gap;solution-dts;glue'`。切换包配置后先停止开发进程、运行 `pnpm core:build` 重新配置，再启动 `pnpm dev`，使监视构建使用新的包组合。Windows 发布产物的标准包、`glue` 与 `gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
+多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换包配置后先停止开发进程、运行 `pnpm core:build` 重新配置，再启动 `pnpm dev`，使监视构建使用新的包组合。Windows 发布产物的标准包、`solution-glue` 与 `solution-gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
 
 ## 开发与验证
 
@@ -111,7 +111,8 @@ pnpm dev
 
 ```text
 core/                  C++ 执行引擎、C ABI 与 C++ 客户端
-packs/                 标准与领域算子包
+packs/                 标准算子包
+solutions/             场景算子包
 crates/lyflow-client/   Rust C ABI 客户端
 bridge/                Rust 桥接、Tauri 宿主支持与 headless CLI
 packages/editor/       可嵌入的 React 节点编辑器

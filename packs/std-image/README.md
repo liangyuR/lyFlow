@@ -96,7 +96,7 @@ ROI 掩膜保持输入图像尺寸，不携带外部 ROI 父层/工件位姿等�
 
 `image.board_calib` 从全分辨率 u8 棋盘图求 `image.PlaneCalib`。pattern 是 3–100 之间的整数内角点数，square 是格长 mm。输出 H（行主序 3×3）、unit、rms、maxError、mmPerPx、pattern、square、imageSize。
 
-`image.load_calib` 从 JSON 读取整个 `Record` 或 data 对象，验证类型、有限矩阵与非奇异性，支持中文路径；文件大小或修改时间变化后重读。量测算子连接 calib 后按 H 映射两点的距离，未接时使用 px。
+`image.load_calib` 从 JSON 读取整个 `Record` 或 data 对象，验证类型、有限矩阵与非奇异性，支持中文路径。文件大小或修改时间变化后重读，输出保留文件中的标定字段。涂胶量测使用版本化标定，旧图可通过 `planeCalib.v1` [离线添加标定适配器](../../docs/glue-integration.md#迁移旧标定连线)。
 
 ## P1 图像、标定与定位
 

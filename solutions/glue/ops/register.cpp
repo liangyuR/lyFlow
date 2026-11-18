@@ -1,0 +1,30 @@
+// glue 包的注册入口（glue-plan G2）。LyFlow 的 CMake 生成的 registerOpPacks 调它（ADR-0013）。
+#include "glue.h"
+
+namespace lyflow::packs::solution_glue {
+
+void registerPackOps(Registry& r) {
+  // Bundle 声明先于用到它的端口（m8-plan L2）。
+  registerBundles(r);
+  // 顺序即面板里同分类下的排列顺序：一张检测图从左到右
+  registerBeadPath(r);
+  registerTaughtPath(r); // 示教胶路：与 bead_path 二选一，出同形的 glue.Path（glue-plan §6）
+  registerBeadWidth(r);
+  registerBeadBreaks(r);
+  registerEdgeDistance(r);
+  registerJudge(r);
+  registerSynthBreak(r);
+  // 固定相机飞拍后检（glue-plan §5）：定位 → 逐点卡尺
+  registerStationCalipers(r);
+  // 1.2 的测量算子：只测量、门限全开放，判定归宿主（docs/glue-measure-ops.md）
+  registerTrackPath(r);
+  registerPolyline(r);
+  // 1.3 的彩色测量算子：RGB 帧上的颜色模型与得分图，判定同样归宿主
+  registerColorModel(r);
+  registerColorTrack(r);
+  registerColorRuns(r);
+  // 片段引用上面的算子；自检在注册表填满之后才跑
+  registerSnippets(r);
+}
+
+} // namespace lyflow::packs::solution_glue

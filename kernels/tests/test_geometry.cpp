@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "lyflow/kernel/geometry.h"
+#include "lyflow/kernel/polyline.h"
 #include "lyflow/kernel/rigid.h"
 
 #include <cmath>
@@ -147,4 +148,29 @@ TEST_CASE("Public rigid kernel keeps legacy Euler order, proper rotations and Re
   CHECK_FALSE(transformPoses3D(record, &transform, "", why, &invalidResult));
   CHECK(invalidResult);
   CHECK(record.data == committed.data);
+}
+
+TEST_CASE("Polyline resampling preserves arc order, endpoints and interpolated tangents") {
+  std::vector<double> s;
+  std::vector<Vec2> pts, tangents;
+  REQUIRE(resamplePolyline<Vec2>({{0, 0}, {300, 0}, {300, 100}}, 50, 0, 2.0, &s, &pts, &tangents));
+  CHECK(s.front() == 50.0);
+  CHECK(s.back() == 400.0);
+  CHECK(s.size() == 176);
+  CHECK(pts.back().x == doctest::Approx(300.0));
+  CHECK(pts.back().y == doctest::Approx(100.0));
+  CHECK(pts[125].x == doctest::Approx(300.0)); // s = 300：拐角
+  CHECK(tangents[125].x == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+  CHECK(tangents[125].y == doctest::Approx(std::sqrt(0.5)).epsilon(1e-6));
+  CHECK_FALSE(resamplePolyline<Vec2>({{0, 0}, {300, 0}}, 0, 301, 2.0, &s, &pts, &tangents));
+  const PolylineView<Vec2> line{&s, &pts, &tangents};
+  REQUIRE(line.valid());
+  Vec2 point, tangent;
+  line.at(299.0, &point, &tangent);
+  CHECK(point.x == doctest::Approx(299.0));
+  CHECK(point.y == 0.0);
+  CHECK(length(tangent) == doctest::Approx(1.0));
+  line.at(405.0, &point, &tangent);
+  CHECK(point.x == doctest::Approx(300.0));
+  CHECK(point.y == doctest::Approx(100.0));
 }

@@ -2,7 +2,19 @@
 // 调用顺序就是 manifest 里的顺序，也是算子面板里的顺序。
 #include "ops.h"
 
+#include "lyflow_cv/inspection.h"
+#include "lyflow_cv/template_pose.h"
+
+namespace lyflow::std_image::color {
+void registerColorMap(Registry& r);
+void registerColorFan(Registry& r);
+} // namespace lyflow::std_image::color
+
 namespace lyflow::packs::std_image {
+void registerResponse(Registry& r);
+void registerFanScan(Registry& r);
+void registerLateralRuns(Registry& r);
+void registerPartEdges(Registry& r);
 void registerPlaneCalibUpgrade(Registry& r);
 
 void registerPackOps(Registry& r) {
@@ -45,6 +57,14 @@ void registerPackOps(Registry& r) {
   ops::registerP5Projection(r);
   ops::registerP5Inspection(r);
   ops::registerP5PoseProjection(r);
+  lyflow::std_image::inspection::registerInspectionBundles(r);
+  registerResponse(r);
+  registerFanScan(r);
+  registerLateralRuns(r);
+  registerPartEdges(r);
+  lyflow::std_image::color::registerColorMap(r);
+  lyflow::std_image::color::registerColorFan(r);
+  lyflow::std_image::template_pose::registerLocate(r);
   registerPlaneCalibUpgrade(r);
 }
 

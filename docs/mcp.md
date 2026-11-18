@@ -410,7 +410,7 @@ pnpm --filter @lyflow/mcp test
 点云统计、JSON Lines 解析容错）总是跑；集成冒烟自己起 test-server 与 MCP 子进程，跑
 `list_operators → get_operator → validate_graph → run_graph → get_node_outputs → summarize_output`，
 另一条走配方：`list_recipes → run_graph recipe`（点数与 `lyflow run --recipe --outputs` 相同）→ 失配的配方被拦 → 内联图带 recipe →
-`get_params recipe`。glue 构建还覆盖环境核对、绑定入口、规格锁定、预算耗尽/续跑、输入漂移拒绝、验证与留出评估、基线比较、失败叠画、候选图/配方导出与后台取消。没有 `bridge/target/debug/lyflow.exe` 时集成测试 skip 并打出原因；显式 LYFLOW_PACKS=glue 时缺 glue 算子视为失败。`pnpm check` 里带着这一步。
+`get_params recipe`。glue 构建还覆盖环境核对、绑定入口、规格锁定、预算耗尽/续跑、输入漂移拒绝、验证与留出评估、基线比较、失败叠画、候选图/配方导出与后台取消。没有 `bridge/target/debug/lyflow.exe` 时集成测试 skip 并打出原因；显式 LYFLOW_PACKS=solution-glue 时缺 glue 算子视为失败。`pnpm check` 里带着这一步。
 
 ## 原生可视化
 

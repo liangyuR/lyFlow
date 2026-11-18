@@ -94,20 +94,22 @@ TEST_CASE("PlaneCalib graph migration rejects guessed units versions ports and d
 
 TEST_CASE(
     "PlaneCalib migrated graph plans and runs with explicit units frames and future rejection") {
-  const auto legacy = planeCalibGraph();
+  auto legacy = planeCalibGraph();
+  const auto file = std::filesystem::temp_directory_path() / "lyflow-legacy-plane-calib.json";
+  Record old{calibration::kPlaneType, {{"H", {1, 0, 0, 0, 1, 0, 0, 0, 1}}}};
+  std::ofstream(file, std::ios::binary) << old.data.dump();
+  legacy["nodes"][0]["params"]["path"] = file.u8string();
   Json graph;
   GraphMigrationError error;
   REQUIRE_MESSAGE(migrateGraph(ensureRegistry(), legacy, legacy["contractUpgrade"], graph, error),
                   error.message);
-  Record old{calibration::kPlaneType, {{"H", {1, 0, 0, 0, 1, 0, 0, 0, 1}}}};
-  std::vector<exec::InjectedInput> inputs{{"load", "calib", Data::record(old)}};
-  const auto plan = Json::parse(exec::planGraphJson(graph.dump(), {}, {}, "", inputs));
+  const auto plan = Json::parse(exec::planGraphJson(graph.dump(), {}, {}, "", {}));
   REQUIRE(plan.size() == 3);
   bool found = false;
   for (const auto& node : plan)
     found = found || node.value("nodeId", "") == "explicit_calib";
   CHECK(found);
-  Session run(graph, {}, {}, false, 1, false, inputs);
+  Session run(graph);
   INFO(Json(run.wait().events).dump());
   REQUIRE(run.wait().runStatus() == "ok");
   Data result;
@@ -120,10 +122,9 @@ TEST_CASE(
   CHECK(plane.imageFrame == "camera");
   CHECK(plane.planeFrame == "table");
   CHECK(result.asRecord()->data["schemaVersion"] == 1);
-  CHECK_FALSE(old.data.contains("unit"));
   old.data["schemaVersion"] = 2;
-  inputs[0].data = Data::record(old);
-  Session future(graph, {}, {}, false, 1, false, inputs);
+  Session future(graph, {}, {}, false, 1, false,
+                 {exec::InjectedInput{"load", "calib", Data::record(old)}});
   CHECK(future.wait().runStatus() == "error");
   CHECK(future.wait().nodeEvent("explicit_calib", "error")["error"]["code"] == "bad_input");
 }

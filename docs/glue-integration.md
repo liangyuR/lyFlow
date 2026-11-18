@@ -1,16 +1,16 @@
 # glue 接入指南
 
-本页说明宿主如何选择涂胶流程、注入图像和消费量测结果。算子参数与 Record / Bundle 字段见 [glue 算子包](../packs/glue/README.md)，低层测量和彩色流程见 [涂胶测量算子](glue-measure-ops.md)。部署与 ABI 兼容规则统一见 [运行库与 SDK 发包](deployment/packaging.md)。
+本页说明宿主如何选择涂胶流程、注入图像和消费量测结果。算子参数与 Record / Bundle 字段见 [glue 算子包](../solutions/glue/README.md)，低层测量和彩色流程见 [涂胶测量算子](glue-measure-ops.md)。部署与 ABI 兼容规则统一见 [运行库与 SDK 发包](deployment/packaging.md)。
 
 ## 选择流程
 
 | 场景 | 参考图 | 宿主职责 |
 |---|---|---|
-| 随动相机，逐帧搜索胶路 | [glue1](../packs/glue/graphs/glue1.lyflow.json)、[glue2](../packs/glue/graphs/glue2.lyflow.json) | 给定喷嘴、搜索方向和检测区，核对胶路是否跟到了目标胶条。 |
-| 固定拍照点，按示教折线检测 | [taught](../packs/glue/graphs/taught.lyflow.json) | 按拍照点提供示教线、检测区、容差、胶宽范围和标定。 |
-| 固定相机飞拍，模板定位后逐点量测 | [flyshot](../packs/glue/graphs/flyshot.lyflow.json) | 管理模板、站点和标定文件；按站点身份消费结果，完成判定及跨帧缺陷合并。 |
-| 显式配置方向、卡尺与测量策略 | [measure](../packs/glue/graphs/measure.lyflow.json) | 消费原始测量与质量信号，定义有无胶、方向回退、候选选择和产品判定。 |
-| 彩色胶条 | [color](../packs/glue/graphs/color.lyflow.json) | 示教颜色模型，冻结生产配置，并用真实好件、缺陷件与干扰背景验收。 |
+| 随动相机，逐帧搜索胶路 | [glue1](../solutions/glue/graphs/glue1.lyflow.json)、[glue2](../solutions/glue/graphs/glue2.lyflow.json) | 给定喷嘴、搜索方向和检测区，核对胶路是否跟到了目标胶条。 |
+| 固定拍照点，按示教折线检测 | [taught](../solutions/glue/graphs/taught.lyflow.json) | 按拍照点提供示教线、检测区、容差、胶宽范围和标定。 |
+| 固定相机飞拍，模板定位后逐点量测 | [flyshot](../solutions/glue/graphs/flyshot.lyflow.json) | 管理模板、站点和标定文件；按站点身份消费结果，完成判定及跨帧缺陷合并。 |
+| 显式配置方向、卡尺与测量策略 | [measure](../solutions/glue/graphs/measure.lyflow.json) | 消费原始测量与质量信号，定义有无胶、方向回退、候选选择和产品判定。 |
+| 彩色胶条 | [color](../solutions/glue/graphs/color.lyflow.json) | 示教颜色模型，冻结生产配置，并用真实好件、缺陷件与干扰背景验收。 |
 
 高层 `glue.bead_path → glue.bead_width → glue.bead_breaks / glue.edge_distance → glue.judge` 提供单帧检测。测量算子与飞拍图只负责定位、量测及质量信号，宿主不能把它们的执行成功直接当作产品合格。
 
@@ -21,11 +21,38 @@
 - 图像采集属于宿主。入口 `io.load_image` 配 `source=inputs`，通过 C ABI / C++ / Rust 的图像注入接口传入 `n_load.image`。接口允许带行填充，core 将输入复制为自己的数据；具体字段与缓冲生命周期见 [嵌入指南](embedding.md)。
 - 文件调试将入口切成 `source=file` 并设置 `path`。CLI 的 `--input` 用于点云，不能代替图像注入；图像文件通过入口参数加载。
 - 图内 Path 参数相对图文件目录解析。模板、站点、标定和图应作为一套配置发布，不依赖进程当前目录。
-- `calib` 使用 `Record<image.PlaneCalib>`，单应矩阵 H 将图像 px 映射到工作平面 mm。宽度和距离按映射后两点的距离计算，曲线长度按映射后的路径累计，不能只乘一个全局比例。
+- `calib` 使用 `schemaVersion=1` 的 `Record<image.PlaneCalib>`，包括 `imageFrame`、`planeFrame`、`unit` 和九元素行主序单应矩阵 `H`。H 将原图像素映射至以 m 或 mm 表示的工作平面。宽度和距离按映射后两点的距离计算，曲线长度按映射后的路径累计。
 - 高层胶路中，`zone` 是沿胶路的弧长区间。切向指向远离喷嘴的方向，法向为 `(-t.y, t.x)`，卡尺 `lo / hi` 是沿法向的像素偏移。示教胶路的弧长从第一个示教点开始。
-- 接标定后，量测及依赖量测单位的断口、判定阈值按 mm 解释；`tolerance`、图像搜索窗、站点位置等像素参数仍为 px。应以各参数声明的 unit 为准。
+- 接标定后，量测及依赖量测单位的断口、判定阈值采用标定单位。`tolerance`、图像搜索窗、站点位置等图像参数仍为 px。
 
 标定属于相机工位与工作平面。`image.board_calib` 从棋盘格生成标定，生产图通过 `image.load_calib` 读取宿主保存的文件；换型不应无条件重标，也不能把不同高度平面的单应混用。
+
+### 迁移旧标定连线
+
+旧图可用 `planeCalib.v1` 在标定连线上插入 `image.upgrade_plane_calib`。以飞拍图的 `n_calib.calib → n_calipers.calib` 为例，将请求保存为 `plane-calib-request.json`。
+
+```json
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "kind": "planeCalib.v1",
+      "source": {"node": "n_calib", "op": "image.load_calib", "opVersion": "1.0.0", "port": "calib"},
+      "target": {"node": "n_calipers", "port": "calib"},
+      "adapterId": "calib_v1",
+      "missingUnit": "mm",
+      "imageFrame": "camera",
+      "planeFrame": "table"
+    }
+  ]
+}
+```
+
+```powershell
+lyflow migrate .\old-flyshot.lyflow.json --request .\plane-calib-request.json --write
+```
+
+填写图里的实际节点 ID、相机帧和平面帧，并按旧文件缺失单位时的实际约定选择 `missingUnit`。如果来源为棋盘格标定节点，将 `source.op` 改为 `image.board_calib`。旧标定文件可继续由迁移后的图读取，图加载时不会自动插入适配器。
 
 ## 示教胶路
 
@@ -60,13 +87,13 @@ T(p) = R(angle) · (p − teachCenter) + center
 
 `angleObservable=false` 表示模板不能可靠约束角度，此时角度报 0、只补平移，不能解释为零件没有转动。模板离测量点较远的宿主必须核对未补偿转角带来的位移误差。`angleRange=0` 是主动关闭转角搜索，不能借其 `angleObservable=true` 证明实际转角为零。
 
-角度搜索对各角度使用一致的预平滑、插值与亚像素相位比较；具体搜索护栏和细扫定义见 [定位内核](../packs/glue/algo/flyshot.h)。只找平移或角度不可观时仍存在亚像素峰值锁定误差，不能把合成测试中的容差承诺为所有现场模板的精度。
+角度搜索对各角度使用一致的预平滑、插值与亚像素相位比较；具体搜索护栏和细扫定义见 [定位内核](../packs/std-image/include/lyflow_cv/template_pose.h)。只找平移或角度不可观时仍存在亚像素峰值锁定误差，不能把合成测试中的容差承诺为所有现场模板的精度。
 
 ### 站点与结果
 
 `stations` 是宿主发布的 JSON 文件，包含 `points[[x,y]]`、`normals[[nx,ny]]` 和可选 `ids[]`。法向从内边开口一侧指向翻边，负偏移为内边一侧。站点经位姿变换后，卡尺在 `innerSearch` 查内边、在 `beadSearch` 查目标胶条；`innerSelect` 由宿主按测量基准选择最近或最强内边。
 
-结果提供逐站状态和内边、近胶边、远胶边的像素偏移；接标定后另给内边到近胶边、到胶中心及胶宽的物理距离。中心线或近边两种测量口径由宿主选择，不必重复运行视觉。胶边超出完整卡尺范围时是 `incomplete_bead`，不能把窗口边缘当胶边或补出合格胶宽。字段和状态以 [算子实现](../packs/glue/ops/station_calipers.cpp) 与 manifest 为准。
+结果提供逐站状态和内边、近胶边、远胶边的像素偏移；接标定后另给内边到近胶边、到胶中心及胶宽的物理距离。中心线或近边两种测量口径由宿主选择，不必重复运行视觉。胶边超出完整卡尺范围时是 `incomplete_bead`，不能把窗口边缘当胶边或补出合格胶宽。字段和状态以 [算子实现](../solutions/glue/ops/station_calipers.cpp) 与 manifest 为准。
 
 站点身份与跨帧弧长归属由宿主管理。宿主负责产品阈值、缺失站点处理、重复站位去重、跨帧断口合并，以及 PLC、数据库和 UI 的结果表达。
 
@@ -81,7 +108,7 @@ T(p) = R(angle) · (p − teachCenter) + center
 ## 构建与验证入口
 
 ```powershell
-$env:LYFLOW_PACKS = 'glue'
+$env:LYFLOW_PACKS = 'solution-glue'
 pnpm core:build
 pnpm check:glue
 ```

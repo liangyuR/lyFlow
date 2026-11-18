@@ -37,7 +37,7 @@ DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，�
 | `packs/std-pointcloud` | 点云处理与 2D 量测（拟合、ICP、盒裁剪）                                                               | 开                                   |
 | `packs/std-ml`         | `ml.onnx_run`                                                                                         | 开                                   |
 | `packs/std-image`      | 图像域（OpenCV，边界同 ADR-0005）：读写、基础处理、分割、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云 | 开                                   |
-| `packs/glue`           | 涂胶检测：胶路、胶宽、断胶、边距与判定                                                                | 关，`LYFLOW_PACKS=glue` 打开         |
+| `solutions/glue`           | 涂胶检测：胶路、胶宽、断胶、边距与判定                                                                | 关，`LYFLOW_PACKS=solution-glue` 打开         |
 | `solutions/gap`        | `gap.*`（间隙/段差测量）                                                                              | 关，`LYFLOW_PACKS=solution-gap` 打开 |
 | `solutions/dts`        | `dts.*`（车门胶条面差）                                                                               | 关，`LYFLOW_PACKS=solution-dts` 打开 |
 
@@ -46,7 +46,7 @@ DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，�
 
 两点值得强调：
 
-开发默认组合与发布组合不同：Windows x64 运行库固定包含三个标准包、`glue` 与 `gap`，以 [发布配置](../packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
+开发默认组合与发布组合不同：Windows x64 运行库固定包含标准包、`solution-glue` 与 `solution-gap`，以 [发布配置](../packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
 
 **执行调度必须在 C++。** 调度需要知道数据有多大、中间结果能不能复用、内存占用和哪几步能并行。
 这些信息只有 C++ 侧有。前端 JS 拿不到，也不该假装拿得到。
