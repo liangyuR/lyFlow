@@ -803,20 +803,23 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
 
   // 整节点注入只给了一部分输出时，没给的那些输出不存在：接在上面的连线不装配，
   // 可选输入按未连接处理，必填输入报 missing_input。
-  const auto withheldOutput = [&](std::size_t node, const std::string& port) {
+  const auto outputsInjected = [&](std::size_t node) {
     const auto injected = options.injectedPorts.find(graph.nodes[node].id);
-    if (injected == options.injectedPorts.end() || injected->second.count(port))
-      return false;
-    return std::any_of(
-        injected->second.begin(), injected->second.end(),
-        [&](const std::string& name) { return findPort(prepared[node].op->outputs, name); });
+    return injected != options.injectedPorts.end() &&
+           std::any_of(
+               injected->second.begin(), injected->second.end(),
+               [&](const std::string& name) { return findPort(prepared[node].op->outputs, name); });
+  };
+  const auto withheldOutput = [&](std::size_t node, const std::string& port) {
+    return outputsInjected(node) && !options.injectedPorts.at(graph.nodes[node].id).count(port);
   };
 
   // -- 类型兼容（按推导后的实际类型）+ 装配输入绑定 -------------------------
   for (const Wire& w : wires) {
     const RawEdge& e = *w.edge;
     if (withheldOutput(w.fi, e.fromPort)) {
-      if (w.inPort->required) {
+      // 下游自己也被整节点注入时 compute 不跑，它的输入没有人用。
+      if (w.inPort->required && !outputsInjected(w.ti)) {
         connectedInputs[w.ti].insert(e.toPort);
         fail(w.ti, "missing_input",
              "必填输入端口 '" + e.toPort + "' 接在节点 '" + e.fromNode + "' 的输出 '" + e.fromPort +

@@ -486,6 +486,15 @@ TEST_CASE("整节点注入只给一部分输出：没给的输出不存在，可
     CHECK(failed["errors"][0]["code"] == "missing_input");
     CHECK(failed["errors"][0]["portName"] == "a");
   }
+  SUBCASE("下游也被整节点注入时不查它的必填输入") {
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"sp", "rest", Data::cloud(lineCloud(2, 1.0F))},
+        exec::InjectedInput{"m", "cloud", Data::cloud(lineCloud(4, 0.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    CHECK(s.wait().runStatus() == "ok");
+    const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
+    CHECK(outputs["merged"]["elementCount"] == 4);
+  }
 }
 
 TEST_CASE("注入的数据进 cacheKey：换一片云就不会命中旧结果（整节点注入与输入注入）") {
