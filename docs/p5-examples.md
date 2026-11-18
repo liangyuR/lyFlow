@@ -58,7 +58,7 @@ lyflow run examples/p5-mask-remove.lyflow.json --param topExpand=2 --outputs --s
 
 ### 有限体、姿态与圆孔
 
-盒体 A 全尺寸 [.125,.125,.03125]、B [.0625,.0625,.0625]，中心分别为 [0,0,.5]、[.25,0,.5]。这些二进制可精确表示的边界便于验证 f32 采样和 closed 裁剪。圆柱模式的 X/Y 直径必须一致，因此不能用不等边长方体假装圆柱。所有示例移除路径使用 compact；保点序 NaN 路径由原生专项测试覆盖。点计数碰撞结果不是实体碰撞安全保证。
+盒体 A 全尺寸 [.125,.125,.03125]、B [.0625,.0625,.0625]，中心分别为 [0,0,.5]、[.25,0,.5]。这些二进制可精确表示的边界便于验证 f32 采样和 closed 裁剪。圆柱模式的 X/Y 直径必须一致，因此不能用不等边长方体假装圆柱。裁剪、紧凑移除和碰撞计数共用一份查询。图参数 `shape` 控制查询几何，`maxCount` 独立控制计数分类。保序移除由原生专项测试覆盖。
 
 刚体图的 A=[0,0,0]、B=[.1,0,0]、参考C=[0,.1,0] 相互独立。图参数只绑定 currentC.position，不同时改变模板。`pose.rigid_check` 以登记残差判定，另用 `pose.rigid_register` 输出实际 native Transform 和配准结果，再连接真实变换应用；不能用固定 identity 冒充。可观测但超公差时保留候选变换并判 accepted=false，退化不可观测时明确报错，不伪造变换。支链还示范有限对称翻转、显式连续轴对称旋转和二维工件向三维平面的嵌入；对称性是调用者声明，不能由任意盒尺寸推断。
 
@@ -66,7 +66,7 @@ lyflow run examples/p5-mask-remove.lyflow.json --param topExpand=2 --outputs --s
 
 圆孔图以实际黑孔边界表示已知半径；具有厚度的黑环有两个不同边界，不能把中线半径强加给其中一条。每个空间圆保留与实际相机约束一致的解，法向按无向平面比较，attributes.shape=circle 与真实圆盘投影关联。倾斜图至少一个解必须满足清单 centerToleranceM 和 normalCosineMinimum，不能只检查非空。所有几何输出仍 pickable=false。
 
-掩膜移除只通过三维实例 attributes.primitive2DId 显式关联真实检测 ID，禁止按数组位置猜测，也不会偷偷添加三维体积裁剪条件。topExpand=2 按每列原掩膜最上方增加两行，两个区域共增加26个删除点。原图之外与没有可信正深度的点继续保留并分开统计；如需同时限制三维有限体，可明确后接 cloud.remove_primitives。
+掩膜移除只通过三维实例 attributes.primitive2DId 显式关联真实检测 ID，禁止按数组位置猜测，也不会偷偷添加三维体积裁剪条件。topExpand=2 按每列原掩膜最上方增加两行，两个区域共增加26个删除点。原图之外与没有可信正深度的点继续保留并分开统计；三维有限体也可基于移除后的云接入 `cloud.query_primitives` 和 `cloud.remove_indices`。
 
 ## 正式合同验证
 

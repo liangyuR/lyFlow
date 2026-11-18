@@ -67,15 +67,15 @@ const exec::PlanNode* nodeOf(const exec::Plan& plan, const std::string& id) {
 
 } // namespace
 
-TEST_CASE("注册表自检干净，core 自带的两个算子都在") {
+TEST_CASE("注册表自检干净，core 自带的流程算子都在") {
   ensureTestOps();
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems)
     MESSAGE(p);
   CHECK(problems.empty());
 
-  // S1：core 只剩这两个，其余都在算子包里（包自己的清单在包的测试里）
-  for (const auto& id : {"gen.synthetic", "util.reroute"}) {
+  // 包自己的清单在对应测试里。
+  for (const auto& id : {"util.reroute", "flow.fallback", "flow.select"}) {
     CAPTURE(id);
     CHECK(ensureRegistry().find(id) != nullptr);
     CHECK(ensureRegistry().find(id)->pack.empty());
@@ -90,7 +90,7 @@ TEST_CASE("拓扑序：上游一定排在下游之前") {
   const Json doc = makeGraph(
       {
           {"c", "test.thin"},
-          {"a", "gen.synthetic"},
+          {"a", "test.make_cloud"},
           {"b", "test.thin"},
       },
       {{"a.cloud", "b.cloud"}, {"b.cloud", "c.cloud"}});
@@ -113,7 +113,7 @@ TEST_CASE(
   // b.cloud」会先被单连接规则挡下来，测到的就不是环检测了。
   const Json doc = makeGraph(
       {
-          {"a", "gen.synthetic"},
+          {"a", "test.make_cloud"},
           {"b", "test.merge2"},
           {"c", "test.thin"},
       },
@@ -140,7 +140,7 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
   ensureTestOps();
   const Json doc = makeGraph(
       {
-          {"a", "gen.synthetic", Json{{"pointCount", -5}, {"noise", "字符串不是数字"}}},
+          {"a", "test.make_cloud", Json{{"pointCount", -5}, {"withIntensity", "字符串不是布尔值"}}},
           {"b", "test.thin", Json{{"leaf", 0.01}, {"nonexistent", 1}}},
           {"c", "no.such.operator"},
       },
@@ -149,7 +149,7 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
   const Built r = build(doc);
   REQUIRE(r.built); // 节点级错误不阻止整图编译
 
-  // a：pointCount 越界 + noise 类型不对，两条都要在
+  // a：pointCount 越界 + withIntensity 类型不对，两条都要在
   const Diagnostic* count = r.find("a", "bad_param");
   REQUIRE(count != nullptr);
   std::size_t aErrors = 0;
@@ -162,7 +162,7 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
   }
   CHECK(aErrors == 2);
   CHECK(std::find(aParams.begin(), aParams.end(), "pointCount") != aParams.end());
-  CHECK(std::find(aParams.begin(), aParams.end(), "noise") != aParams.end());
+  CHECK(std::find(aParams.begin(), aParams.end(), "withIntensity") != aParams.end());
 
   // b：leaf 是标量而不是长度 3 的数组，外加一个未知参数名
   CHECK(r.hasCode("b", "bad_param"));
@@ -188,16 +188,16 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
 
 TEST_CASE("默认值合并：没写的参数用 manifest 的默认值") {
   ensureTestOps();
-  const Json doc = makeGraph({{"g", "gen.synthetic", Json{{"seed", 7}}}}, {});
+  const Json doc = makeGraph({{"g", "test.make_cloud", Json{{"seed", 7}}}}, {});
   const Built r = build(doc);
   REQUIRE(r.built);
   const exec::PlanNode* g = nodeOf(r.plan, "g");
   REQUIRE(g != nullptr);
   CHECK(g->params.at("seed").intValue() == 7);
-  CHECK(g->params.at("pointCount").intValue() == 40000); // manifest 默认值
+  CHECK(g->params.at("pointCount").intValue() == 100); // manifest 默认值
   CHECK(g->params.at("withIntensity").boolValue() == true);
   // 稀疏存储的含义：图里没写的键在这里必须存在，算子才敢无条件取值
-  CHECK(g->params.size() == ensureRegistry().find("gen.synthetic")->params.size());
+  CHECK(g->params.size() == ensureRegistry().find("test.make_cloud")->params.size());
 }
 
 TEST_CASE("类型兼容矩阵") {
@@ -205,14 +205,14 @@ TEST_CASE("类型兼容矩阵") {
   // 相等：PointCloud → PointCloud
   {
     const Json doc =
-        makeGraph({{"a", "gen.synthetic"}, {"b", "test.thin"}}, {{"a.cloud", "b.cloud"}});
+        makeGraph({{"a", "test.make_cloud"}, {"b", "test.thin"}}, {{"a.cloud", "b.cloud"}});
     CHECK(build(doc).errorCount() == 0);
   }
   // 不等：Indices → PointCloud 端口
   {
     const Json doc = makeGraph(
         {
-            {"a", "gen.synthetic"},
+            {"a", "test.make_cloud"},
             {"s", "test.half_indices"},
             {"b", "test.thin"},
         },
@@ -223,7 +223,7 @@ TEST_CASE("类型兼容矩阵") {
   // 端口不存在
   {
     const Json doc =
-        makeGraph({{"a", "gen.synthetic"}, {"b", "test.thin"}}, {{"a.nope", "b.cloud"}});
+        makeGraph({{"a", "test.make_cloud"}, {"b", "test.thin"}}, {{"a.nope", "b.cloud"}});
     CHECK(build(doc).hasCode("a", "unknown_port"));
   }
   // 必填输入没连
@@ -237,7 +237,7 @@ TEST_CASE("类型兼容矩阵") {
   // 可选输入没连：test.merge2 的 b 是 required=false，不该报
   {
     const Json doc =
-        makeGraph({{"a", "gen.synthetic"}, {"c", "test.merge2"}}, {{"a.cloud", "c.a"}});
+        makeGraph({{"a", "test.make_cloud"}, {"c", "test.merge2"}}, {{"a.cloud", "c.a"}});
     CHECK(build(doc).errorCount() == 0);
   }
 }
@@ -260,7 +260,7 @@ TEST_CASE("结构性问题也是诊断，不是异常：边指向不存在的节
     const char* portName; // 空 = 不看端口
   };
   // 边指向不存在的节点
-  Json ghost = makeGraph({{"a", "gen.synthetic"}}, {});
+  Json ghost = makeGraph({{"a", "test.make_cloud"}}, {});
   ghost["edges"].push_back(Json{{"id", "e9"},
                                 {"from", {{"node", "a"}, {"port", "cloud"}}},
                                 {"to", {{"node", "ghost"}, {"port", "cloud"}}}});
@@ -268,7 +268,7 @@ TEST_CASE("结构性问题也是诊断，不是异常：边指向不存在的节
       {"unknown_node", ghost, "unknown_node", ""},
       // 输入端口是单连接
       {"multi_input",
-       makeGraph({{"a", "gen.synthetic"}, {"b", "gen.synthetic"}, {"m", "test.merge2"}},
+       makeGraph({{"a", "test.make_cloud"}, {"b", "test.make_cloud"}, {"m", "test.merge2"}},
                  {{"a.cloud", "m.a"}, {"b.cloud", "m.a"}}),
        "multi_input", "a"},
   };
@@ -290,9 +290,9 @@ TEST_CASE("结构性问题也是诊断，不是异常：边指向不存在的节
 
 TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变，并沿着依赖链传播") {
   ensureTestOps();
-  const Json a = makeGraph({{"g", "gen.synthetic", Json{{"seed", 1}, {"pointCount", 100}}}}, {});
-  const Json b = makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 100}, {"seed", 1}}}}, {});
-  const Json c = makeGraph({{"g", "gen.synthetic", Json{{"seed", 2}, {"pointCount", 100}}}}, {});
+  const Json a = makeGraph({{"g", "test.make_cloud", Json{{"seed", 1}, {"pointCount", 100}}}}, {});
+  const Json b = makeGraph({{"g", "test.make_cloud", Json{{"pointCount", 100}, {"seed", 1}}}}, {});
+  const Json c = makeGraph({{"g", "test.make_cloud", Json{{"seed", 2}, {"pointCount", 100}}}}, {});
 
   const std::string ka = nodeOf(build(a).plan, "g")->cacheKey;
   const std::string kb = nodeOf(build(b).plan, "g")->cacheKey;
@@ -304,7 +304,7 @@ TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变，并沿�
 
   // 沿着依赖链传播
   auto keyOf = [](int seed) {
-    const Json doc = makeGraph({{"g", "gen.synthetic", Json{{"seed", seed}}}, {"v", "test.thin"}},
+    const Json doc = makeGraph({{"g", "test.make_cloud", Json{{"seed", seed}}}, {"v", "test.thin"}},
                                {{"g.cloud", "v.cloud"}});
     return nodeOf(build(doc).plan, "v")->cacheKey;
   };

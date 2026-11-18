@@ -1,4 +1,5 @@
 #include "p3_example_helpers.h"
+#include "test_ops.h"
 
 #include "lyflow/calibration.h"
 
@@ -37,6 +38,7 @@ public:
 
 TEST_CASE(
     "P5 true odd sized source preview preserves physical cloud samples and full pixel mask coverage") {
+  ensureTestOps();
   PreviewFiles files;
   PointCloud points;
   for (const double pixel : {100.25, 1100.25, 2200., -100.}) {
@@ -51,7 +53,7 @@ TEST_CASE(
   }
   const auto input = Data::cloud(std::move(points));
   const auto graph =
-      makeGraph({{"source", "gen.synthetic"},
+      makeGraph({{"source", "test.make_cloud"},
                  {"image", "io.load_image", {{"path", "source.png"}, {"mode", "unchanged"}}},
                  {"camera", "image.load_camera_calib", {{"path", "camera.json"}}},
                  {"project",

@@ -99,7 +99,7 @@ TEST_CASE("P2 top-layer retains original grouped identity, channels and unsuppor
 
 TEST_CASE("P2 neighboring support strategies honor local directions and fixed top anchor") {
   auto registry = heightRegistry();
-  test::OpCall call(registry);
+  test::OpCall call(registry), apply(registry);
   PointCloud c;
   for (int y = 0; y < 8; ++y)
     for (int x = 0; x < 8; ++x) {
@@ -108,6 +108,7 @@ TEST_CASE("P2 neighboring support strategies honor local directions and fixed to
     }
   call.inputs["cloud"] = Data::cloud(c);
   call.inputs["instances"] = Data::record(object());
+  apply.inputs["instances"] = call.inputs.at("instances");
   for (const char* method : {"point_plane", "axis_intercept", "top_layer", "mean", "farthest"}) {
     REQUIRE(call.run("cloud.neighbor_height", {{"method", Value::text(method)},
                                                {"direction", Value::text("top")},
@@ -116,7 +117,9 @@ TEST_CASE("P2 neighboring support strategies honor local directions and fixed to
     const auto result = call.out("heights").asRecord()->data["items"][0];
     CHECK(result["valid"] == true);
     CHECK(std::abs(result["height"].get<double>() - 1) < 1e-6);
-    const auto item = call.out("instances").asRecord()->data["items"][0];
+    apply.inputs["heights"] = call.out("heights");
+    REQUIRE(apply.run("pose.apply_height").ok);
+    const auto item = apply.out("instances").asRecord()->data["items"][0];
     CHECK(std::abs(item["position"][2].get<double>() + item["size"][2].get<double>() / 2 - 1) <
           1e-8);
   }
@@ -125,14 +128,23 @@ TEST_CASE("P2 neighboring support strategies honor local directions and fixed to
         1e-6);
   REQUIRE(call.run("cloud.neighbor_height", {{"direction", Value::text("left")}}).ok);
   CHECK(call.out("heights").asRecord()->data["items"][0]["valid"] == false);
-  CHECK(call.out("instances").asRecord()->data == object().data);
-  REQUIRE(call.run("cloud.neighbor_height", {{"source", Value::text("original")}}).ok);
-  CHECK(call.out("instances").asRecord()->data == object().data);
+  apply.inputs["heights"] = call.out("heights");
+  REQUIRE(apply.run("pose.apply_height").ok);
+  CHECK(apply.out("instances").asRecord()->data == object().data);
+  const auto measuredCloud = call.inputs.at("cloud");
+  call.inputs.erase("cloud");
+  REQUIRE(call.run("cloud.neighbor_height", {{"method", Value::text("original")}}).ok);
+  CHECK(call.out("heights").asRecord()->data["items"][0]["axisHeight"] == 1);
   REQUIRE(call.run("cloud.neighbor_height",
                    {{"method", Value::text("provided")}, {"providedHeight", Value::number(.3)}})
               .ok);
-  CHECK(std::abs(call.out("instances").asRecord()->data["items"][0]["size"][2].get<double>() - .3) <
-        1e-12);
+  apply.inputs["heights"] = call.out("heights");
+  REQUIRE(apply.run("pose.apply_height").ok);
+  CHECK(std::abs(apply.out("instances").asRecord()->data["items"][0]["size"][2].get<double>() -
+                 .3) < 1e-12);
+  REQUIRE(apply.run("pose.apply_height", {{"source", Value::text("maximum")}}).ok);
+  CHECK(apply.out("instances").asRecord()->data["items"][0]["size"][2] == 1);
+  call.inputs["cloud"] = measuredCloud;
   call.inputs["workspace"] =
       Data::record(poses::make3D("ws", "input", {0, .8, 0}, {0, 0, 0, 1}, {1, 1, .1}));
   REQUIRE(call.run("cloud.neighbor_height", {{"direction", Value::text("right")}}).ok);
@@ -142,7 +154,7 @@ TEST_CASE("P2 neighboring support strategies honor local directions and fixed to
 
 TEST_CASE("P2 sloped support separates perpendicular measurement from axial box dimension") {
   auto registry = heightRegistry();
-  test::OpCall call(registry);
+  test::OpCall call(registry), apply(registry);
   PointCloud c;
   for (int y = 0; y < 10; ++y)
     for (int x = 0; x < 10; ++x) {
@@ -151,12 +163,37 @@ TEST_CASE("P2 sloped support separates perpendicular measurement from axial box 
     }
   call.inputs["cloud"] = Data::cloud(c);
   call.inputs["instances"] = Data::record(object());
+  apply.inputs["instances"] = call.inputs.at("instances");
   REQUIRE(call.run("cloud.neighbor_height", {{"direction", Value::text("top")}}).ok);
   auto result = call.out("heights").asRecord()->data["items"][0];
   CHECK(std::abs(result["height"].get<double>() - 1 / std::sqrt(1.01)) < 1e-6);
   CHECK(std::abs(result["axisHeight"].get<double>() - 1) < 1e-6);
-  CHECK(std::abs(call.out("instances").asRecord()->data["items"][0]["size"][2].get<double>() - 1) <
+  apply.inputs["heights"] = call.out("heights");
+  REQUIRE(apply.run("pose.apply_height").ok);
+  CHECK(std::abs(apply.out("instances").asRecord()->data["items"][0]["size"][2].get<double>() - 1) <
         1e-6);
+}
+
+TEST_CASE("P2 height application matches instance IDs and preserves tilted top faces") {
+  auto registry = heightRegistry();
+  test::OpCall call(registry);
+  const double half = std::sqrt(.5);
+  const auto a = poses::make3D("a", "input", {2, 3, 4}, {0, half, 0, half}, {1, 1, 1});
+  const auto b = poses::make3D("b", "input", {0, 0, 0}, {0, 0, 0, 1}, {1, 1, 1});
+  call.inputs["instances"] =
+      Data::record(poses::make3DList(nlohmann::json::array({a.data, b.data}), "input"));
+  call.inputs["heights"] = Data::record(
+      {"cloud.NeighborHeights.v1",
+       {{"unit", "m"},
+        {"frame", "input"},
+        {"items", nlohmann::json::array({{{"id", "b"}, {"valid", false}, {"axisHeight", nullptr}},
+                                         {{"id", "a"}, {"valid", true}, {"axisHeight", .5}}})}}});
+  REQUIRE(call.run("pose.apply_height").ok);
+  const auto& items = call.out("instances").asRecord()->data["items"];
+  CHECK(items[0]["size"][2] == .5);
+  CHECK(items[0]["position"][0].get<double>() == doctest::Approx(2.25));
+  CHECK(items[0]["position"][2].get<double>() == doctest::Approx(4));
+  CHECK(items[1]["position"] == b.data["position"]);
 }
 
 TEST_CASE("P2 neighbor statistical strategies measure distinct supported depth distributions") {
@@ -187,24 +224,28 @@ TEST_CASE("P2 neighbor statistical strategies measure distinct supported depth d
 
 TEST_CASE("P2 tote evidence distinguishes unknown occupied unrecognized and valid empty") {
   auto registry = heightRegistry();
-  test::OpCall call(registry);
-  call.inputs["cloud"] = Data::cloud(PointCloud{});
-  call.inputs["instances"] = Data::record(poses::make3DList(nlohmann::json::array(), "input"));
-  call.inputs["observation"] = Data::record(values::boolean(false));
-  REQUIRE(call.run("cloud.empty_tote").ok);
-  CHECK(call.out("status").asRecord()->data["state"] == "unknown");
-  CHECK(call.out("empty").asRecord()->data["value"] == false);
-  call.inputs["observation"] = Data::record(values::boolean(true));
-  REQUIRE(call.run("cloud.empty_tote").ok);
-  CHECK(call.out("status").asRecord()->data["state"] == "empty");
-  call.inputs["cloud"] = Data::cloud(plane(0));
-  REQUIRE(call.run("cloud.empty_tote").ok);
-  CHECK(call.out("status").asRecord()->data["state"] == "unrecognized");
-  call.inputs["instances"] = Data::record(object());
-  REQUIRE(call.run("cloud.empty_tote").ok);
-  CHECK(call.out("status").asRecord()->data["state"] == "occupied");
-  call.inputs["observation"] = Data::record(values::number(1));
-  CHECK_FALSE(call.run("cloud.empty_tote").ok);
+  test::OpCall measure(registry), apply(registry);
+  measure.inputs["cloud"] = Data::cloud(plane(0));
+  measure.inputs["instances"] = Data::record(poses::make3DList(nlohmann::json::array(), "input"));
+  REQUIRE(measure.run("cloud.tote_observation").ok);
+  apply.inputs["counts"] = measure.out("counts");
+  apply.inputs["observation"] = Data::record(values::boolean(false));
+  REQUIRE(apply.run("cloud.empty_tote").ok);
+  CHECK(apply.out("status").asRecord()->data["state"] == "unknown");
+  CHECK(apply.out("empty").asRecord()->data["value"] == false);
+  apply.inputs["observation"] = Data::record(values::boolean(true));
+  REQUIRE(apply.run("cloud.empty_tote").ok);
+  CHECK(apply.out("status").asRecord()->data["state"] == "unrecognized");
+  const auto limit = static_cast<int>(measure.inputs.at("cloud").asCloud()->pointCount());
+  REQUIRE(apply.run("cloud.empty_tote", {{"maxUndetectedPoints", Value::integer(limit)}}).ok);
+  CHECK(apply.out("status").asRecord()->data["state"] == "empty");
+  measure.inputs["instances"] = Data::record(object());
+  REQUIRE(measure.run("cloud.tote_observation").ok);
+  apply.inputs["counts"] = measure.out("counts");
+  REQUIRE(apply.run("cloud.empty_tote").ok);
+  CHECK(apply.out("status").asRecord()->data["state"] == "occupied");
+  apply.inputs["observation"] = Data::record(values::number(1));
+  CHECK_FALSE(apply.run("cloud.empty_tote").ok);
 }
 
 TEST_CASE("P2 finite plane bounds and inscribed occupied patches do not fill holes") {
@@ -376,11 +417,13 @@ TEST_CASE("P2 height rules reject invalid identities and never publish cancelled
   const auto batch = poses::make3DList(nlohmann::json::array({valid.data, huge.data}), "input");
   std::string why;
   REQUIRE(poses::validate(batch, why));
-  call.inputs = {{"cloud", Data::cloud(PointCloud{})}, {"instances", Data::record(batch)}};
-  for (const char* policy : {"measured", "original", "maximum"}) {
-    const auto result = call.run("cloud.neighbor_height", {{"method", Value::text("provided")},
-                                                           {"providedHeight", Value::number(1)},
-                                                           {"source", Value::text(policy)}});
+  call.inputs = {{"instances", Data::record(batch)}};
+  REQUIRE(call.run("cloud.neighbor_height",
+                   {{"method", Value::text("provided")}, {"providedHeight", Value::number(1)}})
+              .ok);
+  call.inputs["heights"] = call.out("heights");
+  for (const char* policy : {"measured", "maximum"}) {
+    const auto result = call.run("pose.apply_height", {{"source", Value::text(policy)}});
     CHECK_FALSE(result.ok);
     CHECK(result.code == "bad_input");
     CHECK(call.outputs.empty());
@@ -389,12 +432,11 @@ TEST_CASE("P2 height rules reject invalid identities and never publish cancelled
   auto wide = poses::make3D("wide", "input", {0, 0, 1}, {0, 0, 0, 1}, {1e308, 1, 1});
   call.inputs["instances"] =
       Data::record(poses::make3DList(nlohmann::json::array({wide.data}), "input"));
-  CHECK_FALSE(call.run("cloud.neighbor_height",
-                       {{"method", Value::text("provided")}, {"widthRatio", Value::number(100)}})
-                  .ok);
+  call.inputs["cloud"] = Data::cloud(PointCloud{});
+  CHECK_FALSE(call.run("cloud.neighbor_height", {{"widthRatio", Value::number(100)}}).ok);
   CHECK(call.outputs.empty());
-  for (const char* id :
-       {"cloud.top_layer", "cloud.neighbor_height", "cloud.empty_tote", "cloud.plane_patches"}) {
+  for (const char* id : {"cloud.top_layer", "cloud.neighbor_height", "cloud.tote_observation",
+                         "cloud.plane_patches"}) {
     const auto* op = registry.find(id);
     REQUIRE(op);
     ParamMap params;

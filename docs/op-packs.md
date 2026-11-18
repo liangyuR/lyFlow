@@ -13,10 +13,10 @@
 | -------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | 在哪     | 本仓库的 `packs/*`                                                                          | 任意目录                                               |
 | 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                          | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
-| 注册顺序 | 紧跟 `gen.synthetic`                                                                        | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 注册顺序 | 在 core 的透传和调度算子之前                                                               | 在 core 的透传和调度算子之后                          |
 | 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`solutions/gap`、`solutions/dts` | 任何自己写的包                                         |
 
-core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
+core 本身提供 `util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
 不链接任何第三方库（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
@@ -25,12 +25,12 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | 包               | 版本   | DEFAULT | 算子                                                                                             | 依赖                                                                                |
 | ---------------- | ------ | ------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `std-value`      | 0.2.0  | ON      | 16项数值、逻辑、列表与受限表达式                                                                 | core与标准库                                                                        |
-| `std-geometry`   | 0.7.0  | ON      | 39项几何、位姿、坐标变换、刚体关系与三维约束构造                                                 | geometry-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                 |
+| `std-geometry`   | 0.8.0  | ON      | 几何、位姿、坐标变换、刚体关系与三维约束构造，含可选的工作空间读取                                                 | geometry-kernel、原生契约与标准库，工作空间读取使用 workspace-io / yaml-cpp                                 |
 | `std-metrology`  | 0.4.0  | ON      | 7项标定/轮廓度量，含点线面差、圆间隙与两点位移                                                   | metrology-kernel、原生契约与标准库，无PCL/OpenCV/ORT                                |
 | `std-profile`    | 0.5.0  | ON      | 17项轻量能力，可选后端增加半径滤波与2项稳健拟合；[契约](profile-public-operators.md)             | 轻量无PCL/CV/ORT；稳健拟合显式选择PCL公共后端                                       |
-| `std-pointcloud` | 0.6.0  | ON      | 47项点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
-| `std-ml`         | 0.3.1  | ON      | `ml.onnx_run`                                                                                    | ONNX Runtime                                                                        |
-| `std-image`      | 0.12.0 | ON      | 83项图像处理、标定、识别适配、深度投影、响应与候选测量（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV、yaml-cpp、识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
+| `std-pointcloud` | 0.7.0  | ON      | 点云 / 拟合 / 配准 / 编辑算子                                                                | 当前整包链接PCL及CPU匹配后端；逐算子依赖见审计                                      |
+| `std-ml`         | 0.4.0  | ON      | YOLO、YOLOX 及 OCR 的 Tensor 解码、`ml.onnx_run`                                                 | 解码使用原生数据契约，`ml-runtime` 使用 ONNX Runtime                                                                        |
+| `std-image`      | 0.13.0 | ON      | 图像处理、标定、识别适配、深度投影、响应与候选测量（[图像包](../packs/std-image/README.md)） | 当前整包携带OpenCV及识码/字典后端；逐算子依赖不同，正式固定版本见部署文档 |
 | `solution-glue`  | 0.4.0  | **OFF** | 13项示教与搜索、跟踪、场景卡尺、断胶和判定（[README](../solutions/glue/README.md)）                | `std-image`、OpenCV 支持和几何核，无 PCL/ORT                                            |
 | `solution-gap`   | 0.1.0  | **OFF** | 40项`gap.*`原生场景与临时兼容入口                                                                | 基础PCL；模板/模型/导入/兼容能力按模块启用                                          |
 | `solution-dts`   | 0.1.0  | **OFF** | 7项`dts.*`场景与版本化几何桥；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
@@ -46,6 +46,8 @@ pnpm check          # 或 pnpm check:gap
 
 领域包默认关，是因为纯平台开发者不该为一个领域包装 yaml-cpp
 （[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）。
+
+显式选择 `std-ml` 可使用四个 Tensor 解码节点。要在显式组合启用 ONNX 推理，增加 `LYFLOW_MODULES=ml-runtime`。要在显式几何组合读取工作空间，选择 `std-geometry` 并增加 `workspace-io`。默认开发和正式组合包含这两个模块。使用 `gen.synthetic` 的精简组合显式选择 `std-pointcloud`。
 
 ## 用一个包构建
 
@@ -85,8 +87,7 @@ $env:LYFLOW_STD_PACKS = "0"
 pnpm check
 ```
 
-不点名就 `packs/*` 一个都不编。manifest 里只剩 `gen.synthetic`、`util.reroute`、
-`flow.fallback`、`flow.select` 四个，`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
+不点名就 `packs/*` 一个都不编。manifest 包含 `util.reroute`、`flow.fallback`、`flow.select` 三个算子，`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
 这一趟是「core 真的零依赖」的唯一证据，也是不装 PCL 就能开发平台本身的路子。
 
 ### 只编某一个仓库内的包

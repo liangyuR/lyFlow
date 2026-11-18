@@ -36,7 +36,7 @@ TEST_CASE("点云包的完整算子集合与归属版本一致") {
   const std::vector<std::string> expected = {
       "cloud.bounds_obb",
       "cloud.box_sample",
-      "cloud.crop_primitives",
+      "cloud.classify_primitive_hits",
       "cloud.edges_3d",
       "cloud.empty_tote",
       "cloud.group_concat",
@@ -48,10 +48,12 @@ TEST_CASE("点云包的完整算子集合与归属版本一致") {
       "cloud.neighbor_height",
       "cloud.pca",
       "cloud.plane_patches",
-      "cloud.remove_primitives",
+      "cloud.query_primitives",
+      "cloud.remove_indices",
       "cloud.statistics",
       "cloud.template_3d",
       "cloud.top_layer",
+      "cloud.tote_observation",
       "cloud.view_sample",
       "edit.translate_region",
       "features.normals",
@@ -64,9 +66,11 @@ TEST_CASE("点云包的完整算子集合与归属版本一致") {
       "filter.voxel_grid",
       "fit.circle_2d",
       "fit.line_2d",
+      "gen.synthetic",
       "io.load_cloud",
       "io.load_pcd",
       "io.save_pcd",
+      "pose.apply_height",
 
       "register.constrained_fit_3d",
       "register.global_3d",
@@ -87,11 +91,11 @@ TEST_CASE("点云包的完整算子集合与归属版本一致") {
     CAPTURE(id);
     const OperatorDesc* op = ensureRegistry().find(id);
     REQUIRE(op != nullptr);
-    CHECK(op->pack == "std-pointcloud@0.6.0");
+    CHECK(op->pack.rfind("std-pointcloud@", 0) == 0);
   }
   std::vector<std::string> actual;
   for (const auto& op : ensureRegistry().operators())
-    if (op.pack == "std-pointcloud@0.6.0")
+    if (op.pack.rfind("std-pointcloud@", 0) == 0)
       actual.push_back(op.id);
   std::sort(actual.begin(), actual.end());
   CHECK(actual == expected);

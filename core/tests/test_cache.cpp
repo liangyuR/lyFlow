@@ -1,5 +1,5 @@
 // M3 核心轨：缓存复用与 LRU、并行调度、bypass 透传、Any 推导、迁移链。
-// 算子一律用 gen.synthetic / util.reroute / test.*（S6）。
+// 算子一律用 test.make_cloud / util.reroute / test.*（S6）。
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -30,7 +30,7 @@ const Json kSmall = Json{{"pointCount", 4000}};
 Json chainGraph() {
   return makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"v", "test.thin", Json{{"leaf", {0.02, 0.02, 0.02}}}},
           {"p", "util.reroute"},
       },
@@ -39,7 +39,7 @@ Json chainGraph() {
 
 /// 1 源 → 4 支 → 1 汇。每支睡 sleepMs，tag 各不相同。
 Json diamondGraph(int sleepMs) {
-  std::vector<N> nodes{{"g", "gen.synthetic", kSmall}};
+  std::vector<N> nodes{{"g", "test.make_cloud", kSmall}};
   std::vector<E> edges;
   for (int i = 0; i < 4; ++i) {
     const std::string id = "s" + std::to_string(i);
@@ -123,7 +123,7 @@ TEST_CASE("改中间节点参数：只重算它和它的下游") {
 
   const Json changed = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"v", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
           {"p", "util.reroute"},
       },
@@ -313,7 +313,7 @@ TEST_CASE("LRU 字节预算：超预算时从最久没用的一头淘汰") {
   store.setBudget(64ull * 1024 * 1024);
   for (int i = 0; i < 3; ++i) {
     runGraphCached(
-        makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 20000}, {"seed", i}}}}, {}));
+        makeGraph({{"g", "test.make_cloud", Json{{"pointCount", 20000}, {"seed", i}}}}, {}));
   }
   const auto before = store.stats();
   CHECK(before.entries == 3);
@@ -339,7 +339,7 @@ TEST_CASE("纯副作用算子不参与缓存：没有输出端口就永远不 sk
   std::filesystem::create_directories(dir);
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", Json{{"pointCount", 500}}},
+          {"g", "test.make_cloud", Json{{"pointCount", 500}}},
           {"w", "test.sink", Json{{"path", "out.pcd"}}},
       },
       {{"g.cloud", "w.cloud"}});
@@ -445,7 +445,7 @@ TEST_CASE("bypass 找不到类型兼容的源：下游报 bypassed_no_source") {
   // 那一路没有 Indices 类型的输入可以透传。
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"pl", "test.half_indices"},
           {"x", "test.split"},
           {"tail", "test.thin"},
@@ -470,7 +470,7 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
   ensureTestOps();
   const Json ok = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"r1", "util.reroute"},
           {"r2", "util.reroute"},
           {"p", "test.thin"},
@@ -499,7 +499,7 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
   // 推导出 PointCloud 之后再往 Indices 端口上接就该被拒
   const Json bad = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"r", "util.reroute"},
           {"x", "test.split"},
       },
@@ -539,7 +539,7 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   ensureTestOps();
   Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"count", 123}, {"seed", 9}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -570,7 +570,7 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   // 迁移是在内存里生效的：老图直接跑得通
   Json runnable = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"count", 100}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -583,7 +583,7 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   // 迁移之后再存再开：不再产出迁移诊断
   Json saved = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"keepCount", 123}, {"seed", 9}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -595,7 +595,7 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   // 被顶层图参数绑定的参数不进迁移后的 params：写回节点就是 param_conflict（一处定义）
   Json bound = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"count", 123}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -797,7 +797,7 @@ TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出
   // v1 的写法：count 迁成 keepCount，老图当场能跑
   const Json old = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"count", 100}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -817,7 +817,7 @@ TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出
   // 已经是 v2 的写法：迁移函数原样返回，不算迁移
   const Json fresh = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"s", "test.migrated", Json{{"keepCount", 100}}},
       },
       {{"g.cloud", "s.cloud"}});
@@ -1017,7 +1017,7 @@ TEST_CASE(
   // g / t / s 只出点云（能落盘），h 出 Indices（不能）；s 用读回的 t 与现算的 h 对账
   const Json doc = makeGraph(
       {
-          {"g", "gen.synthetic", kSmall},
+          {"g", "test.make_cloud", kSmall},
           {"t", "test.thin", Json{{"leaf", {0.02, 0.02, 0.02}}}},
           {"h", "test.half_indices"},
           {"s", "test.split"},

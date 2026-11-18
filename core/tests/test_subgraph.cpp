@@ -27,7 +27,7 @@ Json flatGraph(int seed) {
   doc["id"] = "01FLAT";
   doc["nodes"] = Json::array({
       Json{{"id", "g"},
-           {"op", "gen.synthetic"},
+           {"op", "test.make_cloud"},
            {"params", {{"pointCount", 20000}, {"seed", seed}}}},
       Json{{"id", "v"},
            {"op", "test.thin"},
@@ -54,7 +54,7 @@ Json subgraphGraph(int seed, double leaf = 0.02) {
   doc["id"] = "01SUB";
   doc["nodes"] = Json::array({
       Json{{"id", "g"},
-           {"op", "gen.synthetic"},
+           {"op", "test.make_cloud"},
            {"params", {{"pointCount", 20000}, {"seed", seed}}}},
       Json{{"id", "s"},
            {"op", "sub:clean"},
@@ -299,7 +299,9 @@ TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无�
 
   Json doc = flatGraph(21);
   doc["nodes"] = Json::array({
-      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", 21}}}},
+      Json{{"id", "g"},
+           {"op", "test.make_cloud"},
+           {"params", {{"pointCount", 20000}, {"seed", 21}}}},
       Json{{"id", "s"},
            {"op", "lib.clean"},
            {"params", {{"leaf", Json::array({0.02, 0.02, 0.02})}}}},

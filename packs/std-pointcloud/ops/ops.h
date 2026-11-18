@@ -6,6 +6,8 @@
 
 namespace lyflow::ops {
 
+void registerGenSynthetic(Registry& r);
+
 // -- 手写 -------------------------------------------------------------------
 void registerFilterPassthrough(Registry& r);
 void registerFilterVoxelGrid(Registry& r);

@@ -3,6 +3,13 @@
 
 namespace lyflow::packs::std_ml {
 
-void registerPackOps(Registry& r) { ops::registerMlOnnxRun(r); }
+void registerPackOps(Registry& r) {
+  ops::registerYoloDecode(r);
+  ops::registerYoloxDecode(r);
+  ops::registerOcrDecode(r);
+#if defined(LYFLOW_ML_RUNTIME)
+  ops::registerMlOnnxRun(r);
+#endif
+}
 
 } // namespace lyflow::packs::std_ml

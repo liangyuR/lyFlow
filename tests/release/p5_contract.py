@@ -51,6 +51,7 @@ BINDINGS = {
         "wireGroups": {"sourceCloudId": "wireframe"},
         "groups": {"sourceCloudId": "sourceCloud"},
         "removeGroups": {"sourceCloudId": "sourceCloud"},
+        "support": {"sourceCloudId": "sourceCloud"},
         "cropQuality": {"sourceCloudId": "sourceCloud"},
         "quality": {"sourceCloudId": "sourceCloud"},
     },
@@ -156,6 +157,10 @@ def check(name, outputs):
         result = record(outputs, "defects", "inspection.Defects.v1")
         for item in result["items"]:
             finite((item["area"], item["volume"]), item["direction"])
+        features = record(outputs, "features", "inspection.Profiles.v1")
+        for role in ("attributes", "attributeValid"):
+            require(outputs[role]["value"]["shape"] == [features["sliceCount"]], f"{role}: 逐截面输出结构不一致")
+        require(outputs["profilePlot"]["type"] == "Image", "profilePlot: 应输出原生图像")
         cloud(outputs, "sliceCloud")
     elif name == "p5-depth-filters":
         record(outputs, "quality", "vision.DepthFilterQuality.v1")

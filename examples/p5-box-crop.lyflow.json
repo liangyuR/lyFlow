@@ -62,8 +62,8 @@
       }
     },
     {
-      "id": "crop",
-      "op": "cloud.crop_primitives",
+      "id": "query",
+      "op": "cloud.query_primitives",
       "params": {
         "frame": "world"
       },
@@ -72,20 +72,44 @@
           "x": 1120,
           "y": 0
         }
-      }
+      },
+      "opVersion": "1.0.0"
     },
     {
       "id": "remove",
-      "op": "cloud.remove_primitives",
+      "op": "cloud.remove_indices",
       "params": {
-        "frame": "world",
-        "mode": "shape",
         "outputMode": "compact"
       },
       "ui": {
         "position": {
-          "x": 0,
-          "y": 260
+          "x": 1400,
+          "y": 200
+        }
+      },
+      "opVersion": "1.0.0"
+    },
+    {
+      "id": "extract",
+      "op": "segment.extract_indices",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1400,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "classify",
+      "op": "cloud.classify_primitive_hits",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1400,
+          "y": 400
         }
       }
     }
@@ -125,25 +149,47 @@
       }
     },
     {
-      "id": "sample-cloud-crop-cloud",
+      "id": "sample-cloud-query-cloud",
       "from": {
         "node": "sample",
         "port": "cloud"
       },
       "to": {
-        "node": "crop",
+        "node": "query",
         "port": "cloud"
       }
     },
     {
-      "id": "boxes-poses-crop-poses",
+      "id": "boxes-poses-query-poses",
       "from": {
         "node": "boxes",
         "port": "poses"
       },
       "to": {
-        "node": "crop",
+        "node": "query",
         "port": "poses"
+      }
+    },
+    {
+      "id": "sample-cloud-extract-cloud",
+      "from": {
+        "node": "sample",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "extract",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "query-innerIndices-extract-indices",
+      "from": {
+        "node": "query",
+        "port": "innerIndices"
+      },
+      "to": {
+        "node": "extract",
+        "port": "indices"
       }
     },
     {
@@ -158,14 +204,25 @@
       }
     },
     {
-      "id": "boxes-poses-remove-poses",
+      "id": "query-innerIndices-remove-indices",
       "from": {
-        "node": "boxes",
-        "port": "poses"
+        "node": "query",
+        "port": "innerIndices"
       },
       "to": {
         "node": "remove",
-        "port": "poses"
+        "port": "indices"
+      }
+    },
+    {
+      "id": "query-support-classify-support",
+      "from": {
+        "node": "query",
+        "port": "support"
+      },
+      "to": {
+        "node": "classify",
+        "port": "support"
       }
     }
   ],
@@ -173,7 +230,13 @@
     "shape": {
       "type": "string",
       "default": "box",
-      "binds": ["crop.shape", "remove.shape"]
+      "binds": ["query.shape"]
+    },
+    "maxCount": {
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "binds": ["classify.maxCount"]
     }
   },
   "outputs": {
@@ -210,31 +273,31 @@
       "port": "quality"
     },
     "cropped": {
-      "node": "crop",
-      "port": "inner"
+      "node": "extract",
+      "port": "selected"
     },
     "outside": {
-      "node": "crop",
-      "port": "outer"
+      "node": "extract",
+      "port": "rest"
     },
     "innerIndices": {
-      "node": "crop",
+      "node": "query",
       "port": "innerIndices"
     },
     "outerIndices": {
-      "node": "crop",
+      "node": "query",
       "port": "outerIndices"
     },
     "groupIndices": {
-      "node": "crop",
+      "node": "query",
       "port": "groupIndices"
     },
     "groups": {
-      "node": "crop",
+      "node": "query",
       "port": "groups"
     },
     "cropQuality": {
-      "node": "crop",
+      "node": "classify",
       "port": "quality"
     },
     "cloud": {
@@ -242,28 +305,32 @@
       "port": "cloud"
     },
     "removed": {
-      "node": "remove",
-      "port": "inner"
+      "node": "extract",
+      "port": "selected"
     },
     "removedIndices": {
-      "node": "remove",
+      "node": "query",
       "port": "innerIndices"
     },
     "keptIndices": {
-      "node": "remove",
+      "node": "query",
       "port": "outerIndices"
     },
     "removeGroupIndices": {
-      "node": "remove",
+      "node": "query",
       "port": "groupIndices"
     },
     "removeGroups": {
-      "node": "remove",
+      "node": "query",
       "port": "groups"
     },
     "quality": {
-      "node": "remove",
+      "node": "classify",
       "port": "quality"
+    },
+    "support": {
+      "node": "query",
+      "port": "support"
     }
   }
 }

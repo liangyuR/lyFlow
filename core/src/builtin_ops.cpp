@@ -77,9 +77,6 @@ void registerBuiltinTypes(Registry& r) {
 void registerBuiltinOps(Registry& r) {
   registerBuiltinTypes(r);
 
-  // core 只剩两个算子（S1 / ADR-0014）。点云算法在 packs/std-pointcloud/。
-  // 下面的夹心注册顺序钉住 manifest 的字节兼容性，理由见 ADR-0014。
-  ops::registerGenSynthetic(r);
   registerStdPacks(r);
   ops::registerUtilReroute(r);
   ops::registerFlowOps(r);

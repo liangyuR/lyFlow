@@ -74,7 +74,10 @@ if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks
 }
 $imageEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-image' -in ($repoPacks -split ';')
 $mlEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-ml' -in ($repoPacks -split ';')
-if ($P4ModelTests -and (-not $imageEnabled -or -not $mlEnabled)) { throw 'P4 模型验证要求 std-image 和 std-ml' }
+$mlRuntimeEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'ml-runtime' -in ($modules -split ';')
+if ($P4ModelTests -and (-not $imageEnabled -or -not $mlEnabled -or -not $mlRuntimeEnabled)) {
+  throw 'P4 模型验证要求 std-image、std-ml 和 ml-runtime'
+}
 if ($imageEnabled) {
   & python (Join-Path $PSScriptRoot 'fetch-barcode-deps.py')
   if ($LASTEXITCODE -ne 0) { throw '固定条码源码准备失败' }

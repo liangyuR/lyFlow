@@ -7,9 +7,9 @@
 | 原算子 | 实际源模式 | LyFlow 实现与优化 |
 | --- | --- | --- |
 | CloudFillHoles | 组织相机云；有效掩膜闭运算定位候选；原观测邻域深度中值；相机反投影 | `cloud.fill_holes`；显式组织映射支持针孔和正交；原观测只读，新云身份及追加补点；不级联使用本次补值；深度跨度门控、外边界策略、独立补值状态 |
-| DefectDetector | UP/DOWN/BOTH；有符号平面残差；可选闭运算；长度、宽度、面积、体积四项独立启用，任一严格超限判退 | `depth.defects`；完整末行末列，掩膜外初始化，归一化平面，实际投影面积；桥接像素不计为缺陷支持；clear/defect/unknown 分开 |
+| DefectDetector | UP/DOWN/BOTH；有符号平面残差；可选闭运算；长度、宽度、面积、体积四项独立启用，任一严格超限判退 | `depth.defects` 提取并测量候选，`depth.classify_defects` 判定；桥接像素不计为缺陷支持 |
 | FindCircles | 自动/手动 Canny；弧方向与相邻长度比；椭圆评分；二维圆偏心率过滤；已知半径恢复两歧义三维圆；Canny/椭圆显示 | `image.find_circles_3d`；独立弧段最小二乘、角覆盖评分、去重、K/D 校正和圆锥二次型截面；不截配半径数组；歧义保留 |
-| ProfileSlicer | x/y 多截面；组织点云建三角网格并求平面交线；A/B 各六种特征；x-x/y-y；上下限；截面与曲线显示 | `depth.profile_slices`；真实三角交线和连通链；梯度不跨孔洞；缺支持与平坦无拐点为 unknown；源顶点追踪、重心通道插值、零基显示序号 |
+| ProfileSlicer | x/y 多截面；组织点云建三角网格并求平面交线；A/B 各六种特征；x-x/y-y；上下限；截面与曲线显示 | `depth.profile_slices` 提取截面，`depth.measure_profile_features` 测量 A/B 特征并绘图，`depth.classify_profile_features` 执行范围判定 |
 | GenerateBoxCloud | 每面随机点、可见面、线框；盒中心锚定；局部/工件坐标；front 虽出现在选项中但源显式报不支持 | `cloud.box_sample`；中心锚定、确定性种子、表面/体积、可见面、精确端点线框、法线/RGB及分组；不声称支持源未实现的 front 锚定，不冒充 Mesh |
 
 源 Profile 特征类型全部支持：`left-right-inflection`、`right-left-inflection`、`top`、`bottom`、`left-most`、`right-most`。前两者表示沿指定扫描方向的第一个显著绝对梯度，阈值为当前兴趣区域同链梯度最大值的比例，并非曲率过零点；命名保留此源业务含义。属性 `x-x` 是横向距离，`y-y` 是相对于基准面的高度差，均使用米。
@@ -46,6 +46,8 @@ XYZ 使用中值深度与正式映射反投影。补点 intensity/normals/RGB �
 
 默认只纳入 observed，`includeInterpolated=true` 才显式纳入补值，并单独统计。`minCoverage` 约束区域内有效覆盖率：有已证缺陷为 defect；覆盖足够且无缺陷为 clear；缺少观测时为 unknown，good=null，不能把空区域判为合格。`valid` 单独表示覆盖是否完整；即使覆盖不足也可报告已有支持证明的 defect。
 
+`depth.defects@2.0.0` 交付 `candidates`、掩膜、有符号高度图和叠图。`distanceThreshold` 在这一步定义候选支持。`depth.classify_defects` 接收同一份 `candidates`，可配置不同尺寸限值与覆盖率，生成 `inspection.Defects.v1` 和带判定标记的位姿集合。
+
 ## 空间圆
 
 自动 Canny 取图像强度中位数生成阈值，手动模式明确使用 low/high。独立弧段按三点方向偏差和长度比断开，使用相隔三像素的方向减少像素阶梯干扰。短弧两两形成有界假设，再只吸收几何兼容弧；不把整张图所有边缘作一次全局拟合。`edgeTolerance` 为像素合并/重复边界容差。最小二乘椭圆以角度分箱覆盖、径向支持比例和 20° 局部切向一致性共同评分，稳定去重后按原图 y/x 排序。完整边界和分离弧片均有正例，矩形与空背景有反例。二维圆只在偏心率小于 circleThreshold 时输出，椭圆轴长、二维圆半径、已知物理圆半径分别命名，不混用直径。
@@ -63,6 +65,22 @@ XYZ 使用中值深度与正式映射反投影。补点 intensity/normals/RGB �
 组织栅格顶点通过 indexMap 引用源云，构成有限三角面；`meshPixelDistance=1` 默认不跨缺测像素，显式增大可连接源模式允许的短缺测间隔，`maxEdgeLength` 限制跨深度跳变的物理边长。三角形与切平面求真实边交点，共享端点去重并按连通链组织；梯度不能跨不同链。平面无交、兴趣区域无点、平坦区域没有有效梯度时，属性有效性为 0、结果 unknown，而非沿用上次特征或零值判 good。
 
 `profiles` 为 `[M,4]` 原生 Tensor，列为 sliceIndex/x/height/chainId；`attributes[S]` 与 `attributeValid[S]` 配对，无效位置的数值 0 不是测量结果。`sliceCloud` 是三角交线生成的新点云，`indices/groups` 绑定它的新身份；`supports[M,3]` 则指向父输入 cloud 的三个支持顶点。两种身份不能交换使用。
+
+`depth.profile_slices@2.0.0` 的 `profiles` 与 `sliceInfo` 可以同时连接多组特征测量。特征选择与绘图读取公开的 float32 截面坐标。原有截面交点和父三角输出沿用。`depth.classify_profile_features` 消费测量节点的 `features`，以闭区间判断各切片。存在有效的超限测量时，汇总为 `ng`。全部切片有效且在范围内时为 `good`。其余情况为 `unknown`。
+
+旧图的离线请求示例
+
+```json
+{
+  "schemaVersion": 1,
+  "rules": [
+    {"kind": "depth.defects.v1", "source": {"node": "defects"}},
+    {"kind": "depth.profile_slices.v1", "source": {"node": "profiles"}}
+  ]
+}
+```
+
+将来源节点 ID 改为旧图中的 ID，保存为 `upgrade.json` 并运行 `lyflow migrate <图文件> --request upgrade.json --write`。旧连线、图参数绑定、图级输出改接到对应的测量或判定端口。
 
 交点是插值几何，不声称实测；`features.derivation` 和 measured=false 明示。intensity/RGB 使用源三角重心插值，RGB 四舍五入；normal 重心插值后归一化，抵消时选择最近非零源法线，全部不可用则输出零向量并统计 unresolvedNormalCount，不伪造方向。输入所有可选通道在交点云中保持对齐。截面图和曲线图仅作几何显示，不依赖字体渲染。
 
