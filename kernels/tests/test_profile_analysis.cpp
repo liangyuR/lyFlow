@@ -33,6 +33,8 @@ TEST_CASE(
     CHECK(fit.count == 3);
     CHECK(fit.minimum == 1);
     CHECK(fit.maximum == 3);
+    CHECK(fit.center[0] == doctest::Approx(2));
+    CHECK(fit.center[1] == doctest::Approx(7));
     CHECK(fit.direction[0] > 0);
     CHECK(fit.direction[1] / fit.direction[0] == doctest::Approx(2));
     CHECK(fit.rms < 1e-6);

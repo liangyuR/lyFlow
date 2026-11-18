@@ -1,5 +1,5 @@
-// M4 验收：子图（§1）、live preview（§2）、大图性能（§4）。CLI（§3）由 cargo test
-// 覆盖，理由见 ../../docs/m4-acceptance.md。与 M2/M3 的分组共用一个 app 实例。
+// 子图、库算子、live preview、大图性能的分组。CLI 没有界面，由 cargo test 覆盖。
+// 与 run.mjs、m3.mjs 的分组共用一个 app 实例。
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -48,7 +48,7 @@ const CHAIN_EDGES = [
 
 const snapshot = (cdp) => cdp.eval(`return window.__lyflow.snapshot();`);
 
-/** 走 store 合成子图。右键菜单那条路在 §1.4 的分组里单独验。 */
+/** 走 store 合成子图。右键菜单那条路在提升参数的分组里单独验。 */
 async function compose(cdp, ids) {
   return cdp.eval(`
     const b = window.__lyflow;
@@ -57,7 +57,7 @@ async function compose(cdp, ids) {
   `);
 }
 
-/** 双击节点**身体**进子图。标题那一片双击是改名（P1 #25），别打在那儿。 */
+/** 双击节点**身体**进子图。标题那一片双击是改名，别打在那儿。 */
 async function enterByDoubleClick(cdp, nodeId) {
   return cdp.eval(`
     const el = document.querySelector('[data-testid="node-${nodeId}"]');
@@ -76,10 +76,10 @@ async function enterByDoubleClick(cdp, nodeId) {
   `);
 }
 
-// -------------------------------------------------------- §1.1 合成与展开
+// -------------------------------------------------------- 合成与展开
 
 async function composeChecks(cdp, report) {
-  report.section("§1 子图：合成之后结果一模一样，事件里是路径式 id");
+  report.section("子图：合成之后结果一模一样，事件里是路径式 id");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   await newDoc(cdp);
@@ -197,10 +197,10 @@ async function composeChecks(cdp, report) {
   return { ids, composed, flatTail };
 }
 
-// ------------------------------------------------------ §1.4 进入 / 退出
+// ------------------------------------------------------ 进入 / 退出
 
 async function suiteNavigate(cdp, report, fixture) {
-  report.section("§1 子图导航：双击进入、面包屑、Esc 退出");
+  report.section("子图导航：双击进入、面包屑、Esc 退出");
 
   const { ids, composed } = fixture;
   const depth = await enterByDoubleClick(cdp, composed.nodeId);
@@ -254,10 +254,10 @@ async function suiteNavigate(cdp, report, fixture) {
     { depth: 0, selected: [composed.nodeId] });
 }
 
-// ------------------------------------------------------- §1.4 提升参数
+// ------------------------------------------------------- 提升参数
 
 async function suitePromote(cdp, report, fixture) {
-  report.section("§1 提升参数：内参变只读，改外参只重算受影响的内部节点");
+  report.section("提升参数：内参变只读，改外参只重算受影响的内部节点");
 
   const { ids, composed } = fixture;
   await enterByDoubleClick(cdp, composed.nodeId);
@@ -331,10 +331,10 @@ async function suitePromote(cdp, report, fixture) {
   report.eq("体素是 done", run.nodes[`${composed.nodeId}/${ids.voxel}`]?.state, "done");
 }
 
-// --------------------------------------------------------- §1 嵌套与递归
+// --------------------------------------------------------- 嵌套与递归
 
 async function suiteNested(cdp, report) {
-  report.section("§1 嵌套两层：cacheKey 稳定，重跑全 skipped");
+  report.section("子图嵌套两层：cacheKey 稳定，重跑全 skipped");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   await newDoc(cdp);
@@ -593,7 +593,7 @@ async function suiteNested(cdp, report) {
 }
 
 async function suiteRecursion(cdp, report) {
-  report.section("§1 递归引用被拒");
+  report.section("子图递归引用被拒");
 
   // 手改过的文件才可能长这样：界面上没有能造出递归的操作
   const diags = await cdp.eval(`
@@ -702,10 +702,10 @@ async function suiteRecursion(cdp, report) {
     JSON.stringify({ names, listed }));
 }
 
-// ------------------------------------------------------------ §1 库算子
+// ------------------------------------------------------------ 库算子
 
 async function suiteLibrary(cdp, report) {
-  report.section("§1 库算子：保存到库 → 面板里出现 → 新图拖出即用");
+  report.section("库算子：保存到库 → 面板里出现 → 新图拖出即用");
 
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
@@ -777,7 +777,7 @@ async function suiteLibrary(cdp, report) {
     `内部=${JSON.stringify(innerDone)} ${JSON.stringify(run.nodes)}`,
   );
 
-  // 展开为内联子图（docs/library-inline-plan.md）：定义由 core 给，换成 sub: 之后跑出来的结果与库算子相同
+  // 展开为内联子图：定义由 core 给，换成 sub: 之后跑出来的结果与库算子相同
   const counts = () => cdp.eval(`
     const nodes = window.__lyflow.stores.execution.getState().nodes;
     const out = {};
@@ -912,10 +912,10 @@ async function suiteLibrary(cdp, report) {
   }
 }
 
-// ------------------------------------------------------------ §2 preview
+// ------------------------------------------------------------ live preview
 
 async function suitePreview(cdp, report) {
-  report.section("§2 live preview：拖参数跟手、松手补正式运行、不污染正式缓存");
+  report.section("live preview：拖参数跟手、松手补正式运行、不污染正式缓存");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   await newDoc(cdp);
@@ -984,7 +984,7 @@ async function suitePreview(cdp, report) {
     { timeoutMs: 20_000, what: "预览运行结束" },
   );
 
-  // 事件到渲染（M4 验收的定义）：拖动中那几次**预览运行**从结束到视图画出它的云。最后一次 ok 的运行是
+  // 事件到渲染：拖动中那几次**预览运行**从结束到视图画出它的云。最后一次 ok 的运行是
   // 松手后补的正式运行（全量取数，debug 构建里光 IPC 就 50–80 ms），不算「跟手」，只打出来参考。
   // 取中位数：拖动中有好几次预览，单次抖动不该决定成败
   const timing = await cdp.waitFor(
@@ -1369,10 +1369,10 @@ async function suitePreview(cdp, report) {
     JSON.stringify({ gpName, gpSeen, gpBefore, gpAfter }));
 }
 
-// ------------------------------------------------------------- §4 大图性能
+// ------------------------------------------------------------- 大图性能
 
 async function suiteBigGraph(cdp, report) {
-  report.section("§4 大图性能：300 节点 400 边");
+  report.section("大图性能：300 节点 400 边");
 
   await newDoc(cdp);
   const built = await cdp.eval(`
@@ -1601,7 +1601,7 @@ async function suiteBigGraph(cdp, report) {
 // ------------------------------------------------------ Ctrl+G / Ctrl+Shift+G
 
 async function suiteShortcuts(cdp, report) {
-  report.section("§1 快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散，提升的参数落回内参");
+  report.section("子图快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散，提升的参数落回内参");
 
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES.slice(0, 4), CHAIN_EDGES.slice(0, 3));
@@ -1658,10 +1658,10 @@ async function suiteShortcuts(cdp, report) {
 }
 
 
-// -------------------------------------------------------- M3 留下的三个尾巴
+// -------------------------------------------------------- 法线着色与 PNG 导出
 
 async function suiteM3Tails(cdp, report, ws) {
-  report.section("M3 尾巴：法线着色可用、PNG 导出走保存对话框、core-watch 见 m4-acceptance");
+  report.section("法线着色可用、PNG 导出走保存对话框");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   // 自带颜色、没有强度的点云（C ABI v12 起 rgb 进了载荷）：三个点，红绿蓝打包成 uint32
@@ -1828,7 +1828,7 @@ async function suiteM3Tails(cdp, report, ws) {
 /** 子图内部节点出错（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」、诊断里是一串路径 id，
  *  点诊断也进不去子图（选中的是一个顶层没有的 id）。 */
 async function suiteInnerError(cdp, report) {
-  report.section("§1.6 子图内部出错：子图节点上写明是哪个内部节点，点它或点诊断都打开到那个节点");
+  report.section("子图内部出错：子图节点上写明是哪个内部节点，点它或点诊断都打开到那个节点");
   await newDoc(cdp);
   const ids = await buildGraph(
     cdp,

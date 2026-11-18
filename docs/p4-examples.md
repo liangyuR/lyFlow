@@ -109,6 +109,6 @@ python tests/release/p4_contract.py --schema-only
 python tests/release/p4_contract.py --cli build/rust/debug/lyflow.exe --assets build/p4-assets
 ```
 
-脚本把工作流及相关资产保存到新的 Unicode 目录，逐图执行“默认→覆盖→默认”共 21 次，校验 JSON Schema、正式成功状态、上述业务真值、原生张量元数据和 ID 绑定，验证结果恢复且图文件、模型和源图 SHA256 不变。日志及 `report.json` 默认保存在 `build/p4-cli-contract`；`--examples` 和 `--output-dir` 可指定安装包示例与输出目录。
+脚本把工作流及相关资产保存到新的 Unicode 目录，逐图执行“默认→覆盖→默认”共 21 次，校验 JSON Schema、正式成功状态、覆盖生效、原生张量元数据和 ID 绑定（业务真值由下文的 core 集成测试验证），验证结果恢复且图文件、模型和源图 SHA256 不变。日志及 `report.json` 默认保存在 `build/p4-cli-contract`；`--examples` 和 `--output-dir` 可指定安装包示例与输出目录。
 
 `core/tests/integration/p4_recognition.cpp` 的七组集成测试经直接调度器、C ABI 和动态 C++ SDK 的保存重载入口比较完整原生图像、掩膜和四边形数据。上述 CLI 脚本通过现有 Rust 客户端执行工作流并验证 JSON 输出元数据，未专项验证 Rust SDK 的完整原生数组读取。CLI JSON 只包含大数据元信息，因此 JSON 合同测试不能替代这组原生载荷比较。SDK 安装验证、真实公开模型测试和原生错误/取消回归共同作为交付检查，具体门禁见 [测试说明](testing.md)。

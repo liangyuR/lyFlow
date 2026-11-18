@@ -1,4 +1,4 @@
-// M8c 的分组（docs/m8-plan.md §5 验收 12–14）：多模板的框分开处理。一张三模板的图，2D 视图切到
+// 多模板框的分组（docs/m8-plan.md）：多模板的框分开处理。一张三模板的图，2D 视图切到
 // 每个槽时恰好画出那个槽的 4 个框；拖槽 2 的框只改槽 2 的参数；「复制到其它槽」；相邻框的标签
 // 互不遮挡；槽 3 的 datum 拖到 target 同侧，诊断标明「模板 3」。数据是合成的，写在临时工作区里。
 
@@ -109,14 +109,14 @@ const intersects = (a, b) => a.left < b.right && b.left < a.right && a.top < b.b
 
 let built = null;
 
-/** §5 验收 12：切槽恰好 4 个框、拖槽 2 只改槽 2、复制到其它槽。 */
+/** 切槽恰好 4 个框、拖槽 2 只改槽 2、复制到其它槽。 */
 async function suiteSlotSwitch(cdp, report, ws) {
   const has = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('gap.locate_template')?.version ?? null;`);
   if (!has) {
-    report.section("M8c 验收 12（本次构建没有 gap 包，未验）");
+    report.section("三模板的图（本次构建没有 gap 包，未验）");
     return;
   }
-  report.section("M8c 验收 12：三模板的图 —— 切槽各 4 个框、拖槽 2 只改槽 2、复制到其它槽");
+  report.section("三模板的图 —— 切槽各 4 个框、拖槽 2 只改槽 2、复制到其它槽");
 
   const scene = makeScene(ws);
   await newDoc(cdp);
@@ -246,10 +246,10 @@ async function suiteSlotSwitch(cdp, report, ws) {
   built = { locate };
 }
 
-/** §5 验收 13：两个框相邻时，它们的标签包围盒不相交。 */
+/** 两个框相邻时，它们的标签包围盒不相交。 */
 async function suiteLabelsApart(cdp, report) {
   if (!built) return;
-  report.section("M8c 验收 13：相邻两个框的角色标签互不遮挡");
+  report.section("相邻两个框的角色标签互不遮挡");
   await select(cdp, built.locate);
   await setCamera(cdp, "2d");
   await clickTab(cdp, 0);
@@ -293,10 +293,10 @@ async function suiteLabelsApart(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); window.__lyflow.stores.graph.getState().undo(); return true;`);
 }
 
-/** §5 验收 14：把槽 3 的 datum 拖到 target 同侧，诊断标明「模板 3」。 */
+/** 把槽 3 的 datum 拖到 target 同侧，诊断标明「模板 3」。 */
 async function suiteSlot3WrongSide(cdp, report) {
   if (!built) return;
-  report.section("M8c 验收 14：槽 3 的 datum 拖到 target 同侧 → 诊断标明「模板 3」");
+  report.section("槽 3 的 datum 拖到 target 同侧 → 诊断标明「模板 3」");
   await select(cdp, built.locate);
   await setCamera(cdp, "2d");
   const clean = await waitValidated(cdp, built.locate, false);
@@ -305,7 +305,7 @@ async function suiteSlot3WrongSide(cdp, report) {
   const g = await roiGeometry(cdp);
   const shift = SLOTS[2].shift;
   await dragMouse(cdp, g.boxes.template3DatumRoi.center, screenOf(g.map, 12 + shift, 160.5), { steps: 10 });
-  // 标红与「同一侧」的措辞由 M8b 验收 10 验过；这里要的是诊断落在槽 3 上并写明「模板 3」
+  // 标红与「同一侧」的措辞由 m8b.mjs 的 suiteDragWrongSide 验过；这里要的是诊断落在槽 3 上并写明「模板 3」
   const bad = await waitValidated(cdp, built.locate, true, 3000);
   const diag = (bad?.diags ?? []).find((d) => d.paramPath === "template3DatumRoi");
   report.ok("诊断指到 template3DatumRoi", diag !== undefined, JSON.stringify(bad?.diags));
@@ -317,7 +317,7 @@ async function suiteSlot3WrongSide(cdp, report) {
   report.ok("Inspector 里「模板槽 3」这一节标红", st.groups.some((x) => x.name === "模板槽 3" && x.invalid),
     JSON.stringify(st.groups));
   await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
-  // 等撤销后的校验落定再切回 3D（撤销回到干净由 M8b 验收 10 验过）
+  // 等撤销后的校验落定再切回 3D（撤销回到干净由 m8b.mjs 的 suiteDragWrongSide 验过）
   await waitValidated(cdp, built.locate, false, 3000);
   await setCamera(cdp, "3d");
 }

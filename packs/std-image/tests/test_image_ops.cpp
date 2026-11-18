@@ -684,7 +684,7 @@ TEST_CASE(
     }
     CHECK(nonzero == 1);
   }
-  SUBCASE("投影超出 32 位的点丢掉，不落进第 0 列；u16 量程外的点不占像素（review 修正 PR #2）") {
+  SUBCASE("投影超出 32 位的点丢掉，不落进第 0 列；u16 量程外的点不占像素") {
     PointCloud cloud;
     cloud.push(0.0f, 0.0f, 1.2f);    // 主点，1.2 m
     cloud.push(0.0f, 0.0f, 0.0003f); // 同一像素，0.3 mm：u16 取整成 0，修前抢下像素写成 0

@@ -889,7 +889,7 @@ async function suiteEdgeMenu(cdp, report) {
   report.eq("菜单里的「查看内容」也能开窗", peeked, 1);
 }
 
-/** 真的双击一条边、读浮窗 DOM 这几样，单节点运行的验收 11b 也要（docs/node-run-plan.md R7）。 */
+/** 真的双击一条边、读浮窗 DOM 这几样，单节点运行的分组也要（docs/node-run-plan.md）。 */
 export { countsOf, openByDoubleClick, park, peekWindows, resetPeek, waitPeek };
 
 export const peekSuites = [

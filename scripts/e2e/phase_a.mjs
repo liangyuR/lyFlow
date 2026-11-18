@@ -1,5 +1,5 @@
-// 阶段 A 验收：惰性分支（plan_extended / not_demanded 半透明 / stale 不误报）
-// 与图级命名输出。对应 docs/phase-a1-acceptance.md 的两条。与其余分组共用一个 app 实例。
+// 惰性分支（plan_extended / not_demanded 半透明 / stale 不误报）与图级命名输出的分组。
+// 与其余分组共用一个 app 实例。
 
 import { sleep } from "./cdp.mjs";
 import { buildGraph, lit, newDoc, pressCtrl, pressF5, pressKey, replan, restoreClipboard, runAndWait, select, stubClipboard } from "./page.mjs";
@@ -21,7 +21,7 @@ const opacityOf = (cdp, nodeId) =>
   cdp.eval(`
     const el = document.querySelector('[data-testid=${lit(`node-${nodeId}`)}]');
     if (!el) return null;
-    // 透明度会动（docs/motion-plan.md）：刚加的节点还在播进场，类名一变还有一段 S3 过渡，
+    // 透明度会动：刚加的节点还在播进场，类名一变还有一段过渡，
     // 刚跑完就读会读到半路上的值。等有限的动画都播完、再过两帧（进场播完才擦 inline 值），
     // 直到节点上不再有动画。running 的呼吸光是无限循环，不等它。
     const finite = () => el.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity);

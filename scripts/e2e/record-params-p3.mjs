@@ -1,4 +1,4 @@
-// 配方（docs/param-recipe-plan.md P3）的验收截图：用 CDP 驱动真实的 Tauri app，搭一张「车门缝隙检测」的图、
+// 配方的截图：用 CDP 驱动真实的 Tauri app，搭一张「车门缝隙检测」的图、
 // 建三个配方，截三张到 docs/：
 //   params-p3-toolbar-row.png  工具栏的配方下拉框（当前「车型A·左前门」、有没存的改动 → 橙点），按节点页里被覆盖的行
 //   params-p3-matrix.png       配方矩阵：三个配方、三态都在（沿用基础 / 配方的值 / 越界），选中两格

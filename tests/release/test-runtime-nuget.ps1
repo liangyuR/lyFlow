@@ -6,6 +6,7 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $work = Join-Path $root ('build/nuget-contract-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 $revision = 'a' * 40
+$productVersion = Get-ReleaseVersion -Root $root
 $tests = 0
 try {
     $runtime = Join-Path $work 'runtime'
@@ -24,7 +25,7 @@ try {
     foreach ($relative in $configuration.requiredRuntimeFiles) {
         $target = Join-Path $runtime $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        Set-Content -LiteralPath $target -Value 'P6 SDK fixture'
+        Set-Content -LiteralPath $target -Value 'SDK fixture'
     }
     $metadata = [ordered]@{
         schemaVersion = 1; architecture = 'x64'; localValidationOnly = $false
@@ -44,11 +45,11 @@ try {
         $script:tests++
     }
     $releaseCombination = $original | ConvertFrom-Json -AsHashtable
-    $releaseCombination.engineVersion = $releaseCombination.abiVersion = '1.4.5'
+    $releaseCombination.engineVersion = $releaseCombination.abiVersion = $productVersion
     $releaseCombination.modules = @($configuration.modules)
     $releaseCombination.packs = @($configuration.packs | ForEach-Object { @{ name = $_; version = '1.0.0' } })
     $releaseCombination | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
-    [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision)
+    [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion $productVersion -ExpectedRevision $revision)
     $tests++
     foreach ($case in @(
         @{ modules = @(); name = 'missing capability modules' },
@@ -60,12 +61,12 @@ try {
         $invalid = $releaseCombination.Clone()
         $invalid.modules = $case.modules
         $invalid | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
-        Expect-Rejected { [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision) } $case.name
+        Expect-Rejected { [void](Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion $productVersion -ExpectedRevision $revision) } $case.name
     }
     $invalid = $releaseCombination.Clone()
     $invalid.packs = @($configuration.packs | ForEach-Object { @{ name = $(if ($_ -eq 'solution-gap') { 'gap' } else { $_ }); version = '1.0.0' } })
     $invalid | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
-    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.4.5' -ExpectedRevision $revision } 'retired pack identity'
+    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion $productVersion -ExpectedRevision $revision } 'retired pack identity'
     $current = $original | ConvertFrom-Json -AsHashtable
     $current.engineVersion = $current.abiVersion = '1.3.12'
     $current | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
@@ -75,8 +76,8 @@ try {
     Remove-Item -LiteralPath $records
     $current.files = @($current.files | Where-Object { $_.path -ne 'python/lyflow_python/records.py' })
     $current | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataFile
-    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.3.12' -ExpectedRevision $revision } 'missing P6 records module despite consistent inventory'
-    Set-Content -LiteralPath $records -Value 'P6 SDK fixture'
+    Expect-Rejected { Assert-RuntimeNuGetMetadata -RuntimeDir $runtime -ExpectedVersion '1.3.12' -ExpectedRevision $revision } 'missing records module despite consistent inventory'
+    Set-Content -LiteralPath $records -Value 'SDK fixture'
     foreach ($change in @(
         @{ key = 'abiVersion'; value = '1.1.1' },
         @{ key = 'engineVersion'; value = '1.2.0' },

@@ -82,7 +82,6 @@ class ReleaseIdentityTests(unittest.TestCase):
 
     def test_product_cohort_versions_and_retired_release_identities_are_synchronized(self):
         root_version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
-        self.assertEqual(root_version, '1.4.5')
         for relative in ['app/package.json', 'packages/editor/package.json', 'packages/mcp/package.json',
                          'packages/visualization/package.json', 'examples/host-react/package.json', 'bridge/tauri.conf.json']:
             self.assertEqual(json.loads((ROOT / relative).read_text(encoding='utf-8'))['version'], root_version, relative)

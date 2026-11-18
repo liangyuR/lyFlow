@@ -1,4 +1,4 @@
-// 两节点输出并排对比（交互清单 #35，docs/compare-plan.md §6）。差异表每种类型的数值只在
+// 两节点输出并排对比（docs/compare-plan.md）。差异表每种类型的数值只在
 // packages/editor/test/compare-diff.test.mjs 里钉；这里只验真界面那一半：两栏、冻结、共用相机、换 B、A 跟随。
 import { sleep } from "./cdp.mjs";
 import {
@@ -126,7 +126,7 @@ async function prepare(cdp) {
 }
 
 async function suiteCompareFreeze(cdp, report) {
-  report.section("对比：进入即冻结 B，改参数重跑后只有 A 变（§6 1–4）");
+  report.section("对比：进入即冻结 B，改参数重跑后只有 A 变");
   const ids = await prepare(cdp);
 
   await selectAndWaitCloud(cdp, ids.gen);
@@ -184,7 +184,7 @@ async function suiteCompareFreeze(cdp, report) {
   report.eq("2D 剖面下两栏仍是点云", [flat.paneA.view, flat.paneB.view], ["cloud", "cloud"]);
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
-  // 测量与对比联动（measure-plan M8）：点在哪一栏就吸附到那一栏的云
+  // 测量与对比联动：点在哪一栏就吸附到那一栏的云
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMeasuring(true); return true;`);
   const count = () => cdp.eval(`return Number(document.querySelector('.viewer').getAttribute('data-measure'));`);
   const paneCenter = (s) => cdp.eval(`
@@ -200,7 +200,7 @@ async function suiteCompareFreeze(cdp, report) {
 }
 
 async function suiteCompareFollow(cdp, report) {
-  report.section("对比：换 B 解冻，A 跟随选中 / 钉住（§6 5–6）");
+  report.section("对比：换 B 解冻，A 跟随选中 / 钉住");
   const ids = await prepare(cdp);
   await selectAndWaitCloud(cdp, ids.gen);
   await cdp.eval(`window.__lyflow.stores.compare.getState().toggle(); return true;`);
@@ -251,7 +251,7 @@ async function openNodeMenu(cdp, id) {
 }
 
 async function suiteCompareExits(cdp, report) {
-  report.section("对比：右键进入、B 被删自动退出、快捷键开关预览、拖框互斥（§6 5、7、8）");
+  report.section("对比：右键进入、B 被删自动退出、快捷键开关预览、拖框互斥");
   const ids = await prepare(cdp);
   await selectAndWaitCloud(cdp, ids.gen);
 
@@ -319,7 +319,7 @@ async function suiteCompareExits(cdp, report) {
 }
 
 async function suiteCompareValues(cdp, report) {
-  report.section("对比：两侧都只有值 —— 两张值表格并排，差异表比 Transform（§6 9）");
+  report.section("对比：两侧都只有值 —— 两张值表格并排，差异表比 Transform");
   await newDoc(cdp);
   await cdp.eval(`window.__lyflow.stores.compare.getState().exit(); return true;`);
   const ids = await buildGraph(cdp, [{ key: "pose", op: "transform.make" }], []);

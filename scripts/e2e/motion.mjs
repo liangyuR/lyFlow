@@ -1,4 +1,4 @@
-// 动效的分组（docs/motion-plan.md §3 验收 2–9）：进场、删除残影、端点对齐、连线生长、
+// 动效的分组（docs/motion-plan.md）：进场、删除残影、端点对齐、连线生长、
 // 数据流动、状态闪光、hover、关动效。逐条结果见 docs/motion-acceptance.md。
 //
 // 动效是「时间上的」行为，断言靠两样东西：页面里的 MutationObserver 记下标记属性
@@ -143,10 +143,10 @@ const clearDoc = async (cdp) => {
   await sleep(500);
 };
 
-// --------------------------------------------------------------- 验收 2：进场
+// --------------------------------------------------------------- 进场
 
 async function suiteEnter(cdp, report) {
-  report.section("动效 验收 2：进场只给编辑出来的节点 —— addNode 淡入、loadDoc 与平移不闪");
+  report.section("动效：进场只给编辑出来的节点 —— addNode 淡入、loadDoc 与平移不闪");
   await install(cdp);
   await clearDoc(cdp);
 
@@ -238,10 +238,10 @@ async function suiteEnter(cdp, report) {
   report.eq("新进入视口的节点没有进场标记", panHits, []);
 }
 
-// --------------------------------------------------------------- 验收 3：删除
+// --------------------------------------------------------------- 删除
 
 async function suiteDelete(cdp, report) {
-  report.section("动效 验收 3：删除 —— doc 立即改、残影无 id/data-*、500 ms 后消失、撤销再进场");
+  report.section("动效：删除 —— doc 立即改、残影无 id/data-*、500 ms 后消失、撤销再进场");
   await install(cdp);
   await clearDoc(cdp);
   const ids = await buildGraph(cdp, [
@@ -296,10 +296,10 @@ async function suiteDelete(cdp, report) {
   report.eq("一次删除 31 个节点不出残影", many, 0);
 }
 
-// ----------------------------------------------------------- 验收 4：端点对齐
+// ----------------------------------------------------------- 端点对齐
 
 async function suiteAlign(cdp, report) {
-  report.section("动效 验收 4：端点对齐 —— 进场后、抖动后、hover 中、布局过渡中途与结束，误差 ≤ 1 px");
+  report.section("动效：端点对齐 —— 进场后、抖动后、hover 中、布局过渡中途与结束，误差 ≤ 1 px");
   await install(cdp);
   await clearDoc(cdp);
   const ids = await buildGraph(cdp, [
@@ -382,10 +382,10 @@ async function suiteAlign(cdp, report) {
   report.ok(`布局过渡结束：最大偏差 ${worst(end.rows)} px ≤ 1`, worst(end.rows) <= 1, JSON.stringify(end.rows));
 }
 
-// --------------------------------------------------------------- 验收 5：生长
+// --------------------------------------------------------------- 生长
 
 async function suiteGrow(cdp, report) {
-  report.section("动效 验收 5：连线生长 —— connect 后带生长标记，长完路径完整、惰性边虚线复原");
+  report.section("动效：连线生长 —— connect 后带生长标记，长完路径完整、惰性边虚线复原");
   await install(cdp);
   await clearDoc(cdp);
   const ids = await buildGraph(cdp, [
@@ -425,7 +425,7 @@ async function suiteGrow(cdp, report) {
     { dash: norm(lazy.late.dash), pathLength: lazy.late.pathLength }, { dash: "6 4", pathLength: null });
 }
 
-// --------------------------------------------------------------- 验收 6：流动
+// --------------------------------------------------------------- 流动
 
 /** 一条够慢的链：两百万点过三道极细的体素栅格。seed 每次不同，免得整条命中缓存。 */
 function slowChain() {
@@ -473,7 +473,7 @@ async function sampleFlow(cdp) {
 }
 
 async function suiteFlow(cdp, report) {
-  report.section("动效 验收 6：数据流动 —— 目标节点 running 时只有它的入边在流，跑完全图清空");
+  report.section("动效：数据流动 —— 目标节点 running 时只有它的入边在流，跑完全图清空");
   await install(cdp);
   await clearDoc(cdp);
   const chain = slowChain();
@@ -489,10 +489,10 @@ async function suiteFlow(cdp, report) {
   report.eq("运行结束后全图没有 data-flowing=\"1\"", leftover, 0);
 }
 
-// ------------------------------------------------------------ 验收 7：状态反馈
+// ------------------------------------------------------------ 状态反馈
 
 async function suiteStateFeedback(cdp, report) {
-  report.section("动效 验收 7：状态反馈 —— done 恰闪一次、error 只抖标题栏、重新挂载不闪");
+  report.section("动效：状态反馈 —— done 恰闪一次、error 只抖标题栏、重新挂载不闪");
   await install(cdp);
   await clearDoc(cdp);
   const ids = await buildGraph(cdp, [
@@ -582,10 +582,10 @@ async function suiteStateFeedback(cdp, report) {
   report.eq("进出子图重新挂载的节点一次都没闪", remountHits, []);
 }
 
-// ------------------------------------------------------------------ 验收 8：hover
+// ------------------------------------------------------------------ hover
 
 async function suiteHover(cdp, report) {
-  report.section("动效 验收 8：hover（真鼠标）—— 节点高亮关联边、边亮两端、端口放大、拖线不淡化");
+  report.section("动效：hover（真鼠标）—— 节点高亮关联边、边亮两端、端口放大、拖线不淡化");
   await install(cdp);
   await clearDoc(cdp);
   const ids = await buildGraph(cdp, [
@@ -725,10 +725,10 @@ async function suiteHover(cdp, report) {
   await moveMouse(cdp, await emptySpot(cdp));
 }
 
-// ------------------------------------------------------------ 验收 9：关动效
+// ------------------------------------------------------------ 关动效
 
 async function suiteReducedMotion(cdp, report) {
-  report.section("动效 验收 9：prefers-reduced-motion: reduce —— 标记全不出现（流动的边静态高亮见单节点运行 验收 11）");
+  report.section("动效：prefers-reduced-motion: reduce —— 标记全不出现（流动的边静态高亮见单节点运行的进度环分组）");
   await install(cdp);
   await clearDoc(cdp);
   await buildGraph(cdp, [
@@ -780,11 +780,11 @@ async function suiteReducedMotion(cdp, report) {
     `);
     const rmEnter = await stopRecord(cdp, "rmEnter");
     const rmGrow = await stopRecord(cdp, "rmGrow");
-    report.eq("（2）addNode 两帧后 opacity 已经是 1、没有进场标记", { opacity: added.opacity, rmEnter }, { opacity: 1, rmEnter: [] });
-    report.eq("（3）删除不出残影", added.ghosts, 0);
-    report.eq("（5）connect 没有生长标记", rmGrow, []);
-    // （6）关动效时的流动（入边仍 data-flowing、流动层与呼吸光 animation-name 为 none）在 noderun.mjs
-    // 验收 11 的进度环采样里一起验：那边本来就在关动效下跑一个慢节点，这里不再另跑一条两百万点的慢链
+    report.eq("addNode 两帧后 opacity 已经是 1、没有进场标记", { opacity: added.opacity, rmEnter }, { opacity: 1, rmEnter: [] });
+    report.eq("删除不出残影", added.ghosts, 0);
+    report.eq("connect 没有生长标记", rmGrow, []);
+    // 关动效时的流动（入边仍 data-flowing、流动层与呼吸光 animation-name 为 none）在 noderun.mjs
+    // 的进度环采样里一起验：那边本来就在关动效下跑一个慢节点，这里不再另跑一条两百万点的慢链
   } finally {
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
     await sleep(150);
@@ -793,7 +793,7 @@ async function suiteReducedMotion(cdp, report) {
   report.eq("撤掉模拟之后动效恢复", back, "on");
 }
 
-/** 端点对齐与真鼠标这几样别的分组也要（docs/node-run-plan.md 验收 11 复用对齐断言）。 */
+/** 端点对齐与真鼠标这几样别的分组也要（单节点运行的分组复用对齐断言）。 */
 export { install as installMotionProbe, alignOf, worst, moveMouse, emptySpot };
 
 export const motionSuites = [

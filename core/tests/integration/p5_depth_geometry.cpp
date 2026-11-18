@@ -404,6 +404,8 @@ void projection(const Json& outputs) {
   pointCount(outputs, "projectedCloud", 3063);
   CHECK(p3::data(outputs, "projectionQuality").at("visibleCount") == 3063);
   CHECK(outputs.at("sourceImage").at("value").at("channels") == 4);
+  CHECK(outputs.at("depth").at("value").at("width") == 64);
+  CHECK(outputs.at("depth").at("value").at("height") == 48);
 }
 }
 
@@ -418,6 +420,7 @@ TEST_CASE(
     CHECK(result.at("areaModel") == "observed_depth_orthogonal_footprint");
     CHECK(result.at("state") == "defect");
     CHECK(result.at("good") == false);
+    CHECK(result.at("valid") == true);
     const auto& items = result.at("items");
     REQUIRE(items.size() == (changed ? 1 : 2));
     for (const auto& item : items) {
@@ -507,6 +510,7 @@ TEST_CASE(
   cross("p5-pose-project-plane", {{"liftMode", "center"}}, [](const Json& outputs, bool changed) {
     const auto& items = p3::data(outputs, "poses").at("items");
     REQUIRE(items.size() == 1);
+    CHECK(items[0].at("id") == "plane-box");
     CHECK(items[0].at("frame") == "camera");
     CHECK(items[0].at("pickable") == false);
     CHECK(std::abs(items[0].at("position")[2].get<double>() - 1.01) <= 1e-8);

@@ -1,9 +1,9 @@
-// 配方 P4（docs/param-recipe-plan.md P4：CLI、MCP、宿主接入）的分组。逐条结果见 docs/param-recipe-p4-acceptance.md。
+// 配方经 CLI 运行的分组。
 //
-// 26 `lyflow run --recipe A.lyflow-recipe.json` 的结果等于编辑器选配方 A 运行的结果：真实的 gap 图（KUN10 的点 2，
+// `lyflow run --recipe A.lyflow-recipe.json` 的结果等于编辑器选配方 A 运行的结果：真实的 gap 图（KUN10 的点 2，
 //    软装 V 缝开口 + 面差）与真实的样本（KUN10 的几帧），逐位比较图级输出 gap / flush；`--param` 覆盖配方里的同名值。
-//    27（失配退出码 4）、28（MCP）在 cargo test 与 packages/mcp 的测试里，不在这里。
-// 顺手修：1280–1440 宽的窗口里工具栏的图名框至少完整放下 8 个汉字（P3 截图里「车门缝隙检测」被截断）。
+//    失配退出码与 MCP 在 cargo test 与 packages/mcp 的测试里，不在这里。
+// 顺手修：1280–1440 宽的窗口里工具栏的图名框至少完整放下 8 个汉字（「车门缝隙检测」曾被截断）。
 //
 // 数据：LYFLOW_GAP_KUN10 指到 luoshi 目录（下面有 database/KUN10 与 cloud/KUN10），缺省是这台机器上的位置。
 // 找不到数据或 core 里没有 gap 包时，这一组标「未验」并说明原因（grep 得到，不算通过）。
@@ -33,7 +33,7 @@ const CLI = path.join(ROOT, 'bridge', 'target', 'debug', 'lyflow.exe');
 const KUN10 = process.env.LYFLOW_GAP_KUN10 ?? 'C:\\Users\\11601\\OneDrive\\Desktop\\DTS\\luoshi';
 const POINT = '2';
 const FRAMES = 3;
-const RECIPE = '车型A·P4';
+const RECIPE = '车型A·对拍';
 
 // ------------------------------------------------------------ 小工具
 
@@ -70,7 +70,7 @@ function cliHasGap() {
 /** CLI 带没带 gap 包。不带就返回原因与重编命令：e2e 里不现编（一编几十分钟），也不静默跳过（跳过的分组照样「全绿」）。 */
 function gapCliProblem() {
   const rebuild =
-    '先在仓库根重编：$env:LYFLOW_PACKS="gap;solution-dts"; cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features';
+    '先在仓库根重编：$env:LYFLOW_PACKS="solution-gap;solution-dts"; $env:LYFLOW_MODULES="gap-template;gap-model;gap-import;gap-compat"; cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features';
   if (!fs.existsSync(CLI)) return `找不到 ${CLI}。${rebuild}`;
   if (!cliHasGap())
     return `${CLI} 里没有 gap.notch_width（编它时 LYFLOW_PACKS 没带 gap）。${rebuild}`;
@@ -83,12 +83,12 @@ const measurementsOf = (outputs) => ({
   flush: JSON.stringify(outputs?.flush ?? null),
 });
 
-// ------------------------------------------------------------ 验收 26
+// ------------------------------------------------------------ CLI --recipe 与编辑器对拍
 
 async function suiteCliMatchesEditor(cdp, report, ws) {
   const graphSrc = path.join(KUN10, 'database', 'KUN10', 'device_0', POINT, `${POINT}.lyflow.json`);
   const cloudRoot = path.join(KUN10, 'cloud', 'KUN10');
-  const title = `P4 验收 26：CLI --recipe 与编辑器选配方运行逐位相同（真实 gap 图 ${POINT}，KUN10 的 ${FRAMES} 帧）`;
+  const title = `CLI --recipe 与编辑器选配方运行逐位相同（真实 gap 图 ${POINT}，KUN10 的 ${FRAMES} 帧）`;
   if (!fs.existsSync(graphSrc) || !fs.existsSync(cloudRoot)) {
     report.section(`${title}（未验：找不到 ${graphSrc} 或 ${cloudRoot}，设 LYFLOW_GAP_KUN10）`);
     report.fail('真实 gap 数据在', `${graphSrc} / ${cloudRoot}`);
@@ -124,12 +124,12 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
   );
 
   // 图拷进中文工作区（配方目录跟着图走），打开、把三个 notch_width 参数纳入配方
-  const dir = path.join(ws.dir, '车门缝隙 P4');
+  const dir = path.join(ws.dir, '车门缝隙 对拍');
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const graphFile = path.join(dir, '点2 开口与面差.lyflow.json');
-  // 线上那张图原样拷来。09-25 起它自己就是 result_bundle v2 的接法、n_load.layout = profile
-  // （docs/kun10-graphs-migration-acceptance.md），这里不再替它改任何东西
+  // 线上那张图原样拷来。09-25 起它自己就是 result_bundle v2 的接法、n_load.layout = profile，
+  // 这里不再替它改任何东西
   const src = JSON.parse(fs.readFileSync(graphSrc, 'utf8'));
   fs.writeFileSync(graphFile, JSON.stringify(src, null, 2), 'utf8');
   const recipeFile = path.join(dir, '点2 开口与面差.recipes', `${RECIPE}.lyflow-recipe.json`);
@@ -267,7 +267,7 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
 
 const EIGHT = '车门缝隙检测左前';
 
-/** 验收 26 留下的那种状态，用合成小图搭：图存在中文工作区里、一个图参数纳入了配方、选着配方、跑过一次。
+/** 对拍分组留下的那种状态，用合成小图搭：图存在中文工作区里、一个图参数纳入了配方、选着配方、跑过一次。
  *  返回接下来改哪个图参数、改成多少（改了就是「已过时 + 将重算 + 配方没存」）。 */
 async function crowdedRecipeState(cdp, ws) {
   const dir = path.join(ws.dir, '工具栏宽度');
@@ -304,7 +304,7 @@ async function crowdedRecipeState(cdp, ws) {
 }
 
 /** 1280–1440 宽时活动标签完整放下 8 个汉字；工具栏里什么都不溢出、运行区的状态字不被裁、配方下拉框在窗口里。
- *  状态照 P3 截图那样挤：跑过一次（done N）、改过参数（已过时 + 将重算 N 个）、有文件名、选着配方且没存。 */
+ *  状态尽量挤：跑过一次（done N）、改过参数（已过时 + 将重算 N 个）、有文件名、选着配方且没存。 */
 async function suiteToolbarWidth(cdp, report, ws) {
   report.section('1280–1440 宽的窗口里，活动标签完整显示 8 个汉字，工具栏无溢出');
   const readState = () =>
@@ -314,7 +314,7 @@ async function suiteToolbarWidth(cdp, report, ws) {
     return { file: g.filePath, recipe: b.snapshot().recipe?.current ?? null };
   `);
   let state = await readState();
-  // 接着验收 26 的状态；它没跑（KUN10 数据不在）就自己搭一个一样挤的，这一组照样验得到
+  // 接着对拍分组的状态；它没跑（KUN10 数据不在）就自己搭一个一样挤的，这一组照样验得到
   let tweak = { param: 'levelDepth', value: 1.1 };
   if (!(state.file && state.recipe === RECIPE)) {
     tweak = await crowdedRecipeState(cdp, ws);

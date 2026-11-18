@@ -67,7 +67,7 @@ M2 将 `transform.make`、`register.constraints_3d` 移入 `std-geometry`，将 
 
 `signedPointLine`要求各输入使用相同的明确单位；`Normalize`用于一般几何，`DeclaredUnit`要求已归一方向且保留旧float方向的数值路径。法向正方向由调用者指定。`sampledGapFlush`计算实际样本左右边缘间隙，以及同一横坐标上右减左的面差；这与点到线的法向距离是不同业务定义。
 
-轻量构建仅需固定Eigen头文件，不需PCL/OpenCV/ORT。运行`python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps`准备并校验，或提供精确5.0.1的`Eigen3_DIR`。安装SDK带`licenses/profile/eigen/NOTICE`及来源清单；导出静态目标不携带源码树或Eigen查找依赖。独立消费门禁显式禁用Eigen发现，运行全部四个内核的数值调用并检查PE导入。
+轻量构建仅需固定Eigen头文件，不需PCL/OpenCV/ORT。运行`python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps`准备并校验，或提供精确5.0.1的`Eigen3_DIR`。安装SDK带`licenses/profile/eigen/NOTICE`及来源清单；导出静态目标不携带源码树或Eigen查找依赖。独立消费门禁显式禁用Eigen发现，调用全部四个内核并检查结果有限、单位与帧契约及PE导入；数值判据由`kernels/tests`负责。
 
 ## 可选的稳健拟合后端
 
@@ -96,4 +96,4 @@ target_link_libraries(my-robust-host PRIVATE lyflow::profile_robust_kernel)
 
 点到无限直线的有符号距离只由`metrology::signedPointLine`实现：面差、ROI边界求交、轮廓最近样本和旧Gap引擎都调用它，`canonicalNormalReference`给出方向朝+x（竖直朝+y）后的右法向参考。带线段裁剪的精确几何距离仍在`geometry_kernel`。
 
-公开节点的帧、平面、来源hash、单位以及旧算子patch版本见[公共Profile算子](profile-public-operators.md)。安装示例同时执行这些新增接口；轻量消费仍显式禁用PCL查找，稳健消费检查实际PCL依赖闭包并隔离core/CV/ORT。SDK只暴露静态计算，不以安装后数值验证代替场景导入或现场验收。
+公开节点的帧、平面、来源hash、单位以及旧算子patch版本见[公共Profile算子](profile-public-operators.md)。安装示例同时执行这些新增接口；轻量消费仍显式禁用PCL查找，稳健消费检查实际PCL依赖闭包并隔离core/CV/ORT。SDK只暴露静态计算，安装后消费验证不代替场景导入或现场验收。

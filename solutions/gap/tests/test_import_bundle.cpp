@@ -162,8 +162,7 @@ using namespace lyflow::test::gap_graph_test;
 } // namespace
 
 TEST_CASE(
-    "导入器注册了六种 kind；导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
-  // 六种 kind 都注册了：三种模式 × 积木 / 细粒度
+    "导入器为每种模式注册积木与细粒度 kind；导入的图每个节点的 opVersion 等于 manifest 里该算子的版本") {
   for (const char* kind :
        {"StandardGap.yml", "StandardGap.yml:template", "StandardGap.yml:model",
         "StandardGap.yml:fine", "StandardGap.yml:template:fine", "StandardGap.yml:model:fine"}) {
@@ -180,7 +179,6 @@ TEST_CASE(
   for (const auto& o : manifest["operators"]) {
     versions[o["id"].get<std::string>()] = o["version"].get<std::string>();
   }
-  REQUIRE(versions.at("gap.locate_template") == "4.0.0");
   Fixture f("opversion", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   for (const char* kind : {"StandardGap.yml:template", "StandardGap.yml:template:fine",
                            "StandardGap.yml:model", "StandardGap.yml:model:fine"}) {
@@ -807,8 +805,9 @@ TEST_CASE("导入的图过 core 的 validate：模板、模型、带 fallback �
 }
 
 TEST_CASE(
-    "Native import six entrypoints retain real fine stages paired contexts and fixed public units") {
-  Fixture fixture("native-six-contract", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
+    "Native import entrypoints retain real fine stages paired contexts and fixed public units") {
+  Fixture fixture("native-import-contract",
+                  "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   const std::set<std::string> retired{"gap.fit_line",
                                       "gap.selected_point",
                                       "gap.nearest_to_line",

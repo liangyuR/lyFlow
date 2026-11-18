@@ -1,4 +1,5 @@
-// 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app。M2 的分组在本文件，M3 的在 ./m3.mjs。
+// 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app。基础分组（中文路径、演示 pipeline、坏参数、取消、安装包）在本文件，
+// 其余分组在同目录的各文件里，由下面的 SUITES 汇总。
 // 跑法与「为什么是 CDP」见 ./README.md。
 
 import fs from 'node:fs';
@@ -88,7 +89,7 @@ function parseOnly(argv) {
 
 // ------------------------------------------------------------------- 各分组
 
-/** §11：中文目录下保存图 + 存 PCD。顺带生成后面演示 pipeline 要读的那个文件。 */
+/** 中文目录下保存图 + 存 PCD。顺带生成后面演示 pipeline 要读的那个文件。 */
 async function suiteChinesePath(cdp, report, ws) {
   report.section('中文路径：保存图 + 写 PCD');
 
@@ -127,7 +128,7 @@ async function suiteChinesePath(cdp, report, ws) {
   return { graphPath, pcdName };
 }
 
-/** §11：演示 pipeline → F5 → 依次变色 → ok → 每个节点 3D 点数 > 0。 */
+/** 演示 pipeline → F5 → 依次变色 → ok → 每个节点 3D 点数 > 0。 */
 async function suiteDemoPipeline(cdp, report, ws, pcdName) {
   report.section('演示 pipeline：读 PCD → 裁剪 → 降采样 → 去噪 → 平面 → 分离 → 存盘');
 
@@ -206,7 +207,7 @@ async function suiteDemoPipeline(cdp, report, ws, pcdName) {
   return { ids, graphPath };
 }
 
-/** §11：坏参数 → 红框 + 下游 cancelled + 旁支照常执行。 */
+/** 坏参数 → 红框 + 下游 cancelled + 旁支照常执行。 */
 async function suiteBadParam(cdp, report, ids) {
   report.section('坏参数：leafSize = 0');
 
@@ -350,7 +351,7 @@ async function suiteBadParam(cdp, report, ids) {
 }
 
 /** 只校验（不执行）与取输出信息两条 command。UI 目前没有调用点（`validate_graph`
- * 留给 M3 的边编辑边标红，`get_output_info` 留给日志抽屉），最容易悄悄坏掉。 */
+ * 留给边编辑边标红，`get_output_info` 留给日志抽屉），最容易悄悄坏掉。 */
 async function suiteValidateAndInfo(cdp, report, ids) {
   report.section('validate_graph / get_output_info');
 
@@ -394,7 +395,7 @@ async function suiteValidateAndInfo(cdp, report, ids) {
   );
 }
 
-/** §11：运行中 Esc → cancelled，UI 无残留 running。 */
+/** 运行中 Esc → cancelled，UI 无残留 running。 */
 async function suiteCancel(cdp, report) {
   report.section('运行中按 Esc 取消');
 
@@ -488,7 +489,7 @@ async function suiteCancel(cdp, report) {
 
 async function main() {
   // --packaged：不起 tauri dev，而是把 `tauri build` 的产物拷进一个干净目录再启动。
-  // 验的是 m2-plan §11 的「安装包在干净目录能启动并跑通演示 pipeline（DLL 随包）」。
+  // 验的是「安装包在干净目录能启动并跑通演示 pipeline（DLL 随包）」。
   const packaged = process.argv.includes('--packaged');
   // 先解析：点错了名字不必等两分钟起 app 才知道
   const only = parseOnly(process.argv);

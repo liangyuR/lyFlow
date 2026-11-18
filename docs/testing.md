@@ -61,11 +61,14 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 
 ## 测试归属与现有入口
 
-优先在已经拥有该功能契约的用例里增加表项或断言，不为同一判据在不同层重复建测试。
+优先在已经拥有该功能契约的用例里增加表项或断言，不为同一判据在不同层重复建测试。数值判据放在能覆盖它的最低一层（内核 → 包 → 场景）；发布、SDK 与 e2e 层只验结构、身份绑定、覆盖生效与跨接口一致，不再断言内点数、槽号或读数。
 
 | 行为 | 主要位置 |
 |---|---|
+| 公共内核数值（几何、度量、Profile 拟合与尺寸） | `kernels/tests/`（`lyflow-kernel-tests`）；不在包测试或发布契约里重复这些判据。 |
 | 算法数值、端口数据、C ABI、执行计划、缓存、取消与子图 | `core/tests/`、各 `packs/*/tests/`。领域数值测试保留原判据和容差。 |
+| Gap/DTS 场景、导入器与旧图离线迁移规则 | `solutions/gap/tests/`、`solutions/dts/tests/`，迁移夹具在各自 `tests/fixtures/`；不放 `core/tests`。 |
+| 安装后的 CLI/SDK 交付契约（EXACT 版本、链接与依赖闭包、覆盖生效与还原、身份绑定、CLI 与嵌入宿主一致） | `tests/release/*_contract.py`、`tests/release/p5_sdk_consumer/`、`bridge/tests/p6_delivery_contract.py`；产品版本取自 `scripts/release-common.ps1` 的 `Get-ReleaseVersion` 等单一来源，不在测试里写死。对应数值判据在 `core/tests/integration/p4_recognition.cpp`、`p5_depth_geometry.cpp` 及各包测试。 |
 | 算子分包清单（字段、Python 示例 ID、与 manifest 的 ID 及包归属一致） | `scripts/tests/test_operator_package_audit.py` 测检查脚本本身；CI 的 `quality` 检查清单，`native`、`vision` 用各自 manifest 以 `--subset` 核对。 |
 | Rust 封送、IPC、命令行选项/退出码、宿主及跨进程缓存 | `bridge/src/*/tests.rs`、`bridge/tests/`；客户端在 `crates/lyflow-client/`。 |
 | 图动作、撤销、端口兼容、自动连线、参数、配方与搜索 | `packages/editor/test/graph-params*.test.mjs`、`typecheck.test.mjs`、`param-values.test.mjs`、`recipes.test.mjs`、`search.test.mjs`。 |

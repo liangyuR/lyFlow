@@ -1,6 +1,4 @@
 {
-  "version": "1.4.4",
-  "runtimeSha256": "0e189fae271362aefa65f550735eae5f58e4c1b44b5bfdff696c14bdc278802c",
   "cases": {
     "template": {
       "kind": "StandardGap.yml:template",

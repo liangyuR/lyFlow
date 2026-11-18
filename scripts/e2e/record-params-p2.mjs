@@ -1,4 +1,4 @@
-// 参数面板（docs/param-recipe-plan.md P2）的验收截图：用 CDP 驱动真实的 Tauri app，打开全类型示例图
+// 参数面板的截图：用 CDP 驱动真实的 Tauri app，打开全类型示例图
 // examples/param-showcase.lyflow.json，截两张到 docs/：
 //   params-p2-panel.png  面板打开、与画布并排、选中「全类型示例」节点，看得到多种类型的控件
 //   params-p2-types.png  面板最大化，transform 与 curve 两个新控件在画面里

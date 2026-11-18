@@ -117,11 +117,9 @@ def normalize(name, outputs, roles):
     return values
 
 
-def cloud(outputs, name, count=None, bytes_per_point=31):
+def cloud(outputs, name, bytes_per_point=31):
     value = outputs[name]
     require(value["type"] == "PointCloud", f"{name}: native PointCloud was replaced")
-    if count is not None:
-        require(value["elementCount"] == count, f"{name}: expected {count} points, got {value['elementCount']}")
     require(value["byteSize"] == value["elementCount"] * bytes_per_point, f"{name}: optional channel payload sizes changed")
     return value["elementCount"]
 
@@ -144,106 +142,65 @@ def mask_binding(outputs, pose_name):
         require(binding["id"] == item["id"] and binding["index"] == index and binding["hasMask"] is True, "Mask business ID/index binding changed")
 
 
-def near(actual, expected, tolerance, label):
-    require(math.isfinite(actual) and abs(actual - expected) <= tolerance, f"{label}: expected {expected}, got {actual}")
+def finite(values, label):
+    require(all(isinstance(value, (int, float)) and math.isfinite(value) for value in values), f"{label}: expected finite numbers")
 
 
-def check(name, outputs, changed, truth):
+def check(name, outputs):
     require(not any(entry.get("missing", False) for entry in outputs.values()), f"{name}: missing graph output")
     if name in {"p5-depth-inspection", "p5-depth-filters"}:
-        cloud(outputs, "sourceCloud", truth["scene"]["sourcePoints"])
-        cloud(outputs, "projectedCloud", truth["scene"]["visiblePoints"])
-        require(record(outputs, "projectionQuality")["visibleCount"] == 3063, "Z-buffer visibility changed")
-        require(outputs["sourceImage"]["value"]["channels"] == 4, "RGBA input was discarded")
-        require(outputs["depth"]["value"]["width"] == 64 and outputs["depth"]["value"]["height"] == 48, "Wrong organized extent")
+        for role in ("sourceCloud", "projectedCloud", "cloud"):
+            cloud(outputs, role)
     if name == "p5-depth-inspection":
-        cloud(outputs, "cloud", 3072)
-        require(record(outputs, "fillQuality")["filledCount"] == 9 and outputs["filledIndices"]["elementCount"] == 9, "Hole fill did not preserve observed versus synthetic support")
+        require(record(outputs, "fillQuality")["filledCount"] == outputs["filledIndices"]["elementCount"], "Hole fill count differs from its native indices")
         result = record(outputs, "defects", "inspection.Defects.v1")
-        require(result["areaModel"] == "observed_depth_orthogonal_footprint", "Defect footprint model changed")
-        require(result["state"] == "defect" and result["good"] is False and result["valid"] is True, "Observed defects were classified as clear/unknown")
-        require([item["direction"] for item in result["items"]] == (["up"] if changed else ["up", "down"]), "Signed defect selection changed")
         for item in result["items"]:
-            direction = item["direction"]
-            require(item["support"] == truth["scene"][direction + "Pixels"], "Wrong physical defect support")
-            area = truth["scene"][direction + "AreaM2"]
-            near(item["area"], area, 1e-9, direction + " area")
-            near(item["volume"], truth["scene"][direction + "VolumeM3"], area * truth["scene"]["heightToleranceM"], direction + " volume")
-        require(record(outputs, "features")["sliceCount"] == 6, "Wrong profile count")
-        require(outputs["attributes"]["value"]["shape"] == [6], "Profile attributes lost their native batch")
+            finite((item["area"], item["volume"]), item["direction"])
         cloud(outputs, "sliceCloud")
-        require(outputs["profiles"]["value"]["shape"][1] == 4 and outputs["supports"]["value"]["shape"][1] == 3, "Profile geometry/provenance tensors changed")
     elif name == "p5-depth-filters":
-        quality = record(outputs, "quality", "vision.DepthFilterQuality.v1")
-        require(quality["mode"] == ("fill" if changed else "mean"), "Filter mode override leaked")
-        require(quality["filledPixels"] == (9 if changed else 0), "Invalid compensation count changed")
-        require(quality["changedPixels"] == (9 if changed else 0), "Kernel-one no-op or fill changed observed samples")
-        cloud(outputs, "cloud", 3072 if changed else 3063)
+        record(outputs, "quality", "vision.DepthFilterQuality.v1")
     elif name == "p5-orthographic-roi":
-        for role in ("sourceCloud", "heightCloud", "orthographicCloud"):
-            cloud(outputs, role, truth["orthographic"]["sourcePoints"])
-        cloud(outputs, "cloud", 94)
-        require(record(outputs, "quality")["outputMode"] == ("normal_angle" if changed else "height"), "Orthographic display mode override leaked")
-        depth = outputs["depth"]["value"]
-        require(depth["depth"] == "f32" and depth["min"][0] < 0 and depth["max"][0] > 0, "Signed physical heights were clamped")
-        require(outputs["image"]["value"]["channels"] == (3 if changed else 1), "Physical height and RGB normal visualization were confused")
-        group = record(outputs, "groups", "cloud.Groups.v1")
-        require([(item["id"], item["count"]) for item in group["groups"]] == [("patch-up", 42), ("patch-down", 36), ("hole-region", 16)], "ROI masks were replaced by boxes or holes filled")
+        for role in ("sourceCloud", "heightCloud", "orthographicCloud", "cloud"):
+            cloud(outputs, role)
+        record(outputs, "quality")
+        require(outputs["depth"]["value"]["depth"] == "f32", "Signed physical heights must remain float32")
+        record(outputs, "groups", "cloud.Groups.v1")
         mask_binding(outputs, "instances")
     elif name == "p5-box-crop":
-        cloud(outputs, "sourceCloud", 1200, 27)
+        total = cloud(outputs, "sourceCloud", 27)
         for role in ("wireframe", "cropped", "outside", "cloud", "removed"):
-            cloud(outputs, role, bytes_per_point=27)
+            cloud(outputs, role, 27)
         count = outputs["cropped"]["elementCount"]
-        require((0 < count < 1200) if changed else count == 1200, "Finite cylinder/box membership did not change")
-        require(count + outputs["outside"]["elementCount"] == 1200, "Crop partitions lost points")
-        require(outputs["removed"]["elementCount"] == count and outputs["cloud"]["elementCount"] == 1200 - count, "Crop and compact removal disagree")
-        require([item["id"] for item in record(outputs, "sampleGroups")["groups"]] == ["boxA", "boxB"], "Sampling changed box IDs")
+        require(count + outputs["outside"]["elementCount"] == total, "Crop partitions lost points")
+        require(outputs["removed"]["elementCount"] == count and outputs["cloud"]["elementCount"] == total - count, "Crop and compact removal disagree")
+        record(outputs, "sampleGroups")
     elif name == "p5-pose-rigid":
-        result = record(outputs, "result", "geometry.RigidCheck3D.v1")
-        require(result["accepted"] is (not changed) and result["observable"] is True, "Nonrigid observation was accepted or correct template mutated")
-        require(record(outputs, "comparison")["matched"] is (not changed), "Registered pose comparison disagrees with rigidity")
-        require([item["position"] for item in poses(outputs, "reference")] == [[0, 0, 0], [.1, 0, 0], [0, .1, 0]], "Observed C override also changed the reference template")
-        require(poses(outputs, "current")[2]["position"] == ([.02, .12, .01] if changed else [0, .1, 0]), "Current C binding changed another pose")
+        record(outputs, "result", "geometry.RigidCheck3D.v1")
+        record(outputs, "comparison")
+        poses(outputs, "reference")
+        poses(outputs, "current")
         m = outputs["transform"]["value"]["m"]
-        require(len(m) == 16 and all(math.isfinite(v) for v in m), "Registration transform is not native finite geometry")
-        registration = record(outputs, "registration")
-        require(registration["observable"] is True and registration["transformAvailable"] is True and registration["accepted"] is (not changed), "Registration availability was confused with rigid tolerance")
-        require(registration["transform"] == m, "Reported registration transform differs from the actual native output")
-        near(m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]), 1, 1e-5, "proper registration determinant")
-        near(poses(outputs, "extended")[0]["position"][2], .2, 1e-12, "2D embedded offset")
+        require(len(m) == 16, "Registration transform is not a native 4x4 matrix")
+        finite(m, "registration transform")
+        require(record(outputs, "registration")["transform"] == m, "Reported registration transform differs from the actual native output")
+        for role in ("flipped", "rotated", "extended"):
+            poses(outputs, role)
     elif name == "p5-pose-project-plane":
         mask_binding(outputs, "projected")
-        item = poses(outputs, "poses")[0]
-        require(item["id"] == "plane-box" and item["frame"] == "camera", "Plane lift lost 3D identity/frame")
-        near(item["position"][2], 1.01, 2e-7, "reference plane location")
-        if changed:
-            require(item["size"] == [.12, .08, .02], "Known center-mode dimensions changed")
-        else:
-            expected = sorted([14 * 1.01 / 120, 10 * 1.01 / 120])
-            for actual, wanted in zip(sorted(item["size"][:2]), expected):
-                near(actual, wanted, 2e-7, "observed pixel footprint dimension")
+        for item in poses(outputs, "poses"):
+            finite((*item["position"], *item["size"]), item["id"])
         require(record(outputs, "maskInfo")["frame"] == "image", "2D image frame was relabeled as a 3D frame")
     elif name == "p5-circles-3d":
-        expected = truth["circles"]["tilted" if changed else "front"]
         detected = record(outputs, "circles", "geometry.Circles3D.v1")["items"]
-        require(1 <= len(detected) <= 2, "Circle hypothesis count changed")
-        found = False
         for item in detected:
-            error = math.dist(item["center"], expected["centerM"])
-            cosine = abs(sum(a * b for a, b in zip(item["normal"], expected["unorientedNormal"])))
-            found |= error <= expected["centerToleranceM"] and cosine >= expected["normalCosineMinimum"]
-            require(item["center"][2] > 0 and item["radius"] == expected["radiusM"], "Circle scale or positive depth is wrong")
-        require(found, "No actual calibrated circle solution matches physical fixture truth")
+            finite((*item["center"], *item["normal"], item["radius"]), "circle")
         require([item["id"] for item in poses(outputs, "instances")] == [item["id"] for item in detected], "Circle/pose hypothesis IDs differ")
         mask_binding(outputs, "projected")
     elif name == "p5-mask-remove":
-        cloud(outputs, "sourceCloud", 3066)
-        removed = 104 if changed else 78
-        cloud(outputs, "cloud", 3066 - removed)
+        total = cloud(outputs, "sourceCloud")
         quality = record(outputs, "quality", "cloud.MaskPrimitiveRemoval.v1")
-        require(quality["removed"] == removed and quality["unknown"] == 1 and quality["outOfBoundsKept"] == 1, "Mask/OOB/unknown decision changed")
-        require(outputs["removedIndices"]["elementCount"] == removed and outputs["unknownIndices"]["elementCount"] == 1, "Mask removal native index counts disagree")
+        require(cloud(outputs, "cloud") == total - quality["removed"], "Mask removal lost or duplicated points")
+        require(outputs["removedIndices"]["elementCount"] == quality["removed"] and outputs["unknownIndices"]["elementCount"] == quality["unknown"], "Mask removal native index counts disagree")
         mask_binding(outputs, "detections")
 
 
@@ -299,10 +256,12 @@ def main():
             require(lines[-1]["status"] == "ok" and not lines[-1]["contractViolations"], f"{name}: unhealthy formal run")
             values = lines[-2]
             normalized = normalize(name, values, roles_by_case[name])
-            check(name, values, changed, truth)
+            check(name, values)
             if iteration == 0:
                 defaults = normalized
-            elif iteration == 2:
+            elif iteration == 1:
+                require(normalized != defaults, f"{name}: parameter override did not change the results")
+            else:
                 require(defaults == normalized, f"{name}: defaults were changed by the isolated override")
         report["cases"].append({"graph": name, "runs": 3, "override": override, "status": "passed"})
     require(original == {str(path.relative_to(saved)): digest(path) for path in saved.iterdir() if path.is_file()}, "Workflow execution changed saved source assets")
