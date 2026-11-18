@@ -1,6 +1,6 @@
 # 算子边界迁移计划
 
-状态：实施中，M1–M4c 已合并；M4d 收敛进行中，M5–M7 未实施，须在 M4d 完成后按本文[迁移原则](#迁移原则)执行。原始规划基线为 `9940c8c`。
+状态：M1–M4d 已合并。下一波是 [M5 Glue 拆分](#m5-glue-拆分)，M6、M7 待实施。
 
 参见[目标边界](operator-package-boundaries.md)、[逐算子清单](operator-package-audit.md)及[机器清单](operator-package-audit.json)。M0–M7 为本次架构迁移波次，与既有能力补齐计划 P0/P1/P2 的优先级编号无关。
 
@@ -15,8 +15,8 @@
 | M4a   | 已合并：稳健拟合公共核、可选模块及独立SDK消费               | [PR65](https://github.com/liangyuR/lyFlow/pull/65)                                                                                          |
 | M4b   | 已合并：10项公共算子、原生来源绑定与旧Gap薄适配             | [PR66](https://github.com/liangyuR/lyFlow/pull/66)、[公共算子契约](profile-public-operators.md)                                             |
 | M4c   | 已合并：Gap原生场景、模板/模型、Bundle及显式图升级          | [PR67](https://github.com/liangyuR/lyFlow/pull/67)、[Gap原生迁移](gap-profile-migration.md)                                                 |
-| M4d   | 进行中：M1–M4c 遗留的分层、死代码、重复校验与治理成本收敛   | 见[M4d 收敛切片](#m4d-收敛切片)                                                                                                             |
-| M5–M7 | 待实施；M4d 完成后开始                                      | 下表的波次及验收门槛                                                                                                                        |
+| M4d   | 已合并 | [M4d 收敛切片](#m4d-收敛切片) |
+| M5–M7 | 待实施 | [M5 切片及验证](#m5-glue-拆分)、[后续波次门槛](#波次与完成门槛) |
 
 M1 提升产品/ABI 至 1.4.0，此后各波次保持 1.4 系列 C ABI 布局。M2 交付公开静态 SDK（geometry/metrology 内核）。M3 交付公共 Profile 链与 solution-dts。M4a–M4c 交付稳健拟合公共核、公共 Profile 选点/拟合/度量节点及 solution-gap。版本号与 ABI 规则以 [发包契约](deployment/packaging.md) 为准。
 
@@ -56,8 +56,7 @@ M1–M4c 的实现暴露出几类系统性膨胀：迁移规则写进 core 并�
 | ---- | -------------------------------- | --------------------------------------------------------------- |
 | 1–7  | M0–M4c（已合并）                 | 见各 PR                                                         |
 | 8    | M4d 收敛（见下节，可拆为多个PR） | 各子切片验收；行为变化逐项列出                                  |
-| 9    | glue通用图像/折线能力迁出        | 响应与颜色映射、边缘采样/站位、折线长度/顺序；图像通道和位深    |
-| 10   | glue场景编排和业务结果同步       | 自由搜索/示教、缺胶/断胶、拒绝候选可见性、宿主判据不改变        |
+| 9–10 | Glue 公共能力与场景拆分 | 按 [M5 切片及验证](#m5-glue-拆分)逐条交付 |
 | 11   | 标准包轻量/后端隔离和归属移动    | YAML可选、Tensor适配无ORT、云portable无PCL、全部方法与错误契约  |
 | 12   | 全量构建/发布切换与退役          | 精确manifest能力集合、安装SDK、各宿主、缓存失效、示例与文档一致 |
 
@@ -82,15 +81,49 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 精简构建已暴露旧 Gap 图对 `std-pointcloud` 的 `util.merge`、`filter.radius_outlier`、`filter.crop_box2d` 以及 `std-ml` 的 `ml.onnx_run` 的隐式注册依赖；这些依赖须在场景模块声明中明确，`flow.fallback` 继续由 core 提供。
 
+### M5 Glue 拆分
+
+**算子归属。** 下表覆盖当前 `glue` 的全部公开 ID。[算子清单](operator-package-audit.json)的 `targetPack` 指迁移后注册该 ID 的包。共享 C++ 实现可以有多个调用方，只有图需要直接连接的能力才新增公开节点。
+
+| 现有 ID | 注册目标包 | 该层承担的行为 |
+| --- | --- | --- |
+| `glue.polyline`、`glue.taught_path` | `solution-glue` | 解释像素走廊、示教区间和叠画。`std-geometry` 提供两者共用的二维弧长、插值和切向计算。 |
+| `glue.response`、`glue.fan_scan`、`glue.color_fan` | `std-image` | 按 ROI 生成响应图，沿射线测量并返回候选峰。灰度和彩色入口分别读响应和颜色得分，复用现有 `fanScanCompute`。 |
+| `glue.lateral_runs`、`glue.part_edges` | `std-image` | 沿折线法向采样，返回各站观测到的区段或边缘候选。边的业务角色由下游选择。 |
+| `glue.color_map` | `std-image` | 用输入模型对生产帧打分，输出得分、亮度、观测状态与 ROI 坐标。模型读写和像素打分实现供建模端复用。 |
+| `glue.color_model`、`glue.color_runs` | `solution-glue` | 建模按示教胶线选前景和两侧背景。彩色卡尺调用共享采样与分段实现，用邻站胶宽、中心和边缘完整性决定是否补缝。 |
+| `glue.track_path`、`glue.color_track` | `solution-glue` | 从候选中按历史宽度和连续性选胶点，控制失跟后的重接，输出供宿主判定的轨迹与覆盖率。 |
+| `glue.locate` | `std-image` | 模板定位返回位姿、角度可观测性及失败原因。飞拍消费者据此变换站位。 |
+| `glue.station_calipers`、`glue.edge_distance` | `solution-glue` | 保留名义站位、内边与胶边的选择、标定距离及逐站状态。可共用的图像采样归 `std-image`。 |
+| `glue.bead_path`、`glue.bead_width`、`glue.bead_breaks`、`glue.judge`、`glue.synth_break` | `solution-glue` | 自由搜索、胶宽与断口测量、随包图的判定、人造断胶。GlueSight 继续使用自己的测量图和生产判据。 |
+
+**PR 切片与最低验证。** 先迁公共实现及其直接调用方，最后统一切换场景包名和交付路径。迁入标准包的节点在该片接管注册，原 Glue 包删除对应实现并声明依赖。跨包使用的折线数据、ROI 图层及读写接口由依赖的下层拥有，标准包能独立编译。只有实际迁动注册的切片才更新清单的 `currentPack`。
+
+| PR 范围 | 交付 | 该片验证 |
+| --- | --- | --- |
+| 1 · 折线重采样 | 将已有重采样实现移入轻量几何核，让折线和示教节点共用。两个入口都要求总长至少 8 px，只有示教入口还要求检测区至少 8 px。现有 ID、记录和 2 px 采样约定沿用。 | 复用折线和示教用例，覆盖点序、两端、切向及总长合格但检测区不足 8 px 的不同结果。用随包 `color.lyflow.json` 核对折线仍能接到建模与卡尺。 |
+| 2 · 灰度响应与扇扫 | 连同生产者迁移 `ResponseMaps` 及扇扫入口，灰度跟踪和卡尺改读同一接口。保持响应、灰度、局部亮度三张图与 ROI 原点的对应关系。 | 复用 `test_glue.cpp` 的整图/ROI 与无有效峰用例，用 `measure.lyflow.json` 核对扫描、跟踪和卡尺连线。 |
+| 3 · 灰度卡尺与跟踪 | 迁移法向分段、两侧找边及其测量节点。灰度跟踪保留选点和重接策略，边距节点保留测量基准。 | 复用灰度测量用例，检查半高分段、出图截断、候选顺序和失跟结果。改变选边或候选筛选时，回放受影响的灰度链。 |
+| 4 · 彩色建模与响应 | 把模型读写、像素打分和得分图扇扫接入图像包。场景建模保留示教带取样及 `prior` 累加。 | 用 `test_color.cpp` 验证模型 JSON 往返、整图与 ROI 对齐、高光/暗区无信息和已观测暗背景为零分。用随包彩色图跑通建模、打分和扇扫。 |
+| 5 · 彩色跟踪与卡尺 | 共享法向采样和候选区间计算，保留参考胶宽、邻站补缝及 `widthPolicy=extent` 的场景行为。新版结果若删除恒空的灰度字段或恒定的 `level`，同片升级契约并切换读取方。 | 复用彩色用例区分反光裂分、真实背景双段和截断胶边。按宿主实际读取检查 `coverageInformative`、`unknownSpans` 和 `extent`。修改补缝、宽度或有效性行为时，用对应彩色录制帧对照。 |
+| 6 · 飞拍定位与站位测量 | 迁移模板定位，沿用同一套位姿与角度可观测性语义。站位卡尺保留任意法向、近胶/最强内边选择及站点标识。标定消费者改用版本化 `image.PlaneCalib`，旧图复用已有的显式标定升级规则。 | 复用 `test_flyshot.cpp` 的随包图和带行填充的相机输入，检查毫米点表、角度不可观、`pose_fail`、`no_inner`、`no_bead`、`incomplete_bead`。用现有标定迁移夹具验证旧图和单位；边缘选择变化时回放飞拍链。 |
+| 7 · 场景包与交付切换 | 将其余注册、自由搜索与示教流程、测量判定、场景测试、随包图、片段和工具移至 `solutions/glue`。切换包选择、脚本和发布清单，删除旧包入口。 | 复用示教/自由搜索、断胶及人造断胶用例，验证诊断候选不计入正式宽度、覆盖率或判定。核对随包图、片段及工具资源路径。用 `LYFLOW_STD_PACKS=0` 点名场景包和所需标准包，运行颜色与卡尺链，核对 manifest 归属及产物依赖中无 ORT/PCL。 |
+
+**按变更选择验证。** 纯实现迁移复用对应包的测试，图级只检查连线与输出契约。改变选边、候选、补缝或有效性规则时，回放受影响链路的录制帧，对照逐站结果与宿主判定。[Glue 专项脚本](../scripts/check-glue.ps1) 在配置 `LYFLOW_GLUE_DATA` 后执行灰度实帧评估。[彩色评估工具](../packs/glue/tools/glue_color_eval.py) 使用 `LYFLOW_GLUE_COLOR_DATA` 和相应的示教配置。缺少相应数据时，在该切片标记回放待验。精简构建在包依赖定型时验证，依赖再次变化才重验。完整 SDK、桌面和发布矩阵归 M7 及发布门禁。
+
+公开 ID、参数或 Record 变化时，同片更新受影响的随包图和读取方。保存到磁盘的旧图需要改写时，由 `lyflow migrate` 调用所属包的离线规则。影响 GlueSight 时，在改变契约的切片用配对运行库验证受影响的内置模板、启动所需 ID、彩色节点的 `widthPolicy=extent` 或已有配方的模型 JSON，并注明宿主可接入的版本。类型或状态字段影响 MCP 时验证相应摘要。读取方见 [GlueSight 启动检查](https://github.com/liangyuR/ly-gluesight/blob/main/src-tauri/src/vision.rs)、[内置图模板](https://github.com/liangyuR/ly-gluesight/tree/main/src-tauri/graphs)和 [MCP 摘要](../packages/mcp/src/summary.ts)。
+
 ## 每次迁移的执行清单
 
+按切片实际变动选用下列项目。M5 的测试层级和触发条件以[分片验证](#m5-glue-拆分)为准。
+
 1. 锁定原ID/版本、参数默认值、端口、单位、坐标系、输入顺序和失败诊断；记录直接后端与当前传递依赖。
-2. 先抽可独立链接的内部算法/校验接口，再迁算子注册；不能让一个算子通过执行另一包的节点绕过真实C++依赖声明。
+2. 跨包复用算法时通过共享 C++ 接口调用，在构建目标中声明依赖。纯注册搬迁可沿用已有实现。
 3. 冻结旧→新ID、包、版本及数据映射。纯归属移动不改ID；拆分节点、改变端口/单位时在所属 solution 内提供离线迁移规则和容差内的等价性说明。
 4. 同步直接消费者、场景图、Bundle/Record schema、片段、库组合和宿主注入。不能只有新生产者没有匹配消费者。
 5. 校验正常、空输入、无效/退化、单位/帧不符、取消及只读输入，但只在负责该不变量的那一层校验和测试。
-6. 核对缓存键的算子版本、模型指纹、场景图与内部实现身份；改变数值契约时提升版本，不沿用旧结果缓存，也不为旧版本保留并行缓存分支。
-7. 单独启用目标模块构建，检查导入表、安装文件及许可证，证明轻量配置没有PCL/OpenCV/ORT等意外依赖。
+6. 改变数值契约时提升算子版本，验证旧缓存失效。修改模型或外部资源的加载方式时，检查该输入是否参与现有缓存键。
+7. 改变包依赖时单独启用目标组合，核对能力清单及实际链接的后端。安装文件或随包依赖有变时，按发包契约检查相应资产与许可证。
 8. 删除被替代的旧注册、源文件、适配壳、测试和文档引用；用"未编译源文件为零、未调用注册函数为零"自检。
 9. 更新清单中该项的归属/状态，验收证据写在 PR 描述中。
 
@@ -100,9 +133,9 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | ------------------------------------ | --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `gap.ScanPair`                       | gap                   | solution-gap / M4                                          | 保留主/副/合并的相机身份和槽/处理阶段；公共Profile适配独立定义，不把两台都有效当作前提                   |
 | `gap.RoiSet`                         | gap                   | solution-gap / M4                                          | datum/target/seamLeft/seamRight角色与来源信息属于场景；单位及坐标记录显式转换                            |
-| `glue.ResponseMaps`                  | glue                  | std-image响应模块 / M5                                     | 三张图及frame配套迁移；图尺寸/位深/stride及公共schema随消费者一起升级                                    |
-| `glue.ColorMaps`                     | glue                  | std-image颜色模块 / M5                                     | score/luma/state/frame和模型指纹保留；不把未观测像素当低得分                                             |
-| `glue.Path`                          | glue                  | 场景适配保留solution-glue，通用折线进入geometry/image / M5 | `line/info`中胶路质量与纯折线分离；不只改Bundle kind后继续解释旧字段                                     |
+| `glue.ResponseMaps`                  | glue                  | std-image / M5 | 扇扫、跟踪和卡尺按同一 frame 读取 response、gray、level。 |
+| `glue.ColorMaps`                     | glue                  | std-image / M5 | 保留 score、luma、state、frame。区分未观测、已观测低分及 ROI 外部。 |
+| `glue.Path`                          | glue                  | solution-glue / M5 | 场景拥有 line/info 的示教与搜索语义，弧长重采样共用几何核。 |
 | `glue.Bead`                          | glue                  | solution-glue / M5                                         | 沿程station及胶路有效性/断胶字段仍按原语义，宿主与片段同步                                               |
 | StandardGap的6种导入模式             | gap                   | solution-gap导入模块 / M4                                  | `StandardGap.yml`、`:template`、`:model`及三种`:fine`逐个重写生成图并验证；模型与模板路径/相对资源不改变 |
 | `gap.backup_camera`                  | gap片段               | solution-gap / M4                                          | 备用闭包的demand与choice事件不变                                                                         |
