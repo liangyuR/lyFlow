@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@lyflow/editor": "workspace:*",
+    "@tauri-apps/api": "^2",
     "@xyflow/react": "^12.11.6",
     "qing-steel": "https://github.com/liangyuR/qing-steel/releases/download/v0.11.2/qing-steel-0.11.2.tgz",
     "react": "^18.3.1",

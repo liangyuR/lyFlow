@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     name: 验证正式 Release 并发布固定版本运行库
     runs-on: windows-2022
     timeout-minutes: 45
@@ -40,7 +41,7 @@ jobs:
         run: ./scripts/publish-runtime-nuget.ps1 -Tag $env:RELEASE_TAG -OutputDir "${{ runner.temp }}/runtime-nuget"
 
       - name: 保存已验证运行库包
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: runtime-nuget

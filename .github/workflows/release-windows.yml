@@ -16,10 +16,9 @@ jobs:
   inputs:
     name: 读取已复核的引擎资产
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write # 读取 GitHub Release 草稿需要写权限。
     outputs:
       version: ${{ steps.select.outputs.version }}
+      engine: ${{ steps.select.outputs.engine }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +34,9 @@ jobs:
             git merge-base --is-ancestor HEAD "origin/${{ github.event.repository.default_branch }}"
             if ($LASTEXITCODE) { throw 'Release tag must belong to the default branch history.' }
           }
+          $engine = (Get-ReviewedEngineRelease -Root $PWD).Version
           "version=$version" >> $env:GITHUB_OUTPUT
+          "engine=$engine" >> $env:GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -43,19 +44,18 @@ jobs:
       - name: 校验锁定的 SDK、runtime 与 NuGet
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.select.outputs.version }}
+          ENGINE: ${{ steps.select.outputs.engine }}
         run: |
           . ./scripts/reviewed-engine-release.ps1
-          $lock = Get-ReviewedEngineRelease -Version $env:VERSION
+          $lock = Get-ReviewedEngineRelease -Version $env:ENGINE
+          $published = Get-PublishedEngineRelease -Release $lock
           $dir = Join-Path $env:RUNNER_TEMP 'engine-assets'
-          $tag = "v$env:VERSION"
-          $published = gh release view $tag --json isDraft --jq '.isDraft == false' 2>$null
-          if ($LASTEXITCODE -or $published -ne 'true') { $tag = "engine-assets-v$env:VERSION" }
-          $patterns = foreach ($name in $lock.Assets.Keys) { '--pattern'; $name }
-          gh release download $tag --dir $dir @patterns
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          [void][IO.Directory]::CreateDirectory($dir)
+          foreach ($name in $lock.Assets.Keys) {
+            Invoke-WebRequest -Uri $lock.Assets[$name].url -OutFile (Join-Path $dir $name)
+          }
           Assert-ReviewedEngineAssets -Release $lock -Directory $dir
+          "Engine assets from $($published.html_url)"
       - uses: actions/upload-artifact@v4
         with:
           name: engine-assets
@@ -88,9 +88,9 @@ jobs:
       - name: 打包并从外部宿主验证正式工具产物
         shell: pwsh
         env:
-          VERSION: ${{ needs.inputs.outputs.version }}
+          ENGINE: ${{ needs.inputs.outputs.engine }}
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP "engine-assets/lyflow-native-sdk-win-x64-v$env:VERSION.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "engine-assets/lyflow-native-sdk-win-x64-v$env:ENGINE.zip"
           $out = Join-Path $env:RUNNER_TEMP 'public-tools'
           ./scripts/package-windows.ps1 -Archive $archive -OutputDir $out
           ./tests/release/test-public-tools.ps1 -AssetsDir $out
@@ -122,14 +122,17 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          ENGINE: ${{ needs.inputs.outputs.engine }}
           VERSION: ${{ needs.inputs.outputs.version }}
         run: |
           . ./scripts/reviewed-engine-release.ps1
-          $lock = Get-ReviewedEngineRelease -Version $env:VERSION
+          $lock = Get-ReviewedEngineRelease -Version $env:ENGINE
           Assert-ReviewedEngineAssets -Release $lock -Directory release
           $tag = "v$env:VERSION"
-          $names = @($lock.Assets.Keys) + @("lyflow-sdk-win-x64-$tag.zip", "lyflow-editor-$tag.tgz", 'lyflow-runtime.json')
+          $names = @("lyflow-sdk-win-x64-$tag.zip", "lyflow-editor-$tag.tgz", 'lyflow-runtime.json')
+          if ($env:VERSION -ceq $env:ENGINE) { $names += @($lock.Assets.Keys) }
           $files = foreach ($name in $names) { (Get-Item -LiteralPath "release/$name" -ErrorAction Stop).FullName }
-          $notes = "Windows x64 运行库、原生 SDK、NuGet、含 CLI 的完整 SDK 与 React 编辑器。工具修订 $env:GITHUB_SHA，引擎修订 $($lock.Revision)。"
+          $origin = Get-PublishedEngineRelease -Release $lock
+          $notes = "Windows x64 完整 SDK（含 CLI）与 React 编辑器。工具修订 $env:GITHUB_SHA。引擎 $env:ENGINE 的运行库、原生 SDK 和 NuGet 见  $($origin.html_url) 。引擎修订 $($lock.Revision)。"
           gh release create $tag @files --verify-tag --draft --title "lyFlow $tag Windows x64" --notes $notes
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

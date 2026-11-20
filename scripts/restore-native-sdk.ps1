@@ -9,13 +9,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'runtime-nuget-common.ps1')
 
-if (!$LockFile) {
-    $root = Split-Path -Parent $PSScriptRoot
-    $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).lyflowEngineVersion
-    $LockFile = Join-Path $root "packaging/engine-releases/v$version.json"
-}
-$lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
-if ($lock.schemaVersion -ne 1) { throw 'Unsupported native SDK lock version.' }
+$reviewed = Get-ReviewedEngineRelease -LockFile $LockFile
+$lock = $reviewed.Sdk
 $destinationPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 if (Test-Path -LiteralPath $destinationPath) { throw "SDK destination already exists: $destinationPath" }
 $parent = Split-Path -Parent $destinationPath
@@ -25,6 +20,7 @@ try {
     if ($Archive) {
         $zip = (Resolve-Path -LiteralPath $Archive).Path
     } else {
+        $null = Get-PublishedEngineRelease -Release $reviewed
         $zip = Join-Path $temporary 'sdk.zip'
         Invoke-WebRequest -Uri $lock.url -OutFile $zip
     }

@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Archive,
+    [string]$LockFile,
     [string]$OutputDir,
     [string]$ExpectedTag,
     [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot)
@@ -20,7 +21,8 @@ if ($ExpectedTag) {
     Assert-ReleaseExit 'Check public release sources'
     if ($ExpectedTag -cne "v$version" -or $head -cne $tagRevision -or $dirty) { throw "Tool sources must be a clean checkout of v$version." }
 }
-$lockFile = Join-Path $root "packaging/engine-releases/v$version.json"
+$LockFile = (Get-ReviewedEngineRelease -Root $root -LockFile $LockFile).Path
+if ($Archive) { $Archive = (Resolve-Path -LiteralPath $Archive).Path }
 if (-not $OutputDir) { $OutputDir = Join-Path $root "build/public-tools-v$version" }
 $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 if (Test-Path -LiteralPath $output) { throw "Choose a new output directory: $output" }
@@ -46,7 +48,7 @@ try {
     $runtime = Get-Content -LiteralPath $runtimeFile -Raw | ConvertFrom-Json
     $info = & $cli info | ConvertFrom-Json
     Assert-ReleaseExit 'Inspect packaged CLI'
-    if ($info.version -cne $version -or $info.corePath -ine (Join-Path $sdk 'bin/lyflow_core.dll') -or
+    if ($info.version -cne $runtime.engineVersion -or $info.corePath -ine (Join-Path $sdk 'bin/lyflow_core.dll') -or
         -not $info.buildIdentity.EndsWith("-source-$($runtime.sourceRevision)")) { throw 'CLI did not load the locked engine from the SDK.' }
     & $cli manifest --check
     Assert-ReleaseExit 'Check packaged CLI manifest'

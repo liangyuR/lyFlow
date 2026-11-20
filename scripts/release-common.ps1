@@ -1,4 +1,6 @@
 #Requires -Version 7.0
+. (Join-Path $PSScriptRoot 'reviewed-engine-release.ps1')
+
 function Assert-ReleaseExit {
     param([string]$Operation)
     if ($LASTEXITCODE -ne 0) { throw "$Operation failed (exit $LASTEXITCODE)" }
