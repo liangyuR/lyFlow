@@ -118,8 +118,6 @@ fn fixture() -> Fixture {
         // 空清单 = 这个宿主不要库算子。测试进程不该去碰 app data。
         library_dirs: Some(Vec::new()),
         scenes: Some(scenes.clone() as Arc<dyn SceneProvider>),
-        // 仓库里真有 build/core/bin/lyflow_core.dll 时 watcher 会起线程，
-        // 测试期间一次热重载就会把结果仓清掉。
         hot_reload: false,
         python: Some(Default::default()),
     };

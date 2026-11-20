@@ -20,7 +20,7 @@ Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Ru
 只依赖同目录的 `lyflow/c_api.h` 与 `lyflow/version.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本使用当前产品版本字符串，版本定义见 [`version.h`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/version.h)。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
+契约版本使用当前产品版本字符串，版本定义见配套 SDK 的 `include/lyflow/version.h`。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
 `LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
 `lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本属于同一 主.次 系列；同系列的补丁版本保持 C ABI 兼容，可以直接替换运行库。
 只有统一打包入口验证固定依赖并声明 `LYFLOW_RELEASE_BUILD=ON`，且实际为 Windows x64、
@@ -32,7 +32,7 @@ C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空�
 
 ## 运行和结果接口
 
-当前完整布局以 [`c_api.h`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/c_api.h)、[`client.hpp`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/client.hpp) 和 [Rust 客户端](../crates/lyflow-client/src/lib.rs) 为准，不再按旧整数 ABI 阶段选择接口。
+当前 C/C++ 布局见配套 SDK 的 `include/lyflow/c_api.h` 与 `include/lyflow/client.hpp`；Rust 接口见 [Rust 客户端](../crates/lyflow-client/src/lib.rs)。
 
 - `lyflow_run_options` 承载顶层参数、局部运行范围及点云/图像输入。宿主应使用与运行库兼容的头文件初始化完整结构，不自行猜测字段偏移。
 - `lyflow_output_cloud`、`lyflow_output_tensor`、`lyflow_output_indices`、`lyflow_output_image` 返回结果视图，按各自释放接口管理生命周期；图像按行切片，`level = 0` 读取原比例，较高级别用于缩小显示。
@@ -45,7 +45,7 @@ C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空�
 
 ```
 <prefix>/
-  bin/                     lyflow_core.dll + 全部依赖 DLL（PCL、boost、onnxruntime…）+ lyflow.exe
+  bin/                     lyflow_core.dll + 全部依赖 DLL（PCL、boost、onnxruntime…）
   include/lyflow/          client.hpp、c_api.h 与其余公共头
   library/                 库算子目录（ADR-0010），初始为空
   examples/embed_minimal.cpp
@@ -53,16 +53,7 @@ C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空�
   lyflow-config-version.cmake
 ```
 
-产出方式：
-
-```powershell
-pnpm run core:build                                  # 先构建 core（含算子包）
-pwsh -File scripts/install-lyflow.ps1          # 默认 build/install
-pwsh -File scripts/install-lyflow.ps1 -Prefix D:\lyflow-runtime
-```
-
-`LYFLOW_INSTALL_PREFIX` 环境变量等价于 `-Prefix`。脚本最后会自检布局，
-少一样就报错 —— 缺一个依赖 DLL 的表现是宿主那边一句「找不到模块」，离现场很远。
+按[快速开始](getting-started.md)恢复原生 SDK，即得到上述前缀。包含命令行的完整 SDK 还提供 `bin/lyflow.exe`。
 
 Windows客户端使用 `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`：非系统依赖放在所选DLL同目录，系统组件从System32解析；不依赖CWD或PATH。OpenCV5迁移需同步替换头文件、import library和完整DLL集合，禁止混用4/5运行库。
 
@@ -75,7 +66,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow 1.3.12 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 2.0.3 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 
@@ -86,12 +77,12 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 | ---------------------- | ------------------------------------------------------------------------- |
 | `LYFLOW_BIN_DIR`       | 运行时目录。宿主 exe 边上要有这一份                                       |
 | `LYFLOW_CORE_DLL`      | `Client` 构造函数要的路径                                                 |
-| `LYFLOW_CLI`           | `lyflow.exe`，离线跑图/导入用                                             |
+| `LYFLOW_CLI`           | 完整 SDK 中的 `lyflow.exe`；仅原生 SDK 时未定义                                             |
 | `LYFLOW_LIBRARY_DIR`   | 库算子目录                                                                |
 | `LYFLOW_ABI_VERSION`   | 产品版本字符串；运行时按主.次系列兼容，包元数据按本次发布逐字一致         |
-| `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
+| `LYFLOW_SOURCE_COMMIT` | 构建原生 SDK 的引擎修订 |
 
-完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
+从 SDK 的 `examples/public-kernels/` 可直接配置外部 CMake 工程。见[消费验收](deployment/windows-consumption-2.0.3.md)。
 
 ## 最小用法
 
@@ -377,9 +368,7 @@ lyflow-app = { git = "https://github.com/liangyuR/lyFlow.git", branch = "main", 
 要跟上 LyFlow 的新提交就 `cargo update -p lyflow-app`。URL 带不带 `.git` 要和宿主
 `[patch."…"]` 里写的逐字一致，否则 patch 对不上。
 
-crate 的 lib 名字是 `lyflow_lib`。`build.rs` 会用 CMake 编 core；外部宿主拿不到
-checkout 路径，所以用环境变量按名字点包：`LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts`
-得到 core + dts（一个 PCL 都不拖，见 [ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）。
+crate 的 lib 名字是 `lyflow_lib`。在构建宿主前设置 `LYFLOW_NATIVE_SDK` 指向已恢复的 SDK，Rust 桥接从该 SDK 暂存运行库及 Python worker。
 
 ### 三段代码
 
@@ -498,7 +487,7 @@ impl SceneProvider for MyProfiles {
 ## 中文路径
 
 core 的 DLL 里所有路径都按 UTF-8 处理。宿主 **exe** 要内嵌
-`activeCodePage=UTF-8` 的 manifest（仓库里那份是 `core/lyflow-utf8.manifest`），
+`activeCodePage=UTF-8` 的 manifest（SDK 随附 `examples/lyflow-utf8.manifest`），
 否则 PCL 的窄字符串文件 IO 会把 UTF-8 路径按本地代码页解释，
 表现是「文件存在但报不存在」。DLL 上贴这个 manifest 无效。
 

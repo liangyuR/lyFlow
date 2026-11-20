@@ -4,7 +4,7 @@
 
 ## 准备和离线复用
 
-在仓库根目录运行：
+在已恢复 SDK 的根目录运行：
 
 ```powershell
 python scripts/fetch-p4-model-assets.py --output-dir build/p4-assets

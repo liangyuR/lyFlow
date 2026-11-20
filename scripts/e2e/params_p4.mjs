@@ -11,16 +11,12 @@ import {
   newDoc,
   pickRecipe,
   clickSelector,
-  pressF5,
   runAndWait,
   saveGraphTo,
 } from './page.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RECIPE = '车型A·对拍';
-
-// ------------------------------------------------------------ 小工具
-
 
 async function saveRecipe(cdp) {
   await cdp.eval(
@@ -76,7 +72,7 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
   await saveRecipe(cdp);
   report.eq('保存的配方只含覆盖值', JSON.parse(fs.readFileSync(recipeFile, 'utf8')).values, overrides);
 
-  const run = await runAndWait(cdp, () => pressF5(cdp));
+  const run = await runAndWait(cdp, () => clickSelector(cdp, '[data-testid="run-button"]'));
   mustOk(run.status === 'ok', '编辑器运行完成', run.status);
   const editor = await cdp.eval(`return window.__lyflow.runOutputs(${lit(run.runId)});`);
   const base = cliOutputs(graph);
@@ -128,7 +124,7 @@ async function crowdedRecipeState(cdp, ws) {
   mustOk(made === 'ok', '新建配方并写进一个值', made);
   mustOk((await pickRecipe(cdp, RECIPE)) === 'ok', '工具栏下拉框选中配方');
   await saveRecipe(cdp);
-  const run = await runAndWait(cdp, () => pressF5(cdp));
+  const run = await runAndWait(cdp, () => clickSelector(cdp, '[data-testid="run-button"]'));
   mustOk(run.status === 'ok', '合成小图跑过一次', run.status);
   return { param, value: 3 };
 }
@@ -228,4 +224,4 @@ async function suiteCleanup(cdp) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
 }
 
-export const paramsP4Suites = [suiteCliMatchesEditor, suiteToolbarWi
+export const paramsP4Suites = [suiteCliMatchesEditor, suiteToolbarWidth, suiteCleanup];

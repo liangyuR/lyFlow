@@ -533,6 +533,7 @@ async function main() {
     // 各分组据此区分开发构建与安装包（例如热重载只在前者有）
     process.env.LYFLOW_E2E_PACKAGED = '1';
     staged = stagePackagedApp();
+    process.env.LYFLOW_CLI = staged.cli;
     console.log(`干净安装目录：${staged.dir}（${staged.dlls} 个 DLL 随包）`);
   }
 

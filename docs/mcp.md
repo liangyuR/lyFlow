@@ -75,7 +75,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `LYFLOW_HTTP_BASE` | 是 | `/lyflow/*` 的基址，例如 `http://127.0.0.1:8787`。缺了进程直接退出并说明 |
 | `LYFLOW_HTTP_TOKEN` | 否 | 有它就每个请求带 `Authorization: Bearer`，WebSocket 走 `lyflow-token.<token>` 子协议 |
 | `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
-| `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
+| `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程；可用原生算子由实际加载的 SDK 确定，可通过 `get_environment` 与 `list_operators` 核对 |
 | `LYFLOW_WORK_DIR` | 否 | 评估快照、任务状态、artifact 与逐行结果目录，默认 `os.tmpdir()/lyflow-mcp`；跨重启续跑应配置持久目录 |
 | `LYFLOW_CACHE_DIR` | 否 | 结果缓存落盘目录，原样传给每次起的 CLI 子进程（CLI 自己认这个变量，等价于 `--cache-dir`）：MCP 每次工具调用都是一个新进程，配了它，读盘、滤波、ONNX 推理这类贵的上游在第二次调用起直接命中。默认不设 = 关。按产品版本、源码修订和缓存格式组成的构建身份分目录；无有效构建身份的开发运行库不能启用；占用用 `lyflow cache info --cache-dir <dir>` 看（[当前指南](cli.md#跨进程缓存)） |
 

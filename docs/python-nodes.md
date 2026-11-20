@@ -30,7 +30,7 @@ def offset(inputs, params, ctx):
 
 Python 节点可以从 `2.0.0` 等主版本开始发布，新建节点保存当前版本。首版 SDK 不提供迁移回调；已有工作流与当前节点主版本不一致时，会明确报版本不匹配，需安装兼容版本或显式调整工作流。
 
-SDK 随运行库放在 `python/lyflow_python`，worker 自动加入 SDK 搜索路径。独立编写或测试时，可安装 `python/` 下的 SDK，或将其加入 `PYTHONPATH`。示例见 `python/examples/offset.py` 和 `python/examples/image_metrics/`。
+SDK 随原生 SDK 放在 `bin/python/lyflow_python/`。独立编写或运行节点时，将 `$env:LYFLOW_NATIVE_SDK/bin/python` 加入 `PYTHONPATH`。示例见[Python SDK 说明](../python/README.md)。
 
 ## 数据与上下文
 
@@ -82,6 +82,8 @@ Rust/Tauri `HostConfig.python: Some(PythonRuntimeConfig { ... })` 覆盖共享�
 HTTP 接口见 [HTTP 传输契约](http-transport.md)。运行库 ZIP、SDK 与 NuGet 携带 SDK、worker 和示例；Python 解释器与第三方依赖由用户提供。
 
 ## 验证
+
+以下 Python worker 与 C++ 检查在[引擎仓](https://github.com/liangyuR/lyflow-engine)运行。
 
 ```powershell
 $env:PYTHONPATH = Join-Path (Get-Location) 'python'

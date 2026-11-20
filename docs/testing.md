@@ -16,8 +16,9 @@
 | `pnpm --filter @lyflow/editor test`、`pnpm --filter @lyflow/visualization test` | 图操作、撤销、标签、运行状态、图像和点云显示。React 18/19 的类型检查见编辑器的 `typecheck`。 |
 | `pnpm --filter @lyflow/mcp test` | MCP 工具、资源、HTTP/CLI 的真实运行结果与调参流程。指定本地 CLI 时，集成冒烟的依赖缺失会直接报错。 |
 | `pnpm e2e:packaged --only noderun:suiteSmart` | 从构建产物暂存独立目录，启动 Tauri/WebView2，执行点云图并验证单节点运行和缓存。桌面及 CLI 须已构建，分组选择见[交互验收](../scripts/e2e/README.md)。 |
+| `pnpm e2e:packaged --only params_p4` | 在真实桌面保存配方，让同一安装目录的 CLI 运行已保存的图，核对三个输出、参数覆盖优先级和不同宽度的窗口布局。 |
 | `pnpm e2e:http` | 浏览器中的外部 React 宿主、HTTP 传输、结果取数。 |
-| `pnpm run package` | 从锁定的原生 SDK 构建并组装公共工具。发布资产的独立消费验收见[发包说明](deployment/packaging.md)。 |
+| `pnpm run package` | 从锁定的原生 SDK 构建并组装公共工具。`./tests/release/test-public-tools.ps1 -AssetsDir <目录>` 从成包运行 P4/P5、外部 C++17 EXACT 与依赖拒绝用例、Profile/P6、场景图和外部 React 宿主。见[发包说明](deployment/packaging.md)。 |
 
 公共 PR 和 main 的 CI 检查格式、公共契约、前端，以及在 Windows x64 匿名恢复 SDK 后运行 Rust、CLI、MCP 与真实桌面。Rust 构建缓存只用于公共客户端和工具。SDK 采用版本锁指定的原始 ZIP。
 

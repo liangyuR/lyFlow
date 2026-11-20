@@ -43,10 +43,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: python -m pip install -r scripts/requirements.txt
+      - run: python -m pip install -r scripts/requirements.txt clang-format==20.1.8
+      - name: 公共 C++ 宿主示例格式
+        run: git ls-files -z -- '*.cpp' '*.h' '*.hpp' | xargs -0 -r clang-format --dry-run --Werror
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: python tests/quality/test_graph_contract_schema.py
+      - run: python tests/release/p4_contract.py --schema-only
+      - run: python tests/release/p5_contract.py --schema-only
       - shell: pwsh
         run: ./scripts/check.ps1 -Steps schema
 

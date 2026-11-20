@@ -1,6 +1,12 @@
 # 版本变更
 
-## 2.0.3
+## 主分支
+
+- 开发 CLI、MCP 与桌面工具时从版本锁恢复正式 SDK。原生引擎及算子开发入口转到 lyflow-engine。
+
+## 2.0.3（已发布）
+
+- Windows Release 增加带 CLI 的完整 SDK 和可独立安装的编辑器 tarball。
 
 - CLI 和桌面工具支持通过 `LYFLOW_NATIVE_SDK` 使用同版 Windows x64 原生 SDK。公共工具仓提供版本锁，可按 SHA-256 和引擎修订校验下载的 SDK。
 - 编辑器插入已有图节点时保留原参数和契约版本，用户可以根据校验提示修正旧配置。

@@ -4,7 +4,7 @@
 
 ## 准备与运行
 
-在仓库根目录执行：
+在已恢复 SDK 的根目录执行。下文的 `lyflow` 指配套的 CLI：
 
 ```powershell
 python scripts/fetch-p4-model-assets.py --output-dir examples/p4-assets

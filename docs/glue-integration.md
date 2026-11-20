@@ -107,19 +107,7 @@ T(p) = R(angle) · (p − teachCenter) + center
 
 ## 构建与验证入口
 
-```powershell
-$env:LYFLOW_PACKS = 'solution-glue'
-pnpm core:build
-pnpm check:glue
-```
-
-专项原生测试可在构建后执行：
-
-```powershell
-& .\build\core\bin\lyflow-core-tests.exe '--source-file=*test_flyshot.cpp,*test_calib.cpp,*test_glue.cpp,*test_color.cpp'
-```
-
-[scripts/check-glue.ps1](https://github.com/liangyuR/lyFlow/blob/v2.0.3/scripts/check-glue.ps1) 检查构建、manifest、契约和参考图；给定 `LYFLOW_GLUE_DATA` 才执行仓库外的真实帧评估，人造断胶另行报告。当前修订是否通过以实际输出为准，命令存在不代表已运行。完整门禁、运行库交付与宿主消费验收分别见 [测试地图](testing.md) 和 [发包指南](deployment/packaging.md)。
+公共工具从配套 SDK 加载 `solution-glue`，可用 `lyflow manifest --check` 核对注册。灰度及彩色回放脚本见[涂胶评估工具](../solutions/glue/tools/)。原生算法的构建和专项测试在[引擎仓](https://github.com/liangyuR/lyflow-engine/tree/main/solutions/glue)运行。公开运行库与 SDK 的消费方式见[发包指南](deployment/packaging.md)。
 
 单帧失败定位和批量评估可用 [MCP 涂胶调参流程](mcp-glue-tuning.md)。先区分执行错误、未量到和产品 NG，再比较阈值；冻结图、参数、输入与标定身份，避免把缓存命中耗时当作冷启动节拍。
 

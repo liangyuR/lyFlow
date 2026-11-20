@@ -4,13 +4,9 @@
 
 场景入口仍使用 `gap.*` 算子 ID，包名改为 `solution-gap`。使用明确的 Profile 单位、轴布局、坐标系、手性、有效性和原槽索引；物理几何以米表示并带 `profile.Geometry.v3` 空间上下文，读数单位显式选择。旧通用 Gap 算子退出注册，由公共 Profile/几何/度量能力承接。
 
-```powershell
-$env:LYFLOW_PACKS = "solution-gap"
-$env:LYFLOW_MODULES = "gap-template;gap-model;gap-import"
-pnpm check:gap
-```
+正式 SDK 随附本场景。在[私有引擎仓](https://github.com/liangyuR/lyflow-engine/tree/main/solutions/gap)开发自定义组合时，通过 `LYFLOW_PACKS`、`LYFLOW_MODULES` 选择所需模块。
 
-这组模块覆盖完整模板、模型、导入和临时兼容入口；基础场景不要求全部启用。正式组合由 [release.json](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json) 统一声明，依赖准备与打包见[发布指南](../../docs/deployment/packaging.md)。旧 `LYFLOW_PACKS=gap` 不作为别名接受。
+`gap-template`、`gap-model`、`gap-import` 分别提供模板、模型与导入能力；基础场景不要求全部启用。正式组合由 [release.json](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json) 统一声明，依赖准备与打包见[发布指南](../../docs/deployment/packaging.md)。旧 `LYFLOW_PACKS=gap` 不作为别名接受。
 
 | 目录                          | 职责                                                             |
 | ----------------------------- | ---------------------------------------------------------------- |

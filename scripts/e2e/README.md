@@ -60,8 +60,7 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
 几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
-`m8c` 的切槽、标签避让、槽位诊断各自创建三模板图，可以单独运行。构建 core 时启用
-`LYFLOW_PACKS=solution-gap` 和 `LYFLOW_MODULES=gap-template`。例如
+`m8c` 的切槽、标签避让、槽位诊断各自创建三模板图，可以单独运行。使用带 `solution-gap` 和 `gap-template` 的正式 SDK。例如
 `pnpm e2e --only m8c:suiteLabelsApart` 验证相邻框的标签，
 `pnpm e2e --only m8c:suiteSlot3WrongSide` 验证拖框后的错误定位。
 
@@ -129,7 +128,7 @@ cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
 和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。不取 `target/release/` 里的 DLL：
 app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」分组通过 WebView2 的 Tauri 接口核对
 core 版本、平台转接算子、本次构建启用的包，并确认热重载已关闭。
-运行时的 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 和 `LYFLOW_MODULES` 要与 `tauri build` 时一致。
+打包与验收使用同一版本锁对应的 SDK。
 
 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，漏打包的 DLL
 仍然可能被系统从别处找到。

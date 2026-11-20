@@ -112,6 +112,12 @@ if (Want "client") {
   } finally { Pop-Location }
 }
 
+if ((Want "cli") -or ((Want "mcp") -and !$env:LYFLOW_CLI)) {
+  $metadata = cargo metadata --format-version 1 --no-deps --manifest-path (Join-Path $root 'bridge/Cargo.toml') | ConvertFrom-Json
+  if ($LASTEXITCODE) { throw "无法定位 Cargo 构建目录" }
+  $env:LYFLOW_CLI = Join-Path $metadata.target_directory "debug/lyflow.exe"
+}
+
 if (Want "cli") {
   Step "headless CLI（不带 Tauri）"
   # --no-default-features 是 F6 的证据：关掉 desktop 之后 tauri 一行都不该被编到。
@@ -119,7 +125,7 @@ if (Want "cli") {
   try {
     cargo build --quiet --bin lyflow --no-default-features
     if ($LASTEXITCODE -ne 0) { throw "CLI 构建失败" }
-    & (Join-Path $root "bridge/target/debug/lyflow.exe") manifest --check | Out-Null
+    & $env:LYFLOW_CLI manifest --check | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "lyflow manifest --check 失败" }
   } finally { Pop-Location }
 }
@@ -149,7 +155,6 @@ if (Want "mcp") {
   # 那个 exe 不在时冒烟 skip 并打出原因，其余用例照跑。
   Push-Location $root
   try {
-    $env:LYFLOW_CLI = (Resolve-Path (Join-Path $root "bridge/target/debug/lyflow.exe")).Path
     pnpm --filter "@lyflow/mcp" typecheck
     if ($LASTEXITCODE -ne 0) { throw "@lyflow/mcp 类型检查失败" }
     pnpm --filter "@lyflow/mcp" build

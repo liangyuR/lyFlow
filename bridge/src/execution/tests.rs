@@ -983,7 +983,7 @@ fn isolate_reruns_only_that_node_over_the_abi() {
 }
 
 /// isolate 在开跑前就被拒的两种情形，都是一个节点都不动。纯平台构建里 ABI 的 isolate
-/// 字段只有这一条在走，所以它不能挂 std_packs_off。
+/// 字段只有这一条在走，所以这个用例应当在公共 SDK 上执行。
 /// R2：上游没有当前 cacheKey 的结果 —— 整次失败，诊断指向缺结果的上游。
 /// R5：预览与 isolate 不组合，core 报参数错误。
 #[test]
