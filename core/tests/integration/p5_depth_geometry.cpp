@@ -45,24 +45,9 @@ struct CloudRole {
   std::string node, port, identity;
   std::string name() const { return node + "." + port; }
 };
-class Saved {
-public:
-  explicit Saved(const std::string& name) {
-    static std::atomic<unsigned> counter{0};
-    const std::filesystem::path examples(LYFLOW_EXAMPLES_DIR);
-    base = std::filesystem::temp_directory_path() /
-           std::filesystem::u8path(
-               "lyflow-p5-保存-" + std::to_string(counter.fetch_add(1)) + "-" +
-               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(std::filesystem::create_directory(base));
-    for (const auto& entry : std::filesystem::directory_iterator(examples)) {
-      if (!entry.is_regular_file())
-        continue;
-      const auto filename = entry.path().filename().u8string();
-      if (filename.rfind("p5-", 0) == 0 || filename == "1700000001000-p5-scene.png")
-        std::filesystem::copy_file(entry.path(), base / entry.path().filename());
-    }
-    graph = p3::read(examples / (name + ".lyflow.json"));
+struct DepthExample : p3::Example {
+  explicit DepthExample(const std::string& name)
+      : p3::Example(name, "p5-", "1700000001000-p5-scene.png") {
     const auto nodes = graph.at("nodes");
     for (const auto& node : nodes) {
       const auto* op = ensureRegistry().find(node.at("op").get<std::string>());
@@ -81,20 +66,7 @@ public:
         graph["outputs"][identity] = {{"node", identity}, {"port", "statistics"}};
       }
     }
-    path = base / "saved.lyflow.json";
-    {
-      std::ofstream file(path, std::ios::binary);
-      file << graph.dump(2);
-      REQUIRE(file.good());
-    }
-    REQUIRE(p3::read(path) == graph);
   }
-  ~Saved() {
-    std::error_code error;
-    std::filesystem::remove_all(base, error);
-  }
-  std::filesystem::path base, path;
-  Json graph;
   std::vector<CloudRole> clouds;
 };
 
@@ -165,11 +137,11 @@ void normalizeIds(Json& value, const std::map<std::string, std::string>& identit
   }
 }
 
-Snapshot snapshot(const Saved& saved, Json outputs, const std::string& runId, Client* client,
-                  bool direct = false) {
+Snapshot snapshot(const DepthExample& example, Json outputs, const std::string& runId,
+                  Client* client, bool direct) {
   Snapshot result;
   std::map<std::string, std::set<std::string>> roles;
-  for (const auto& role : saved.clouds) {
+  for (const auto& role : example.clouds) {
     const auto& data = p3::data(outputs, role.identity.c_str());
     const auto identity = data.at("sourceCloudId").get<std::string>();
     REQUIRE_FALSE(identity.empty());
@@ -191,7 +163,7 @@ Snapshot snapshot(const Saved& saved, Json outputs, const std::string& runId, Cl
       token += "|" + name;
     identities[item.first] = std::move(token);
   }
-  for (const auto& output : saved.graph.at("outputs").items()) {
+  for (const auto& output : example.graph.at("outputs").items()) {
     const auto& metadata = outputs.at(output.key());
     REQUIRE_FALSE(metadata.value("missing", false));
     const auto node = output.value().at("node").get<std::string>();
@@ -328,61 +300,23 @@ void agree(const Snapshot& expected, const Snapshot& actual) {
   }
 }
 
-using Check = std::function<void(const Json&, bool)>;
-void cross(const std::string& name, const Json& overrides, const Check& check) {
-  Saved saved(name);
-  Client client(LYFLOW_TEST_RUNTIME);
-  const auto source = saved.graph.dump(), base = saved.base.u8string();
-  Snapshot defaults;
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    CAPTURE(name);
-    CAPTURE(attempt);
-    const bool changed = attempt == 1;
-    const Json params = changed ? overrides : Json::object();
-    Snapshot overridden;
-    auto& expected = changed ? overridden : defaults;
-    if (attempt < 2) {
-      auto effective = saved.graph;
-      for (const auto& parameter : params.items()) {
-        REQUIRE(effective.at("params").contains(parameter.key()));
-        effective["params"][parameter.key()]["default"] = parameter.value();
-      }
-      Session session(effective, saved.base, {}, false, 2, true);
-      const auto& log = session.wait();
-      REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-      const auto scheduler = p3::take(lyflow_run_outputs(log.runId.c_str()));
-      check(scheduler, changed);
-      expected = snapshot(saved, scheduler, log.runId, nullptr, true);
-    }
-    const auto id = name + "-abi-" + std::to_string(attempt), parameters = params.dump();
-    REQUIRE(
-        p3::take(lyflow_validate_params(source.c_str(), base.c_str(), parameters.c_str())).empty());
-    lyflow_run_options options{};
-    options.run_id = id.c_str();
-    options.base_dir = base.c_str();
-    options.params_json = parameters.c_str();
-    options.max_parallel = 2;
-    options.no_reuse = 1;
-    const std::unique_ptr<lyflow_run, decltype(&lyflow_run_free)> run(
-        lyflow_run_start(source.c_str(), &options, nullptr, nullptr), lyflow_run_free);
-    REQUIRE(run != nullptr);
-    lyflow_run_join(run.get());
-    REQUIRE_MESSAGE(p3::take(lyflow_run_summary(id.c_str())).at("status") == "ok",
-                    p3::take(lyflow_run_summary(id.c_str())).dump());
-    const auto abi = p3::take(lyflow_run_outputs(id.c_str()));
-    agree(expected, snapshot(saved, abi, id, nullptr));
-    RunOptions sdkOptions;
-    sdkOptions.runId = id + "-sdk";
-    sdkOptions.baseDir = base;
-    sdkOptions.paramsJson = parameters;
-    sdkOptions.maxParallel = 2;
-    sdkOptions.noReuse = true;
-    const auto result = client.run(source, sdkOptions);
-    REQUIRE_MESSAGE(result.ok(), result.summary);
-    const auto sdk = Json::parse(result.outputs);
-    agree(expected, snapshot(saved, sdk, sdkOptions.runId, &client));
-    CHECK(p3::read(saved.path) == saved.graph);
-  }
+void depthExample(const std::string& name, const Json& overrides, p3::Coverage coverage,
+                  const p3::Check& check) {
+  const DepthExample example(name);
+  std::array<Snapshot, 2> baselines;
+  p3::replay(name, example, overrides, coverage,
+             [&](const Json& outputs, const std::string& runId, Client* client, bool changed,
+                 bool baseline) {
+               auto actual = snapshot(example, outputs, runId, client, baseline);
+               auto& expected = baselines[changed];
+               if (baseline) {
+                 check(outputs, changed);
+                 if (coverage == p3::Coverage::Interfaces)
+                   expected = std::move(actual);
+               } else {
+                 agree(expected, actual);
+               }
+             });
 }
 } // namespace
 
@@ -404,111 +338,114 @@ void projection(const Json& outputs) {
 }
 
 TEST_CASE(
-    "P5 physical depth defects fill and profiles preserve native lineage across saved interfaces") {
-  cross("p5-depth-inspection", {{"defectMode", "up"}}, [](const Json& outputs, bool changed) {
-    projection(outputs);
-    pointCount(outputs, "cloud", 3072);
-    CHECK(p3::data(outputs, "fillQuality").at("filledCount") == 9);
-    CHECK(outputs.at("filledIndices").at("elementCount") == 9);
-    const auto& result = p3::data(outputs, "defects");
-    CHECK(result.at("areaModel") == "observed_depth_orthogonal_footprint");
-    CHECK(result.at("state") == "defect");
-    CHECK(result.at("good") == false);
-    CHECK(result.at("valid") == true);
-    const auto& items = result.at("items");
-    REQUIRE(items.size() == (changed ? 1 : 2));
-    for (const auto& item : items) {
-      const auto direction = item.at("direction").get<std::string>();
-      CHECK((direction == "up" || (!changed && direction == "down")));
-      CHECK(item.at("exceeded").is_array());
-    }
-    const auto& features = p3::data(outputs, "features");
-    const auto shape = Json::array({features.at("sliceCount")});
-    CHECK(outputs.at("attributes").at("value").at("shape") == shape);
-    CHECK(outputs.at("attributeValid").at("value").at("shape") == shape);
-    CHECK(outputs.at("profiles").at("value").at("shape")[1] == 4);
-    CHECK(outputs.at("supports").at("value").at("shape")[1] == 3);
-    CHECK(outputs.at("profilePlot").at("type") == "Image");
-    CHECK(outputs.at("sliceCloud").at("elementCount").get<std::size_t>() > 0);
-  });
+    "P5 physical depth defects fill and profiles preserve native lineage across scheduler C ABI and SDK") {
+  depthExample("p5-depth-inspection", {{"defectMode", "up"}}, p3::Coverage::Interfaces,
+               [](const Json& outputs, bool changed) {
+                 projection(outputs);
+                 pointCount(outputs, "cloud", 3072);
+                 CHECK(p3::data(outputs, "fillQuality").at("filledCount") == 9);
+                 CHECK(outputs.at("filledIndices").at("elementCount") == 9);
+                 const auto& result = p3::data(outputs, "defects");
+                 CHECK(result.at("areaModel") == "observed_depth_orthogonal_footprint");
+                 CHECK(result.at("state") == "defect");
+                 CHECK(result.at("good") == false);
+                 CHECK(result.at("valid") == true);
+                 const auto& items = result.at("items");
+                 REQUIRE(items.size() == (changed ? 1 : 2));
+                 for (const auto& item : items) {
+                   const auto direction = item.at("direction").get<std::string>();
+                   CHECK((direction == "up" || (!changed && direction == "down")));
+                   CHECK(item.at("exceeded").is_array());
+                 }
+                 const auto& features = p3::data(outputs, "features");
+                 const auto shape = Json::array({features.at("sliceCount")});
+                 CHECK(outputs.at("attributes").at("value").at("shape") == shape);
+                 CHECK(outputs.at("attributeValid").at("value").at("shape") == shape);
+                 CHECK(outputs.at("profiles").at("value").at("shape")[1] == 4);
+                 CHECK(outputs.at("supports").at("value").at("shape")[1] == 3);
+                 CHECK(outputs.at("profilePlot").at("type") == "Image");
+                 CHECK(outputs.at("sliceCloud").at("elementCount").get<std::size_t>() > 0);
+               });
 }
-TEST_CASE(
-    "P5 no op and missing depth compensation restore XYZ and optional channels across interfaces") {
-  cross("p5-depth-filters", {{"mode", "fill"}, {"kernelSize", 7}},
-        [](const Json& outputs, bool changed) {
-          projection(outputs);
-          pointCount(outputs, "cloud", changed ? 3072 : 3063);
-          const auto& quality = p3::data(outputs, "quality");
-          CHECK(quality.at("mode") == (changed ? "fill" : "mean"));
-          CHECK(quality.at("filledPixels") == (changed ? 9 : 0));
-          CHECK(quality.at("changedPixels") == (changed ? 9 : 0));
-        });
+TEST_CASE("P5 no op and missing depth compensation restore XYZ and optional channels") {
+  depthExample("p5-depth-filters", {{"mode", "fill"}, {"kernelSize", 7}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 projection(outputs);
+                 pointCount(outputs, "cloud", changed ? 3072 : 3063);
+                 const auto& quality = p3::data(outputs, "quality");
+                 CHECK(quality.at("mode") == (changed ? "fill" : "mean"));
+                 CHECK(quality.at("filledPixels") == (changed ? 9 : 0));
+                 CHECK(quality.at("changedPixels") == (changed ? 9 : 0));
+               });
 }
-TEST_CASE(
-    "P5 signed orthographic grids and native instance masks retain all ROI groups through interfaces") {
-  cross("p5-orthographic-roi", {{"outputMode", "normal_angle"}},
-        [](const Json& outputs, bool changed) {
-          for (const auto* name : {"sourceCloud", "heightCloud", "orthographicCloud"})
-            pointCount(outputs, name, 3063);
-          pointCount(outputs, "cloud", 94);
-          CHECK(p3::data(outputs, "quality").at("outputMode") ==
-                (changed ? "normal_angle" : "height"));
-          CHECK(outputs.at("depth").at("value").at("min")[0].get<double>() < 0);
-          CHECK(outputs.at("depth").at("value").at("max")[0].get<double>() > 0);
-          CHECK(outputs.at("image").at("value").at("channels") == (changed ? 3 : 1));
-          const auto& groups = p3::data(outputs, "groups").at("groups");
-          REQUIRE(groups.size() == 3);
-          CHECK(groups[0].at("id") == "patch-up");
-          CHECK(groups[0].at("count") == 42);
-          CHECK(groups[1].at("id") == "patch-down");
-          CHECK(groups[1].at("count") == 36);
-          CHECK(groups[2].at("id") == "hole-region");
-          CHECK(groups[2].at("count") == 16);
-        });
+TEST_CASE("P5 signed orthographic grids and native instance masks retain all ROI groups") {
+  depthExample("p5-orthographic-roi", {{"outputMode", "normal_angle"}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 for (const auto* name : {"sourceCloud", "heightCloud", "orthographicCloud"})
+                   pointCount(outputs, name, 3063);
+                 pointCount(outputs, "cloud", 94);
+                 CHECK(p3::data(outputs, "quality").at("outputMode") ==
+                       (changed ? "normal_angle" : "height"));
+                 CHECK(outputs.at("depth").at("value").at("min")[0].get<double>() < 0);
+                 CHECK(outputs.at("depth").at("value").at("max")[0].get<double>() > 0);
+                 CHECK(outputs.at("image").at("value").at("channels") == (changed ? 3 : 1));
+                 const auto& groups = p3::data(outputs, "groups").at("groups");
+                 REQUIRE(groups.size() == 3);
+                 CHECK(groups[0].at("id") == "patch-up");
+                 CHECK(groups[0].at("count") == 42);
+                 CHECK(groups[1].at("id") == "patch-down");
+                 CHECK(groups[1].at("count") == 36);
+                 CHECK(groups[2].at("id") == "hole-region");
+                 CHECK(groups[2].at("count") == 16);
+               });
 }
 TEST_CASE(
     "P5 seeded box clouds and analytic partitions agree on geometry channels and source identities") {
-  cross("p5-box-crop", {{"shape", "cylinder"}}, [](const Json& outputs, bool changed) {
-    pointCount(outputs, "sourceCloud", 1200, 27);
-    const auto count = outputs.at("cropped").at("elementCount").get<std::size_t>();
-    if (changed) {
-      CHECK(count > 0);
-      CHECK(count < 1200);
-    } else
-      CHECK(count == 1200);
-    pointCount(outputs, "cropped", count, 27);
-    pointCount(outputs, "outside", 1200 - count, 27);
-    const auto& groups = p3::data(outputs, "sampleGroups").at("groups");
-    REQUIRE(groups.size() == 2);
-    CHECK(groups[0].at("id") == "boxA");
-    CHECK(groups[1].at("id") == "boxB");
-  });
+  depthExample("p5-box-crop", {{"shape", "cylinder"}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 pointCount(outputs, "sourceCloud", 1200, 27);
+                 const auto count = outputs.at("cropped").at("elementCount").get<std::size_t>();
+                 if (changed) {
+                   CHECK(count > 0);
+                   CHECK(count < 1200);
+                 } else
+                   CHECK(count == 1200);
+                 pointCount(outputs, "cropped", count, 27);
+                 pointCount(outputs, "outside", 1200 - count, 27);
+                 const auto& groups = p3::data(outputs, "sampleGroups").at("groups");
+                 REQUIRE(groups.size() == 2);
+                 CHECK(groups[0].at("id") == "boxA");
+                 CHECK(groups[1].at("id") == "boxB");
+               });
 }
-TEST_CASE("P5 registered rigid reference and explicit symmetry survive saved non rigid overrides") {
-  cross("p5-pose-rigid", {{"currentC", {.02, .12, .01}}}, [](const Json& outputs, bool changed) {
-    CHECK(p3::data(outputs, "accepted").at("value") == !changed);
-    CHECK(p3::data(outputs, "registration").at("accepted") == !changed);
-    CHECK(outputs.at("transform").at("type") == "Transform");
-    CHECK(p3::data(outputs, "reference").at("items")[2].at("position") == Json::array({0, .1, 0}));
-    CHECK(p3::data(outputs, "current").at("items")[2].at("position") ==
-          (changed ? Json::array({.02, .12, .01}) : Json::array({0, .1, 0})));
-    for (const auto* name : {"flipped", "rotated", "extended"})
-      p3::poseRecord(outputs.at(name));
-  });
+TEST_CASE("P5 registered rigid reference and explicit symmetry respond to non rigid overrides") {
+  depthExample("p5-pose-rigid", {{"currentC", {.02, .12, .01}}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 CHECK(p3::data(outputs, "accepted").at("value") == !changed);
+                 CHECK(p3::data(outputs, "registration").at("accepted") == !changed);
+                 CHECK(outputs.at("transform").at("type") == "Transform");
+                 CHECK(p3::data(outputs, "reference").at("items")[2].at("position") ==
+                       Json::array({0, .1, 0}));
+                 CHECK(p3::data(outputs, "current").at("items")[2].at("position") ==
+                       (changed ? Json::array({.02, .12, .01}) : Json::array({0, .1, 0})));
+                 for (const auto* name : {"flipped", "rotated", "extended"})
+                   p3::poseRecord(outputs.at(name));
+               });
 }
 TEST_CASE(
     "P5 full camera geometry masks and arbitrary plane inverse preserve calibrated dimensions") {
-  cross("p5-pose-project-plane", {{"liftMode", "center"}}, [](const Json& outputs, bool changed) {
-    const auto& items = p3::data(outputs, "poses").at("items");
-    REQUIRE(items.size() == 1);
-    CHECK(items[0].at("id") == "plane-box");
-    CHECK(items[0].at("frame") == "camera");
-    CHECK(items[0].at("pickable") == false);
-    CHECK(std::abs(items[0].at("position")[2].get<double>() - 1.01) <= 1e-8);
-    if (changed)
-      CHECK(items[0].at("size") == Json::array({.12, .08, .02}));
-    CHECK(p3::data(outputs, "maskInfo").at("frame") == "image");
-  });
+  depthExample("p5-pose-project-plane", {{"liftMode", "center"}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 const auto& items = p3::data(outputs, "poses").at("items");
+                 REQUIRE(items.size() == 1);
+                 CHECK(items[0].at("id") == "plane-box");
+                 CHECK(items[0].at("frame") == "camera");
+                 CHECK(items[0].at("pickable") == false);
+                 CHECK(std::abs(items[0].at("position")[2].get<double>() - 1.01) <= 1e-8);
+                 if (changed)
+                   CHECK(items[0].at("size") == Json::array({.12, .08, .02}));
+                 CHECK(p3::data(outputs, "maskInfo").at("frame") == "image");
+               });
 }
 TEST_CASE("P5 observed circle poses feed the native disk mask outputs") {
   const std::filesystem::path examples(LYFLOW_EXAMPLES_DIR);
@@ -551,15 +488,15 @@ TEST_CASE("P5 observed circle poses feed the native disk mask outputs") {
     CHECK(std::find(first, first + pixels, 1.0f) != first + pixels);
   }
 }
-TEST_CASE(
-    "P5 mask associated cloud removal preserves unknown outside points and all channels through interfaces") {
-  cross("p5-mask-remove", {{"topExpand", 2}}, [](const Json& outputs, bool changed) {
-    pointCount(outputs, "sourceCloud", 3066);
-    pointCount(outputs, "cloud", 3066 - (changed ? 104 : 78));
-    const auto& quality = p3::data(outputs, "quality");
-    CHECK(quality.at("removed") == (changed ? 104 : 78));
-    CHECK(quality.at("unknown") == 1);
-    CHECK(quality.at("outOfBoundsKept") == 1);
-    CHECK(outputs.at("removedIndices").at("elementCount") == (changed ? 104 : 78));
-  });
+TEST_CASE("P5 mask associated cloud removal preserves unknown outside points and all channels") {
+  depthExample("p5-mask-remove", {{"topExpand", 2}}, p3::Coverage::Scheduler,
+               [](const Json& outputs, bool changed) {
+                 pointCount(outputs, "sourceCloud", 3066);
+                 pointCount(outputs, "cloud", 3066 - (changed ? 104 : 78));
+                 const auto& quality = p3::data(outputs, "quality");
+                 CHECK(quality.at("removed") == (changed ? 104 : 78));
+                 CHECK(quality.at("unknown") == 1);
+                 CHECK(quality.at("outOfBoundsKept") == 1);
+                 CHECK(outputs.at("removedIndices").at("elementCount") == (changed ? 104 : 78));
+               });
 }

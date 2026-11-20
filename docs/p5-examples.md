@@ -84,7 +84,7 @@ python tests/release/p5_contract.py --cli build/rust/release/lyflow.exe
 
 可用 `--examples <安装SDK/examples>` 验证安装后的文件，`--output-dir` 指定日志目录。脚本先核十个夹具的尺寸/SHA256，把八图和相关文件保存到新的 Unicode 目录。每张图运行一次默认参数。深度滤波图和位姿配准图额外运行覆盖和恢复默认，共 12 次校验与 12 次执行。每轮检查正式 summary、原生大载荷元信息和业务 ID 等结构契约，全部源文件的摘要在测试后复核。物理真值在原生测试验证，其中正面和斜面圆孔由 `packs/std-image/tests/test_p5_inspection.cpp` 覆盖。
 
-点云的进程内 ID 不跨运行保证一致。脚本仅在保存副本追加 cloud.statistics 观察节点，逐运行验证每个 sourceCloudId/parentCloudId/resultCloudId/sliceCloudId 实际绑定的云角色后再规范化这些字段；不删除工件 ID、掩膜 ID、帧名或几何摘要，也不把绑定错误隐藏成“ID本来会变化”。CLI JSON 的云/掩膜/四边形仍为元信息；完整原生数组、索引身份、C ABI 和动态 C++ SDK 的保存重载一致性由正式 core 集成测试另验。Rust CLI 经过 Rust 客户端执行工作流，不能据此冒充 Rust SDK 全数组专项验收。
+点云 ID 只在进程内有效。脚本在示例副本中加入 `cloud.statistics`，逐次核对 `sourceCloudId`、`parentCloudId`、`resultCloudId` 和 `sliceCloudId` 的绑定，然后按角色比较各次输出。工件 ID、掩膜 ID、帧名与几何摘要均参与比较。CLI 交付云、掩膜与四边形的元信息。原生集成测试通过深度检测图，从 C ABI 和动态 C++ SDK 读取完整载荷，核对索引与来源点云的绑定。Rust CLI 经 Rust 客户端执行，Rust SDK 的原生数组读取需单独验证。
 
 独立安装的 C++17 SDK 门禁使用 `tests/release/p5_sdk_consumer`，必须显式传入 `LYFLOW_CONSUMER_VERSION=X.Y.Z` 并以 EXACT 查找安装包，编译时不读取源码构建路径或 vcpkg。`p5_sdk_contract.py --sdk <安装目录> --consumer <编译后的程序> --bait-dir <构建bin> --output-dir <日志目录>` 实际运行八图、核结构契约和资产不变，并在 Windows 暂移SDK内OpenCV依赖时验证有效CWD/PATH诱饵仍被拒绝。该门禁纳入原生Windows CI；不能把旧补丁客户端兼容运行冒充当前头文件重新编译。
 

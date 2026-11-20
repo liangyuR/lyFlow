@@ -282,7 +282,7 @@ try {
     foreach ($file in Get-ChildItem -LiteralPath $runtime -Force) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $sdk 'bin') -Recurse -Force }
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
     & python (Join-Path $root 'tests/release/p4_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --assets $env:LYFLOW_P4_ASSETS --output-dir (Join-Path $diagnostics 'p4-cli')
-    Assert-ReleaseExit 'Installed P4 CLI saved default/override/default contracts'
+    Assert-ReleaseExit 'Installed P4 CLI parameter overrides and barcode default restoration'
     & python (Join-Path $root 'tests/release/p5_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p5-cli')
     Assert-ReleaseExit 'Installed P5 CLI native lineage and saved parameter contracts'
     & python (Join-Path $root 'tests/release/scene_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'scene-cli')

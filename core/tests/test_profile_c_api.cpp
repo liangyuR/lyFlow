@@ -86,24 +86,34 @@ TEST_CASE("Profile C ABI keeps slots, source indices and view lifetime") {
 
 TEST_CASE("Profile C ABI rejects semantic invalidity consistently across inputs APIs") {
   Input in;
-  in.indices[1] = in.indices[0];
-  const auto plan = take(lyflow_plan_inputs_ex(kGraph, nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                               nullptr, 0, &in.raw, 1));
-  const auto effective = take(lyflow_effective_params_inputs_ex(kGraph, nullptr, nullptr, nullptr,
-                                                                0, nullptr, 0, &in.raw, 1));
-  const auto evict = take(lyflow_cache_evict_inputs_ex(kGraph, nullptr, nullptr, 0, 0, nullptr,
-                                                       nullptr, 0, nullptr, 0, &in.raw, 1));
-  for (const auto* text : {&plan, &effective, &evict}) {
-    CHECK(text->find("bad_input") != std::string::npos);
-    const auto doc = nlohmann::json::parse(*text);
-    REQUIRE(doc.is_array());
-    CHECK(doc[0]["nodeId"] == "p");
+  const auto checkError = [](char* response, const char* field) {
+    const auto diagnostics = nlohmann::json::parse(take(response));
+    const auto& error = diagnostics.at(0);
+    CHECK(error.at("code") == "bad_input");
+    CHECK(error.at("nodeId") == "p");
+    CHECK(error.at("message").get<std::string>().find(field) != std::string::npos);
+  };
+  const auto plan = [&] {
+    return lyflow_plan_inputs_ex(kGraph, nullptr, nullptr, 0, nullptr, nullptr, 0, nullptr, 0,
+                                 &in.raw, 1);
+  };
+  SUBCASE("duplicate source index") {
+    in.indices[1] = in.indices[0];
+    checkError(plan(), "sourceIndices");
+    checkError(lyflow_effective_params_inputs_ex(kGraph, nullptr, nullptr, nullptr, 0, nullptr, 0,
+                                                 &in.raw, 1),
+               "sourceIndices");
+    checkError(lyflow_cache_evict_inputs_ex(kGraph, nullptr, nullptr, 0, 0, nullptr, nullptr, 0,
+                                            nullptr, 0, &in.raw, 1),
+               "sourceIndices");
   }
-  in.raw.descriptor_json =
-      R"({"schemaVersion":1,"frame":"sensor","unit":"px","plane":"XZ","handedness":"right","sampleOrder":"acquisition","sourceId":"scan-1","sourceCount":4})";
-  const auto badUnit = take(lyflow_plan_inputs_ex(kGraph, nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                                  nullptr, 0, &in.raw, 1));
-  CHECK(badUnit.find("bad_input") != std::string::npos);
+  SUBCASE("unsupported unit") {
+    auto descriptor = nlohmann::json::parse(kDescriptor);
+    descriptor["unit"] = "px";
+    const auto serialized = descriptor.dump();
+    in.raw.descriptor_json = serialized.c_str();
+    checkError(plan(), "unit");
+  }
 }
 
 TEST_CASE("Profile retained input preserves identity across run plan and cache eviction") {

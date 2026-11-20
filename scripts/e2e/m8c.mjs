@@ -8,7 +8,7 @@ import path from "node:path";
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
 import { profile, roiGeometry, screenOf, setCamera, waitValidated, writePcd } from "./m8b.mjs";
-import { buildGraph, dragMouse, lit, mustOk, newDoc, select } from "./page.mjs";
+import { buildGraph, clickAt, dragMouse, lit, mustOk, newDoc, select } from "./page.mjs";
 
 /** 三个槽的模板文件（槽 1 用默认文件名，槽 2 / 3 也是各自槽的默认值）与各自在 x 上的错位（毫米）。
  *  错开是为了让三片底图的包围盒不同 —— 切槽之后能断言底图真的换了。 */
@@ -82,16 +82,14 @@ function frameState(cdp) {
 
 /** 真实鼠标点一下切换条上的第 i 个标签页，等视图换到那一组、底图也读完。 */
 async function clickTab(cdp, index) {
-  const pt = await cdp.eval(`
+  const pt = await cdp.waitFor(`(() => {
     const t = document.querySelectorAll('[data-testid="roi-frame-tab"]')[${index}];
     if (!t) return null;
     const r = t.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), key: t.getAttribute('data-frame') };
-  `);
-  if (!pt) return null;
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pt.x, y: pt.y, buttons: 0 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: pt.x, y: pt.y, button: "left", buttons: 1, clickCount: 1 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pt.x, y: pt.y, button: "left", buttons: 1, clickCount: 1 });
+    const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+    return t.contains(document.elementFromPoint(x, y)) && { x, y, key: t.getAttribute('data-frame') };
+  })()`, { timeoutMs: 5000, what: `槽 ${index + 1} 的切换按钮可点击` });
+  await clickAt(cdp, pt);
   await cdp.waitFor(
     `(() => { const v = document.querySelector('.viewer');
               return v?.getAttribute('data-roi-frame') === ${lit(pt.key)} && Number(v.getAttribute('data-backdrop')) > 0
@@ -107,17 +105,9 @@ const expectedParams = (k) => ROLES.map((r) => `template${k}${r}Roi`).sort();
 /** 两个矩形（屏幕像素）相交。 */
 const intersects = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
-let built = null;
-
-/** 切槽恰好 4 个框、拖槽 2 只改槽 2、复制到其它槽。 */
-async function suiteSlotSwitch(cdp, report, ws) {
-  const has = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('gap.locate_template')?.version ?? null;`);
-  if (!has) {
-    report.section("三模板的图（本次构建没有 gap 包，未验）");
-    return;
-  }
-  report.section("三模板的图 —— 切槽各 4 个框、拖槽 2 只改槽 2、复制到其它槽");
-
+async function openTemplateScene(cdp, ws) {
+  const hasTemplate = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.has('gap.locate_template');`);
+  mustOk(hasTemplate, "多模板分组需要 solution-gap 包和 gap-template 模块");
   const scene = makeScene(ws);
   await newDoc(cdp);
   await cdp.eval(`window.__lyflow.stores.peek.getState().closeAll(); window.__lyflow.stores.ui.getState().setPinnedNode(null); return true;`);
@@ -126,13 +116,13 @@ async function suiteSlotSwitch(cdp, report, ws) {
     for (const [role, box] of Object.entries(slotBoxes(s.shift))) locateParams[`template${s.k}${role}Roi`] = box;
   }
   const ids = await buildGraph(cdp, [
-    { key: "read", op: "gap.read_scan", params: { dir: scene.point } },
+    { key: "read", op: "gap.read_scan", params: {
+      dir: scene.point, unit: "m", fileFrame: "gap.sensor-files", sensorFrame: "gap.sensor",
+      measurementFrame: "gap.measurement", handedness: "right",
+    } },
     { key: "locate", op: "gap.locate_template", params: locateParams },
   ], [{ from: ["read", "scan"], to: ["locate", "scan"] }]);
   const locate = ids.locate;
-  const clean = await waitValidated(cdp, locate, false);
-  report.eq("三个槽的框都对：校验干净", clean?.invalid, "0");
-
   await select(cdp, locate);
   await setCamera(cdp, "2d");
   await cdp.waitFor(
@@ -141,6 +131,15 @@ async function suiteSlotSwitch(cdp, report, ws) {
                 && document.querySelector('[data-testid="roi-layer"]')?.getAttribute('data-map'); })()`,
     { timeoutMs: 20_000, what: "模板底图与可拖框" },
   );
+  const clean = await waitValidated(cdp, locate, false);
+  mustOk(clean?.invalid === "0", "三个模板槽的初始配置有效", clean);
+  return locate;
+}
+
+/** 切槽恰好 4 个框、拖槽 2 只改槽 2、复制到其它槽。 */
+async function suiteSlotSwitch(cdp, report, ws) {
+  report.section("三模板的图 —— 切槽各 4 个框、拖槽 2 只改槽 2、复制到其它槽");
+  const locate = await openTemplateScene(cdp, ws);
   let st = await frameState(cdp);
   report.eq("切换条列出三个启用的槽", st.tabs.map((t) => t.label), ["模板 1 · f1", "模板 2 · f2", "模板 3 · f3"]);
   report.ok("默认选中槽 1", st.tabs[0]?.active === true && st.frame === st.tabs[0]?.key, JSON.stringify(st.tabs));
@@ -210,9 +209,7 @@ async function suiteSlotSwitch(cdp, report, ws) {
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   `);
   mustOk(copyAt !== null, "切换条上有「复制到其它槽」且可点");
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: copyAt.x, y: copyAt.y, buttons: 0 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
+  await clickAt(cdp, copyAt);
   await sleep(200);
   const copied = await paramsOf(cdp, locate);
   for (const k of [1, 3]) {
@@ -241,23 +238,17 @@ async function suiteSlotSwitch(cdp, report, ws) {
   st = await frameState(cdp);
   report.eq("关掉槽 3 之后切换条只列两个槽", st.tabs.map((t) => t.label), ["模板 1 · f1", "模板 2 · f2"]);
   report.eq("所选的槽被关掉就退回槽 1", st.frame, st.tabs[0]?.key);
-  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(locate)}, 'template3Enabled', true); return true;`);
-  await sleep(250);
-  built = { locate };
 }
 
 /** 两个框相邻时，它们的标签包围盒不相交。 */
-async function suiteLabelsApart(cdp, report) {
-  if (!built) return;
+async function suiteLabelsApart(cdp, report, ws) {
   report.section("相邻两个框的角色标签互不遮挡");
-  await select(cdp, built.locate);
-  await setCamera(cdp, "2d");
+  const locate = await openTemplateScene(cdp, ws);
   await clickTab(cdp, 0);
   // 截图里的情形：Seam Right 窄、右边紧挨着 Target（间隔 0.1 mm），标签比 Seam Right 的框宽
   await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
-    g.setParam(${lit(built.locate)}, 'template1SeamRightRoi', [1.5, 163, 4.5, 166]);
-    window.__lyflow.stores.graph.getState().setParam(${lit(built.locate)}, 'template1TargetRoi', [4.6, 162.5, 15, 166]);
+    g.setParam(${lit(locate)}, 'template1TargetRoi', [4.6, 162.5, 15, 166]);
     return true;
   `);
   await sleep(400);
@@ -290,23 +281,18 @@ async function suiteLabelsApart(cdp, report) {
     }
   }
   report.eq("这一组四个标签两两都不相交", pairs, []);
-  await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); window.__lyflow.stores.graph.getState().undo(); return true;`);
 }
 
 /** 把槽 3 的 datum 拖到 target 同侧，诊断标明「模板 3」。 */
-async function suiteSlot3WrongSide(cdp, report) {
-  if (!built) return;
+async function suiteSlot3WrongSide(cdp, report, ws) {
   report.section("槽 3 的 datum 拖到 target 同侧 → 诊断标明「模板 3」");
-  await select(cdp, built.locate);
-  await setCamera(cdp, "2d");
-  const clean = await waitValidated(cdp, built.locate, false);
-  mustOk(clean?.invalid === "0", "开始时校验干净", JSON.stringify(clean));
+  const locate = await openTemplateScene(cdp, ws);
   await clickTab(cdp, 2);
   const g = await roiGeometry(cdp);
   const shift = SLOTS[2].shift;
   await dragMouse(cdp, g.boxes.template3DatumRoi.center, screenOf(g.map, 12 + shift, 160.5), { steps: 10 });
   // 标红与「同一侧」的措辞由 m8b.mjs 的 suiteDragWrongSide 验过；这里要的是诊断落在槽 3 上并写明「模板 3」
-  const bad = await waitValidated(cdp, built.locate, true, 3000);
+  const bad = await waitValidated(cdp, locate, true, 3000);
   const diag = (bad?.diags ?? []).find((d) => d.paramPath === "template3DatumRoi");
   report.ok("诊断指到 template3DatumRoi", diag !== undefined, JSON.stringify(bad?.diags));
   report.ok("诊断与节点上贴的诊断都标明「模板 3」",
@@ -318,7 +304,7 @@ async function suiteSlot3WrongSide(cdp, report) {
     JSON.stringify(st.groups));
   await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
   // 等撤销后的校验落定再切回 3D（撤销回到干净由 m8b.mjs 的 suiteDragWrongSide 验过）
-  await waitValidated(cdp, built.locate, false, 3000);
+  await waitValidated(cdp, locate, false, 3000);
   await setCamera(cdp, "3d");
 }
 

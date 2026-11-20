@@ -76,6 +76,6 @@ ArUco夹具为 `DICT_4X4_50` ID7、物理边长0.1m。相机真值位置[0.12,0.
 
 本批交付还完成了安装目录隔离验证：PATH仅含System32时，安装后的六张图全部通过。临时移出安装目录中的opencv_geometry510.dll，并把有效同名DLL分别放在CWD和PATH，加载仍按预期拒绝；随后恢复原文件。加载器允许runtime目录和System32，不通过工作目录或PATH补齐缺失的这项依赖。C++ Client头也已在不引入vcpkg、Eigen的独立消费者中编译通过；这不表示运行库本身没有第三方依赖。
 
-永久跨接口回归位于 `core/tests/integration/p3_calibration.cpp`（四张识别码/工作空间图）和 `p3_shape.cpp`（两张CAD图）。每例把图与依赖资产保存到独立Unicode临时目录并重载，按默认→运行覆写→默认三轮分别执行原scheduler、真实C ABI和动态C++ Client SDK，共54次图执行。检查预设真值、稳定Record/Transform、覆写隔离与磁盘图恢复；CAD例另通过原生Tensor借阅接口检查Nx4特征、单位法向和跨接口数据一致性，不把特征正文转存为工作流JSON。图像集成只在所需图像/几何包开启时编译，CAD集成另要求点云包。
+永久回归位于 `core/tests/integration/p3_calibration.cpp`（四张识别码和工作空间图）及 `p3_shape.cpp`（两张 CAD 图）。六张图各用默认和覆盖参数运行原生调度，核对各自的真值。CAD 图还从原生 Tensor 检查 Nx4 特征及单位法向。工作空间原生格式图通过 C ABI 和动态 C++ SDK 各执行默认、覆盖、恢复默认三步，核对 Record 与变换矩阵。图像集成需要图像和几何包，CAD 集成另需点云包。
 
 本次Windows完整core套件已通过564组、137237断言、0失败、0跳过，其中包含上述六例；证据为 `build/core-full-p3-final.log`。这是本次构建的测试结果，不是只统计P3的数量。
