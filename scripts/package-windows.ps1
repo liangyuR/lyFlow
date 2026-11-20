@@ -4,6 +4,7 @@ param(
     [switch]$SkipDependencySetup,
     [switch]$SkipVisionBuild,
     [switch]$AllowDirty,
+    [switch]$NativeOnly,
     [string]$OutputDir,
     [string]$ExpectedTag
 )
@@ -12,12 +13,12 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_MODULES', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'LYFLOW_P4_ASSETS', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_MODULES', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_NATIVE_SDK', 'LYFLOW_TEST_ONNX_MODEL', 'LYFLOW_P4_ASSETS', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
     if (-not $IsWindows -or -not [Environment]::Is64BitProcess) { throw 'Packaging requires Windows x64 PowerShell.' }
-    $version = Get-ReleaseVersion -Root $root
+    $version = if ($NativeOnly) { Get-NativeReleaseVersion -Root $root } else { Get-ReleaseVersion -Root $root }
     $revision = (& git rev-parse HEAD | Out-String).Trim()
     Assert-ReleaseExit 'Read source revision'
     if ($revision -notmatch '^[0-9a-f]{40}$') { throw 'A known Git source revision is required.' }
@@ -51,9 +52,12 @@ try {
     }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $runtimeZip = Join-Path $output "lyflow-runtime-win-x64-v$version.zip"
+    $nativeSdkZip = Join-Path $output "lyflow-native-sdk-win-x64-v$version.zip"
     $sdkZip = Join-Path $output "lyflow-sdk-win-x64-v$version.zip"
     $editorTgz = Join-Path $output "lyflow-editor-v$version.tgz"
-    foreach ($archive in @($runtimeZip, $sdkZip, $editorTgz, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output "LyFlow.Runtime.win-x64.$version.nupkg"))) {
+    $assets = @($runtimeZip, $nativeSdkZip, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output "LyFlow.Runtime.win-x64.$version.nupkg"))
+    if (-not $NativeOnly) { $assets += @($sdkZip, $editorTgz) }
+    foreach ($archive in $assets) {
         if (Test-Path -LiteralPath $archive) { throw "Release asset already exists; use a fresh output directory: $archive" }
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
@@ -70,16 +74,6 @@ try {
     $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $fixtures 'channels-6-to-8.onnx'
     if (-not (Test-Path -LiteralPath $env:LYFLOW_TEST_ONNX_MODEL)) { throw 'Release ONNX fixture is missing.' }
     & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild -SkipVisionBuild:$SkipVisionBuild -P4ModelTests
-    $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
-    $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
-    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
-        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
-    $buildExit = $LASTEXITCODE
-    if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
-    & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
-        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
-    $testExit = $LASTEXITCODE
-    if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }
     $vs = Get-ReleaseVisualStudio
     $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if (-not (Test-Path -LiteralPath $cmake)) { $cmake = 'cmake' }
@@ -256,9 +250,8 @@ try {
     Write-ReleaseJson -Value $inspection.manifest -Path $auditedManifest
     & python (Join-Path $root 'scripts/check-operator-package-audit.py') --manifest $auditedManifest
     Assert-ReleaseExit 'Staged native operator registrations and retired identities'
-    if ($inspection.engineVersion -ne $version) { throw 'Staged DLL version differs from source product version.' }
-    if ($inspection.abiVersion -isnot [string] -or $inspection.abiVersion -cne $version -or $inspection.abiVersion -cne $inspection.engineVersion) { throw 'Staged DLL ABI must be a string exactly equal to the product and engine version.' }
-    if ($inspection.sourceRevision -isnot [string] -or ($inspection.sourceRevision -cne $revision -and -not ($AllowDirty -and $inspection.sourceRevision -ceq ''))) { throw 'Staged DLL source revision differs from HEAD. Only -AllowDirty diagnostics may use an empty compiled source revision.' }
+    if ($inspection.engineVersion -cne $version -or $inspection.abiVersion -cne $version) { throw 'Staged DLL version or ABI differs from the release version.' }
+    if ($inspection.sourceRevision -cne $revision -and -not ($AllowDirty -and $inspection.sourceRevision -ceq '')) { throw 'Staged DLL source revision differs from HEAD.' }
     $packs = @($inspection.manifest.operators | Where-Object { $_.PSObject.Properties.Name -contains 'pack' -and $_.pack } | ForEach-Object pack | Sort-Object -Unique | ForEach-Object {
         $parts = $_ -split '@', 2
         if ($parts.Count -ne 2) { throw "Versioned operator pack required: $_" }
@@ -280,45 +273,63 @@ try {
     }
     Write-ReleaseJson -Value $metadata -Path $metadataPath
     foreach ($file in Get-ChildItem -LiteralPath $runtime -Force) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $sdk 'bin') -Recurse -Force }
-    Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
-    & python (Join-Path $root 'tests/release/p4_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --assets $env:LYFLOW_P4_ASSETS --output-dir (Join-Path $diagnostics 'p4-cli')
-    Assert-ReleaseExit 'Installed P4 CLI parameter overrides and barcode default restoration'
-    & python (Join-Path $root 'tests/release/p5_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p5-cli')
-    Assert-ReleaseExit 'Installed P5 CLI native lineage and saved parameter contracts'
-    & python (Join-Path $root 'tests/release/scene_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'scene-cli')
-    Assert-ReleaseExit 'Installed Gap, DTS and Glue CLI scene contracts'
-    Test-InstalledSdkConsumer -Root $root -Prefix $sdk -Workspace (Join-Path $diagnostics 'sdk-consumer')
-    & python (Join-Path $root 'bridge/tests/p6_delivery_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --core (Join-Path $sdk 'bin/lyflow_core.dll') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p6-cli')
-    Assert-ReleaseExit 'Installed P6 CLI native frame recording replay logging and publication contracts'
     foreach ($relative in $configuration.requiredSdkFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative) -PathType Leaf)) { throw "SDK missing $relative" }
     }
-    foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'scripts/fetch-p4-model-assets.py', 'scripts/generate-p4-ocr-fixture.py', 'packaging/p4-model-assets.json', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json', 'docs/p4-assets.md', 'scripts/generate-p5-fixtures.py', 'examples/p5-fixtures.json', 'examples/p5-depth-inspection.lyflow.json', 'examples/p5-depth-filters.lyflow.json', 'examples/p5-orthographic-roi.lyflow.json', 'examples/p5-box-crop.lyflow.json', 'examples/p5-pose-rigid.lyflow.json', 'examples/p5-pose-project-plane.lyflow.json', 'examples/p5-circles-3d.lyflow.json', 'examples/p5-mask-remove.lyflow.json', 'docs/p5-examples.md', 'library')) {
+    foreach ($relative in @('bin/lyflow_core.dll', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'scripts/fetch-p4-model-assets.py', 'scripts/generate-p4-ocr-fixture.py', 'packaging/p4-model-assets.json', 'examples/p4-ocr-scene.png', 'examples/p4-ocr-scene-truth.json', 'docs/p4-assets.md', 'scripts/generate-p5-fixtures.py', 'examples/p5-fixtures.json', 'examples/p5-depth-inspection.lyflow.json', 'examples/p5-depth-filters.lyflow.json', 'examples/p5-orthographic-roi.lyflow.json', 'examples/p5-box-crop.lyflow.json', 'examples/p5-pose-rigid.lyflow.json', 'examples/p5-pose-project-plane.lyflow.json', 'examples/p5-circles-3d.lyflow.json', 'examples/p5-mask-remove.lyflow.json', 'docs/p5-examples.md', 'library')) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }
     if (@(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Extension -In @('.pdb', '.onnx')).Count) { throw 'Debug symbols or test models leaked into staging.' }
+    Test-InstalledSdkConsumer -Root $root -Prefix $sdk -Workspace (Join-Path $diagnostics 'sdk-consumer') -Version $version
+    $pendingNativeSdk = Join-Path $stage (Split-Path -Leaf $nativeSdkZip)
+    New-NativeSdkArchive -Prefix $sdk -OperatorManifest $auditedManifest -Archive $pendingNativeSdk
+    $pendingRuntime = Join-Path $stage (Split-Path -Leaf $runtimeZip)
+    [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $pendingRuntime)
+    if (-not $NativeOnly) {
+        $env:LYFLOW_PREBUILT_CORE_DIR = $null
+        $env:LYFLOW_NATIVE_SDK = $sdk
+        $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
+        & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
+            Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
+        $buildExit = $LASTEXITCODE
+        if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
+        & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
+            Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
+        $testExit = $LASTEXITCODE
+        if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }
+        Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
+        & python (Join-Path $root 'tests/release/p4_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --assets $env:LYFLOW_P4_ASSETS --output-dir (Join-Path $diagnostics 'p4-cli')
+        Assert-ReleaseExit 'Installed P4 CLI parameter overrides and barcode default restoration'
+        & python (Join-Path $root 'tests/release/p5_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p5-cli')
+        Assert-ReleaseExit 'Installed P5 CLI native lineage and saved parameter contracts'
+        & python (Join-Path $root 'tests/release/scene_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'scene-cli')
+        Assert-ReleaseExit 'Installed Gap, DTS and Glue CLI scene contracts'
+        & python -B (Join-Path $root 'bridge/tests/p6_delivery_contract.py') --cli (Join-Path $sdk 'bin/lyflow.exe') --core (Join-Path $sdk 'bin/lyflow_core.dll') --examples (Join-Path $sdk 'examples') --output-dir (Join-Path $diagnostics 'p6-cli')
+        Assert-ReleaseExit 'Installed P6 CLI native frame recording replay logging and publication contracts'
+        $pendingSdk = Join-Path $stage (Split-Path -Leaf $sdkZip)
+        [IO.Compression.ZipFile]::CreateFromDirectory($sdk, $pendingSdk)
+        # 编辑器以 TypeScript 源码包随版本发布（宿主用自己的打包器编译），版本必须与产品版本一致。
+        $editorDir = Join-Path $root 'packages/editor'
+        $editorVersion = (Get-Content -LiteralPath (Join-Path $editorDir 'package.json') -Raw | ConvertFrom-Json).version
+        if ($editorVersion -cne $version) { throw "@lyflow/editor version $editorVersion differs from product version $version." }
+        $editorStage = Join-Path $stage 'editor'
+        New-Item -ItemType Directory -Path $editorStage -Force | Out-Null
+        & node (Join-Path $editorDir 'scripts/pack.mjs') --pack-destination $editorStage
+        Assert-ReleaseExit 'Pack @lyflow/editor'
+        $editorPacked = @(Get-ChildItem -LiteralPath $editorStage -Filter '*.tgz' -File)
+        if ($editorPacked.Count -ne 1) { throw 'npm pack did not produce exactly one editor tarball.' }
+    }
     if (-not $AllowDirty -and -not $SkipDependencySetup) {
         & (Join-Path $PSScriptRoot 'package-runtime-nuget.ps1') -RuntimeDir $runtime -OutputDir $output -ExpectedVersion $version -ExpectedRevision $revision
     }
-    $pendingRuntime = Join-Path $stage (Split-Path -Leaf $runtimeZip)
-    $pendingSdk = Join-Path $stage (Split-Path -Leaf $sdkZip)
-    [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $pendingRuntime)
-    [IO.Compression.ZipFile]::CreateFromDirectory($sdk, $pendingSdk)
     [IO.File]::Copy($pendingRuntime, $runtimeZip, $false)
-    [IO.File]::Copy($pendingSdk, $sdkZip, $false)
-    # 编辑器以 TypeScript 源码包随版本发布（宿主用自己的打包器编译），版本必须与产品版本一致。
-    $editorDir = Join-Path $root 'packages/editor'
-    $editorVersion = (Get-Content -LiteralPath (Join-Path $editorDir 'package.json') -Raw | ConvertFrom-Json).version
-    if ($editorVersion -cne $version) { throw "@lyflow/editor version $editorVersion differs from product version $version." }
-    $editorStage = Join-Path $stage 'editor'
-    New-Item -ItemType Directory -Path $editorStage -Force | Out-Null
-    & node (Join-Path $editorDir 'scripts/pack.mjs') --pack-destination $editorStage
-    Assert-ReleaseExit 'Pack @lyflow/editor'
-    $editorPacked = @(Get-ChildItem -LiteralPath $editorStage -Filter '*.tgz' -File)
-    if ($editorPacked.Count -ne 1) { throw 'npm pack did not produce exactly one editor tarball.' }
+    [IO.File]::Copy($pendingNativeSdk, $nativeSdkZip, $false)
     [IO.File]::Copy($metadataPath, (Join-Path $output 'lyflow-runtime.json'), $false)
-    [IO.File]::Copy($editorPacked[0].FullName, $editorTgz, $false)
-    Write-Host "Built runtime, SDK and editor archives: $output"
+    if (-not $NativeOnly) {
+        [IO.File]::Copy($pendingSdk, $sdkZip, $false)
+        [IO.File]::Copy($editorPacked[0].FullName, $editorTgz, $false)
+    }
+    Write-Host "Built Windows release assets in $output"
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
     Pop-Location

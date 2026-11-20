@@ -29,7 +29,7 @@ fn exe_dir() -> PathBuf {
 /// 开发构建先用本配置自己的 cmake 产物（build.rs 的 `LYFLOW_CORE_BIN`）：cargo 按
 /// feature 集把同一个 crate 建好几遍，而 target/<profile>/ 是共用的，谁后拷谁说了算。
 fn dll_path() -> PathBuf {
-    if cfg!(debug_assertions) {
+    if cfg!(all(debug_assertions, not(native_sdk))) {
         let own = Path::new(env!("LYFLOW_CORE_BIN")).join(DLL_NAME);
         if own.is_file() {
             return own;
@@ -47,7 +47,7 @@ pub(crate) fn dll_file() -> PathBuf {
 /// 只在 debug 构建里开：这个路径是编译时写死的，构建机上它一直在 —— 在那台机器上开打包出来的 app，
 /// 它会盯着开发目录，`build-core.ps1` 一编就把装好的 core 换成另一份（包都可能不一样）。
 pub fn watch_source() -> Option<PathBuf> {
-    if !cfg!(debug_assertions) {
+    if !cfg!(all(debug_assertions, not(native_sdk))) {
         return None;
     }
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;

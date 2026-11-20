@@ -116,10 +116,96 @@ fn vcpkg_toolchain() -> Option<PathBuf> {
 fn main() {
     // ADR-0004：core 是 CMake 构建的 DLL，这里不发任何 rustc-link-lib。
     // 路径别 canonicalize()——扩展长度前缀会让 CMake 的 file(GLOB) 一个文件都匹配不到。
-    let core = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("bridge 应当有父目录")
-        .join("core");
+    // 仓库内的标准算子包（ADR-0014）。默认 1；LYFLOW_STD_PACKS=0 是纯平台构建。
+    // 空串按「没设」处理：PowerShell 里 $env:X="" 留下的是空串而不是删除
+    let std_packs = match std::env::var("LYFLOW_STD_PACKS") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => "1".to_string(),
+    };
+    println!("cargo:rerun-if-env-changed=LYFLOW_STD_PACKS");
+    // 纯平台构建里要标准包算子的测试记 ignored（cargo 汇总行里有数），默认构建照跑。
+    // Rust 的测试没有运行时 skip，提前 return 会记成 passed（docs/op-packs.md「纯平台构建」）
+    println!("cargo:rustc-check-cfg=cfg(std_packs_off)");
+    if std_packs == "0" {
+        println!("cargo:rustc-cfg=std_packs_off");
+    }
+
+    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
+    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
+    let modules = std::env::var("LYFLOW_MODULES").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_MODULES");
+    // tests/host.rs 的注入测试要 dts 包（默认关，ADR-0015）。没点名时记 ignored，
+    // 与 std_packs_off 同一个道理：汇总行里看得见，不会静默地「全绿」。
+    println!("cargo:rustc-check-cfg=cfg(dts_pack)");
+    if repo_packs.split(';').any(|p| p.trim() == "solution-dts") {
+        println!("cargo:rustc-cfg=dts_pack");
+    }
+
+    println!("cargo:rerun-if-env-changed=LYFLOW_NATIVE_SDK");
+    println!("cargo:rerun-if-env-changed=LYFLOW_PREBUILT_CORE_DIR");
+    let sdk = std::env::var_os("LYFLOW_NATIVE_SDK")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    let prebuilt = std::env::var_os("LYFLOW_PREBUILT_CORE_DIR")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let core = repository.join("core");
+    println!("cargo:rustc-check-cfg=cfg(native_sdk)");
+    let (bin, python, manifest) = if let Some(sdk) = &sdk {
+        println!("cargo:rustc-cfg=native_sdk");
+        assert!(
+            prebuilt.is_none(),
+            "LYFLOW_NATIVE_SDK and LYFLOW_PREBUILT_CORE_DIR are mutually exclusive"
+        );
+        let python = sdk.join("bin/python");
+        let manifest = sdk.join("examples/lyflow-utf8.manifest");
+        (prebuilt_bin(sdk.join("bin")), python, manifest)
+    } else {
+        let bin = match prebuilt {
+            Some(bin) => prebuilt_bin(bin),
+            None => build_core(&core, &std_packs, &repo_packs, &modules),
+        };
+        (
+            bin,
+            repository.join("python"),
+            core.join("lyflow-utf8.manifest"),
+        )
+    };
+    println!("cargo:rustc-env=LYFLOW_CORE_BIN={}", bin.display());
+
+    let target_dir = target_profile_dir();
+    for dest in [target_dir.clone(), target_dir.join("deps")] {
+        if let Err(e) = copy_dir_contents(&bin, &dest, sdk.is_some()) {
+            if sdk.is_some() {
+                panic!("Deploy native SDK: {e}");
+            }
+            println!(
+                "cargo:warning=拷贝 core 运行时到 {} 失败: {e}",
+                dest.display()
+            );
+        }
+        stage_python(&python, &dest).expect("准备 Python SDK 失败");
+    }
+    #[cfg(feature = "desktop")]
+    stage_bundle_core(&bin, &python, sdk.is_some());
+
+    utf8_manifest_step(&manifest);
+    tauri_step();
+}
+
+fn prebuilt_bin(bin: PathBuf) -> PathBuf {
+    assert!(bin.is_absolute(), "预构建运行库必须使用绝对路径");
+    assert!(
+        bin.join("lyflow_core.dll").is_file(),
+        "预构建目录缺少 lyflow_core.dll"
+    );
+    println!("cargo:rerun-if-changed={}", bin.display());
+    bin
+}
+
+fn build_core(core: &Path, std_packs: &str, repo_packs: &str, modules: &str) -> PathBuf {
     assert!(core.is_dir(), "找不到 {}", core.display());
 
     let mut files = Vec::new();
@@ -149,32 +235,6 @@ fn main() {
         println!("cargo:rerun-if-changed={}", d.display());
     }
     println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
-
-    // 仓库内的标准算子包（ADR-0014）。默认 1；LYFLOW_STD_PACKS=0 是纯平台构建。
-    // 空串按「没设」处理：PowerShell 里 $env:X="" 留下的是空串而不是删除
-    let std_packs = match std::env::var("LYFLOW_STD_PACKS") {
-        Ok(v) if !v.trim().is_empty() => v,
-        _ => "1".to_string(),
-    };
-    println!("cargo:rerun-if-env-changed=LYFLOW_STD_PACKS");
-    // 纯平台构建里要标准包算子的测试记 ignored（cargo 汇总行里有数），默认构建照跑。
-    // Rust 的测试没有运行时 skip，提前 return 会记成 passed（docs/op-packs.md「纯平台构建」）
-    println!("cargo:rustc-check-cfg=cfg(std_packs_off)");
-    if std_packs == "0" {
-        println!("cargo:rustc-cfg=std_packs_off");
-    }
-
-    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
-    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
-    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
-    let modules = std::env::var("LYFLOW_MODULES").unwrap_or_default();
-    println!("cargo:rerun-if-env-changed=LYFLOW_MODULES");
-    // tests/host.rs 的注入测试要 dts 包（默认关，ADR-0015）。没点名时记 ignored，
-    // 与 std_packs_off 同一个道理：汇总行里看得见，不会静默地「全绿」。
-    println!("cargo:rustc-check-cfg=cfg(dts_pack)");
-    if repo_packs.split(';').any(|p| p.trim() == "solution-dts") {
-        println!("cargo:rustc-cfg=dts_pack");
-    }
 
     let repository = core.parent().expect("core 应当有父目录");
     for directory in ["kernels", "packs", "solutions"] {
@@ -213,94 +273,57 @@ fn main() {
         );
     }
 
-    println!("cargo:rerun-if-env-changed=LYFLOW_PREBUILT_CORE_DIR");
-    let bin = if let Some(path) =
-        std::env::var_os("LYFLOW_PREBUILT_CORE_DIR").filter(|p| !p.is_empty())
-    {
-        let bin = PathBuf::from(path);
-        assert!(bin.is_absolute(), "LYFLOW_PREBUILT_CORE_DIR 必须是绝对路径");
-        assert!(
-            bin.join("lyflow_core.dll").is_file(),
-            "预构建目录缺少 lyflow_core.dll"
-        );
-        println!("cargo:rerun-if-changed={}", bin.display());
-        for entry in std::fs::read_dir(&bin).expect("读取预构建 core 目录失败") {
-            let path = entry.expect("读取预构建 core 文件失败").path();
-            if path.is_file() {
-                println!("cargo:rerun-if-changed={}", path.display());
+    let mut cfg = cmake::Config::new(core);
+    // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
+    // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
+    cfg.profile("RelWithDebInfo")
+        .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
+        // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
+        // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
+        .build_target("lyflow_core")
+        .define("BUILD_TESTING", "OFF")
+        .define("LYFLOW_OP_PACKS", &packs)
+        .define("LYFLOW_STD_PACKS", std_packs)
+        .define("LYFLOW_PACKS", repo_packs)
+        .define("LYFLOW_MODULES", modules)
+        .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
+    let ninja = find_ninja();
+    if let Some(ninja) = &ninja {
+        cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);
+    } else {
+        println!("cargo:warning=没找到 ninja，退回 CMake 默认生成器（会慢不少）");
+    }
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    drop_incompatible_cache(&out_dir.join("build"), ninja.as_ref().map(|_| "Ninja"));
+    if let Some(toolchain) = vcpkg_toolchain() {
+        cfg.define("CMAKE_TOOLCHAIN_FILE", &toolchain);
+    } else {
+        println!("cargo:warning=没找到 vcpkg 工具链，CMake 将自行寻找 PCL");
+    }
+    for name in [
+        "VCPKG_MANIFEST_DIR",
+        "VCPKG_INSTALLED_DIR",
+        "VCPKG_MANIFEST_MODE",
+        "VCPKG_MANIFEST_INSTALL",
+        "VCPKG_TARGET_TRIPLET",
+    ] {
+        println!("cargo:rerun-if-env-changed={name}");
+        if let Ok(value) = std::env::var(name) {
+            if !value.is_empty() {
+                cfg.define(name, value);
             }
         }
+    }
+    let out = cfg.build();
+
+    // CMake 的产物都在 <build>/bin。开发构建直接从这里加载（下面这个 LYFLOW_CORE_BIN），
+    // 再整目录拷到共享的 target/<profile>/ 与 deps/，供 tauri build 与打包取用。
+    let bin = out.join("build").join("bin");
+    if bin.exists() {
         bin
     } else {
-        let mut cfg = cmake::Config::new(&core);
-        // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
-        // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
-        cfg.profile("RelWithDebInfo")
-            .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
-            // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
-            // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
-            .build_target("lyflow_core")
-            .define("BUILD_TESTING", "OFF")
-            .define("LYFLOW_OP_PACKS", &packs)
-            .define("LYFLOW_STD_PACKS", &std_packs)
-            .define("LYFLOW_PACKS", &repo_packs)
-            .define("LYFLOW_MODULES", &modules)
-            .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
-        let ninja = find_ninja();
-        if let Some(ninja) = &ninja {
-            cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);
-        } else {
-            println!("cargo:warning=没找到 ninja，退回 CMake 默认生成器（会慢不少）");
-        }
-        let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-        drop_incompatible_cache(&out_dir.join("build"), ninja.as_ref().map(|_| "Ninja"));
-        if let Some(toolchain) = vcpkg_toolchain() {
-            cfg.define("CMAKE_TOOLCHAIN_FILE", &toolchain);
-        } else {
-            println!("cargo:warning=没找到 vcpkg 工具链，CMake 将自行寻找 PCL");
-        }
-        for name in [
-            "VCPKG_MANIFEST_DIR",
-            "VCPKG_INSTALLED_DIR",
-            "VCPKG_MANIFEST_MODE",
-            "VCPKG_MANIFEST_INSTALL",
-            "VCPKG_TARGET_TRIPLET",
-        ] {
-            println!("cargo:rerun-if-env-changed={name}");
-            if let Ok(value) = std::env::var(name) {
-                if !value.is_empty() {
-                    cfg.define(name, value);
-                }
-            }
-        }
-        let out = cfg.build();
-
-        // CMake 的产物都在 <build>/bin。开发构建直接从这里加载（下面这个 LYFLOW_CORE_BIN），
-        // 再整目录拷到共享的 target/<profile>/ 与 deps/，供 tauri build 与打包取用。
-        let bin = out.join("build").join("bin");
-        if bin.exists() {
-            bin
-        } else {
-            out.join("bin")
-        }
-    };
-    println!("cargo:rustc-env=LYFLOW_CORE_BIN={}", bin.display());
-
-    let target_dir = target_profile_dir();
-    for dest in [target_dir.clone(), target_dir.join("deps")] {
-        if let Err(e) = copy_dir_contents(&bin, &dest) {
-            println!(
-                "cargo:warning=拷贝 core 运行时到 {} 失败: {e}",
-                dest.display()
-            );
-        }
-        stage_python(&dest).expect("准备 Python SDK 失败");
+        out.join("bin")
     }
-    #[cfg(feature = "desktop")]
-    stage_bundle_core(&bin);
-
-    utf8_manifest_step(&core.join("lyflow-utf8.manifest"));
-    tauri_step();
 }
 
 /// D9：本包链出的所有 exe（lyflow-app、CLI、lib 与各 bin 的测试）都要
@@ -320,6 +343,7 @@ fn utf8_manifest_step(manifest: &Path) {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
         return;
     }
+    println!("cargo:rerun-if-changed={}", manifest.display());
     println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
     println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
     let app_manifest = app_manifest_path();
@@ -365,12 +389,12 @@ fn tauri_step() {}
 /// tauri-build 在 debug 下也按 resources 往 target 里拷，glob 什么都匹配不到会报错，
 /// 而一次 `tauri dev` 不该把上一次 release 留下的换掉（release 的构建脚本下次不一定重跑）。
 #[cfg(feature = "desktop")]
-fn stage_bundle_core(bin: &Path) {
+fn stage_bundle_core(bin: &Path, python: &Path, from_sdk: bool) {
     let staging = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("target")
         .join("bundle-core");
     let is_dll = |p: &Path| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"));
-    stage_python(&staging).expect("准备安装包 Python SDK 失败");
+    stage_python(python, &staging).expect("准备安装包 Python SDK 失败");
     let staged: Vec<PathBuf> = std::fs::read_dir(&staging)
         .map(|d| {
             d.flatten()
@@ -380,7 +404,7 @@ fn stage_bundle_core(bin: &Path) {
         })
         .unwrap_or_default();
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
-    if !release && !staged.is_empty() {
+    if !from_sdk && !release && !staged.is_empty() {
         return;
     }
     let result = (|| -> std::io::Result<()> {
@@ -397,6 +421,9 @@ fn stage_bundle_core(bin: &Path) {
         Ok(())
     })();
     if let Err(e) = result {
+        if from_sdk {
+            panic!("Stage native SDK: {e}");
+        }
         println!(
             "cargo:warning=准备安装包里的 core 运行时（{}）失败: {e}",
             staging.display()
@@ -414,7 +441,7 @@ fn target_profile_dir() -> PathBuf {
         .to_path_buf()
 }
 
-fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
+fn copy_dir_contents(from: &Path, to: &Path, from_sdk: bool) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -425,14 +452,15 @@ fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
         // 只拷运行时需要的东西。.lib/.exp 是链接期产物，跟着走只会让
         // 安装包体积莫名其妙地大一圈。
         match src.extension().and_then(|s| s.to_str()) {
-            Some("dll") | Some("exe") | Some("pdb") => {}
+            Some("dll") => {}
+            Some("exe") | Some("pdb") if !from_sdk => {}
             _ => continue,
         }
         let dst = to.join(entry.file_name());
         // 目标文件正被占用（比如上一次 tauri dev 还开着）时不让整个构建挂掉，
         // 但必须说出来 —— 静默跳过等于「悄悄用了别人留下的那一份」。
         if let Err(e) = std::fs::copy(&src, &dst) {
-            if e.kind() != std::io::ErrorKind::PermissionDenied {
+            if from_sdk || e.kind() != std::io::ErrorKind::PermissionDenied {
                 return Err(e);
             }
             println!(
@@ -444,11 +472,7 @@ fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn stage_python(destination: &Path) -> std::io::Result<()> {
-    let source = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("workspace root")
-        .join("python");
+fn stage_python(source: &Path, destination: &Path) -> std::io::Result<()> {
     println!("cargo:rerun-if-changed={}", source.display());
     fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(destination)?;
@@ -469,5 +493,5 @@ fn stage_python(destination: &Path) -> std::io::Result<()> {
         }
         Ok(())
     }
-    copy_tree(&source, &destination.join("python"))
+    copy_tree(source, &destination.join("python"))
 }

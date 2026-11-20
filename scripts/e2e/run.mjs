@@ -498,10 +498,19 @@ async function suitePackagedCore(cdp, report, staged) {
     };
   `);
   report.eq('桌面壳通过 Tauri 读取 core', kind, 'tauri');
-  const desktopConfig = JSON.parse(
-    fs.readFileSync(new URL('../../bridge/tauri.conf.json', import.meta.url), 'utf8'),
-  );
-  report.eq('core 版本与桌面构建版本一致', info.version, desktopConfig.version);
+  const sdkRuntime = process.env.LYFLOW_NATIVE_SDK
+    ? JSON.parse(
+        fs.readFileSync(
+          path.join(process.env.LYFLOW_NATIVE_SDK, 'bin/lyflow-runtime.json'),
+          'utf8',
+        ),
+      )
+    : null;
+  const engineVersion =
+    sdkRuntime?.engineVersion ??
+    JSON.parse(fs.readFileSync(new URL('../../bridge/tauri.conf.json', import.meta.url), 'utf8'))
+      .version;
+  report.eq('桌面加载了构建时选定的引擎版本', info.version, engineVersion);
   report.ok('core 清单包含平台转接算子 util.reroute', hasReroute);
   report.ok('CLI 也随包', staged.cli != null && fs.existsSync(staged.cli), String(staged.cli));
   const standardPacks = !['0', 'OFF', 'FALSE'].includes(
@@ -513,16 +522,19 @@ async function suitePackagedCore(cdp, report, staged) {
     const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
     report.eq('onnxruntime 两个 DLL 都在干净目录里', present, ort);
   }
-  const release = JSON.parse(
-    fs.readFileSync(new URL('../../packaging/release.json', import.meta.url), 'utf8'),
-  );
-  const want = [
-    ...(standardPacks ? release.packs.filter((id) => id.startsWith('std-')) : []),
-    ...(process.env.LYFLOW_PACKS ?? '')
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  ];
+  const want = sdkRuntime
+    ? sdkRuntime.packs.map((pack) => pack.name)
+    : [
+        ...(standardPacks
+          ? JSON.parse(
+              fs.readFileSync(new URL('../../packaging/release.json', import.meta.url), 'utf8'),
+            ).packs.filter((id) => id.startsWith('std-'))
+          : []),
+        ...(process.env.LYFLOW_PACKS ?? '')
+          .split(';')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ];
   report.ok(
     `打包的 core 带着这次构建要的包（${want.join('、')}）`,
     want.every((p) => packs.includes(p)),

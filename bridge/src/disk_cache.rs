@@ -22,8 +22,13 @@ pub(crate) fn dir_of(parsed: &Parsed) -> Option<String> {
 }
 
 fn identity_for(version: &str, revision: &str) -> Result<String, String> {
-    if version != lyflow_client::ABI_VERSION {
-        return Err("缓存产品版本与客户端 ABI 不一致".into());
+    if !lyflow_client::abi_compatible(version)
+        || version.split('.').count() != 3
+        || !version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err("缓存需要与客户端 ABI 兼容的完整引擎版本 X.Y.Z".into());
     }
     if revision.len() != 40
         || !revision
@@ -156,6 +161,12 @@ mod tests {
     #[test]
     fn build_identity_uses_explicit_version_and_revision() {
         let revision = "0123456789abcdef0123456789abcdef01234567";
+        let (series, patch) = lyflow_client::ABI_VERSION.rsplit_once('.').unwrap();
+        let next_patch = format!("{series}.{}", patch.parse::<u64>().unwrap() + 1);
+        assert_eq!(
+            identity_for(&next_patch, revision).unwrap(),
+            format!("lfc1-v{}-source-{revision}", next_patch.replace('.', "_"))
+        );
         assert_eq!(
             identity_for(lyflow_client::ABI_VERSION, revision).unwrap(),
             format!(

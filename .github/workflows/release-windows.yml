@@ -350,25 +350,119 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  public-tools:
+    name: 从原生 SDK 构建公共工具
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/*/
+            /app/
+            /bridge/
+            /crates/lyflow-client/
+            /examples/host-react/
+            /packages/
+            /docs/agent-tuning.md
+            /docs/http-transport.md
+            /docs/mcp-glue-tuning.md
+            /packs/*/README.md
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: ${{ runner.temp }}/engine-assets
+      - name: 解压本次构建的 SDK
+        shell: pwsh
+        env:
+          ENGINE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $sdk = Join-Path $env:RUNNER_TEMP 'native-sdk'
+          $zip = Join-Path $env:RUNNER_TEMP "engine-assets/lyflow-native-sdk-win-x64-v$env:ENGINE_VERSION.zip"
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip, $sdk)
+          Copy-Item "$sdk/schema" schema -Recurse
+          Copy-Item "$sdk/examples/m3-native-profile.lyflow.json","$sdk/examples/m3-native-profile.csv" -Destination examples
+          "LYFLOW_NATIVE_SDK=$sdk" >> $env:GITHUB_ENV
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: 构建桌面工具并用 CLI 执行随包示例
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm --filter lyflow-app build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --manifest-path bridge/Cargo.toml --bin lyflow-app --features custom-protocol
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --manifest-path bridge/Cargo.toml --no-default-features --bin lyflow
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path bridge/Cargo.toml --no-default-features --test profiles lypr
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $cli = (Resolve-Path bridge/target/debug/lyflow.exe).Path
+          & $cli manifest --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $lines = @(& $cli run "$env:LYFLOW_NATIVE_SDK/examples/p2-expression.lyflow.json" --summary)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $result = $lines[-1] | ConvertFrom-Json
+          if ($result.status -cne 'ok' -or $result.outputs.mean.state -cne 'value') { throw 'CLI 未返回示例输出' }
+          "LYFLOW_CLI=$cli" >> $env:GITHUB_ENV
+      - name: 通过 MCP 读取实际执行结果
+        shell: pwsh
+        run: |
+          pnpm --filter @lyflow/mcp build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm --filter @lyflow/mcp test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
   publish:
     name: 创建草稿 Release
-    needs: build
+    needs: [build, public-tools]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            packaging/engine-releases
+            scripts/reviewed-engine-release.ps1
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           name: windows-release
           path: release
+
+      - name: 校验双仓发行的原始资产
+        id: reviewed
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          . ./scripts/reviewed-engine-release.ps1
+          $lock = Get-ReviewedEngineRelease -Version $env:RELEASE_VERSION
+          if ($lock) {
+            Assert-ReviewedEngineAssets -Release $lock -Directory release
+            "revision=$($lock.Revision)" >> $env:GITHUB_OUTPUT
+            "files=$(ConvertTo-Json -InputObject @($lock.Assets.Keys) -Compress)" >> $env:GITHUB_OUTPUT
+          }
 
       - name: 创建草稿且不覆盖已有资产
         uses: actions/github-script@v7
         env:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           SOURCE_REVISION: ${{ needs.build.outputs.revision }}
+          ENGINE_REVISION: ${{ steps.reviewed.outputs.revision }}
+          ENGINE_FILES: ${{ steps.reviewed.outputs.files }}
         with:
           script: |
             const fs = require('node:fs');
@@ -379,13 +473,17 @@ jobs:
             if (context.ref !== `refs/tags/${tag}`) throw new Error('tag 与构建版本不一致');
             const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
             if (releases.some(release => release.tag_name === tag)) throw new Error(`Release ${tag} 已存在；禁止覆盖`);
-            const files = fs.readdirSync('release').filter(name => /\.(zip|json|tgz|nupkg)$/.test(name));
-            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, `LyFlow.Runtime.win-x64.${version}.nupkg`, 'lyflow-runtime.json']) {
-              if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
+            const reviewed = process.env.ENGINE_REVISION;
+            const files = reviewed ? JSON.parse(process.env.ENGINE_FILES) : fs.readdirSync('release').filter(name => /\.(zip|json|tgz|nupkg)$/.test(name));
+            if (!reviewed) {
+              const required = [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-native-sdk-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, `LyFlow.Runtime.win-x64.${version}.nupkg`, 'lyflow-runtime.json'];
+              for (const name of required) {
+                if (!fs.existsSync(path.join('release', name))) throw new Error(`缺少构建资产: ${name}`);
+              }
             }
             const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
-            const runtimeContract = JSON.parse(fs.readFileSync('release/lyflow-runtime.json', 'utf8'));
-            const body = [
+            const runtimeContract = reviewed ? null : JSON.parse(fs.readFileSync('release/lyflow-runtime.json', 'utf8'));
+            const body = reviewed ? `Windows x64 运行库、原生 SDK 和 NuGet ${tag}。引擎来源为 liangyuR/lyflow-engine 的 \`${reviewed}\`，公开 tag 对应工具仓修订 \`${revision}\`。` : [
               `Windows x64 运行库、SDK/CLI 与节点图编辑器 ${tag}。人工复核后正式发布。`,
               '',
               `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
@@ -399,7 +497,7 @@ jobs:
               `lyflow-client = { git = "${repository}.git", rev = "${revision}" }`,
               '```',
               '',
-              '构建门禁覆盖 core 与完整标准包的 Rust 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。最终 ZIP 独立消费、客户图像效果、真实设备、现场节拍及 GlueSight 安装验收由下游按需执行。',
+              '构建门禁覆盖 core 与完整标准包的 Rust 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。公共工具使用解压的原生 SDK 构建并运行示例。客户图像效果、真实设备、现场节拍和 GlueSight 安装验收归下游验证。',
               '',
               '下游固定正式发布的 tag 与资产名；依赖或二进制变化必须增加产品版本，不覆盖旧资产。'
             ].join('\n');
