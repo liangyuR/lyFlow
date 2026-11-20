@@ -57,7 +57,7 @@ impl PythonRuntimeConfig {
         let sdk = std::env::var_os("LYFLOW_PYTHON_SDK_DIR")
             .map(PathBuf::from)
             .or_else(|| {
-                if cfg!(debug_assertions) {
+                if cfg!(all(debug_assertions, not(native_sdk))) {
                     let source = Path::new(env!("CARGO_MANIFEST_DIR"))
                         .parent()?
                         .join("python");

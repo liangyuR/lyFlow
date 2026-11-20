@@ -39,6 +39,18 @@ function Get-ReleaseVisualStudio {
     return [string]$installation
 }
 
+function Get-NativeReleaseVersion {
+    param([string]$Root)
+    $header = Get-Content -LiteralPath (Join-Path $Root 'core/include/lyflow/version.h') -Raw
+    if ($header -notmatch '#define\s+LYFLOW_VERSION\s+"([^"\r\n]+)"') { throw 'Missing engine version in core header' }
+    $version = $Matches[1]
+    $python = Get-Content -LiteralPath (Join-Path $Root 'python/pyproject.toml') -Raw
+    if ($python -notmatch '(?m)^version\s*=\s*"([^"\r\n]+)"' -or $Matches[1] -ne $version) { throw 'Version mismatch in Python SDK' }
+    $cmake = Get-Content -LiteralPath (Join-Path $Root 'core/CMakeLists.txt') -Raw
+    if ($cmake -notmatch 'project\(lyflow_core\s+LANGUAGES\s+CXX\s+VERSION\s+([\d.]+)\)' -or $Matches[1] -ne $version) { throw 'Version mismatch in core CMake project' }
+    return $version
+}
+
 function Get-ReleaseVersion {
     param([string]$Root)
     $version = (Get-Content -LiteralPath (Join-Path $Root 'package.json') -Raw | ConvertFrom-Json).version
@@ -47,14 +59,11 @@ function Get-ReleaseVersion {
         $actual = (Get-Content -LiteralPath (Join-Path $Root $relative) -Raw | ConvertFrom-Json).version
         if ($actual -ne $version) { throw "Version mismatch in ${relative}: expected $version, got $actual" }
     }
-    foreach ($relative in @('bridge/Cargo.toml', 'crates/lyflow-client/Cargo.toml', 'python/pyproject.toml')) {
+    foreach ($relative in @('bridge/Cargo.toml', 'crates/lyflow-client/Cargo.toml')) {
         $source = Get-Content -LiteralPath (Join-Path $Root $relative) -Raw
         if ($source -notmatch '(?m)^version\s*=\s*"([^"\r\n]+)"' -or $Matches[1] -ne $version) { throw "Version mismatch in $relative" }
     }
-    $header = Get-Content -LiteralPath (Join-Path $Root 'core/include/lyflow/version.h') -Raw
-    if ($header -notmatch '#define\s+LYFLOW_VERSION\s+"([^"\r\n]+)"' -or $Matches[1] -ne $version) { throw 'Version mismatch in core version header' }
-    $cmake = Get-Content -LiteralPath (Join-Path $Root 'core/CMakeLists.txt') -Raw
-    if ($cmake -notmatch 'project\(lyflow_core\s+LANGUAGES\s+CXX\s+VERSION\s+([\d.]+)\)' -or $Matches[1] -ne $version) { throw 'Version mismatch in core CMake project' }
+    if ((Get-NativeReleaseVersion -Root $Root) -cne $version) { throw 'Tool and engine release versions differ' }
     return $version
 }
 
@@ -63,15 +72,25 @@ function Write-ReleaseJson {
     $Value | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
 }
 
+function New-NativeSdkArchive {
+    param(
+        [Parameter(Mandatory)][string]$Prefix,
+        [Parameter(Mandatory)][string]$OperatorManifest,
+        [Parameter(Mandatory)][string]$Archive
+    )
+    if (Test-Path -LiteralPath (Join-Path $Prefix 'bin/lyflow.exe')) { throw 'Native SDK staging already contains the CLI.' }
+    Copy-Item -LiteralPath $OperatorManifest -Destination (Join-Path $Prefix 'operator-manifest.json')
+    [IO.Compression.ZipFile]::CreateFromDirectory($Prefix, $Archive)
+}
+
 function Test-InstalledSdkConsumer {
-    param([string]$Root, [string]$Prefix, [string]$Workspace)
+    param([string]$Root, [string]$Prefix, [string]$Workspace, [string]$Version = (Get-ReleaseVersion -Root $Root))
     $vs = Get-ReleaseVisualStudio
     $vcvars = Join-Path $vs 'VC/Auxiliary/Build/vcvars64.bat'
     $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     $ninja = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
     if (-not (Test-Path $cmake)) { $cmake = 'cmake' }
     if (-not (Test-Path $ninja)) { $ninja = 'ninja' }
-    $version = Get-ReleaseVersion -Root $Root
     $source = Join-Path $Workspace 'src'
     $build = Join-Path $Workspace 'build'
     New-Item -ItemType Directory -Path $source -Force | Out-Null

@@ -17,6 +17,7 @@
     "core:dump": "pwsh -ExecutionPolicy Bypass -File scripts/dump-manifest.ps1",
     "core:watch": "pwsh -ExecutionPolicy Bypass -File scripts/core-watch.ps1",
     "cli:build": "cargo build --release --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features",
+    "package:native": "pwsh -NoProfile -File scripts/package-windows.ps1 -NativeOnly",
     "package": "pwsh -NoProfile -File scripts/package-windows.ps1",
     "check": "pwsh -ExecutionPolicy Bypass -File scripts/check.ps1",
     "check:glue": "pwsh -NoProfile -File scripts/check-glue.ps1",

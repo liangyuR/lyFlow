@@ -577,6 +577,12 @@ install(TARGETS lyflow_core
         LIBRARY DESTINATION bin
         ARCHIVE DESTINATION lib)
 
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../schema/"
+        DESTINATION schema
+        FILES_MATCHING PATTERN "*.schema.json" PATTERN "fixtures" EXCLUDE PATTERN "examples" EXCLUDE)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../schema/examples/graph.example.lyflow.json"
+        DESTINATION schema/examples)
+
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/lyflow_python"
         DESTINATION bin/python
         FILES_MATCHING PATTERN "*.py")

@@ -58,6 +58,7 @@
 - [测试地图](testing.md)：本地检查、CI 覆盖及仍需独立验收的范围。
 - [E2E 驱动](../scripts/e2e/README.md)：真实桌面与浏览器验收的运行方式。
 - [Windows 发包](deployment/packaging.md)：固定依赖、运行库 / SDK / 编辑器资产、版本和 ABI 门禁。
+- [私有引擎与公共工具链拆仓计划](deployment/runtime-sdk-repo-split-plan.md)
 - [版本变更](CHANGELOG.md)：发布行为与兼容要求。
 - 模块说明：[core](../core/README.md)、[bridge](../bridge/README.md)、[app](../app/README.md)、[MCP](mcp.md)。
 

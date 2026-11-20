@@ -24,7 +24,7 @@
 | 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2。领域场景需要对应的 solution 包，多模板分组还需要 `gap-template` 模块。 |
 | 桌面构建产物 | `pnpm e2e:packaged` | 同一套桌面交互断言验证构建产物，不等于运行库/SDK 发包验证。 |
 | 浏览器宿主 | `pnpm e2e:http` | HTTP 传输、结果取数与 React 宿主链路。 |
-| Windows 发包 | `pnpm run package` | 固定标准包、solution-glue、solution-gap、solution-dts，生成运行库/SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
+| Windows 发包 | `pnpm run package` | 固定标准包、solution-glue、solution-gap、solution-dts，生成运行库、原生 SDK 与含 CLI 的 SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
 
 桌面完整验收及按分组复验：
 
@@ -61,6 +61,8 @@ CTest 按日常 Core、Core `stress` 和公共内核运行相应 doctest。只�
 
 [Windows release](../.github/workflows/release-windows.yml) 仅在 `v*` tag 或手动触发时运行，日常 CI 不代替发布门禁。运行库版本、ABI、源码修订、资产检查和下游消费边界以 [发包说明](deployment/packaging.md) 为准。LyFlow 的软件检查也不等于 GlueSight 或其他宿主的现场验收。
 
+Windows 发布流程中的 `public-tools` job 只检出公共工具，直接解压本次构建作业传递的 SDK，使用其中的运行库与 schema，构建桌面和 headless CLI，运行随包示例及 MCP 测试。跨仓消费使用 `scripts/restore-native-sdk.ps1` 和工具仓的版本锁。NuGet 发布测试覆盖历史发布规则、归档摘要及本地输入禁止推送；传入 `-ReviewedAssetsDir` 可用真实复核包验证从模拟 Release 仅下载并交付原始 nupkg 的路径。
+
 ## 测试归属与现有入口
 
 优先在已经拥有该功能契约的用例里增加表项或断言，不为同一判据在不同层重复建测试。数值判据放在能覆盖它的最低一层（内核 → 包 → 场景）；发布、SDK 与 e2e 层只验结构、身份绑定、覆盖生效与跨接口一致，不再断言内点数、槽号或读数。
@@ -87,7 +89,7 @@ CTest 按日常 Core、Core `stress` 和公共内核运行相应 doctest。只�
 | 真鼠标、键盘、弹窗、焦点、窗口行为与渲染 | `scripts/e2e/`；共享动作位于 `page.mjs`，CDP 连接位于 `cdp.mjs`。 |
 | 图像、点云与轮廓的取数和展示 | `packages/visualization/test/` 覆盖共享轮廓描述符及 SVG 入口，`packages/editor/test/profile.test.mjs` 覆盖编辑器的轮廓二进制载荷，`packages/mcp/` 覆盖工具输出。见 [MCP 可视化说明](mcp-visualization.md)。 |
 
-跨语言规则优先扩充 `schema/fixtures/recipes/`、`schema/examples/` 等共享夹具；全类型参数示例位于 `examples/param-showcase.lyflow.json`。C++ 辅助在 `core/tests/helpers.h`，CLI 测试辅助由 `bridge/src/cli.rs` 的 `test_support` 提供。
+跨语言规则优先扩充 `schema/fixtures/recipes/`、`schema/examples/` 等共享夹具；全类型参数示例位于 `examples/param-showcase.lyflow.json`。私有引擎仓的发包探针负责原生 Profile 输入、输出和量测。LYPR 传输检查在 `bridge/tests/profiles.rs`。C++ 辅助在 `core/tests/helpers.h`，CLI 测试辅助由 `bridge/src/cli.rs` 的 `test_support` 提供。
 
 启用相关包和 P4 模型时，P3–P5 的 20 张图各在原生调度层运行默认和覆盖两种配置。三张图再通过 C ABI 和动态 C++ SDK 各执行默认、覆盖、恢复默认三步，与调度基准比对。工作空间图检查变换与 Record，原生标注图检查图像与掩膜 Tensor，深度检测图检查点云、索引及来源身份。上述矩阵合计 58 次整图执行。另有 P5 圆孔图运行一次，检查位姿接入圆盘投影后的掩膜与实例绑定；正面和斜面精度归图像包测试。
 
