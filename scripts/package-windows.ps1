@@ -60,7 +60,7 @@ try {
     & node (Join-Path $root 'packages/editor/scripts/pack.mjs') --pack-destination $assets
     Assert-ReleaseExit 'Pack editor from public sources'
     [IO.File]::Move((Join-Path $assets "lyflow-editor-$version.tgz"), (Join-Path $assets "lyflow-editor-v$version.tgz"))
-    [IO.Compression.ZipFile]::CreateFromDirectory($sdk, (Join-Path $assets "lyflow-sdk-win-x64-v$version.zip"))
+    New-PublicSdkArchive -SdkDirectory $sdk -ArchivePath (Join-Path $assets "lyflow-sdk-win-x64-v$version.zip")
     [IO.File]::Copy($runtimeFile, (Join-Path $assets 'lyflow-runtime.json'))
     [IO.Directory]::Move($assets, $output)
     Write-Host "Packaged public tools in $output"

@@ -38,3 +38,13 @@ function Get-ReleaseVersion {
     }
     return $version
 }
+
+function New-PublicSdkArchive {
+    param([string]$SdkDirectory, [string]$ArchivePath)
+    [IO.Compression.ZipFile]::CreateFromDirectory($SdkDirectory, $ArchivePath)
+    $zip = [IO.Compression.ZipFile]::Open($ArchivePath, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $timestamp = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+        foreach ($entry in $zip.Entries) { $entry.LastWriteTime = $timestamp }
+    } finally { $zip.Dispose() }
+}

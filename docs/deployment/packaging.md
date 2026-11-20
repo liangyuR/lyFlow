@@ -19,7 +19,7 @@
 
 ## 本地组包与消费验收
 
-Windows x64 下安装 [Rust 和 Node.js 开发环境](../getting-started.md)，使用 PowerShell 7。默认从公开地址匿名恢复 SDK，校验归档 SHA-256、正式构建标记、版本及修订，然后构建 CLI、运行随包示例并打包编辑器。输出目录须为新路径。
+Windows x64 下安装 [Rust 和 Node.js 开发环境](../getting-started.md)，使用 PowerShell 7。默认从公开地址匿名恢复 SDK，校验归档 SHA-256、正式构建标记、版本及修订，然后构建 CLI、运行随包示例并打包编辑器。输出目录须为新路径。新组装的 SDK ZIP 使用固定历史时间，跨时区直接解压后也可构建 CMake 示例。恢复早期原生包时，解压脚本会将晚于本机当前时刻的文件时间调至当前时刻。
 
 ```powershell
 ./scripts/package-windows.ps1 -OutputDir build/tool-release

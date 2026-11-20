@@ -46,4 +46,9 @@ function Expand-RuntimeReleaseArchive {
         }
     } finally { $archive.Dispose() }
     [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination)
+    # ZIP 的 DOS 时间使用本地时区；未来的 CMake 输入会让 Ninja 持续重新配置。
+    $now = [DateTime]::UtcNow
+    foreach ($item in Get-ChildItem -LiteralPath $Destination -Force -Recurse) {
+        if ($item.LastWriteTimeUtc -gt $now) { $item.LastWriteTimeUtc = $now }
+    }
 }

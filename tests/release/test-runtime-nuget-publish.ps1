@@ -3,7 +3,7 @@ param([string]$ReviewedAssetsDir)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-. (Join-Path $root 'scripts/release-common.ps1')
+. (Join-Path $root 'scripts/runtime-nuget-common.ps1')
 $reviewed = Get-ReviewedEngineRelease -Root $root
 $version = $reviewed.Version
 $tag = "v$version"
@@ -48,6 +48,29 @@ $env:LYFLOW_NUGET_TOKEN = 'non-secret-test-token'
 try {
     $scratch = [IO.Directory]::CreateTempSubdirectory('lyflow-lock-test-').FullName
     try {
+        $zip = Join-Path $scratch 'sdk.zip'
+        $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+        $past = [DateTimeOffset]::Now.AddDays(-2)
+        try {
+            $archive.CreateEntry('lyflow-config.cmake').LastWriteTime = [DateTimeOffset]::Now.AddDays(2)
+            $archive.CreateEntry('prior.cmake').LastWriteTime = $past
+        } finally { $archive.Dispose() }
+        $sdk = Join-Path $scratch 'sdk'
+        Expand-RuntimeReleaseArchive -ArchivePath $zip -Destination $sdk
+        $current = Get-Item -LiteralPath (Join-Path $sdk 'lyflow-config.cmake')
+        $prior = Get-Item -LiteralPath (Join-Path $sdk 'prior.cmake')
+        if ($current.LastWriteTimeUtc -gt [DateTime]::UtcNow -or
+            [Math]::Abs(($prior.LastWriteTimeUtc - $past.UtcDateTime).TotalSeconds) -ge 2) {
+            throw 'Extracted SDK timestamps must preserve past entries and clamp future inputs.'
+        }
+        $toolsArchive = Join-Path $scratch 'tools.zip'
+        New-PublicSdkArchive -SdkDirectory $sdk -ArchivePath $toolsArchive
+        $archive = [IO.Compression.ZipFile]::OpenRead($toolsArchive)
+        try {
+            foreach ($entry in $archive.Entries) {
+                if ($entry.LastWriteTime.DateTime -ne [DateTime]::new(1980, 1, 1)) { throw 'SDK ZIP contains a machine-local build timestamp.' }
+            }
+        } finally { $archive.Dispose() }
         $pin = [version]$version
         $other = [version]::new($pin.Major, $pin.Minor, $pin.Build + 1).ToString()
         [void][IO.Directory]::CreateDirectory((Join-Path $scratch 'packaging/engine-releases'))
