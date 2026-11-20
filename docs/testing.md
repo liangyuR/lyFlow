@@ -12,13 +12,14 @@
 |---|---|---|
 | 完整开发门禁 | `pnpm check` | core、manifest、schema、Rust bridge/客户端、CLI、C++ SDK、前端与 MCP。 |
 | 选择门禁步骤 | `pwsh -NoProfile -File scripts/check.ps1 -Steps frontend,mcp` | 可选步骤为 core、manifest、schema、bridge、client、cli、sdk、frontend、mcp；不给 `-Steps` 则全部运行。 |
-| C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算法数值、执行语义和 C ABI 契约的主要入口。 |
+| C++ core 与算子包 | `pnpm core:build` | 编译并运行日常 doctest，覆盖算法数值、执行语义和 C ABI 契约。 |
+| C++ 压力与长超时 | `ctest --test-dir build/core -L stress --no-tests=error --output-on-failure` | 用已构建的测试程序运行两项专项。也可用 `pwsh -File scripts/build-core.ps1 -RunStressTests` 构建并同时运行日常与专项。 |
 | Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量首次与重复读取 `valueJson()` 计时，不代表整图耗时。 |
 | 编辑器纯逻辑 | `pnpm --filter @lyflow/editor test` | 当前按 25 个文件、96 个功能契约用例组织，包含工作区与 PythonNode；不启动桌面壳。 |
 | 编辑器类型 | `pnpm --filter @lyflow/editor typecheck` | 同时检查 React 18 与 React 19 类型契约。 |
 | 共享可视化 | `pnpm --filter @lyflow/visualization test` | 图像、点云等共享可视化逻辑。 |
 | Python SDK 与 worker | `python -B -m unittest discover -s python/tests -v` | Python 3.11 及以上与 NumPy；检查节点发现、数据交换和 worker 行为。 |
-| MCP 单元测试 | `pnpm --filter @lyflow/mcp test:unit` | 不含需要 CLI 的集成冒烟；完整入口为 `pnpm --filter @lyflow/mcp test`。 |
+| MCP 单元测试 | `pnpm --filter @lyflow/mcp test:unit` | 6 个文件、32 个用例。不含需要 CLI 的集成冒烟。完整入口为 `pnpm --filter @lyflow/mcp test`。 |
 | glue / gap 门禁 | `pnpm check:glue` / `pnpm check:gap` | 运行相应包的专项检查；真实数据和历史对拍需额外配置，不能把人造帧结果当现场结论。 |
 | 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2；完整领域场景需带 `gap;dts`。 |
 | 桌面构建产物 | `pnpm e2e:packaged` | 同一套桌面交互断言验证构建产物，不等于运行库/SDK 发包验证。 |
@@ -45,13 +46,13 @@ pnpm e2e --only m3:suitePanels,params_p4
 | `client` | windows-2022 | 运行库 NuGet 契约测试、bridge/客户端/运行库探针的 Rust 格式检查、独立 Rust 客户端编译与单测。 |
 | `frontend` | windows-2022 | 编辑器 React 18/19 类型、桌面与 React 宿主构建、编辑器及共享可视化单测、MCP 类型/构建/单测。 |
 | `fast` | ubuntu-24.04 | 要求 `frontend` 与 `client` 都成功，不重复运行其测试。 |
-| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及 CTest；Python 3.12 与 NumPy 2.2.6 的 SDK/worker 测试；M2 轻量 SDK 安装与公共核消费。 |
+| `native` | windows-2022 | 纯平台 + dts 的 CMake 编译及日常 CTest，另验 Python SDK/worker 和 M2 轻量 SDK。PR 涉及 `core/`、`python/` 或对应测试入口时运行 `stress`，main 和手动运行也执行该组。 |
 | `rust` | windows-2022 | 自行编译同组合的 `lyflow_core`（不含测试），再做 Rust 桌面/CLI 编译、lib/bins 单测及 `python_nodes`、`profiles`、`host` 集成测试。 |
 | `vision` | ubuntu-24.04 | 无 PCL/ORT 的值、几何、图像、度量、Tensor 解码与涂胶场景包编译、算子自检及 CTest。 |
 
 `native`、`rust` 与 `vision` 用 sccache 缓存编译结果，因此关闭了预编译头；源文件必须自己包含所需头文件，不能依赖 PCH。
 
-CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单元测试例数。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 编出的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
+CTest 按日常 Core、Core `stress` 和公共内核运行相应 doctest。只构建包测试的配置不注册 Core `stress`。`pnpm check` 和 Windows 发布运行适用的全部分组。Rust 使用 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 编出的 core。纯平台 + dts 不依赖标准包的 vcpkg 端口，需要标准包的既有 Rust 用例会标记 ignored；这不证明标准算子包已验证。
 
 日常 CI 不编译依赖 PCL/ORT 的组合（std-pointcloud、std-ml 推理、solution-gap），也不执行 P1/P4 真实模型链、SDK 安装消费、CLI 交付契约、整套桌面/浏览器 e2e、完整真实数据评估或正式发包。改动这些包或交付链时，合并前须在本地运行对应入口（如 `pnpm check:gap`、`pnpm check:glue`，或带全部包与模型测试选项的 `scripts/build-core.ps1`），并在 PR 描述中记录结果。完整 `pnpm check` 与各专项入口仍应按改动范围运行。
 
@@ -69,21 +70,31 @@ CTest 的一个条目执行该构建组合的全部 doctest，条目数不是单
 | 算法数值、端口数据、C ABI、执行计划、缓存、取消与子图 | `core/tests/`、各 `packs/*/tests/`。领域数值测试保留原判据和容差。 |
 | 图像响应、法向候选与颜色模型 | `packs/std-image/tests/test_line_scan.cpp`、`packs/std-image/tests/test_color_model.cpp`。 |
 | 标准算子组合与旧图拆分 | `packs/std-pointcloud/tests/test_p2_height_rules.cpp`、`test_p2_advanced_fit.cpp`、`test_p5_primitive_crop.cpp` 及 `packs/std-image/tests/test_p5_inspection.cpp`。节点拆分公共规则在 `core/tests/test_graph_migration.cpp`。 |
+| 点云保序删点与旧紧凑模式诊断 | `packs/std-pointcloud/tests/test_p5_primitive_crop.cpp` 覆盖 `NaN` 标记、点序、通道、同源索引、`segment.extract_indices.rest`，以及显式、默认或绑定的旧紧凑模式触发整图校验失败。 |
 | 涂胶搜索、示教、灰度/彩色测量与飞拍场景 | `solutions/glue/tests/`，涵盖随包彩色、灰度和飞拍图。 |
 | 宿主注入（整节点与输入注入、只给部分输出、注入进缓存键） | `core/tests/test_flow.cpp`；Profile 的 C ABI 注入在 `core/tests/test_profile_c_api.cpp`。 |
 | Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`；StandardGap 导入图由宿主注入两路 Profile 运行在 `solutions/gap/tests/test_import_bundle.cpp`。 |
 | 锚框窗口、重叠高度观测和公差比较 | 几何计算在 `kernels/tests/test_geometry.cpp`，窗口空间检查在 `packs/std-geometry/tests/test_geometry.cpp`，观测在 `packs/std-profile/tests/test_compare_overlap.cpp`，比较在 `packs/std-metrology/tests/test_metrology.cpp`。 |
+| 刚体点对距离、配准变换及旧参数诊断 | `packs/std-geometry/tests/test_p5_pose_geometry.cpp` 覆盖距离检查与配准结果、退化配准失败，以及旧 `mode` 参数和图参数绑定的校验错误。 |
 | 安装后的 CLI/SDK 交付契约（EXACT 版本、链接与依赖闭包、覆盖生效与还原、身份绑定、CLI 与嵌入宿主一致） | `tests/release/*_contract.py`、`tests/release/p5_sdk_consumer/`、`bridge/tests/p6_delivery_contract.py`；产品版本取自 `scripts/release-common.ps1` 的 `Get-ReleaseVersion` 等单一来源，不在测试里写死。对应数值判据在 `core/tests/integration/p4_recognition.cpp`、`p5_depth_geometry.cpp` 及各包测试。 |
-| 算子分包清单（字段、Python 示例 ID、与 manifest 的 ID 及包归属一致） | `scripts/tests/test_operator_package_audit.py` 测检查脚本本身；CI 的 `quality` 检查清单，`native`、`vision` 用各自 manifest 以 `--subset` 核对。 |
+| 算子分包清单（字段、Python 示例 ID、manifest 的 ID、归属及缺项） | `scripts/tests/test_operator_package_audit.py` 测检查脚本。`--subset` 校验已导出的算子，`--complete-pack` 对声明完整的包额外检查漏项。日常标准包构建审计 `std-pointcloud`，`native`、`vision` 审计各自完整启用的包，发布审计全量清单。 |
 | Rust 封送、IPC、命令行选项/退出码、宿主及跨进程缓存 | `bridge/src/*/tests.rs`、`bridge/tests/`；客户端在 `crates/lyflow-client/`。 |
 | 图动作、撤销、端口兼容、自动连线、参数、配方与搜索 | `packages/editor/test/graph-params*.test.mjs`、`typecheck.test.mjs`、`param-values.test.mjs`、`recipes.test.mjs`、`search.test.mjs`。 |
 | 标签快照、异步操作归属、宿主文档通知及备份恢复 | `packages/editor/test/flow-tabs.test.mjs`、`flow-backup.test.mjs`、`autosave.test.mjs`。 |
 | 执行事件、正式判定、结果显示与预览 | `packages/editor/test/execution-store.test.mjs`、`view-rule.test.mjs`。 |
-| Python 发现、数据校验、异常与 worker；引擎及宿主接入 | `python/tests/`、`core/tests/test_python.cpp`、`bridge/tests/python_nodes.rs`、编辑器 Python 场景。 |
+| Python 发现、数据校验、异常与 worker；引擎及宿主接入 | `python/tests/`、`core/tests/test_python.cpp`、`bridge/tests/python_nodes.rs`、编辑器 Python 场景。日常保留真实异常恢复和确定性取消。真实超时、强制终止、导入中取消以及 `core/tests/test_cache.cpp` 的 100 次随机取消归入 `stress`。 |
 | 真鼠标、键盘、弹窗、焦点、窗口行为与渲染 | `scripts/e2e/`；共享动作位于 `page.mjs`，CDP 连接位于 `cdp.mjs`。 |
-| 图像、点云等取数与展示的跨端契约 | `packages/visualization/`、`packages/mcp/` 及 [MCP 可视化说明](mcp-visualization.md)。 |
+| 图像、点云与轮廓的取数和展示 | `packages/visualization/test/` 覆盖共享轮廓描述符及 SVG 入口，`packages/editor/test/profile.test.mjs` 覆盖编辑器的轮廓二进制载荷，`packages/mcp/` 覆盖工具输出。见 [MCP 可视化说明](mcp-visualization.md)。 |
 
 跨语言规则优先扩充 `schema/fixtures/recipes/`、`schema/examples/` 等共享夹具；全类型参数示例位于 `examples/param-showcase.lyflow.json`。C++ 辅助在 `core/tests/helpers.h`，CLI 测试辅助由 `bridge/src/cli.rs` 的 `test_support` 提供。
+
+P3、P4 和 P5 跨接口用例以原生调度的默认、覆盖结果为基准。C ABI 和 C++ SDK 各自运行默认、覆盖、恢复默认三步，并与相应基准比较输出和所需的原生缓冲区。P5 圆孔的正面和斜面精度归图像包测试，整图只跑一次以验证位姿接入圆盘投影后的掩膜与实例绑定。
+
+ASCII PCD 的短语料、大文件跨块和随机词分别运行。P2 CAD 匹配的三档各通过 C ABI 运行原始模型，另用 balanced 档验证 C++ SDK 读取二进制保存后的模型。
+
+安装后的 P5 CLI 对八张图各运行一次默认参数。深度滤波和位姿配准两张代表图各补覆盖与恢复默认，共 12 次 `validate` 和 12 次 `run`。
+
+P0 检测图在调度层检查数值真值及双向惰性分支。C ABI 和 C++ SDK 的参数覆盖、恢复默认和结果交付由 P2 表达式及 P4 条码用例覆盖。
 
 ## 结果应如何解释
 

@@ -2,7 +2,8 @@
 
 不带参数：检查清单结构，并核对 Python 示例 ID 与 python/examples 中的 @node 声明一致。
 --manifest：再核对 lyflow-dump-manifest 导出的原生算子与清单一致（ID 全集与当前包归属）。
---subset：manifest 只来自部分包组合时使用，只要求导出的每个算子都已登记且归属一致。
+--subset：manifest 来自部分包组合或裁剪了可选模块，核对已导出算子的 ID 和包归属。
+--complete-pack PACK：在 --subset 中额外检查指定包的全部算子是否注册。可重复指定。
 """
 import argparse
 import ast
@@ -40,7 +41,7 @@ def manifest_operators(paths):
     return exported
 
 
-def validate(data, example_ids, exported=None, subset=False):
+def validate(data, example_ids, exported=None, subset=False, complete_packs=()):
     problems = []
     require = lambda ok, message: ok or problems.append(message)
     require(data.get('schemaVersion') == 2, 'schemaVersion 必须为 2')
@@ -76,9 +77,12 @@ def validate(data, example_ids, exported=None, subset=False):
             require(identifier not in packs or packs[identifier] == pack,
                     f'{identifier}: 当前包归属为 {pack}，清单写的是 {packs.get(identifier)}')
             require(identifier not in retired_ids, f'{identifier}: 已退役却仍在注册')
-        if not subset:
-            missing = sorted(set(packs) - set(exported))
-            require(not missing, f'清单中登记但未注册：{", ".join(missing)}')
+        complete_packs = set(complete_packs)
+        unknown = sorted(complete_packs - set(packs.values()))
+        require(not unknown, f'清单中没有指定的完整包：{", ".join(unknown)}')
+        missing = sorted(identifier for identifier, pack in packs.items()
+                         if identifier not in exported and (not subset or pack in complete_packs))
+        require(not missing, f'清单中登记但未注册：{", ".join(missing)}')
     return problems
 
 
@@ -88,21 +92,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--manifest', action='append', type=Path, default=[])
     parser.add_argument('--subset', action='store_true')
+    parser.add_argument('--complete-pack', action='append', default=[], metavar='PACK')
     args = parser.parse_args()
     if args.subset and not args.manifest:
         parser.error('--subset 需要 --manifest')
+    if args.complete_pack and not args.subset:
+        parser.error('--complete-pack 需要 --subset')
     data = json.loads(LEDGER.read_text(encoding='utf-8'))
     try:
         exported = manifest_operators(args.manifest) if args.manifest else None
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
-    problems = validate(data, python_example_ids(), exported, args.subset)
+    problems = validate(data, python_example_ids(), exported, args.subset, args.complete_pack)
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
         return 1
-    scope = '（部分包组合）' if args.subset else ''
+    scope = ''
+    if args.complete_pack:
+        scope = f'（要求完整的包 {", ".join(sorted(set(args.complete_pack)))}）'
+    elif args.subset:
+        scope = '（部分包组合）'
     checked = f'，manifest {len(exported)} 项{scope}一致' if exported is not None else ''
     print(f"OK: {len(data['operators'])} 原生算子，{len(data['pythonExamples'])} Python 示例{checked}")
     return 0

@@ -71,7 +71,7 @@ inline OperatorDesc descriptor(const char* id, const char* label, const char* ke
   op.id = id;
   op.version = "1.0.0";
   op.label = label;
-  op.category = "几何/工件位姿";
+  op.category = "几何/工作空间";
   op.keywords = {keywords, label, "pose", "工件", "位姿", "坐标系"};
   op.capabilities = {true, false, true};
   return op;

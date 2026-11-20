@@ -4,6 +4,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <tuple>
 
 #include "exec/hash.h"
 #include "lyflow/json_writer.h"
@@ -609,6 +610,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     std::vector<Diagnostic> errors;
   };
   std::vector<Prepared> prepared(n);
+  bool hasRemovedParameter = false;
 
   auto fail = [&](std::size_t i, std::string code, std::string message, std::string paramPath = {},
                   std::string portName = {}) {
@@ -640,11 +642,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     nlohmann::json params = rn.params;
     const auto mig = migrations.find(rn.id);
     const Semver current = parseSemver(op->version);
+    const Semver saved = parseSemver(rn.opVersion);
     if (rn.opVersion.empty() && mig != migrations.end() && mig->second.broken &&
         !mig->second.failureReason.empty())
       fail(i, "migration_required", mig->second.failureReason);
     if (!rn.opVersion.empty()) {
-      const Semver saved = parseSemver(rn.opVersion);
       if (saved.valid && current.valid) {
         if (saved.major > current.major) {
           fail(i, "version_mismatch",
@@ -692,16 +694,20 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 参数：先查未知键，再逐个规整 + 查范围。
     for (auto it = params.begin(); it != params.end(); ++it) {
       if (!findParam(*op, it.key())) {
-        if (prepared[i].fullyProvided)
+        const auto removed = op->removedParamHints.find(it.key());
+        const bool isRemoved = removed != op->removedParamHints.end();
+        hasRemovedParameter |= isRemoved;
+        if (prepared[i].fullyProvided && !isRemoved)
           continue;
+        const std::string hint = isRemoved ? "。" + removed->second : "";
         auto viaGraph = rn.graphParams.find(it.key());
         if (viaGraph != rn.graphParams.end()) {
           fail(i, "unknown_bind",
                "顶层参数 '" + viaGraph->second + "' 绑到算子 " + op->id + " 没有的参数 '" +
-                   it.key() + "'",
+                   it.key() + "'" + hint,
                it.key());
         } else {
-          fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'", it.key());
+          fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'" + hint, it.key());
         }
         continue;
       }
@@ -710,7 +716,25 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     for (const Param& p : op->params) {
       Value v = p.def;
       auto it = params.find(p.name);
-      if (it != params.end()) {
+      const auto removed = std::find_if(
+          op->removedParamValues.begin(), op->removedParamValues.end(),
+          [&](const RemovedParamValue& entry) {
+            if (entry.param != p.name)
+              return false;
+            if (it != params.end())
+              return *it == entry.value;
+            const auto cutoff = parseSemver(entry.defaultBeforeVersion);
+            return cutoff.valid &&
+                   (!saved.valid || std::tie(saved.major, saved.minor, saved.patch) <
+                                        std::tie(cutoff.major, cutoff.minor, cutoff.patch));
+          });
+      if (removed != op->removedParamValues.end()) {
+        hasRemovedParameter = true;
+        const std::string prefix = it == params.end() ? "旧节点省略的参数 '" : "参数 '";
+        fail(i, "bad_param",
+             prefix + p.name + "' 使用已移除的值 '" + removed->value + "'。" + removed->hint,
+             p.name);
+      } else if (it != params.end()) {
         std::string message;
         if (!coerceParam(p, *it, v, message)) {
           if (!prepared[i].fullyProvided)
@@ -1226,7 +1250,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
 
   // 顶层图参数的取值不合它自己的规格（P1.2）：诊断在展开期已经报过（nodeId 为空）。
   // 节点照常规整、诊断照常收齐 —— 编辑期校验要一次看到全部问题 —— 但这份计划不能跑。
-  if (!graph.paramValuesOk)
+  if (!graph.paramValuesOk || hasRemovedParameter)
     return false;
 
   out.ok = true;

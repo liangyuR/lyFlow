@@ -76,20 +76,6 @@
       "opVersion": "1.0.0"
     },
     {
-      "id": "remove",
-      "op": "cloud.remove_indices",
-      "params": {
-        "outputMode": "compact"
-      },
-      "ui": {
-        "position": {
-          "x": 1400,
-          "y": 200
-        }
-      },
-      "opVersion": "1.0.0"
-    },
-    {
       "id": "extract",
       "op": "segment.extract_indices",
       "opVersion": "1.0.0",
@@ -193,28 +179,6 @@
       }
     },
     {
-      "id": "sample-cloud-remove-cloud",
-      "from": {
-        "node": "sample",
-        "port": "cloud"
-      },
-      "to": {
-        "node": "remove",
-        "port": "cloud"
-      }
-    },
-    {
-      "id": "query-innerIndices-remove-indices",
-      "from": {
-        "node": "query",
-        "port": "innerIndices"
-      },
-      "to": {
-        "node": "remove",
-        "port": "indices"
-      }
-    },
-    {
       "id": "query-support-classify-support",
       "from": {
         "node": "query",
@@ -297,34 +261,6 @@
       "port": "groups"
     },
     "cropQuality": {
-      "node": "classify",
-      "port": "quality"
-    },
-    "cloud": {
-      "node": "remove",
-      "port": "cloud"
-    },
-    "removed": {
-      "node": "extract",
-      "port": "selected"
-    },
-    "removedIndices": {
-      "node": "query",
-      "port": "innerIndices"
-    },
-    "keptIndices": {
-      "node": "query",
-      "port": "outerIndices"
-    },
-    "removeGroupIndices": {
-      "node": "query",
-      "port": "groupIndices"
-    },
-    "removeGroups": {
-      "node": "query",
-      "port": "groups"
-    },
-    "quality": {
       "node": "classify",
       "port": "quality"
     },

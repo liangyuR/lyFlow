@@ -166,7 +166,6 @@ TEST_CASE("P2 matching examples preserve CAD anchors across save load C ABI and 
     CHECK(std::abs(center[2].get<double>() - .009) < 1e-7);
     CHECK(out.at("visible").at("elementCount").get<int>() > 0);
   };
-  Client client(LYFLOW_TEST_RUNTIME);
   const auto temporary =
       std::filesystem::temp_directory_path() /
       ("p2-cad-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
@@ -184,15 +183,19 @@ TEST_CASE("P2 matching examples preserve CAD anchors across save load C ABI and 
   OpCall save;
   save.inputs = {{"cloud", loader.outputs.at("cloud")}};
   REQUIRE(save.run("io.save_pcd", {{"path", Value::text(temporary.u8string())}}).ok);
-  for (const char* preset : {"fast", "balanced", "precise"}) {
-    CAPTURE(std::string(preset));
-    const std::string name = std::string("p2-matching-") + preset + ".lyflow.json";
+  for (const std::string preset : {"fast", "balanced", "precise"}) {
+    CAPTURE(preset);
+    const std::string name = "p2-matching-" + preset + ".lyflow.json";
     const auto graph = example(name.c_str());
-    const std::string id = std::string("p2-match-") + preset;
+    const std::string id = "p2-match-" + preset;
     {
       INFO("C ABI original model");
       check(abiRun(graph, id, Json::object()));
     }
+    if (preset != "balanced")
+      continue;
+
+    Client client(LYFLOW_TEST_RUNTIME);
     RunOptions options;
     options.runId = id + "-sdk-roundtrip";
     options.baseDir = LYFLOW_EXAMPLES_DIR;

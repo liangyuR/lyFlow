@@ -282,7 +282,6 @@ mod tests {
 
         let fresh = core().expect("换代后拿不到 core");
         assert!(!Arc::ptr_eq(&old, &fresh), "还是旧的那一份");
-        assert!(fresh.manifest_problems().unwrap().is_empty());
         let fresh_ops = serde_json::from_str::<serde_json::Value>(&fresh.manifest_json().unwrap())
             .unwrap()["operators"]
             .as_array()

@@ -24,7 +24,7 @@ if ($pureStd) { Write-Host "标准包已关：纯平台构建" -ForegroundColor 
 
 if (Want "core") {
   Step "C++ core"
-  & "$PSScriptRoot\build-core.ps1"
+  & "$PSScriptRoot\build-core.ps1" -RunStressTests
 }
 
 if (Want "manifest") {

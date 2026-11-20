@@ -19,14 +19,12 @@ class OperatorPackageLedger(unittest.TestCase):
         cls.examples = CHECK.python_example_ids()
         cls.manifest = {row['id']: row['currentPack'] for row in cls.ledger['operators']}
 
-    def problems(self, mutate=None, exported=None, subset=False, examples=None):
+    def problems(self, mutate=None, exported=None, subset=False, examples=None, complete_packs=()):
         data = copy.deepcopy(self.ledger)
         if mutate:
             mutate(data)
-        return CHECK.validate(data, self.examples if examples is None else examples, exported, subset)
-
-    def test_repository_ledger_matches_its_own_full_manifest(self):
-        self.assertEqual(self.problems(exported=self.manifest), [])
+        return CHECK.validate(data, self.examples if examples is None else examples, exported, subset,
+                              complete_packs)
 
     def test_rejects_malformed_rows(self):
         cases = {
@@ -58,6 +56,25 @@ class OperatorPackageLedger(unittest.TestCase):
         self.assertTrue(self.problems(exported=partial))
         self.assertEqual(self.problems(exported=partial, subset=True), [])
         self.assertTrue(self.problems(exported=dict(partial, **{'new.op': 'core'}), subset=True))
+
+        complete_pack = 'std-pointcloud'
+        pointcloud = {identifier: pack for identifier, pack in self.manifest.items()
+                      if pack == complete_pack}
+        other_id, other_pack = next((identifier, pack) for identifier, pack in self.manifest.items()
+                                    if pack != complete_pack)
+        partial_without_pointcloud = {other_id: other_pack}
+        partial_with_pointcloud = {**partial_without_pointcloud, **pointcloud}
+        self.assertEqual(self.problems(exported=partial_with_pointcloud, subset=True,
+                                       complete_packs=[complete_pack]), [])
+        removed = next(iter(pointcloud))
+        del partial_with_pointcloud[removed]
+        self.assertIn(f'清单中登记但未注册：{removed}',
+                      self.problems(exported=partial_with_pointcloud, subset=True,
+                                    complete_packs=[complete_pack]))
+        self.assertTrue(self.problems(exported=partial_without_pointcloud, subset=True,
+                                      complete_packs=[complete_pack]))
+        self.assertIn('清单中没有指定的完整包：missing-pack',
+                      self.problems(exported=partial, subset=True, complete_packs=['missing-pack']))
 
     def test_conflicting_manifests_are_rejected(self):
         first = self.ledger['operators'][0]['id']

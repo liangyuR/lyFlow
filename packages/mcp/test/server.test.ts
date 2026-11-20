@@ -178,28 +178,27 @@ test('后端连不上时工具报错而不是挂住', async () => {
   await client.close();
 });
 
-test('图给得不对时 run_graph 不去碰后端', async () => {
+test('运行和校验在请求后端前报告无效的图', async (t) => {
   const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
-  const result = await client.callTool({
-    name: 'run_graph',
-    arguments: {
-      graph: { schemaVersion: 1, id: 'g', nodes: [{ id: 'a', op: 'x' }], edges: [] },
-      set: { 'nope.p': 1 },
+  t.after(() => client.close());
+  const cases = [
+    {
+      name: 'run_graph',
+      args: {
+        graph: { schemaVersion: 1, id: 'g', nodes: [{ id: 'a', op: 'x' }], edges: [] },
+        set: { 'nope.p': 1 },
+      },
+      expected: [/没有节点 nope/],
     },
-  });
-  assert.equal(result.isError, true);
-  assert.match(text(result), /没有节点 nope/);
-  await client.close();
-});
-
-test('图缺 GraphDoc 必填字段时当场说清楚，而不是让后端回一个空诊断数组', async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
-  const result = await client.callTool({
-    name: 'validate_graph',
-    arguments: { graph: { schemaVersion: 1, nodes: [{ id: 'a', op: 'x' }] } },
-  });
-  assert.equal(result.isError, true);
-  assert.match(text(result), /id/);
-  assert.match(text(result), /edges/);
-  await client.close();
+    {
+      name: 'validate_graph',
+      args: { graph: { schemaVersion: 1, nodes: [{ id: 'a', op: 'x' }] } },
+      expected: [/id/, /edges/],
+    },
+  ];
+  for (const { name, args, expected } of cases) {
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, true, name);
+    for (const pattern of expected) assert.match(text(result), pattern, name);
+  }
 });

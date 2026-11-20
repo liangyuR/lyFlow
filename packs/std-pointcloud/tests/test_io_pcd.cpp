@@ -374,62 +374,65 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
 
 TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件、怪词）") {
   AsciiTempDir dir;
-  // PCL 1.15 每个词独立舍入到 float；先转 double 再转 float 会让这个临界值差 1 ulp。
-  const std::string tie = "1.0000000596046447753906250001";
-  const std::string longDigits(70, '7');
+  SUBCASE("短文件的词法和行边界") {
+    // PCL 1.15 每个词独立舍入到 float；先转 double 再转 float 会让这个临界值差 1 ulp。
+    const std::string tie = "1.0000000596046447753906250001";
+    const std::string longDigits(70, '7');
 
-  struct Case {
-    std::string name;
-    std::string text;
-  };
-  const std::vector<Case> cases = {
-      {"CRLF、空行、只有空白的行、多余的空格与 tab",
-       header("x y z", "4 4 4", "F F F", "1 1 1", 4, 1, 4, "\r\n") +
-           "1 2 3\r\n\r\n  4\t5  6 \r\n   \r\n7 8 9\r\n"},
-      {"特殊词：nan、inf、+、溢出、次正规、半截、十六进制、逗号、超长",
-       header("a b c d e f", "4 4 4 4 4 4", "F F F F F F", "1 1 1 1 1 1", 4, 1, 4) +
-           "nan NaN -nan inf -inf +1.5\n"
-           "1e39 -1e39 1e-50 1e-40 .5 -.5\n"
-           "5. 1e5 1E+05 0x10 1.5abc 007\n"
-           "-0 0.0 1,5 " +
-           tie + " " + longDigits + " 1\v\n"},
-      {"第一个词就是双重舍入的临界值，后面再来一个",
-       header("x", "4", "F", "1", 3, 1, 3) + tie + "\n" + tie + "\n0.1\n"},
-      {"整数字段：越界、负数进无符号、小数、nan、带 + 号、科学计数",
-       header("a b c d e f", "1 1 2 2 4 4", "I U I U I U", "1 1 1 1 1 1", 8, 1, 8) +
-           "300 300 70000 70000 3000000000 5000000000\n"
-           "-1 -1 -5 -5 -1 -1\n"
-           "1.9 1.9 1.9 1.9 1.9 1.9\n"
-           "nan nan nan nan nan nan\n"
-           "127 255 32767 65535 2147483647 4294967295\n"
-           "-128 0 -32768 0 -2147483648 0\n"
-           "+5 +5 +5 +5 +5 +5\n"
-           "1e3 1e3 1e3 1e3 -2.5 2.5\n"},
-      {"double 字段：溢出、次正规、最小正规数",
-       header("a b", "8 8", "F F", "1 1", 4, 1, 4) +
-           "1e308 1e309\n4.9e-324 2.2250738585072014e-308\n0.1 -0\nnan inf\n"},
-      {"count > 1 与填充维 _",
-       header("x _ n", "4 4 4", "F F F", "1 2 3", 2, 1, 2) + "1 9 9 2 3 4\n5 9 9 6 7 8\n"},
-      {"行比点少：读不够点数（报错）",
-       header("x y z", "4 4 4", "F F F", "1 1 1", 5, 1, 5) + "1 2 3\n4 5 6\n7 8 9\n"},
-      {"行比点多：多的不读",
-       header("x y z", "4 4 4", "F F F", "1 1 1", 2, 1, 2) + "1 2 3\n4 5 6\n7 8 9\n1 1 1\n"},
-      {"最后一行没有换行符", header("x y z", "4 4 4", "F F F", "1 1 1", 2, 1, 2) + "1 2 3\n4 5 6"},
-      {"词数不对的行照样占一个点",
-       header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) + "1 2\n4 5 6\n7 8 9 10\n"},
-      {"Ctrl+Z：文本模式读到它就当文件结束", header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) +
-                                                 "1 2 3\n\x1a"
-                                                 "4 5 6\n7 8 9\n"},
-      {"POINTS 0", header("x y z", "4 4 4", "F F F", "1 1 1", 0, 1, 0)},
-      {"有序云", header("x y", "4 4", "F F", "1 1", 2, 2, 4) + "1 2\n3 4\n5 6\n7 8\n"},
-      {"单字段的全空白行：保留占位，后续临界值独立舍入",
-       header("x", "4", "F", "1", 3, 1, 3) + "   \n" + tie + "\n3\n"},
-  };
-  for (const Case& c : cases) {
-    CAPTURE(c.name);
-    const std::filesystem::path file = dir.file("case.pcd");
-    writeBytes(file, c.text);
-    requireSameRead(file);
+    struct Case {
+      std::string name;
+      std::string text;
+    };
+    const std::vector<Case> cases = {
+        {"CRLF、空行、只有空白的行、多余的空格与 tab",
+         header("x y z", "4 4 4", "F F F", "1 1 1", 4, 1, 4, "\r\n") +
+             "1 2 3\r\n\r\n  4\t5  6 \r\n   \r\n7 8 9\r\n"},
+        {"特殊词：nan、inf、+、溢出、次正规、半截、十六进制、逗号、超长",
+         header("a b c d e f", "4 4 4 4 4 4", "F F F F F F", "1 1 1 1 1 1", 4, 1, 4) +
+             "nan NaN -nan inf -inf +1.5\n"
+             "1e39 -1e39 1e-50 1e-40 .5 -.5\n"
+             "5. 1e5 1E+05 0x10 1.5abc 007\n"
+             "-0 0.0 1,5 " +
+             tie + " " + longDigits + " 1\v\n"},
+        {"第一个词就是双重舍入的临界值，后面再来一个",
+         header("x", "4", "F", "1", 3, 1, 3) + tie + "\n" + tie + "\n0.1\n"},
+        {"整数字段：越界、负数进无符号、小数、nan、带 + 号、科学计数",
+         header("a b c d e f", "1 1 2 2 4 4", "I U I U I U", "1 1 1 1 1 1", 8, 1, 8) +
+             "300 300 70000 70000 3000000000 5000000000\n"
+             "-1 -1 -5 -5 -1 -1\n"
+             "1.9 1.9 1.9 1.9 1.9 1.9\n"
+             "nan nan nan nan nan nan\n"
+             "127 255 32767 65535 2147483647 4294967295\n"
+             "-128 0 -32768 0 -2147483648 0\n"
+             "+5 +5 +5 +5 +5 +5\n"
+             "1e3 1e3 1e3 1e3 -2.5 2.5\n"},
+        {"double 字段：溢出、次正规、最小正规数",
+         header("a b", "8 8", "F F", "1 1", 4, 1, 4) +
+             "1e308 1e309\n4.9e-324 2.2250738585072014e-308\n0.1 -0\nnan inf\n"},
+        {"count > 1 与填充维 _",
+         header("x _ n", "4 4 4", "F F F", "1 2 3", 2, 1, 2) + "1 9 9 2 3 4\n5 9 9 6 7 8\n"},
+        {"行比点少：读不够点数（报错）",
+         header("x y z", "4 4 4", "F F F", "1 1 1", 5, 1, 5) + "1 2 3\n4 5 6\n7 8 9\n"},
+        {"行比点多：多的不读",
+         header("x y z", "4 4 4", "F F F", "1 1 1", 2, 1, 2) + "1 2 3\n4 5 6\n7 8 9\n1 1 1\n"},
+        {"最后一行没有换行符",
+         header("x y z", "4 4 4", "F F F", "1 1 1", 2, 1, 2) + "1 2 3\n4 5 6"},
+        {"词数不对的行照样占一个点",
+         header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) + "1 2\n4 5 6\n7 8 9 10\n"},
+        {"Ctrl+Z：文本模式读到它就当文件结束", header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) +
+                                                   "1 2 3\n\x1a"
+                                                   "4 5 6\n7 8 9\n"},
+        {"POINTS 0", header("x y z", "4 4 4", "F F F", "1 1 1", 0, 1, 0)},
+        {"有序云", header("x y", "4 4", "F F", "1 1", 2, 2, 4) + "1 2\n3 4\n5 6\n7 8\n"},
+        {"单字段的全空白行：保留占位，后续临界值独立舍入",
+         header("x", "4", "F", "1", 3, 1, 3) + "   \n" + tie + "\n3\n"},
+    };
+    for (const Case& c : cases) {
+      CAPTURE(c.name);
+      const std::filesystem::path file = dir.file("case.pcd");
+      writeBytes(file, c.text);
+      requireSameRead(file);
+    }
   }
 
   SUBCASE("超过一块（8 MB）的文件：块边界上的半行接得上") {

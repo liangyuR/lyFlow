@@ -219,8 +219,8 @@ LyFlow 1.3.11 / std-pointcloud 0.4.0 源码增加以下三节点，参考模式�
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cloud.box_sample`        | 中心Pose3D盒体的surface/volume、pose/local坐标、可见面、确定性种子、带端点线框、RGB/法线和独立分组；volume必须关闭normals及visibleOnly。不生成Mesh，不支持源未实现的front锚定。 |
 | `cloud.query_primitives` | 有限 box/cylinder/sphere 或局部采样模型查询，支持显式尺寸、外扩、中心/顶部锚点和开闭边界。输出原云分组索引、并集及无效观测。 |
-| `segment.extract_indices` | 复用查询索引，输出紧凑的内外点云。 |
-| `cloud.remove_indices` | 对原云应用索引，支持紧凑输出或保留点序并将移除点的 XYZ 置为 NaN。 |
+| `segment.extract_indices` | 复用查询索引，输出紧凑的内外点云。紧凑删点使用 `rest`。 |
+| `cloud.remove_indices` | 对原云应用索引，保留点序和通道，将移除点的 XYZ 置为 NaN。 |
 | `cloud.classify_primitive_hits` | 复用查询提供的逐体支持及无效观测，独立应用命中点数阈值。 |
 
 采样使用米制全尺寸及xyzw旋转，float32交付检查八角点互异及逐点量化误差，不能将远处小盒体塌成点仍成功。local结果逐组保留sourcePose，不是统一世界坐标。模型半径移除对实际float32查询做距离复核；全部选择保留已有intensity/normals/RGB，groups/groupIndices绑定原云，不能误接新提取云。

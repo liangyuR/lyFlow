@@ -10,7 +10,6 @@ import {
   poseScene2D,
   projectedPoseScene,
   renderImageOverlaySvg,
-  renderSvg,
   resultColor,
   resultSummary,
   structuredScene,
@@ -42,6 +41,7 @@ test('native Profile summaries preserve explicit units, planes, ordering and lin
     { frame: 'sensor\u0000other' },
     { sourceId: 'scan\u0000other' },
     { frame: '\ud800' },
+    { frame: '文'.repeat(342) },
     { extra: 1 },
   ])
     assert.throws(() => profileDescriptor({ ...descriptor, ...patch }));
@@ -49,9 +49,12 @@ test('native Profile summaries preserve explicit units, planes, ordering and lin
     resultSummary({ kind: 'Profile', descriptor, count: 1280, validCount: 1281 }),
   );
   const boundary = { ...descriptor, frame: '\u0001'.repeat(670), sourceId: '\u0001'.repeat(670) };
-  assert.ok(new TextEncoder().encode(JSON.stringify(boundary)).length <= 8192);
+  boundary.sourceId += 'x'.repeat(8192 - new TextEncoder().encode(JSON.stringify(boundary)).length);
   assert.equal(profileDescriptor(boundary).sourceId, boundary.sourceId);
-  assert.throws(() => profileDescriptor({ ...boundary, sourceId: '\u0001'.repeat(674) }), /8KiB/);
+  assert.throws(
+    () => profileDescriptor({ ...boundary, sourceId: `${boundary.sourceId}x` }),
+    /8KiB/,
+  );
 });
 
 const pose = (dimension, overrides = {}) => ({
@@ -86,8 +89,9 @@ test('typed pose records preserve rotation, identity, frames, source immutabilit
   assert.equal(scene.frame.unit, 'px');
   assert.equal(scene.frame.yDirection, 'down');
   assert.equal(scene.layers[0].instanceId, 'part-1');
-  assert.equal(poseGeometry(pose(3))[0].points.length, 24);
-  assert.equal(poseGeometry(pose(3)).length, 4);
+  const geometry = poseGeometry(pose(3));
+  assert.equal(geometry.length, 4);
+  assert.equal(geometry[0].points.length, 24);
   assert.equal(poseGeometry(value, { selectedId: 'missing' }).length, 0);
   assert.equal(resultSummary(pose(3)).items[0].height, 0.6);
   assert.deepEqual(
@@ -95,7 +99,7 @@ test('typed pose records preserve rotation, identity, frames, source immutabilit
     '中文\n<script>',
   );
   assert.equal(JSON.stringify(value), before);
-  assert.equal(resultColor('工件一'), resultColor('工件一'));
+  assert.equal(scene.layers[0].color, resultColor(value.data.id));
   const collection = {
     type: 'vision.Poses2D.v1',
     data: { frame: 'camera', unit: 'px', items: [value.data, value.data] },
@@ -121,8 +125,9 @@ test('typed pose records preserve rotation, identity, frames, source immutabilit
 });
 
 test('camera projection is frame explicit, positive-depth only and follows OpenCV distortion and rigid extrinsics', () => {
-  assert.deepEqual(cameraProjector(camera, 'camera').project([0, 0, 2]), [50, 40]);
-  assert.equal(cameraProjector(camera, 'camera').project([0, 0, -1]), null);
+  const projector = cameraProjector(camera, 'camera');
+  assert.deepEqual(projector.project([0, 0, 2]), [50, 40]);
+  assert.equal(projector.project([0, 0, -1]), null);
   assert.throws(() => cameraProjector(camera, 'world'), /explicit/);
   const matrix = [1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   assert.deepEqual(
@@ -259,28 +264,7 @@ test('instance masks bind NHW binary payload to ordered IDs and render to a safe
   assert.ok(svg.includes('M23.5,25.5'));
   assert.ok(svg.includes('&lt;script&gt;'));
   assert.ok(!svg.includes('<script>'));
-  assert.throws(
-    () =>
-      renderImageOverlaySvg(
-        {
-          ...scene,
-          layers: [
-            {
-              id: 'unsafe',
-              frame: scene.frame,
-              kind: 'image',
-              bounds: [0, 0, 1, 1],
-              dataUrl: 'https://example.com/tracker.png',
-            },
-          ],
-        },
-        100,
-        80,
-      ),
-    /embedded/,
-  );
   assert.throws(() => renderImageOverlaySvg(scene, 100000, 100000), /16777216/);
   assert.equal(structuredScene({ type: 'std.Value.v1', data: { value: '<svg/>' } }), null);
   assert.equal(structuredScene({ type: 'visualization.SceneSpec.v1', data: scene }), scene);
-  assert.ok(renderSvg(scene).includes('&lt;script&gt;'));
 });

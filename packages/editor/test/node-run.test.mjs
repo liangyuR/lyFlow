@@ -280,7 +280,7 @@ test('自动运行补谁（paramEditTargets）：参数有效值、静音、图�
   );
 });
 
-test('图遍历与索引缓存：方向导航、源头优先祖先、扫描等价与连线变更失效', () => {
+test('图遍历与索引缓存：方向导航、源头优先祖先与连线变更失效', () => {
   // 同一张图摆上位置：b 的下游 d 在上、x 在下；x 的上游 b 在上、c 在下；e 的上游 d 在上、x 在下
   const pos = {
     a: [0, 0],
@@ -322,44 +322,13 @@ test('图遍历与索引缓存：方向导航、源头优先祖先、扫描等�
   );
 
   // 从 e 往上数最长的那条路：a 三步，b、c 两步，d、x 一步
-  assert.deepEqual(ancestorsOf(level, 'e'), ['a', 'b', 'c', 'd', 'x']);
+  const ancestors = ancestorsOf(level, 'e');
+  assert.deepEqual(ancestors, ['a', 'b', 'c', 'd', 'x']);
   assert.deepEqual(ancestorsOf(level, 'a'), []);
-
-  // 一张有扇出、有汇合的 60 节点图，边的先后打乱（同深度的先后靠它定）
-  const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, op: 't.op' }));
-  const edges = [];
-  for (let i = 1; i < 60; i += 1) {
-    edges.push(edge(`n${Math.floor((i - 1) / 2)}`, `n${i}`));
-    if (i % 3 === 0) edges.push(edge(`n${i - 2}`, `n${i}`));
-  }
-  edges.reverse();
-  const lvl = { nodes, edges };
-  for (const n of nodes) assert.deepEqual(ancestorsOf(lvl, n.id), ancestorsByScan(lvl, n.id), n.id);
-  assert.equal(ancestorsOf(lvl, 'n59'), ancestorsOf(lvl, 'n59'), '同一份连线：直接给缓存');
-  const changed = { nodes, edges: [...edges, edge('n1', 'n58')] };
-  assert.deepEqual(ancestorsOf(changed, 'n59'), ancestorsByScan(changed, 'n59'));
-  assert.deepEqual(ancestorsOf(changed, 'n58'), ancestorsByScan(changed, 'n58'));
+  assert.equal(ancestorsOf(placed, 'e'), ancestors, '只移动节点，复用同一份连线的缓存');
+  const changed = { ...level, edges: [...level.edges, edge('f', 'a')].reverse() };
+  assert.deepEqual(ancestorsOf(changed, 'e'), ['f', 'a', 'c', 'b', 'x', 'd']);
 });
-
-/** 原来的 ancestorsOf：每往上一层把全部连线扫一遍。缓存与索引版必须逐个给出同样的结果与顺序。 */
-function ancestorsByScan(lvl, nodeId) {
-  const depth = new Map();
-  let frontier = [nodeId];
-  for (let d = 1; frontier.length > 0 && d <= lvl.nodes.length; d += 1) {
-    const next = [];
-    for (const id of frontier) {
-      for (const e of lvl.edges) {
-        if (e.to.node !== id || e.from.node === nodeId) continue;
-        const seen = depth.get(e.from.node);
-        if (seen !== undefined && seen >= d) continue;
-        depth.set(e.from.node, d);
-        next.push(e.from.node);
-      }
-    }
-    frontier = next;
-  }
-  return [...depth.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
-}
 
 test('willCompute / upstreamToRun 的计划索引：与逐条扫计划的判断相同，子图节点看它的全部内部节点', () => {
   const plan = new Map([

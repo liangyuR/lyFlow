@@ -64,7 +64,7 @@ inline OperatorDesc descriptor(const char* id, const char* label, const char* ke
   op.id = id;
   op.version = "1.0.0";
   op.label = label;
-  op.category = "几何/工件位姿";
+  op.category = "点云/裁剪与分类";
   op.keywords = {keywords, label, "pose", "工件", "位姿", "坐标系"};
   op.capabilities = {true, false, true};
   return op;
@@ -454,7 +454,7 @@ Status classify(const Inputs& in, const ParamView& p, Outputs& out, ExecContext&
   return Status::Ok();
 }
 
-Status removeIndices(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+Status removeIndices(const Inputs& in, const ParamView&, Outputs& out, ExecContext& ctx) {
   const auto& cloud = *in.get("cloud").asCloud();
   const auto& indices = *in.get("indices").asIndices();
   if (indices.sourceCloudId != cloud.id)
@@ -462,21 +462,17 @@ Status removeIndices(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
   for (const auto i : indices.values)
     if (i < 0 || static_cast<std::size_t>(i) >= cloud.pointCount())
       return g::bad("移除索引越界", "indices");
-  if (p.choice("outputMode") == "compact")
-    out.set("cloud", Data::cloud(cloud.selectInverse(indices.values)));
-  else {
-    PointCloud result = cloud;
-    result.id = PointCloud{}.id;
-    const auto nan = std::numeric_limits<float>::quiet_NaN();
-    Ticker ticker(ctx, indices.values.size());
-    for (std::size_t k = 0; k < indices.values.size(); ++k) {
-      if (ticker.tick(k))
-        return g::cancelled();
-      const auto offset = 3 * static_cast<std::size_t>(indices.values[k]);
-      std::fill_n(result.xyz.begin() + offset, 3, nan);
-    }
-    out.set("cloud", Data::cloud(std::move(result)));
+  PointCloud result = cloud;
+  result.id = PointCloud{}.id;
+  const auto nan = std::numeric_limits<float>::quiet_NaN();
+  Ticker ticker(ctx, indices.values.size());
+  for (std::size_t k = 0; k < indices.values.size(); ++k) {
+    if (ticker.tick(k))
+      return g::cancelled();
+    const auto offset = 3 * static_cast<std::size_t>(indices.values[k]);
+    std::fill_n(result.xyz.begin() + offset, 3, nan);
   }
+  out.set("cloud", Data::cloud(std::move(result)));
   return Status::Ok();
 }
 
@@ -587,12 +583,18 @@ void registerP5PrimitiveCrop(Registry& r) {
   op.compute = g::atomic(classify);
   r.addOperator(std::move(op));
 
-  op = g::descriptor("cloud.remove_indices", "按原云索引移除点",
-                     "remove point cloud indices compact preserve order");
-  op.doc = "紧凑输出保留点，或保留源点序并将移除点的 XYZ 置为 NaN。保留已有通道。";
+  constexpr const char* preserveOnlyVersion = "1.1.0";
+  op = g::descriptor("cloud.remove_indices", "按索引保序移除点",
+                     "remove point cloud indices preserve order NaN");
+  op.version = preserveOnlyVersion;
+  op.doc = "保留源点序和已有通道，将移除点的 XYZ 置为 NaN。紧凑删点使用点云索引提取的 rest 输出。";
   op.inputs = {g::port("cloud", "PointCloud"), g::port("indices", "Indices")};
   op.outputs = {g::port("cloud", "PointCloud")};
-  op.params = {g::choice("outputMode", "输出点序", "compact", {"compact", "preserve_order"})};
+  op.params = {g::choice("outputMode", "输出点序", "preserve_order", {"preserve_order"})};
+  op.removedParamValues = {
+      {"outputMode", "compact",
+       "请手动改用 segment.extract_indices，保留 cloud 和 indices 输入，将原 cloud 输出的连线和图输出改接 rest，并移除 outputMode 参数或绑定。",
+       preserveOnlyVersion}};
   op.compute = g::atomic(removeIndices);
   r.addOperator(std::move(op));
 

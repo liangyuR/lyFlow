@@ -1064,6 +1064,7 @@ void registerP5PoseProjection(Registry& r) {
   r.addOperator(std::move(op));
   op = g::descriptor("cloud.remove_mask_primitives", "按三维工件关联像素掩膜移除云",
                      "mask primitive cloud remove top expand");
+  op.category = "点云/裁剪与分类";
   op.inputs = {g::port("cloud", "PointCloud"),
                g::record("poses"),
                g::record("detections"),

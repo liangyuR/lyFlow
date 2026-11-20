@@ -1,5 +1,6 @@
 #include "helpers.h"
 #include "lyflow/pose.h"
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -111,14 +112,13 @@ TEST_CASE(
   c.inputs = {{"template", templ}, {"poses", p5Poses(moved, "source")}};
   REQUIRE(c.run("pose.rigid_check").ok);
   CHECK(p5Record(c, "result")["accepted"] == true);
-  CHECK(c.outputs.count("transform") == 0);
-  REQUIRE(c.run("pose.rigid_check", {{"mode", Value::text("registration")}}).ok);
-  CHECK(p5Record(c, "result")["accepted"] == true);
-  CHECK(p5Record(c, "result")["observable"] == true);
-  CHECK(c.outputs.count("transform") == 0);
-  CHECK(p5Record(c, "result")["transformAvailable"] == true);
+  CHECK(p5Record(c, "result")["residualCount"] == 6);
+  CHECK(p5Record(c, "result")["maximumError"].get<double>() < 1e-12);
   REQUIRE(c.run("pose.rigid_register").ok);
   const auto* t = c.outputs.at("transform").asTransform();
+  REQUIRE(t);
+  CHECK(c.outputs.at("result").asRecord()->type == "geometry.RigidCheck3D.v1");
+  CHECK(p5Record(c, "result")["accepted"] == true);
   CHECK(p5Record(c, "result")["transform"] == Json(t->m));
   CHECK(t->m[1] == doctest::Approx(1));
   CHECK(t->m[4] == doctest::Approx(-1));
@@ -129,17 +129,17 @@ TEST_CASE(
   c.inputs["poses"] = p5Poses(moved, "source");
   REQUIRE(c.run("pose.rigid_check").ok);
   CHECK(p5Record(c, "result")["accepted"] == false);
-  REQUIRE(c.run("pose.rigid_check", {{"mode", Value::text("registration")}}).ok);
-  CHECK(p5Record(c, "result")["accepted"] == false);
+  CHECK_FALSE(c.run("pose.rigid_check", {{"alarm", Value::boolean(true)}}).ok);
+  CHECK(c.outputs.empty());
   REQUIRE(c.run("pose.rigid_register").ok);
   CHECK(p5Record(c, "result")["accepted"] == false);
   CHECK(p5Record(c, "result")["transformAvailable"] == true);
   CHECK(c.outputs.at("transform").asTransform() != nullptr);
-  CHECK_FALSE(c.run("pose.rigid_check", {{"alarm", Value::boolean(true)}}).ok);
+  CHECK_FALSE(c.run("pose.rigid_register", {{"alarm", Value::boolean(true)}}).ok);
   CHECK(c.outputs.empty());
 }
 TEST_CASE(
-    "P5 rigid registration rejects reflection and unobservable supports without fabricated transform") {
+    "P5 rigid registration rejects reflection and collinearity while distance checks support collinear points") {
   using namespace lyflow;
   test::OpCall c;
   c.inputs = {{"poses", p5Poses({{0, 0, 0}, {1, 0, 0}, {0, 2, 0}, {0, 0, 3}})}};
@@ -147,19 +147,21 @@ TEST_CASE(
   auto templ = c.outputs.at("template");
   c.inputs = {{"template", templ},
               {"poses", p5Poses({{0, 0, 0}, {-1, 0, 0}, {0, 2, 0}, {0, 0, 3}})}};
-  REQUIRE(c.run("pose.rigid_check", {{"mode", Value::text("registration")}}).ok);
+  REQUIRE(c.run("pose.rigid_register").ok);
   CHECK(p5Record(c, "result")["accepted"] == false);
   c.inputs = {{"poses", p5Poses({{0, 0, 0}, {1, 0, 0}, {2, 0, 0}})}};
   REQUIRE(c.run("pose.rigid_template").ok);
   templ = c.outputs.at("template");
   c.inputs["template"] = templ;
-  REQUIRE(c.run("pose.rigid_check", {{"mode", Value::text("registration")}}).ok);
-  CHECK(p5Record(c, "result")["observable"] == false);
-  CHECK(p5Record(c, "result")["maximumError"].is_null());
-  CHECK(p5Record(c, "result")["residualCount"] == 0);
+  REQUIRE(c.run("pose.rigid_check").ok);
+  const auto* result = c.outputs.at("result").asRecord();
+  REQUIRE(result);
+  CHECK(result->type == "geometry.RigidCheck3D.v2");
+  CHECK(result->data.at("accepted") == true);
+  CHECK(p5Record(c, "accepted").at("value") == true);
+  for (const char* removed : {"mode", "observable", "transformAvailable", "transform"})
+    CHECK_FALSE(result->data.contains(removed));
   CHECK(c.outputs.count("transform") == 0);
-  CHECK(p5Record(c, "result")["transformAvailable"] == false);
-  CHECK(p5Record(c, "result")["transform"].is_null());
   CHECK(c.run("pose.rigid_register").code == "unobservable");
   CHECK(c.outputs.empty());
 }
@@ -307,50 +309,39 @@ TEST_CASE("P5 pose self comparison retains tight axis tolerances without acos am
         doctest::Approx(1e-8).epsilon(1e-6));
 }
 
-TEST_CASE(
-    "P5 scheduler rigid checks preserve distances and explicitly reject unavailable transforms") {
+TEST_CASE("P5 retired rigid-check mode reports manual repair and blocks the graph") {
   using namespace lyflow;
-  const auto points = p5Poses({{0, 0, 0}, {1, 0, 0}, {2, 0, 0}});
-  test::OpCall creator;
-  creator.inputs = {{"poses", points}};
-  REQUIRE(creator.run("pose.rigid_template").ok);
-  const auto templ = creator.outputs.at("template");
-  for (const char* mode : {"distances", "registration"}) {
-    CAPTURE(mode);
-    auto graph = test::makeGraph({{"check", "pose.rigid_check", {{"mode", mode}}}}, {});
-    test::Session session(graph, {}, {}, false, 1, true,
-                          {{"check", "poses", points}, {"check", "template", templ}});
-    const auto& log = session.wait();
-    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-    Data result, accepted, missing;
-    auto& store = exec::ResultStore::instance();
-    REQUIRE(store.get(log.runId, "check", "result", result));
-    REQUIRE(store.get(log.runId, "check", "accepted", accepted));
-    const auto& data = result.asRecord()->data;
-    CHECK(data.at("transformAvailable") == false);
-    CHECK(data.at("transform").is_null());
-    CHECK_FALSE(store.get(log.runId, "check", "transform", missing));
-    if (std::string(mode) == "distances") {
-      CHECK(data.at("accepted") == true);
-      CHECK(data.at("maximumError") == 0);
-    } else {
-      CHECK(data.at("accepted") == false);
-      CHECK(data.at("observable") == false);
-      CHECK(data.at("maximumError").is_null());
-    }
+  const auto graph = test::makeGraph({{"check", "pose.rigid_check", {{"mode", "registration"}}},
+                                      {"independent", "pose.construct_3d"}},
+                                     {});
+  auto bound = graph;
+  bound["nodes"][0]["params"].erase("mode");
+  bound["params"] = {{"checkMode", {{"default", "distances"}, {"binds", {"check.mode"}}}}};
+  for (const bool isBound : {false, true}) {
+    const char* code = isBound ? "unknown_bind" : "unknown_param";
+    CAPTURE(code);
+    const Json diags = Json::parse(exec::validateGraphJson((isBound ? bound : graph).dump(), {}));
+    const auto diag = std::find_if(diags.begin(), diags.end(), [code](const Json& d) {
+      return d.at("nodeId") == "check" && d.at("code") == code;
+    });
+    REQUIRE_MESSAGE(diag != diags.end(), diags.dump());
+    CHECK(diag->at("kind") == "diagnostic");
+    CHECK(diag->at("phase") == "validate");
+    CHECK(diag->at("severity") == "error");
+    CHECK(diag->at("paramPath") == "mode");
+    const auto message = diag->at("message").get<std::string>();
+    for (const char* hint : {"pose.rigid_register", "手动", "不可观测", "删除"})
+      CHECK_MESSAGE(message.find(hint) != std::string::npos, message);
   }
-  auto graph = test::makeGraph({{"fit", "pose.rigid_register"}}, {});
-  test::Session session(graph, {}, {}, false, 1, true,
-                        {{"fit", "poses", points}, {"fit", "template", templ}});
+  test::Session session(graph);
   const auto& log = session.wait();
   CHECK(log.runStatus() == "error");
+  const auto event = log.nodeEvent("check", "error");
+  REQUIRE_MESSAGE(event.contains("error"), Json(log.events).dump());
+  CHECK(event.at("error").at("code") == "unknown_param");
   Data result;
-  CHECK_FALSE(exec::ResultStore::instance().get(log.runId, "fit", "transform", result));
-  bool unobservable = false;
-  for (const auto& event : log.events)
-    if (event.contains("error"))
-      unobservable = unobservable || event.at("error").value("code", "") == "unobservable";
-  CHECK(unobservable);
+  CHECK_FALSE(exec::ResultStore::instance().get(log.runId, "check", "result", result));
+  CHECK_FALSE(exec::ResultStore::instance().get(log.runId, "independent", "pose", result));
 }
 
 TEST_CASE("P5 scheduler all five lifting inputs publish explicit poses and geometry collections") {
@@ -371,50 +362,45 @@ TEST_CASE("P5 scheduler all five lifting inputs publish explicit poses and geome
   REQUIRE(registered);
   Line2D line;
   line.dir[0] = 1;
-  const std::vector<std::pair<std::string, Data>> inputs{
-      {"point", Data::point2d(Point2D{{1, 2}, Unit2D::Meter})},
-      {"line", Data::line2d(line)},
-      {"circle", Data::circle2d(Circle2D{{1, 2}, 3, Unit2D::Meter})},
-      {"poses", Data::record(poses::make2D("pose", "image", "m", {1, 2}, 0, {1, 1}))},
-      {"features",
+  const auto graph = test::makeGraph(
+      {{"point", "geometry.extend_2d"},
+       {"line", "geometry.extend_2d"},
+       {"circle", "geometry.extend_2d"},
+       {"poseSource",
+        "pose.construct_2d",
+        {{"id", "pose"},
+         {"frame", "image"},
+         {"unit", "m"},
+         {"position", {1, 2}},
+         {"size", {1, 1}}}},
+       {"poses", "geometry.extend_2d"},
+       {"featureSource", "test.p5_geometry_record_source"},
+       {"features", "geometry.extend_2d"}},
+      {{"poseSource.pose", "poses.poses"}, {"featureSource.record", "features.features"}});
+  const std::vector<exec::InjectedInput> injected{
+      {"point", "point", Data::point2d(Point2D{{1, 2}, Unit2D::Meter})},
+      {"line", "line", Data::line2d(line)},
+      {"circle", "circle", Data::circle2d(Circle2D{{1, 2}, 3, Unit2D::Meter})},
+      {"featureSource", "record",
        Data::record(
            {"geometry.Features2D.v1",
             {{"frame", "image"},
              {"unit", "m"},
              {"items",
               Json::array({{{"id", "feature"}, {"type", "point"}, {"position", {1, 2}}}})}}})}};
-  for (const auto& input : inputs) {
-    CAPTURE(input.first);
-    auto graph = test::makeGraph({{"lift", "geometry.extend_2d"}}, {});
-    std::vector<exec::InjectedInput> injected{{"lift", input.first, input.second}};
-    if (input.first == "poses") {
-      graph = test::makeGraph({{"source",
-                                "pose.construct_2d",
-                                {{"id", "pose"},
-                                 {"frame", "image"},
-                                 {"unit", "m"},
-                                 {"position", {1, 2}},
-                                 {"size", {1, 1}}}},
-                               {"lift", "geometry.extend_2d"}},
-                              {{"source.pose", "lift.poses"}});
-      injected.clear();
-    } else if (input.first == "features") {
-      graph = test::makeGraph(
-          {{"source", "test.p5_geometry_record_source"}, {"lift", "geometry.extend_2d"}},
-          {{"source.record", "lift.features"}});
-      injected = {{"source", "record", input.second}};
-    }
-    test::Session session(graph, {}, {}, false, 1, true, std::move(injected));
-    const auto& log = session.wait();
-    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+  test::Session session(graph, {}, {}, false, 1, true, injected);
+  const auto& log = session.wait();
+  REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+  auto& store = exec::ResultStore::instance();
+  for (const std::string id : {"point", "line", "circle", "poses", "features"}) {
+    CAPTURE(id);
     Data posesResult, features;
-    auto& store = exec::ResultStore::instance();
-    REQUIRE(store.get(log.runId, "lift", "poses", posesResult));
-    REQUIRE(store.get(log.runId, "lift", "features", features));
+    REQUIRE(store.get(log.runId, id, "poses", posesResult));
+    REQUIRE(store.get(log.runId, id, "features", features));
     std::string why;
     REQUIRE_MESSAGE(poses::validate(*posesResult.asRecord(), why), why);
     CHECK(features.asRecord()->type == "geometry.Features3D.v1");
-    CHECK(posesResult.asRecord()->data.at("items").size() == (input.first == "poses" ? 1 : 0));
-    CHECK(features.asRecord()->data.at("items").size() == (input.first == "poses" ? 0 : 1));
+    CHECK(posesResult.asRecord()->data.at("items").size() == (id == "poses" ? 1 : 0));
+    CHECK(features.asRecord()->data.at("items").size() == (id == "poses" ? 0 : 1));
   }
 }

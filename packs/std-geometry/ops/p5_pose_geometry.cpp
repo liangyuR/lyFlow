@@ -311,8 +311,17 @@ Status makeTemplate(const Inputs& in, const ParamView& p, Outputs& out, ExecCont
                                      {"items", items}}}));
   return Status::Ok();
 }
-Status rigidEvaluate(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx,
-                     const std::string& mode, bool requireTransform) {
+constexpr const char* kRigidDistanceResult = "geometry.RigidCheck3D.v2";
+
+struct RigidPoints {
+  std::string sourceFrame, targetFrame;
+  double pairTolerance = 0;
+  std::vector<V3> source, target;
+  std::vector<double> tolerances;
+  std::vector<std::string> ids;
+};
+
+Status matchRigidPoints(const Inputs& in, RigidPoints& points) {
   Record observed;
   auto s = list(in, "poses", observed);
   if (!s.ok)
@@ -330,13 +339,13 @@ Status rigidEvaluate(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     return bad("刚体模板结构、单位或容差非法", "template");
   if (d["items"].size() != observed.data["items"].size())
     return bad("模板和观测定位点数量不匹配");
-  std::map<std::string, Json> obs;
+  points.sourceFrame = observed.data["frame"].get<std::string>();
+  points.targetFrame = d["frame"].get<std::string>();
+  points.pairTolerance = d["pairTolerance"].get<double>();
+  std::map<std::string, const Json*> obs;
   for (const auto& item : observed.data["items"])
-    obs.emplace(item["id"].get<std::string>(), item);
+    obs.emplace(item["id"].get<std::string>(), &item);
   std::set<std::string> used;
-  std::vector<V3> a, b;
-  std::vector<double> tolerances;
-  Json ids = Json::array();
   for (const auto& item : d["items"]) {
     if (!item.is_object() || item.size() != 3 || !item.contains("id") || !item["id"].is_string() ||
         !item.contains("position") || !poses::numericArray(item["position"], 3) ||
@@ -345,7 +354,7 @@ Status rigidEvaluate(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     auto id = item["id"].get<std::string>();
     if (id.empty() || !used.insert(id).second || !obs.count(id))
       return bad("模板ID重复、为空或缺少观测", "template");
-    auto source = jvector(obs[id]["position"]), target = jvector(item["position"]);
+    auto source = jvector((*obs.at(id))["position"]), target = jvector(item["position"]);
     double tol = item["tolerance"].get<double>();
     if (!validNumber(tol) || tol < 0)
       return bad("模板点容差非法", "template");
@@ -355,100 +364,127 @@ Status rigidEvaluate(const Inputs& in, const ParamView& p, Outputs& out, ExecCon
     for (double x : target)
       if (!validNumber(x))
         return bad("模板坐标超出预算");
-    a.push_back(source);
-    b.push_back(target);
-    tolerances.push_back(tol);
-    ids.push_back(id);
+    points.source.push_back(source);
+    points.target.push_back(target);
+    points.tolerances.push_back(tol);
+    points.ids.push_back(std::move(id));
   }
+  return Status::Ok();
+}
+
+Status rigidCheck(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
+  RigidPoints points;
+  auto status = matchRigidPoints(in, points);
+  if (!status.ok)
+    return status;
+
   Json residuals = Json::array();
-  bool accepted = true, observable = true;
-  Transform native;
-  poses::Quaternion q{0, 0, 0, 1};
-  V3 t{};
+  bool accepted = true;
   double maximum = 0;
-  if (mode == "distances") {
-    for (std::size_t i = 0; i < a.size(); ++i) {
-      if (ctx.cancelled())
-        return cancelled();
-      for (std::size_t j = i + 1; j < a.size(); ++j) {
-        auto x = sub(a[i], a[j]), y = sub(b[i], b[j]);
-        double measured = std::hypot(x[0], x[1], x[2]), expected = std::hypot(y[0], y[1], y[2]),
-               error = std::abs(measured - expected);
-        maximum = std::max(maximum, error);
-        accepted = accepted && error <= d["pairTolerance"].get<double>();
-        if (residuals.size() < 512)
-          residuals.push_back({{"a", ids[i]},
-                               {"b", ids[j]},
-                               {"measured", measured},
-                               {"expected", expected},
-                               {"error", error}});
-      }
+  constexpr std::size_t maxReportedResiduals = 512;
+  const auto count = points.source.size();
+  const auto pairCount = count * (count - 1) / 2;
+  for (std::size_t i = 0; i < count; ++i) {
+    if (ctx.cancelled())
+      return cancelled();
+    for (std::size_t j = i + 1; j < count; ++j) {
+      const auto observed = sub(points.source[i], points.source[j]);
+      const auto reference = sub(points.target[i], points.target[j]);
+      const double measured = std::hypot(observed[0], observed[1], observed[2]);
+      const double expected = std::hypot(reference[0], reference[1], reference[2]);
+      const double error = std::abs(measured - expected);
+      maximum = std::max(maximum, error);
+      accepted = accepted && error <= points.pairTolerance;
+      if (residuals.size() < maxReportedResiduals)
+        residuals.push_back({{"a", points.ids[i]},
+                             {"b", points.ids[j]},
+                             {"measured", measured},
+                             {"expected", expected},
+                             {"error", error}});
     }
-  } else if (mode == "registration") {
-    observable = fit(a, b, q, t);
-    accepted = observable;
-    if (observable) {
-      auto r = poses::rotationMatrix(q);
-      for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j)
-          native.m[i * 4 + j] = static_cast<float>(r[i * 3 + j]);
-        if (std::abs(t[i]) > std::numeric_limits<float>::max())
-          return bad("配准平移无法交付float32");
-        native.m[i * 4 + 3] = static_cast<float>(t[i]);
-      }
-      M4 m;
-      poses::Quaternion nq;
-      if (!rigid(&native, m, nq, why))
-        return bad("原生float32配准非刚体");
-      for (std::size_t i = 0; i < a.size(); ++i) {
-        auto delta = sub(pose_detail::apply(m, a[i]), b[i]);
-        double error = std::hypot(delta[0], delta[1], delta[2]);
-        maximum = std::max(maximum, error);
-        accepted = accepted && error <= tolerances[i];
-        residuals.push_back({{"id", ids[i]}, {"error", error}, {"tolerance", tolerances[i]}});
-      }
-    }
-  } else
-    return badParam("未知刚体检查模式", "mode");
-  if (requireTransform && !observable)
-    return Status::Error(Phase::Execute, "unobservable", "刚体定位点退化，不能交付有效变换");
+  }
   if (!accepted && p.flag("alarm"))
-    return Status::Error(Phase::Execute, "rigid_check_failed",
-                         observable ? "刚体残差超容差" : "刚体定位点退化不可观");
-  Record result{
-      "geometry.RigidCheck3D.v1",
-      {{"sourceFrame", observed.data["frame"]},
-       {"targetFrame", d["frame"]},
-       {"unit", "m"},
-       {"mode", mode},
-       {"accepted", accepted},
-       {"observable", observable},
-       {"transformAvailable", mode == "registration" && observable},
-       {"transform", mode == "registration" && observable ? Json(native.m) : Json(nullptr)},
-       {"maximumError", observable ? Json(maximum) : Json(nullptr)},
-       {"status",
-        observable ? (accepted ? "within_tolerance" : "out_of_tolerance") : "unobservable"},
-       {"residuals", residuals},
-       {"residualCount", mode == "distances" ? a.size() * (a.size() - 1) / 2
-                         : observable        ? a.size()
-                                             : 0},
-       {"residualsTruncated", mode == "distances" && a.size() * (a.size() - 1) / 2 > 512}}};
+    return Status::Error(Phase::Execute, "rigid_check_failed", "定位点间距差超公差");
+  Record result{kRigidDistanceResult,
+                {{"sourceFrame", points.sourceFrame},
+                 {"targetFrame", points.targetFrame},
+                 {"unit", "m"},
+                 {"accepted", accepted},
+                 {"maximumError", maximum},
+                 {"status", accepted ? "within_tolerance" : "out_of_tolerance"},
+                 {"residuals", std::move(residuals)},
+                 {"residualCount", pairCount},
+                 {"residualsTruncated", pairCount > maxReportedResiduals}}};
   if (!bounded(result))
     return resource();
   if (ctx.cancelled())
     return cancelled();
   out.set("result", Data::record(std::move(result)));
   out.set("accepted", Data::record(values::boolean(accepted)));
-  if (requireTransform)
-    out.set("transform", Data::transform(native));
   return Status::Ok();
 }
 
-Status rigidCheck(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
-  return rigidEvaluate(in, p, out, ctx, p.choice("mode"), false);
-}
 Status rigidRegister(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
-  return rigidEvaluate(in, p, out, ctx, "registration", true);
+  RigidPoints points;
+  auto status = matchRigidPoints(in, points);
+  if (!status.ok)
+    return status;
+
+  poses::Quaternion rotation{0, 0, 0, 1};
+  V3 translation{};
+  if (!fit(points.source, points.target, rotation, translation))
+    return Status::Error(Phase::Execute, "unobservable", "刚体定位点退化，不能交付有效变换");
+
+  Transform native;
+  const auto r = poses::rotationMatrix(rotation);
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j)
+      native.m[i * 4 + j] = static_cast<float>(r[i * 3 + j]);
+    if (std::abs(translation[i]) > std::numeric_limits<float>::max())
+      return bad("配准平移无法交付float32");
+    native.m[i * 4 + 3] = static_cast<float>(translation[i]);
+  }
+  M4 matrix;
+  poses::Quaternion nativeRotation;
+  std::string why;
+  if (!rigid(&native, matrix, nativeRotation, why))
+    return bad("原生float32配准非刚体");
+
+  Json residuals = Json::array();
+  bool accepted = true;
+  double maximum = 0;
+  for (std::size_t i = 0; i < points.source.size(); ++i) {
+    const auto delta = sub(pose_detail::apply(matrix, points.source[i]), points.target[i]);
+    const double error = std::hypot(delta[0], delta[1], delta[2]);
+    maximum = std::max(maximum, error);
+    accepted = accepted && error <= points.tolerances[i];
+    residuals.push_back(
+        {{"id", points.ids[i]}, {"error", error}, {"tolerance", points.tolerances[i]}});
+  }
+  if (!accepted && p.flag("alarm"))
+    return Status::Error(Phase::Execute, "rigid_check_failed", "刚体残差超容差");
+  Record result{"geometry.RigidCheck3D.v1",
+                {{"sourceFrame", points.sourceFrame},
+                 {"targetFrame", points.targetFrame},
+                 {"unit", "m"},
+                 {"mode", "registration"},
+                 {"accepted", accepted},
+                 {"observable", true},
+                 {"transformAvailable", true},
+                 {"transform", native.m},
+                 {"maximumError", maximum},
+                 {"status", accepted ? "within_tolerance" : "out_of_tolerance"},
+                 {"residuals", std::move(residuals)},
+                 {"residualCount", points.source.size()},
+                 {"residualsTruncated", false}}};
+  if (!bounded(result))
+    return resource();
+  if (ctx.cancelled())
+    return cancelled();
+  out.set("result", Data::record(std::move(result)));
+  out.set("accepted", Data::record(values::boolean(accepted)));
+  out.set("transform", Data::transform(native));
+  return Status::Ok();
 }
 
 Status extend(const Inputs& in, const ParamView& p, Outputs& out, ExecContext& ctx) {
@@ -700,12 +736,14 @@ void registerP5PoseGeometry(Registry& r) {
   op.params = {number("tolerance", "米制公差", .001, "m")};
   op.compute = atomic(&makeTemplate);
   r.addOperator(std::move(op));
-  op = descriptor("pose.rigid_check", "刚体多点距离与配准残差检查",
-                  "rigid distances registration alarm");
+  op = descriptor("pose.rigid_check", "刚体定位点间距检查", "rigid pairwise distances alarm");
   op.inputs = {record("poses"), record("template")};
-  op.outputs = {record("result"), scalarPort("accepted", true)};
-  op.params = {choice("mode", "检查模式", "distances", {"distances", "registration"}),
-               flag("alarm", "异常返回错误", false)};
+  op.outputs = {withContract(record("result"), {{"recordType", kRigidDistanceResult}}),
+                scalarPort("accepted", true)};
+  op.params = {flag("alarm", "间距超差返回错误", false)};
+  op.removedParamHints = {
+      {"mode", "请手动修改：点对距离检查请删除节点参数或绑定中的 mode。旧 registration 模式请改用 "
+               "pose.rigid_register，并检查定位点不可观测时报错的处理。"}};
   op.compute = atomic(&rigidCheck);
   r.addOperator(std::move(op));
   op = descriptor("pose.rigid_register", "刚体定位点可观测配准",
@@ -717,6 +755,7 @@ void registerP5PoseGeometry(Registry& r) {
   r.addOperator(std::move(op));
   op = descriptor("geometry.extend_2d", "二维几何与工件嵌入三维平面",
                   "2D 3D lift point line circle pose");
+  op.category = "几何/升维";
   op.inputs = {record("poses", false),
                record("features", false),
                port("point", "Point2D", false),

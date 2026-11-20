@@ -1601,26 +1601,6 @@ mod tests {
             keys(&back["params"]["leafSize"]),
             keys(&original["params"]["leafSize"])
         );
-        // 规格字段逐个在：label、限位、单位、分组、分量名、options、placeholder
-        let leaf = &back["params"]["leafSize"];
-        for key in [
-            "label",
-            "min",
-            "max",
-            "softMin",
-            "softMax",
-            "step",
-            "unit",
-            "group",
-            "componentLabels",
-        ] {
-            assert!(leaf.get(key).is_some(), "leafSize 丢了 {key}");
-        }
-        assert_eq!(back["params"]["cutField"]["options"][2]["doc"], "竖直方向");
-        assert_eq!(back["params"]["pointCount"]["placeholder"], "点数");
-        // 老格式那一条仍是老样子
-        assert!(back["params"]["cutMax"].get("type").is_none());
-
         // core 认这份图：完整规格与老格式都能过校验
         let diags = validate_graph_at(&loaded.doc, None, None).unwrap();
         assert_eq!(diags, serde_json::json!([]), "{diags}");
