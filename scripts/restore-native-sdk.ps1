@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$LockFile,
+    [string]$LockFile,
     [Parameter(Mandatory)][string]$Destination,
     [string]$Archive
 )
@@ -9,6 +9,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'runtime-nuget-common.ps1')
 
+if (!$LockFile) {
+    $root = Split-Path -Parent $PSScriptRoot
+    $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).lyflowEngineVersion
+    $LockFile = Join-Path $root "packaging/engine-releases/v$version.json"
+}
 $lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
 if ($lock.schemaVersion -ne 1) { throw 'Unsupported native SDK lock version.' }
 $destinationPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)

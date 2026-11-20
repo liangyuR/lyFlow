@@ -65,7 +65,7 @@ export class Report {
 /** 把 `tauri build` 的产物复刻成一个**干净目录**里的安装结果：exe + 同目录的全部
  * DLL。验的是「DLL 随包 + 从 exe 同目录加载」，不等于干净机器 —— 见 ./README.md。 */
 export function stagePackagedApp() {
-  const release = path.join(ROOT, "bridge", "target", "release");
+  const release = process.env.LYFLOW_E2E_BIN_DIR ?? path.join(ROOT, "bridge", "target", "release");
   // 桌面壳叫 lyflow-app.exe：包名那个 bin 名让给了 CLI（ADR-0012）
   const exe = path.join(release, "lyflow-app.exe");
   if (!fs.existsSync(exe)) {
@@ -90,6 +90,7 @@ export function stagePackagedApp() {
     fs.copyFileSync(path.join(bundled, name), path.join(dir, name));
     dlls += 1;
   }
+  fs.cpSync(path.join(bundled, "python"), path.join(dir, "python"), { recursive: true });
   return { dir, exe: path.join(dir, "lyflow-app.exe"), cli: path.join(dir, "lyflow.exe"), dlls };
 }
 
@@ -144,7 +145,7 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
     child.stdout?.on("data", (c) => verbose || process.stdout.write(c));
     child.stderr?.on("data", (c) => process.stderr.write(c));
   } else if (!attach) {
-    console.log(`启动 tauri dev（CDP 端口 ${CDP_PORT}）…首次运行要编 C++ 与 Rust，请耐心`);
+    console.log(`启动 tauri dev（CDP 端口 ${CDP_PORT}）…首次运行要编 Rust，请耐心`);
     child = spawn("pnpm", ["tauri", "dev"], {
       cwd: ROOT,
       shell: true,

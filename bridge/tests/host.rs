@@ -4,8 +4,7 @@
 //! 它看 `lyflow_lib` 的角度和 dts-check 完全一样 —— `lyflow_handler!` 在这里展开得开，
 //! 在宿主那边就展开得开。
 //!
-//! 需要 `lyflow_core.dll`：debug 构建走 build.rs 写进来的 `LYFLOW_CORE_BIN`
-//! （`core_ffi::dll_path()`），是绝对路径，测试二进制放在哪都找得到。
+//! 测试进程从自身目录加载构建时暂存的 SDK 运行库。
 
 #![cfg(feature = "host")]
 
@@ -237,10 +236,6 @@ fn manifest_and_core_info_over_ipc() {
 /// 端到端：宿主注入一条轮廓 → 图跑完 → 图级命名输出里有 flush，
 /// 且 `profile.input` 使用了注入的原生轮廓。
 #[test]
-#[cfg_attr(
-    not(dts_pack),
-    ignore = "要 dts 包：LYFLOW_PACKS=solution-dts;std-profile;std-metrology;std-geometry"
-)]
 fn run_graph_injects_the_host_profile() {
     let f = fixture();
     let view = webview(&f.app);
@@ -297,10 +292,6 @@ fn run_graph_injects_the_host_profile() {
 
 /// 换一片云，`n_in` 的 cacheKey 必须变 —— 不变的表现是「产线上两台车量出一模一样的值」。
 #[test]
-#[cfg_attr(
-    not(dts_pack),
-    ignore = "要 dts 包：LYFLOW_PACKS=solution-dts;std-profile;std-metrology;std-geometry"
-)]
 fn injected_data_changes_the_cache_key() {
     let f = fixture();
     let view = webview(&f.app);

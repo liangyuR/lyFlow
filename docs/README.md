@@ -32,7 +32,7 @@
 
 ## 算子与业务接入
 
-实际算子由构建选项、库目录和 Python 节点配置共同决定，以当前引擎的 `lyflow manifest` 为准。开发和发布组合不同，发布组合见 [release.json](../packaging/release.json)。
+实际算子由构建选项、库目录和 Python 节点配置共同决定，以当前引擎的 `lyflow manifest` 为准。开发和发布组合不同，发布组合见 [release.json](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json)。
 
 | 领域                                   | 入口                                                                                                                                        |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,7 +45,7 @@
 | 间隙与段差                             | [gap 包](../solutions/gap/README.md) · [原生迁移](gap-profile-migration.md) · [宿主接入](gap-inspector-integration-design.md)               |
 | 原生轮廓选择、稳健拟合及公共度量       | [公共Profile算子](profile-public-operators.md) · [Profile包](../packs/std-profile/README.md) · [度量包](../packs/std-metrology/README.md)   |
 | 车门胶条面差                           | [solution-dts 包](../solutions/dts/README.md)                                                                                               |
-| 开发新算子或外部包                     | [算子包机制](op-packs.md) · [core 开发指南](../core/README.md)                                                                              |
+| 开发新算子或外部包                     | [算子包机制](op-packs.md) · [core 开发指南](https://github.com/liangyuR/lyflow-engine/blob/main/core/README.md)                                                                              |
 | 算子资源与性能约束                     | [缓存、结果读取与推理资源](operator-optimization.md)                                                                                        |
 | 算子包边界重整                         | [目标边界](operator-package-boundaries.md) · [逐算子审计](operator-package-audit.md) · [迁移进度与验收](operator-package-migration-plan.md) |
 
@@ -60,7 +60,7 @@
 - [Windows 发包](deployment/packaging.md)：固定依赖、运行库 / SDK / 编辑器资产、版本和 ABI 门禁。
 - [私有引擎与公共工具链拆仓计划](deployment/runtime-sdk-repo-split-plan.md)
 - [版本变更](CHANGELOG.md)：发布行为与兼容要求。
-- 模块说明：[core](../core/README.md)、[bridge](../bridge/README.md)、[app](../app/README.md)、[MCP](mcp.md)。
+- 模块说明：[core](https://github.com/liangyuR/lyflow-engine/blob/main/core/README.md)、[bridge](../bridge/README.md)、[app](../app/README.md)、[MCP](mcp.md)。
 
 ## 追溯旧资料
 

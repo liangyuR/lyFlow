@@ -2,7 +2,7 @@
 
 [文档中心](README.md) · [六阶段交付](p2-sequential-delivery.md) · [P1配准分析](p1-analysis-cloud.md)
 
-本页记录阶段2的 `BestFit` / `SearchPoseLocally` 逐行分析和独立实现契约。实现入口为 [p2_advanced_fit.cpp](../packs/std-pointcloud/ops/p2_advanced_fit.cpp)，共享执行与质量核对为 [p2_fit.cpp](../packs/std-pointcloud/algo/p2_fit.cpp)，永久回归为 [test_p2_advanced_fit.cpp](../packs/std-pointcloud/tests/test_p2_advanced_fit.cpp)。阶段2包含的其他高度、全局匹配、边缘与可见面采样在相应分析中跟踪；本页不代表整阶段已合并。
+本页记录阶段2的 `BestFit` / `SearchPoseLocally` 逐行分析和独立实现契约。实现入口为 [p2_advanced_fit.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-pointcloud/ops/p2_advanced_fit.cpp)，共享执行与质量核对为 [p2_fit.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-pointcloud/algo/p2_fit.cpp)，永久回归为 [test_p2_advanced_fit.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-pointcloud/tests/test_p2_advanced_fit.cpp)。阶段2包含的其他高度、全局匹配、边缘与可见面采样在相应分析中跟踪；本页不代表整阶段已合并。
 
 ## 参考实现核对
 
@@ -97,7 +97,7 @@ hierarchical围绕最佳偏移继续采样，半径每层除以steps−1，并�
 
 ## 共享精配准与边界
 
-[共享接口](../packs/std-pointcloud/algo/p2_fit.h)提供TargetIndex、CloudFitOptions、FitBudget、evaluateCloudFit/refineCloudFit。全局模板匹配可复用相同交付质量路径，而不复制一套定义不一致的ICP结果校验。P1既有算子行为不变。
+[共享接口](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-pointcloud/algo/p2_fit.h)提供TargetIndex、CloudFitOptions、FitBudget、evaluateCloudFit/refineCloudFit。全局模板匹配可复用相同交付质量路径，而不复制一套定义不一致的ICP结果校验。P1既有算子行为不变。
 
 每云最多1Mi点；目标索引检查finite、通道一致、法线非零及float平方距离安全跨度。全批最多64Mi次模型点NN查询；搜索aligned总输出最多4Mi点。结果按float32变换和float32点坐标真实重建，再查询原目标点、以double重算欧氏距离。匹配比例分母是源模型点数，不是整个场景；targetIndices按源点顺序保留原目标索引/−1，targetSupport为去重排序的场景支持，供全局多实例抑制复用。所有最终有效NN配对必须至少覆盖3个不同目标索引，交付源点与目标点各自非共线且配对交叉协方差至少秩2；重合、共线及float32平移后坍缩的支持仅标记该候选不可观测/不接受，不中断其他候选搜索。ICP点到面必须有目标法线，最终交付NN/法线重新建立的中心化/列归一化六维Jacobian也必须可观测；所有精化最终仍以欧氏NN RMSE与模型比例门控，不拿点面目标函数替代几何质量。
 

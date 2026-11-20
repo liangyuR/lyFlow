@@ -1,6 +1,6 @@
 # P4：语义分割、ROI 回贴与原生实例支持
 
-本项独立实现 `image.segmentation_preprocess → ml.onnx_run → image.segmentation_decode`。像素载荷使用原生Image/Tensor；Record只保存有界的参考帧、类别、ROI映射、实例ID和质量说明。实现见 [p4_segmentation.cpp](../packs/std-image/ops/p4_segmentation.cpp)，永久回归包括[合成边界](../packs/std-image/tests/test_p4_segmentation.cpp)与[真实模型链](../packs/std-image/tests/test_p4_segmentation_models.cpp)。
+本项独立实现 `image.segmentation_preprocess → ml.onnx_run → image.segmentation_decode`。像素载荷使用原生Image/Tensor；Record只保存有界的参考帧、类别、ROI映射、实例ID和质量说明。实现见 [p4_segmentation.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/ops/p4_segmentation.cpp)，永久回归包括[合成边界](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/tests/test_p4_segmentation.cpp)与[真实模型链](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/tests/test_p4_segmentation_models.cpp)。
 
 ## 外部参考的可知与不可知范围
 

@@ -9,7 +9,7 @@ import shutil
 import struct
 import subprocess
 
-from public_robust_kernel_contract import isolated_workspace
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -125,7 +125,8 @@ def main():
     require(cmake and dumpbin, "Use the MSVC developer environment with CMake/Ninja and dumpbin")
     environment = os.environ.copy()
     environment.pop("LYFLOW_CACHE_DIR", None)
-    with isolated_workspace(output) as workspace:
+    with tempfile.TemporaryDirectory(dir=output) as directory:
+        workspace = Path(directory)
         runtime = workspace / "runtime"
         shutil.copytree(runtime_source, runtime)
         executable = runtime / "lyflow.exe"

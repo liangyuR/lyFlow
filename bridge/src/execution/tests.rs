@@ -446,7 +446,6 @@ fn two_node_graph(seed: i64) -> serde_json::Value {
 /// ADR-0022：同一份 summary 有两个出口 —— run_finished 事件里那一份，
 /// 和按 runId 从 C ABI 取回来的那一份。它们必须逐字段相等。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_summary_comes_back_over_the_abi_and_in_the_event() {
     let f = run(two_node_graph(104), "");
     assert_eq!(f.run_status(), "ok");
@@ -508,7 +507,6 @@ fn run_summary_comes_back_over_the_abi_and_in_the_event() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn output_cloud_binary_header_is_correct() {
     let f = run(two_node_graph(102), "");
     assert_eq!(f.run_status(), "ok");
@@ -553,7 +551,6 @@ fn output_cloud_binary_header_is_correct() {
 
 /// M3 尾巴 c：法线进了点云载荷，3D 视图的「法线着色」才有东西可画。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn cloud_payload_carries_normals_when_the_op_produces_them() {
     let doc = serde_json::json!({
         "schemaVersion": 1, "id": "t",
@@ -587,7 +584,6 @@ fn cloud_payload_carries_normals_when_the_op_produces_them() {
 
 /// v12：rgb 进了视图与载荷。放在最后、补齐到 4 字节 —— 老解码器不看第 3 位也不看尾部。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn cloud_payload_carries_rgb_last_and_padded() {
     let dir = std::env::temp_dir().join(format!("lyflow-rgb-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -667,7 +663,6 @@ fn passthrough_graph(seed: i64, count: i64) -> serde_json::Value {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn indices_payload_header_is_correct_and_carries_source_cloud_id() {
     let f = run(passthrough_graph(4101, 5000), "");
     assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
@@ -694,7 +689,6 @@ fn indices_payload_header_is_correct_and_carries_source_cloud_id() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn indices_paging_keeps_total_and_clips_at_the_tail() {
     let f = run(passthrough_graph(4102, 1200), "");
     assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
@@ -889,7 +883,6 @@ fn cancel_stops_a_heavy_run_and_joins_within_a_second() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn chinese_path_save_then_load_roundtrip() {
     let dir = std::env::temp_dir().join("lyflow 桥接 中文测试");
     let _ = std::fs::remove_dir_all(&dir);
@@ -926,7 +919,6 @@ fn chinese_path_save_then_load_roundtrip() {
 /// 单节点运行（docs/node-run-plan.md R1–R3）走的是 C ABI v11 的 isolate 字段：
 /// 上游命中缓存、自己强制重算、下游不进计划。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn isolate_reruns_only_that_node_over_the_abi() {
     // 三节点：g → v → p。先全图跑一遍，把 g 的结果放进结果仓
     let doc = serde_json::json!({
@@ -1045,7 +1037,6 @@ fn isolate_is_refused_before_running_anything() {
 
 /// 修订一 V2：「运行到此」（只给 targets）也把计划外、仍有当前结果的下游挂进来。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_to_node_attaches_unplanned_downstream() {
     let doc = serde_json::json!({
         "schemaVersion": 1, "id": "t",
@@ -1148,7 +1139,6 @@ fn graph_param_values_reach_the_core_through_params_json() {
 /// 以前这里 drop_all → lyflow_run_free → 索引没了、数据还在：界面显示「完成」，按这个 runId
 /// 取点云却是「core 没有该结果」，下一次运行又全部命中缓存。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn library_rescan_keeps_the_finished_run_readable() {
     let core = crate::core_ffi::core().expect("加载 core 失败");
     let manager = RunManager::new();

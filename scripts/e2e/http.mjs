@@ -16,7 +16,8 @@ const HOST_PORT = Number(process.env.LYFLOW_HOST_PORT ?? 5174);
 const CDP_PORT = Number(process.env.LYFLOW_HTTP_CDP_PORT ?? 9333);
 const TOKEN = process.env.LYFLOW_HTTP_TOKEN ?? crypto.randomBytes(12).toString("hex");
 
-const CLI = path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
+const CLI = process.env.LYFLOW_CLI ?? path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
+const installedHost = process.env.LYFLOW_PACKAGED_HOST;
 
 const BROWSERS = [
   `${process.env["ProgramFiles"]}\\Google\\Chrome\\Application\\chrome.exe`,
@@ -567,6 +568,21 @@ async function suiteRecipesOverHttp(cdp, report, ws) {
 
 // ------------------------------------------------------------------- main
 
+async function openInstalledExample(cdp, report, ws) {
+  const file = "p2-expression.lyflow.json";
+  fs.copyFileSync(path.resolve(path.dirname(CLI), "../examples", file), path.join(ws, file));
+  const name = await cdp.eval(`
+    const { transport, stores } = window.__lyflow;
+    const { doc } = await transport.loadGraph(${lit(file)});
+    stores.graph.getState().loadDoc(doc, ${lit(file)});
+    return doc.name;
+  `);
+  await cdp.waitFor(`document.querySelector('[data-testid="host-doc"]')?.textContent.includes(${lit(name)})
+    && document.querySelector('.react-flow__node') !== null`);
+  const run = await runAndWait(cdp, () => cdp.eval("await window.__lyflow.run(); return true;"));
+  report.ok("外部宿主打开随包图并运行", run.status === "ok" && run.outputs?.some(o => o.name === "mean"), JSON.stringify(run));
+}
+
 async function main() {
   const report = new Report();
 
@@ -594,18 +610,20 @@ async function main() {
   );
   const serverLog = tail(server);
 
+  const viteArgs = ["--port", String(HOST_PORT), "--strictPort", "--host", "127.0.0.1"];
   const host = spawn(
-    "pnpm",
-    // --host 写死 127.0.0.1：vite 默认听 localhost，有的机器上它只解析到 ::1，
-    // 下面按 127.0.0.1 等就永远等不到
-    ["--filter", "lyflow-host-react", "dev", "--port", String(HOST_PORT), "--strictPort", "--host", "127.0.0.1"],
+    installedHost ? process.execPath : "pnpm",
+    installedHost
+      ? [path.join(installedHost, "node_modules", "vite", "bin", "vite.js"), "preview", ...viteArgs]
+      : ["--filter", "lyflow-host-react", "dev", ...viteArgs],
     {
-      cwd: ROOT,
-      shell: true,
+      cwd: installedHost ?? ROOT,
+      shell: !installedHost,
+      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        VITE_LYFLOW_API: `http://127.0.0.1:${API_PORT}`,
+        VITE_LYFLOW_API: 'http://127.0.0.1:' + API_PORT,
         VITE_LYFLOW_TOKEN: TOKEN,
       },
     },
@@ -673,13 +691,17 @@ async function main() {
     });
 
     await suiteHost(cdp, report);
-    await suiteEditAndRun(cdp, report, ws);
-    await suiteBuildAndShortcut(cdp, report);
-    await suiteAnimationsProp(cdp, report);
-    await suiteNodeRunOverHttp(cdp, report);
-    await suiteImageOverHttp(cdp, report);
-    await suiteGraphParamsOverHttp(cdp, report);
-    await suiteRecipesOverHttp(cdp, report, ws);
+    if (installedHost) {
+      await openInstalledExample(cdp, report, ws);
+    } else {
+      await suiteEditAndRun(cdp, report, ws);
+      await suiteBuildAndShortcut(cdp, report);
+      await suiteAnimationsProp(cdp, report);
+      await suiteNodeRunOverHttp(cdp, report);
+      await suiteImageOverHttp(cdp, report);
+      await suiteGraphParamsOverHttp(cdp, report);
+      await suiteRecipesOverHttp(cdp, report, ws);
+    }
 
     report.section("控制台");
     report.ok(

@@ -35,26 +35,11 @@ function entryPoint(): string | null {
 
 const ENTRY = entryPoint();
 
-/**
- * 冒烟图用的是标准包的 filter.voxel_grid（ADR-0014）。只有纯平台构建（LYFLOW_STD_PACKS=0）的 CLI
- * 里没有它才 skip；标准包没关就照跑 —— 那时没有它是构建坏了，validate_graph 那一步会挂。
- */
-function stdPacksExcluded(): boolean {
-  if (process.env['LYFLOW_STD_PACKS'] !== '0') return false;
-  const r = spawnSync(CLI, ['manifest'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const line = (r.stdout ?? '').split(/\r?\n/).find((l) => l.startsWith('{')) ?? '{}';
-  const operators = (JSON.parse(line) as { operators?: { id: string }[] }).operators ?? [];
-  return !operators.some((o) => o.id === 'filter.voxel_grid');
-}
-
 function skipReason(): string | false {
   if (!ROOT) return '找不到仓库根，跳过集成冒烟';
   if (!fs.existsSync(CLI)) return `没有 ${CLI}（先 cargo build --bin lyflow），跳过集成冒烟`;
   if (!fs.existsSync(TEST_SERVER)) return `没有 ${TEST_SERVER}，跳过集成冒烟`;
   if (!ENTRY) return '还没构建出 dist/index.js 或 build-test/src/index.js，跳过集成冒烟';
-  if (stdPacksExcluded()) {
-    return '纯平台构建（LYFLOW_STD_PACKS=0）没有标准包，冒烟图里的 filter.voxel_grid 跑不了，跳过集成冒烟';
-  }
   return false;
 }
 
@@ -118,14 +103,10 @@ async function tuningWorkflow(client: Client, workspace: string): Promise<void> 
   assert.equal(env['compatible'], true, JSON.stringify(env));
   assert.equal(env['buildVerified'], true, JSON.stringify(env));
   const available = await call('list_operators', { query: 'glue.bead_path' });
-  if (!(available['operators'] as { id: string }[]).some((o) => o.id === 'glue.bead_path')) {
-    assert.notEqual(
-      process.env['LYFLOW_PACKS']?.split(';').includes('solution-glue'),
-      true,
-      'glue 构建不能跳过生命周期验收',
-    );
-    return;
-  }
+  assert.ok(
+    (available['operators'] as { id: string }[]).some((o) => o.id === 'glue.bead_path'),
+    'SDK 缺少调参示例使用的 glue.bead_path',
+  );
   const width = 640,
     height = 560,
     values = new Float64Array(width * height),
@@ -420,6 +401,7 @@ async function tuningWorkflow(client: Client, workspace: string): Promise<void> 
 }
 
 const reason = skipReason();
+if (reason && process.env['LYFLOW_CLI']) throw new Error(reason);
 if (reason) console.log(`# skip: ${reason}`);
 
 test(

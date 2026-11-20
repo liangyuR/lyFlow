@@ -1,6 +1,6 @@
 # P3 B03：可消费的工作空间文件与参考帧树
 
-本项独立实现 `workspace.load`，源码位于 [p3_workspace.cpp](../packs/std-geometry/ops/p3_workspace.cpp)，永久回归位于 [test_p3_workspace.cpp](../packs/std-geometry/tests/test_p3_workspace.cpp)。它从文件建立本次执行的明确参考帧树，输出工作空间体积 Pose 和双向原生 Transform，可直接接既有位姿变换、点云变换和邻域工作空间输入。它由 std-geometry 的 workspace-io 模块注册。默认构建启用该模块，精简构建可显式选择。
+本项独立实现 `workspace.load`，源码位于 [p3_workspace.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/ops/p3_workspace.cpp)，永久回归位于 [test_p3_workspace.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/tests/test_p3_workspace.cpp)。它从文件建立本次执行的明确参考帧树，输出工作空间体积 Pose 和双向原生 Transform，可直接接既有位姿变换、点云变换和邻域工作空间输入。它由 std-geometry 的 workspace-io 模块注册。默认构建启用该模块，精简构建可显式选择。
 
 ## 参考源码与实际资产边界
 

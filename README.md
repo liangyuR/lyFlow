@@ -32,23 +32,17 @@ LyFlow 是面向点云与图像处理的视觉流程平台。用节点连接算�
 
 ## 快速开始
 
-当前开发与发包脚本面向 **Windows x64 + PowerShell 7**。先安装 Visual Studio C++ 工具集与 Windows SDK、CMake/Ninja、Git、Rust、Node、pnpm，并完成 vcpkg bootstrap；步骤与版本声明见 [环境准备](docs/getting-started.md)。桌面运行还需要 WebView2 Runtime。
-
-在仓库根目录执行，以下假设 vcpkg 位于 `C:\vcpkg`：
+Windows x64 开发环境需要 PowerShell 7、MSVC C++ 工具集与 Windows SDK、Rust、Node 和 pnpm。桌面需要 WebView2 Runtime。首次检出后在仓库根目录执行：
 
 ```powershell
-$env:VCPKG_ROOT = 'C:\vcpkg'
-& "$env:VCPKG_ROOT\vcpkg.exe" install pcl:x64-windows yaml-cpp:x64-windows
-./scripts/fetch-onnxruntime.ps1
-./scripts/build-vision-deps.ps1
+$env:LYFLOW_NATIVE_SDK = ./scripts/restore-native-sdk.ps1 -Destination build/native-sdk
 pnpm install --frozen-lockfile
-python -m pip install -r scripts/requirements.txt
+pnpm cli:build
+& ./bridge/target/release/lyflow.exe run "$env:LYFLOW_NATIVE_SDK/examples/p2-expression.lyflow.json" --summary
 pnpm dev
 ```
 
-默认构建包含点云、图像与 ONNX 推理标准包。`pnpm dev` 同时启动桌面应用和 C++ 监视构建；修改 `core/` 或 `packs/` 后增量编译并热重载。首次构建需要准备原生依赖，详细步骤、纯平台模式与浏览器模式见 [快速开始](docs/getting-started.md)。
-
-打开桌面后，在算子面板添加 `gen.synthetic`，运行并查看生成的点云，即可开始一条无需外部数据的流程。
+示例的命名输出 `mean` 为 13 mm。新开 PowerShell 时，将 `LYFLOW_NATIVE_SDK` 指回已恢复的 SDK 绝对路径。依赖版本与桌面操作见[快速开始](docs/getting-started.md)。
 
 ## 选择使用方式
 
@@ -74,44 +68,17 @@ MCP 同时使用 HTTP 后端与本地 CLI；配置完成后，先调用 `get_env
 
 ## 算子包
 
-| 包                                               | 处理领域                               | 开发默认构建 |
-| ------------------------------------------------ | -------------------------------------- | ------------ |
-| [std-pointcloud](packs/std-pointcloud/README.md) | 点云读写、滤波、分割、拟合、配准与量测 | 启用         |
-| [std-image](packs/std-image/README.md)           | 图像处理、标定、深度图与点云转换       | 启用         |
-| [std-ml](packs/std-ml/README.md)                 | ONNX Runtime 推理                      | 启用         |
-| [solution-glue](solutions/glue/README.md)            | 胶路、胶宽、断胶、边距与判定           | 按需启用     |
-| [solution-gap](solutions/gap/README.md)          | 间隙与段差测量                         | 按需启用     |
-| [solution-dts](solutions/dts/README.md)          | 车门胶条面差                           | 按需启用     |
-
-开发涂胶流程时，在构建或启动前指定：
-
-```powershell
-$env:LYFLOW_PACKS = 'solution-glue'
-pnpm dev
-```
-
-多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换包配置时先停止开发进程，再运行 `pnpm dev`，脚本会按当前的包组合重新配置 core。Windows 发布产物的标准包、`solution-glue` 与 `solution-gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
+Windows x64 正式 SDK 包含七个标准包与 Gap、DTS、Glue 三个场景包。工具读取 SDK 的算子清单。每个包的算子和示例见[文档中心](docs/README.md)，原生开发及包组合由[引擎仓](https://github.com/liangyuR/lyflow-engine)维护。
 
 ## 开发与验证
 
-| 命令                                  | 用途                                                                   |
-| ------------------------------------- | ---------------------------------------------------------------------- |
-| `pnpm core:build`                     | 构建 C++ core，运行 manifest 自检与 core 测试                          |
-| `pnpm typecheck`                      | 检查编辑器和桌面前端类型                                               |
-| `pnpm check`                          | 运行 core、契约、Rust、CLI、SDK、前端与 MCP 门禁                       |
-| `pnpm check:glue` / `pnpm check:gap`  | 对应领域包的专项门禁                                                   |
-| `pnpm e2e`                            | 启动真实桌面应用进行交互验收                                           |
-| `pnpm e2e:http` / `pnpm e2e:packaged` | 浏览器宿主 / 桌面构建产物验收                                          |
-| `pnpm run package`                    | 构建 Windows x64 运行库、SDK/CLI、编辑器 tarball 与正式运行库 NuGet 包 |
-
-测试范围与 CI 覆盖见 [测试地图](docs/testing.md)。发布条件、版本契约与下游验收边界见 [发包指南](docs/deployment/packaging.md)。历史验收结果记录在对应文档中，不代表任意新修订已经验证通过。
+`pnpm check` 检查 SDK 契约、Rust、前端、CLI 与 MCP。`pnpm e2e:packaged` 验证桌面构建产物，`pnpm e2e:http` 验证浏览器宿主。`pnpm run package` 组装含 CLI 的完整 SDK 和编辑器 tarball。见[测试地图](docs/testing.md)与[发包指南](docs/deployment/packaging.md)。
 
 ## 仓库导航
 
 ```text
-core/                  C++ 执行引擎、C ABI 与 C++ 客户端
-packs/                 标准算子包
-solutions/             场景算子包
+packs/                 标准包说明
+solutions/             场景包说明、图与示例
 crates/lyflow-client/   Rust C ABI 客户端
 bridge/                Rust 桥接、Tauri 宿主支持与 headless CLI
 packages/editor/       可嵌入的 React 节点编辑器

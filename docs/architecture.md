@@ -46,7 +46,7 @@ DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，�
 
 两点值得强调：
 
-开发默认组合与发布组合不同：Windows x64 运行库固定包含标准包、`solution-glue` 与 `solution-gap`，以 [发布配置](../packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
+开发默认组合与发布组合不同：Windows x64 运行库固定包含标准包、`solution-glue` 与 `solution-gap`，以 [发布配置](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
 
 **执行调度必须在 C++。** 调度需要知道数据有多大、中间结果能不能复用、内存占用和哪几步能并行。
 这些信息只有 C++ 侧有。前端 JS 拿不到，也不该假装拿得到。

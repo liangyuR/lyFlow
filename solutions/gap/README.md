@@ -10,7 +10,7 @@ $env:LYFLOW_MODULES = "gap-template;gap-model;gap-import"
 pnpm check:gap
 ```
 
-这组模块覆盖完整模板、模型、导入和临时兼容入口；基础场景不要求全部启用。正式组合由 [release.json](../../packaging/release.json) 统一声明，依赖准备与打包见[发布指南](../../docs/deployment/packaging.md)。旧 `LYFLOW_PACKS=gap` 不作为别名接受。
+这组模块覆盖完整模板、模型、导入和临时兼容入口；基础场景不要求全部启用。正式组合由 [release.json](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json) 统一声明，依赖准备与打包见[发布指南](../../docs/deployment/packaging.md)。旧 `LYFLOW_PACKS=gap` 不作为别名接受。
 
 | 目录                          | 职责                                                             |
 | ----------------------------- | ---------------------------------------------------------------- |

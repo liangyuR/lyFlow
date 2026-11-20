@@ -48,7 +48,6 @@ fn write_pcd(file: &Path, n: usize, row: f32) {
 
 /// `--input` 自己读 PCD（为了带上 rgb）：三种 DATA 格式都要与 core 的 io.load_pcd 读出同一批点。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn pcd_reader_agrees_with_io_load_pcd_on_all_three_formats() {
     let dir = workspace("pcdformats");
     let core = core().unwrap();
@@ -83,7 +82,6 @@ fn pcd_reader_agrees_with_io_load_pcd_on_all_three_formats() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn input_injects_a_cloud_into_an_input_port() {
     let dir = workspace("input");
     let a = dir.join("a.pcd");
@@ -159,7 +157,6 @@ fn manifest_check_is_clean() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn validate_accepts_a_good_graph_and_rejects_a_bad_one() {
     let dir = workspace("validate");
     let good = chain(&dir, 301);
@@ -177,7 +174,6 @@ fn validate_accepts_a_good_graph_and_rejects_a_bad_one() {
 /// `plan` 每个节点一行：cacheKey 与 level；外加惰性标记（m6-plan §5 / H9）。这张链上一个
 /// 惰性端口都没有，所以 lazy 全是 false、demandedBy 全空 —— 「默认什么都不标」是它该有的样子。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn plan_marks_lazy_nodes_and_who_demands_them() {
     let dir = workspace("plan-lazy");
     let graph = chain(&dir, 312);
@@ -196,7 +192,6 @@ fn plan_marks_lazy_nodes_and_who_demands_them() {
 /// `lyflow params`（m6-plan §2 / H6）：生效值来自 core，来源分得开
 /// 「图里写了」与「合进来的默认值」。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn params_joins_defaults_and_marks_the_source() {
     let dir = workspace("params");
     let graph = chain(&dir, 313);
@@ -246,7 +241,6 @@ fn params_joins_defaults_and_marks_the_source() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn params_filters_by_node_and_by_source() {
     let dir = workspace("params-filter");
     let graph = chain(&dir, 314);
@@ -279,7 +273,6 @@ fn params_filters_by_node_and_by_source() {
 /// 未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4（用法错），
 /// 而不是与「图本身不合法」混成同一个 1。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn params_rejects_unknown_nodes_and_params_with_the_usage_code() {
     let dir = workspace("params-unknown");
     let graph = chain(&dir, 315);
@@ -301,7 +294,6 @@ fn params_rejects_unknown_nodes_and_params_with_the_usage_code() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_streams_execution_events_as_json_lines() {
     let dir = workspace("run");
     let graph = chain(&dir, 303);
@@ -330,7 +322,6 @@ fn run_streams_execution_events_as_json_lines() {
 
 /// 改源头点数的两条路：`--set` 覆盖参数、`--preview-points` 在预览里降采样源头。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn set_and_preview_change_the_source_point_count() {
     let dir = workspace("set-preview");
     let graph = chain(&dir, 304);
@@ -350,7 +341,6 @@ fn set_and_preview_change_the_source_point_count() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_to_node_prunes_the_downstream() {
     let dir = workspace("runto");
     let graph = chain(&dir, 305);
@@ -377,7 +367,6 @@ fn run_exits_one_on_validation_failure() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_exits_two_when_a_node_fails() {
     let dir = workspace("failrun");
     let doc = json!({
@@ -417,7 +406,6 @@ fn fallback_graph(dir: &Path, seed: i64, outputs: Value) -> String {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn run_summary_says_degraded_when_a_fallback_saved_the_run() {
     let dir = workspace("summary-degraded");
     let graph = fallback_graph(
@@ -658,7 +646,6 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn dump_writes_the_output_to_disk() {
     let dir = workspace("dump");
     let graph = chain(&dir, 307);
@@ -685,7 +672,6 @@ fn dump_writes_the_output_to_disk() {
 /// m4-plan §3 的验收原话是「sweep 5 组 leafSize」——而 leafSize 是 vec3f。
 /// 一个数要能广播到三个分量，否则那条验收根本写不出来。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn sweep_broadcasts_a_scalar_onto_a_vector_param() {
     let dir = workspace("sweepvec");
     let graph = chain(&dir, 315);
@@ -743,7 +729,6 @@ fn sweep_broadcasts_a_scalar_onto_a_vector_param() {
 
 /// §3 验收：只移动了节点的两份图，diff 输出为空。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn diff_ignores_ui_and_catches_params() {
     let dir = workspace("diff");
     let graph = chain(&dir, 310);
@@ -811,7 +796,6 @@ fn diff_merges_defaults_before_comparing() {
 
 /// ADR-0008：迁移只是诊断；--write 才落盘，落完再跑一次就没有迁移了。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn migrate_reports_and_optionally_writes() {
     let dir = workspace("migrate");
     let doc = json!({
@@ -854,7 +838,6 @@ fn migrate_reports_and_optionally_writes() {
 
 /// F1：子图在 compile 前展开，CLI 看见的事件里只有路径式 id。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn subgraph_expands_into_path_ids() {
     let dir = workspace("subgraph");
     let doc = json!({
@@ -902,7 +885,6 @@ fn samples_file(dir: &Path, name: &str, lines: &[&str]) -> String {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_reports_rows_and_per_group_statistics() {
     let dir = workspace("eval");
     let graph = chain(&dir, 320);
@@ -969,7 +951,6 @@ fn eval_reports_rows_and_per_group_statistics() {
 /// ADR-0022：`--summary` 时每个 eval_row 带这一次运行的结论。
 /// **默认关**（m6-plan §10 第 5 条）：体积是逐行的，一维 bundle 就 6 KB。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_rows_carry_the_run_summary_only_when_asked() {
     let dir = workspace("eval-summary");
     let graph = chain(&dir, 3410);
@@ -1027,7 +1008,6 @@ fn eval_rows_carry_the_run_summary_only_when_asked() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_groups_by_a_tag_key() {
     let dir = workspace("evalgroup");
     let graph = chain(&dir, 321);
@@ -1064,7 +1044,6 @@ fn eval_groups_by_a_tag_key() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_crosses_parameter_sets_with_samples() {
     let dir = workspace("evalparam");
     let graph = chain(&dir, 322);
@@ -1124,7 +1103,6 @@ fn without_durations(lines: Vec<Value>) -> Vec<Value> {
 /// 某个样本自己就跑不起来（set 写到了不存在的节点）：--jobs 与一次接一次停在同一行 ——
 /// 排在它前面的照常交出，然后报错退出 2；排在后面、已经起了的那几次结果丢掉。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_with_jobs_stops_at_the_same_row_as_without() {
     let dir = workspace("evaljobsfail");
     let graph = chain(&dir, 327);
@@ -1163,7 +1141,6 @@ fn eval_with_jobs_stops_at_the_same_row_as_without() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_lists_the_available_paths_when_the_metric_is_wrong() {
     let dir = workspace("evalpath");
     let graph = chain(&dir, 323);
@@ -1205,7 +1182,6 @@ fn eval_lists_the_available_paths_when_the_metric_is_wrong() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_builds_samples_from_a_glob() {
     let dir = workspace("evalglob");
     let clouds = dir.join("clouds");
@@ -1254,7 +1230,6 @@ fn eval_builds_samples_from_a_glob() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_separates_validation_failures_from_run_failures() {
     let dir = workspace("evalfail");
     let doc = json!({
@@ -1303,7 +1278,6 @@ fn eval_separates_validation_failures_from_run_failures() {
 
 /// 不给样本就跑一次图；指标用的是 sweep 那套老写法 `v:cloud.elementCount`，eval 也得认。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_without_samples_runs_the_graph_once() {
     let dir = workspace("evalnosample");
     let graph = chain(&dir, 326);
@@ -1347,7 +1321,6 @@ fn crop_chain(dir: &Path, seed: i64, count: i64) -> String {
 const HALFSPACE: &str = r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0]}"#;
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn perturb_inserts_the_node_and_reports_a_slope() {
     let dir = workspace("perturb");
     let graph = crop_chain(&dir, 3401, 17003);
@@ -1404,7 +1377,6 @@ fn perturb_inserts_the_node_and_reports_a_slope() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn perturb_flags_a_reading_that_does_not_move_and_exits_failed() {
     let dir = workspace("perturbflat");
     let graph = crop_chain(&dir, 3402, 17005);
@@ -1439,7 +1411,6 @@ fn perturb_flags_a_reading_that_does_not_move_and_exits_failed() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn perturb_point_from_moves_the_cut_to_each_frames_anchor() {
     let dir = workspace("perturbanchor");
     let graph = crop_chain(&dir, 3403, 17003);
@@ -1587,7 +1558,6 @@ fn done_count(events: &[Value], node: &str) -> Option<i64> {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn params_reports_the_graph_source_and_which_graph_param() {
     let dir = workspace("gparam-params");
     let graph = param_chain(&dir, 7101);
@@ -1611,7 +1581,6 @@ fn params_reports_the_graph_source_and_which_graph_param() {
 
 /// J8：宿主走 C ABI 的 params_json，CLI 走 --param —— 两条路算出同一个东西。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn abi_params_json_and_cli_param_agree() {
     let dir = workspace("gparam-abi");
     let graph = param_chain(&dir, 7103);
@@ -1706,7 +1675,6 @@ fn set_on_a_bound_param_and_unknown_param_are_usage_errors() {
 }
 
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_takes_graph_params_next_to_sweep_axes() {
     let dir = workspace("gparam-eval");
     let graph = param_chain(&dir, 7106);
@@ -1782,7 +1750,6 @@ fn write_recipe(graph: &str, name: &str, values: Value, graph_ref: Option<Value>
 /// P4 验收 26 的 CLI 这一半：`--recipe` 与把同一组值写成 `--param` 是同一个结果（cacheKey 与点数），
 /// 同名的 `--param` 覆盖配方。编辑器那一半在 scripts/e2e/params_p4.mjs（真实 gap 图逐位比）。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn recipe_runs_like_the_same_values_given_as_param_and_param_wins() {
     let dir = workspace("recipe-run");
     let graph = recipe_chain(&dir, 7201);
@@ -1954,7 +1921,6 @@ fn a_mismatched_recipe_stops_every_command_with_exit_4_and_the_report() {
 
 /// ④ 规格变了只提示：退出码照旧，stderr 一行「提示：…」，值照常用上。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn a_recipe_written_for_another_graph_only_warns() {
     let dir = workspace("recipe-spec");
     let graph = recipe_chain(&dir, 7203);
@@ -1980,7 +1946,6 @@ fn a_recipe_written_for_another_graph_only_warns() {
 
 /// eval：配方作用于所有样本；参数组里不含「.」的键写图参数，叠在配方上面；--param 最后说了算。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn eval_layers_base_recipe_paramsets_then_param() {
     let dir = workspace("recipe-eval");
     let graph = recipe_chain(&dir, 7204);
@@ -2125,7 +2090,6 @@ fn eval_layers_base_recipe_paramsets_then_param() {
 
 /// patch --recipe：配方的值写回基础（等于对每一行「写回基础」），--param 排在后面；失配整体不写。
 #[test]
-#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
 fn patch_recipe_writes_the_values_back_as_defaults() {
     let dir = workspace("recipe-patch");
     let graph = recipe_chain(&dir, 7205);
@@ -2260,16 +2224,7 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
                 .any(|i| i["kind"] == "StandardGap.yml:template:fine")
         })
         .unwrap_or(false);
-    let gap_built = std::env::var("LYFLOW_PACKS")
-        .unwrap_or_default()
-        .contains("gap");
-    assert!(
-        !gap_built || has_importer,
-        "LYFLOW_PACKS 带了 gap，却没有细粒度导入器"
-    );
-    if !has_importer {
-        return;
-    }
+    assert!(has_importer, "正式 SDK 缺少 StandardGap 导入器");
     let dir = workspace("gap-import");
     let config = dir.join("StandardGap.yml");
     std::fs::write(

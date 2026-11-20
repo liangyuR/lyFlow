@@ -1,7 +1,6 @@
 #Requires -Version 7.0
 function Get-ReviewedEngineRelease {
     param([string]$Version)
-    if ([version]$Version -le [version]'2.0.2') { return }
     $path = Join-Path $PSScriptRoot "../packaging/engine-releases/v$Version.json"
     $lock = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json
     if ($lock.schemaVersion -ne 1 -or $lock.engineVersion -cne $Version) { throw "Unexpected engine lock for v$Version." }

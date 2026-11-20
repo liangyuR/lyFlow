@@ -20,11 +20,11 @@ Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Ru
 只依赖同目录的 `lyflow/c_api.h` 与 `lyflow/version.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本使用当前产品版本字符串，版本定义见 [`version.h`](../core/include/lyflow/version.h)。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
+契约版本使用当前产品版本字符串，版本定义见 [`version.h`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/version.h)。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
 `LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
 `lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本属于同一 主.次 系列；同系列的补丁版本保持 C ABI 兼容，可以直接替换运行库。
 只有统一打包入口验证固定依赖并声明 `LYFLOW_RELEASE_BUILD=ON`，且实际为 Windows x64、
-RelWithDebInfo、[发布配置](../packaging/release.json)规定的固定包组合、无外部算子包、源码树干净
+RelWithDebInfo、[发布配置](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json)规定的固定包组合、无外部算子包、源码树干净
 且 Git 修订可识别时，`lyflow_source_revision()` 才返回完整提交标识；否则返回空串。
 该开关默认为 OFF，普通开发构建、其他算子组合与未经依赖验证的构建都不能启用跨进程磁盘缓存。
 C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空值不能启用跨进程磁盘缓存。
@@ -32,7 +32,7 @@ C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空�
 
 ## 运行和结果接口
 
-当前完整布局以 [`c_api.h`](../core/include/lyflow/c_api.h)、[`client.hpp`](../core/include/lyflow/client.hpp) 和 [Rust 客户端](../crates/lyflow-client/src/lib.rs) 为准，不再按旧整数 ABI 阶段选择接口。
+当前完整布局以 [`c_api.h`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/c_api.h)、[`client.hpp`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/client.hpp) 和 [Rust 客户端](../crates/lyflow-client/src/lib.rs) 为准，不再按旧整数 ABI 阶段选择接口。
 
 - `lyflow_run_options` 承载顶层参数、局部运行范围及点云/图像输入。宿主应使用与运行库兼容的头文件初始化完整结构，不自行猜测字段偏移。
 - `lyflow_output_cloud`、`lyflow_output_tensor`、`lyflow_output_indices`、`lyflow_output_image` 返回结果视图，按各自释放接口管理生命周期；图像按行切片，`level = 0` 读取原比例，较高级别用于缩小显示。

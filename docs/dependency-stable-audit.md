@@ -77,7 +77,7 @@ Linux vision CI使用PowerShell7调用同一正式构建脚本，显式传入Ope
 
 运行库/SDK复制完整OpenCV主许可证和安装树第三方许可证（JPEG、PNG、zlib、SoftFloat、MSCR表、Annoy、DLPack、FlatBuffers等）；STag只带MIT字典来源与使用说明，排除上游ED/LSD实现。依赖inventory记录vision-opencv版本/修订及vision-stag字典修订。输出目录避开受管视觉构建/源码/安装目录，进程环境中的OpenCV路径在成功或失败后恢复。
 
-core原始单头依赖的完整许可和来源表另放入 `licenses/core/`：nlohmann的LICENSE.MIT、doctest的LICENSE.txt、xxHash的LICENSE以及SOURCES.md。版本从实际头文件宏读取并纳入依赖清单；doctest明确标记test-only，不暗示运行库链接测试框架。官方标签/源码修订/文件SHA见[core来源表](../core/third_party/README.md)，这里的来源校验不建立产品身份。
+core原始单头依赖的完整许可和来源表另放入 `licenses/core/`：nlohmann的LICENSE.MIT、doctest的LICENSE.txt、xxHash的LICENSE以及SOURCES.md。版本从实际头文件宏读取并纳入依赖清单；doctest明确标记test-only，不暗示运行库链接测试框架。官方标签/源码修订/文件SHA见[core来源表](https://github.com/liangyuR/lyflow-engine/blob/main/core/third_party/README.md)，这里的来源校验不建立产品身份。
 
 xxHash升级另由主验证比较原0.8.2与新0.8.4的108组长短输入、内存对齐和seed向量，XXH3-128结果全部一致；没有仅凭版本说明假定缓存键协议保持不变。完整native与SDK门禁仍按本阶段实际执行记录。
 

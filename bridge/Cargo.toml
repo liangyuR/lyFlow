@@ -36,7 +36,6 @@ tauri = { version = "2", features = ["test"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
-cmake = "0.1.58"
 
 [dependencies]
 tauri = { version = "2", features = [], optional = true }

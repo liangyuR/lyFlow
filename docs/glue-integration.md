@@ -87,13 +87,13 @@ T(p) = R(angle) · (p − teachCenter) + center
 
 `angleObservable=false` 表示模板不能可靠约束角度，此时角度报 0、只补平移，不能解释为零件没有转动。模板离测量点较远的宿主必须核对未补偿转角带来的位移误差。`angleRange=0` 是主动关闭转角搜索，不能借其 `angleObservable=true` 证明实际转角为零。
 
-角度搜索对各角度使用一致的预平滑、插值与亚像素相位比较；具体搜索护栏和细扫定义见 [定位内核](../packs/std-image/include/lyflow_cv/template_pose.h)。只找平移或角度不可观时仍存在亚像素峰值锁定误差，不能把合成测试中的容差承诺为所有现场模板的精度。
+角度搜索对各角度使用一致的预平滑、插值与亚像素相位比较；具体搜索护栏和细扫定义见 [定位内核](https://github.com/liangyuR/lyflow-engine/blob/main/packs/std-image/include/lyflow_cv/template_pose.h)。只找平移或角度不可观时仍存在亚像素峰值锁定误差，不能把合成测试中的容差承诺为所有现场模板的精度。
 
 ### 站点与结果
 
 `stations` 是宿主发布的 JSON 文件，包含 `points[[x,y]]`、`normals[[nx,ny]]` 和可选 `ids[]`。法向从内边开口一侧指向翻边，负偏移为内边一侧。站点经位姿变换后，卡尺在 `innerSearch` 查内边、在 `beadSearch` 查目标胶条；`innerSelect` 由宿主按测量基准选择最近或最强内边。
 
-结果提供逐站状态和内边、近胶边、远胶边的像素偏移；接标定后另给内边到近胶边、到胶中心及胶宽的物理距离。中心线或近边两种测量口径由宿主选择，不必重复运行视觉。胶边超出完整卡尺范围时是 `incomplete_bead`，不能把窗口边缘当胶边或补出合格胶宽。字段和状态以 [算子实现](../solutions/glue/ops/station_calipers.cpp) 与 manifest 为准。
+结果提供逐站状态和内边、近胶边、远胶边的像素偏移；接标定后另给内边到近胶边、到胶中心及胶宽的物理距离。中心线或近边两种测量口径由宿主选择，不必重复运行视觉。胶边超出完整卡尺范围时是 `incomplete_bead`，不能把窗口边缘当胶边或补出合格胶宽。字段和状态以 [算子实现](https://github.com/liangyuR/lyflow-engine/blob/main/solutions/glue/ops/station_calipers.cpp) 与 manifest 为准。
 
 站点身份与跨帧弧长归属由宿主管理。宿主负责产品阈值、缺失站点处理、重复站位去重、跨帧断口合并，以及 PLC、数据库和 UI 的结果表达。
 
@@ -119,7 +119,7 @@ pnpm check:glue
 & .\build\core\bin\lyflow-core-tests.exe '--source-file=*test_flyshot.cpp,*test_calib.cpp,*test_glue.cpp,*test_color.cpp'
 ```
 
-[scripts/check-glue.ps1](../scripts/check-glue.ps1) 检查构建、manifest、契约和参考图；给定 `LYFLOW_GLUE_DATA` 才执行仓库外的真实帧评估，人造断胶另行报告。当前修订是否通过以实际输出为准，命令存在不代表已运行。完整门禁、运行库交付与宿主消费验收分别见 [测试地图](testing.md) 和 [发包指南](deployment/packaging.md)。
+[scripts/check-glue.ps1](https://github.com/liangyuR/lyFlow/blob/v2.0.3/scripts/check-glue.ps1) 检查构建、manifest、契约和参考图；给定 `LYFLOW_GLUE_DATA` 才执行仓库外的真实帧评估，人造断胶另行报告。当前修订是否通过以实际输出为准，命令存在不代表已运行。完整门禁、运行库交付与宿主消费验收分别见 [测试地图](testing.md) 和 [发包指南](deployment/packaging.md)。
 
 单帧失败定位和批量评估可用 [MCP 涂胶调参流程](mcp-glue-tuning.md)。先区分执行错误、未量到和产品 NG，再比较阈值；冻结图、参数、输入与标定身份，避免把缓存命中耗时当作冷启动节拍。
 

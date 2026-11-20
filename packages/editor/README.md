@@ -129,7 +129,7 @@ Rust/Tauri 宿主通过 `lyflow_lib::host::attach`（`host` feature）装配 man
 
 Python 管理方法为 `getPythonSettings`、`setPythonSettings`、`refreshPythonNodes`。宿主通过 `supported` / `editable` 表达支持状态和只读配置，详见 [Python 节点指南](../../docs/python-nodes.md)。
 
-C ABI 签名以 [c_api.h](../../core/include/lyflow/c_api.h) 为准。产品版本与 ABI 使用同一个完整 `X.Y.Z` 字符串，C++/Rust 客户端按主、次版本系列判定运行时兼容：同系列补丁兼容，跨次版本拒绝加载。旧数字 ABI 不能作为当前接口契约。资产中的版本和源码修订仍须满足 [发包契约](../../docs/deployment/packaging.md)。
+C ABI 签名以 [c_api.h](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/c_api.h) 为准。产品版本与 ABI 使用同一个完整 `X.Y.Z` 字符串，C++/Rust 客户端按主、次版本系列判定运行时兼容：同系列补丁兼容，跨次版本拒绝加载。旧数字 ABI 不能作为当前接口契约。资产中的版本和源码修订仍须满足 [发包契约](../../docs/deployment/packaging.md)。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，

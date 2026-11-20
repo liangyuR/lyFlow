@@ -63,7 +63,7 @@ GraphDoc 的顶层 `outputs` 将业务名称绑定到节点端口。宿主按约
 
 模型失败回退模板可由图中的 `flow.fallback` 表达。备用路径按需调度，未执行的备用节点不是执行失败。宿主需要保留回退选择和原因，不能把回退成功掩盖成主路径始终正常。
 
-`gap.result_bundle` 4.0.0 输出 schemaVersion 4 的 `Record<GapResultBundle>`，汇总量测、ROI、拟合、对齐、点数和回退信息；它不重新计算未接入的数据，也不保证旧业务结果结构中的每个字段都有值。当前字段与缺省语义以 [算子实现](../solutions/gap/ops/result_bundle.cpp) 和 manifest 为准。
+`gap.result_bundle` 4.0.0 输出 schemaVersion 4 的 `Record<GapResultBundle>`，汇总量测、ROI、拟合、对齐、点数和回退信息；它不重新计算未接入的数据，也不保证旧业务结果结构中的每个字段都有值。当前字段与缺省语义以 [算子实现](https://github.com/liangyuR/lyflow-engine/blob/main/solutions/gap/ops/result_bundle.cpp) 和 manifest 为准。
 
 - `roi_source` 反映实际选中的定位/ROI 来源，不能由宿主文件名推断模型路径是否生效。取值为 `model`（模型定位），或模板定位时角色框的来源：`template`（随模板）与 `config`（显式配置的框）。
 - 点数对应各输入实际提供的阶段；它们不一定等价于旧算法同名字段。未产出的逐阶段或逐圆诊断不得伪造为零或合格。

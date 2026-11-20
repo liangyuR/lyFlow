@@ -62,7 +62,7 @@ def schemas(examples):
     spec = importlib.util.spec_from_file_location("lyflow_p5_schema", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    schema = REPOSITORY / "schema/graph-doc.schema.json"
+    schema = examples.parent / "schema/graph-doc.schema.json"
     validator = module.make_validator(json.loads(schema.read_text(encoding="utf-8")), str(schema))
     for name in CASES:
         validator.validate(json.loads((examples / f"{name}.lyflow.json").read_text(encoding="utf-8")))

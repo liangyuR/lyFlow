@@ -6,7 +6,7 @@
 
 ## 逐项取舍
 
-路径以外部库 `src/xyz_vision_lib/models/` 为根。所有 LyFlow 工件节点位于 [pose_ops.cpp](../packs/std-geometry/ops/pose_ops.cpp)，几何变换位于 [geometry_transform.cpp](../packs/std-geometry/ops/geometry_transform.cpp)，共享契约位于 [pose.h](../core/include/lyflow/pose.h)，永久回归位于 [test_pose.cpp](../packs/std-geometry/tests/test_pose.cpp)。
+路径以外部库 `src/xyz_vision_lib/models/` 为根。所有 LyFlow 工件节点位于 [pose_ops.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/ops/pose_ops.cpp)，几何变换位于 [geometry_transform.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/ops/geometry_transform.cpp)，共享契约位于 [pose.h](https://github.com/liangyuR/lyFlow/blob/v2.0.3/core/include/lyflow/pose.h)，永久回归位于 [test_pose.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/tests/test_pose.cpp)。
 
 | 外部条目 / 参考文件 | 核实的行为与问题 | LyFlow 实现和边界 |
 |---|---|---|

@@ -1,2 +1,0 @@
-ultralytics==8.4.21
-onnx==1.17.0

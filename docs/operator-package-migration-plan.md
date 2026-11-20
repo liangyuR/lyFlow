@@ -111,7 +111,7 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | 6 · 飞拍定位与站位测量 | 迁移模板定位，沿用同一套位姿与角度可观测性语义。站位卡尺保留任意法向、近胶/最强内边选择及站点标识。标定消费者改用版本化 `image.PlaneCalib`，旧图复用已有的显式标定升级规则。 | 复用 `test_flyshot.cpp` 的随包图和带行填充的相机输入，检查毫米点表、角度不可观、`pose_fail`、`no_inner`、`no_bead`、`incomplete_bead`。用现有标定迁移夹具验证旧图和单位；边缘选择变化时回放飞拍链。 |
 | 7 · 场景包与交付切换 | 将其余注册、自由搜索与示教流程、测量判定、场景测试、随包图、片段和工具移至 `solutions/glue`。切换包选择、脚本和发布清单，删除旧包入口。 | 复用示教/自由搜索、断胶及人造断胶用例，验证诊断候选不计入正式宽度、覆盖率或判定。核对随包图、片段及工具资源路径。用 `LYFLOW_STD_PACKS=0` 点名场景包和所需标准包，运行颜色与卡尺链，核对 manifest 归属及产物依赖中无 ORT/PCL。 |
 
-**按变更选择验证。** 纯实现迁移复用对应包的测试，图级只检查连线与输出契约。改变选边、候选、补缝或有效性规则时，回放受影响链路的录制帧，对照逐站结果与宿主判定。[Glue 专项脚本](../scripts/check-glue.ps1) 在配置 `LYFLOW_GLUE_DATA` 后执行灰度实帧评估。[彩色评估工具](../solutions/glue/tools/glue_color_eval.py) 使用 `LYFLOW_GLUE_COLOR_DATA` 和相应的示教配置。缺少相应数据时，在该切片标记回放待验。精简构建在包依赖定型时验证，依赖再次变化才重验。完整 SDK、桌面和发布矩阵归 M7 及发布门禁。
+**按变更选择验证。** 纯实现迁移复用对应包的测试，图级只检查连线与输出契约。改变选边、候选、补缝或有效性规则时，回放受影响链路的录制帧，对照逐站结果与宿主判定。[Glue 专项脚本](https://github.com/liangyuR/lyFlow/blob/v2.0.3/scripts/check-glue.ps1) 在配置 `LYFLOW_GLUE_DATA` 后执行灰度实帧评估。[彩色评估工具](../solutions/glue/tools/glue_color_eval.py) 使用 `LYFLOW_GLUE_COLOR_DATA` 和相应的示教配置。缺少相应数据时，在该切片标记回放待验。精简构建在包依赖定型时验证，依赖再次变化才重验。完整 SDK、桌面和发布矩阵归 M7 及发布门禁。
 
 公开 ID、参数或 Record 变化时，同片更新受影响的随包图和读取方。保存到磁盘的旧图需要改写时，由 `lyflow migrate` 调用所属包的离线规则。影响 GlueSight 时，在改变契约的切片用配对运行库验证受影响的内置模板、启动所需 ID、彩色节点的 `widthPolicy=extent` 或已有配方的模型 JSON，并注明宿主可接入的版本。类型或状态字段影响 MCP 时验证相应摘要。读取方见 [GlueSight 启动检查](https://github.com/liangyuR/ly-gluesight/blob/main/src-tauri/src/vision.rs)、[内置图模板](https://github.com/liangyuR/ly-gluesight/tree/main/src-tauri/graphs)和 [MCP 摘要](../packages/mcp/src/summary.ts)。
 
@@ -235,19 +235,19 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 
 | 现有入口 | 上提到哪里，场景保留什么 | 切片验收 |
 | --- | --- | --- |
-| `gap.datum_window` | `std-geometry` 根据水平锚框、可选的同空间高度锚框、左右方向、偏移和尺寸生成窗口和空间上下文。选择钣金或缝侧锚框留在 StandardGap 图。 | 用普通 Box2D 独立构造左右窗口，覆盖独立高度锚框和空间不符。核对原毫米参数到公共单位的换算，细粒度导入图直接使用公共 `box/context`。核实旧 `gap.DatumWindow.v2` 状态字段的读取方后再变更输出。[区域用例](../solutions/gap/tests/test_profile_regions.cpp) |
-| `glue.color_runs` | `std-image` 沿折线法向返回各站原始色段、两侧边界、无信息区间及成因。`solution-glue` 消费同一份观测，用邻站参考宽度和中心决定是否补缝，保留 `widthPolicy=extent`。 | 同一份原始观测可直接读出，也可接到 Glue 获得补缝结果。复用反光裂分、真实背景双段、ROI/图像边界截断用例，验证补缝不跨真实背景。以配对运行库核对 GlueSight 的必需 ID、`extent`、`unknownSpans` 和跟踪端 `coverageInformative`。[彩色用例](../solutions/glue/tests/test_color.cpp) · [宿主要求](https://github.com/liangyuR/ly-gluesight/blob/main/packaging/runtime.json) |
-| `gap.camera_guard` | `std-profile` 输出两条轮廓在重叠窗口内的有效样本数、高度差的有符号中位数和绝对值中位数。Gap 决定记录、保留哪一路或报错。 | 同一观测可分别驱动记录与择相机。验证阈值使用绝对值中位数，刚好等于上限时通过；重叠不足时标明未能评估并保留双路。切换保留侧时核对物理源身份。[相机一致性用例](../solutions/gap/tests/test_profile_guard.cpp) |
-| `gap.judge` | `std-metrology` 比较 Measurement 与标称值、上下偏差和边界余量。Gap 消费比较结果，将巡检超限降为 `margin`，无效测量给 `fail`。 | 同一测量可同时供正常与巡检策略读取，原值和单位一致。覆盖上下限等号、靠近边界、双向超限与无效输入；StandardGap 导入图及判定片段仍发布约定的 verdict。[现有判定](../solutions/gap/ops/measure.cpp) |
+| `gap.datum_window` | `std-geometry` 根据水平锚框、可选的同空间高度锚框、左右方向、偏移和尺寸生成窗口和空间上下文。选择钣金或缝侧锚框留在 StandardGap 图。 | 用普通 Box2D 独立构造左右窗口，覆盖独立高度锚框和空间不符。核对原毫米参数到公共单位的换算，细粒度导入图直接使用公共 `box/context`。核实旧 `gap.DatumWindow.v2` 状态字段的读取方后再变更输出。[区域用例](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/gap/tests/test_profile_regions.cpp) |
+| `glue.color_runs` | `std-image` 沿折线法向返回各站原始色段、两侧边界、无信息区间及成因。`solution-glue` 消费同一份观测，用邻站参考宽度和中心决定是否补缝，保留 `widthPolicy=extent`。 | 同一份原始观测可直接读出，也可接到 Glue 获得补缝结果。复用反光裂分、真实背景双段、ROI/图像边界截断用例，验证补缝不跨真实背景。以配对运行库核对 GlueSight 的必需 ID、`extent`、`unknownSpans` 和跟踪端 `coverageInformative`。[彩色用例](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/glue/tests/test_color.cpp) · [宿主要求](https://github.com/liangyuR/ly-gluesight/blob/main/packaging/runtime.json) |
+| `gap.camera_guard` | `std-profile` 输出两条轮廓在重叠窗口内的有效样本数、高度差的有符号中位数和绝对值中位数。Gap 决定记录、保留哪一路或报错。 | 同一观测可分别驱动记录与择相机。验证阈值使用绝对值中位数，刚好等于上限时通过；重叠不足时标明未能评估并保留双路。切换保留侧时核对物理源身份。[相机一致性用例](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/gap/tests/test_profile_guard.cpp) |
+| `gap.judge` | `std-metrology` 比较 Measurement 与标称值、上下偏差和边界余量。Gap 消费比较结果，将巡检超限降为 `margin`，无效测量给 `fail`。 | 同一测量可同时供正常与巡检策略读取，原值和单位一致。覆盖上下限等号、靠近边界、双向超限与无效输入；StandardGap 导入图及判定片段仍发布约定的 verdict。[现有判定](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/gap/ops/measure.cpp) |
 
 **有明确读方才进一步拆的入口。** 以下项目各有继续上提的条件，未满足时按现有场景归属交付。
 
 | 入口 | 候选边界与决定条件 |
 | --- | --- |
 | `gap.corner_vertex` | 复用几何交点；若下游需单独读取翼角，可公开从顶点指向两翼的有向角。用反向拟合线和近乎平行的翼面验证角度及退化行为；Gap 保留基准朝向、增益、零偏及 gap/flush 口径。 |
-| `gap.infer_profile` | 细粒度图优先试接已有 `ml.onnx_run`。同一模型须保留原双头批次、线程配置、有限输入 `[2,6,1280]`、输出 `[2,C,1280]`（1 ≤ C ≤ 256）的槽序与错误诊断；由模型适配端承担这些约定。等价后删除专用重复入口。[模型用例](../solutions/gap/tests/test_profile_model_ops.cpp) |
+| `gap.infer_profile` | 细粒度图优先试接已有 `ml.onnx_run`。同一模型须保留原双头批次、线程配置、有限输入 `[2,6,1280]`、输出 `[2,C,1280]`（1 ≤ C ≤ 256）的槽序与错误诊断；由模型适配端承担这些约定。等价后删除专用重复入口。[模型用例](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/gap/tests/test_profile_model_ops.cpp) |
 | `glue.polyline` | 有非 Glue 图需要构造折线时，公开带步长和弧长区间的标准入口，复用几何重采样核；像素走廊与叠画留场景。验证端点、顺序、原 2 px 步长，以及折线总长与示教检测区各自的 8 px 约定。先切换引用旧 ID 的宿主模板。 |
-| `glue.track_path`、`glue.color_track`、`glue.station_calipers`、`glue.edge_distance` | 读取方需要独立轨迹点、站位采样或候选边时复用标准图像能力。失跟重接、近胶/最强内边、跨站投票及中心/胶边基准归 Glue。改变接口的切片须验证跟踪重接、两种选边及 `no_inner`、`no_bead`、`incomplete_bead` 的区别。[飞拍用例](../solutions/glue/tests/test_flyshot.cpp) |
+| `glue.track_path`、`glue.color_track`、`glue.station_calipers`、`glue.edge_distance` | 读取方需要独立轨迹点、站位采样或候选边时复用标准图像能力。失跟重接、近胶/最强内边、跨站投票及中心/胶边基准归 Glue。改变接口的切片须验证跟踪重接、两种选边及 `no_inner`、`no_bead`、`incomplete_bead` 的区别。[飞拍用例](https://github.com/liangyuR/lyFlow/blob/v2.0.3/solutions/glue/tests/test_flyshot.cpp) |
 
 ### 退役与发行验收
 
@@ -261,7 +261,7 @@ M4d-1 先行；M4d-2 与 M4d-4 互不依赖可并行；M4d-5b 改变端口契约
 | 实施切片 | 交付内容 | 验收 |
 | --- | --- | --- |
 | 1 · 退役 Gap 旧黑盒 | 从历史对照工具移除向新图注入 `gap.measure_reference` 的路径；需要历史比较时直接读取已有基线 CSV。同片删除该节点的注册、专用旧引擎与缓存、`gap-compat` 模块及其构建、发布和工具引用。清单允许退役项表达“无等价替代”。 | 导入一份 StandardGap 配置，生成图只使用当前节点；对照工具可直接比较新图输出与基线。运行库不导出旧 ID，读取含它的图时能定位该节点。退役后无同名别名、兼容开关或调用旧引擎的回退路径。[历史对照工具](../solutions/gap/tools/lyflow_ab.py) |
-| 2 · 统一正式包 | 以一份发布配置交付标准算子包及 `solution-gap`、`solution-dts`、`solution-glue`。在现行正式组合中加入 DTS，移除已退役模块，保留现用导入、模板、模型能力与 OpenCV、PCL 等标准依赖。三个场景继续由各自的包注册。同步安装资产、依赖缓存身份和发包文档。[发布清单](../packaging/release.json) | 从同一暂存运行库读取 manifest，核对三个场景的关键能力和所属包，以及已退役的 Gap、DTS 入口缺席。用安装后的 CLI 分别运行 StandardGap 导入图、[DTS 轮廓图](../solutions/dts/graphs/default-profile.lyflow.json)和 [Glue 测量图](../solutions/glue/graphs/measure.lyflow.json)，为各图提供对应输入。用现有源码树外 SDK 消费工程验证安装路径与资源解析。 |
+| 2 · 统一正式包 | 以一份发布配置交付标准算子包及 `solution-gap`、`solution-dts`、`solution-glue`。在现行正式组合中加入 DTS，移除已退役模块，保留现用导入、模板、模型能力与 OpenCV、PCL 等标准依赖。三个场景继续由各自的包注册。同步安装资产、依赖缓存身份和发包文档。[发布清单](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packaging/release.json) | 从同一暂存运行库读取 manifest，核对三个场景的关键能力和所属包，以及已退役的 Gap、DTS 入口缺席。用安装后的 CLI 分别运行 StandardGap 导入图、[DTS 轮廓图](../solutions/dts/graphs/default-profile.lyflow.json)和 [Glue 测量图](../solutions/glue/graphs/measure.lyflow.json)，为各图提供对应输入。用现有源码树外 SDK 消费工程验证安装路径与资源解析。 |
 | 3 · 验证 Agent 使用发布契约搭图 | Agent 从旧资料中提取输入、目标输出、参数绑定、单位和帧；通过 MCP 查询新版节点并生成单独的候选图。对公开端口或参数已变化的用户组合，在当前编辑器保存组合后，用外层图验证绑定。[MCP 图工具](mcp.md) | 在切片 2 的同一候选版本上，以一条 M6 拆分过的业务链完成下述端到端验证。发布说明给出新版搭图示例、退役入口和已知语义差异。 |
 
 **Agent 搭图验收示例。** 以“读取测点附近的高度，必要时按高度更新工件位姿”为任务。用 `get_environment` 确认 HTTP 运行库与 CLI 的版本和能力一致，再用 `list_operators`、`get_operator` 读取实际 ID、端口、单位及有效性约定。Agent 按用户需要搭出只读高度的图，或接上下游位姿更新节点，将候选图另存。再从标准窗口或原始彩色卡尺中选一条已交付链，验证 Agent 可以只取公共观测，也可接入场景策略。使用同一组图参数、配方和样本执行 `validate_graph`、`plan_graph`、`run_graph`，读取命名输出，核对高度单位、无效测量的表达及需要时的位姿结果。数据不足以确定单位、坐标帧或判据时，向使用者指出缺项。验收以新版业务结果为准。[高度测量示例](../examples/p2-height-rules.lyflow.json)
