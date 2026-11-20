@@ -12,7 +12,7 @@
 | --- | --- |
 | `pnpm check` | 校验随包 manifest 和公共图、事件、配方等 schema 夹具。构建独立客户端、CLI、桌面和 React 示例，运行 Rust、编辑器、可视化与 MCP 测试。 |
 | `./scripts/check.ps1 -Steps schema,frontend` | 单独选择 manifest、schema、bridge、client、cli、frontend、mcp 步骤。MCP 集成测试需要先构建 debug CLI。 |
-| `cargo test --locked --manifest-path bridge/Cargo.toml` | SDK DLL 的加载、ABI 封送、命令行执行、缓存、宿主注入与 Python 节点。跨进程缓存按首次运行实际落盘的节点核对命中。 |
+| `cargo test --locked --manifest-path bridge/Cargo.toml` | SDK DLL 的加载、ABI 封送、命令行执行、缓存、宿主注入与 Python 节点。跨进程缓存按首次运行实际落盘的节点核对命中。热重载在独立测试进程中替换 DLL，其他并行用例继续使用自己的引擎状态。 |
 | `pnpm --filter @lyflow/editor test`、`pnpm --filter @lyflow/visualization test` | 图操作、撤销、标签、运行状态、图像和点云显示。React 18/19 的类型检查见编辑器的 `typecheck`。 |
 | `pnpm --filter @lyflow/mcp test` | MCP 工具、资源、HTTP/CLI 的真实运行结果与调参流程。指定本地 CLI 时，集成冒烟的依赖缺失会直接报错。 |
 | `pnpm e2e:packaged --only noderun:suiteSmart` | 从构建产物暂存独立目录，启动 Tauri/WebView2，执行点云图并验证单节点运行和缓存。桌面及 CLI 须已构建，分组选择见[交互验收](../scripts/e2e/README.md)。 |
