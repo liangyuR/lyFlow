@@ -21,7 +21,7 @@ function Invoke-RestMethod {
     if ($Uri -ceq "https://api.github.com/repos/liangyuR/lyFlow/contents/package.json?ref=$toolTag") {
         return [pscustomobject]@{ version = $toolTag.Substring(1); lyflowEngineVersion = $state.reviewed.Version }
     }
-    if ($Uri -ceq "https://api.github.com/repos/liangyuR/lyFlow/releases/tags/$toolTag" -and $Headers) {
+    if ($Uri -ceq "https://api.github.com/repos/liangyuR/lyFlow/releases/tags/$toolTag" -and $Headers.ContainsKey('X-GitHub-Api-Version')) {
         return @{ draft = $state.scenario -eq 'draft'; prerelease = $false; published_at = 'published'; tag_name = $toolTag }
     }
     $engineTag = ([uri]$state.reviewed.Sdk.url).Segments[-2].TrimEnd('/')

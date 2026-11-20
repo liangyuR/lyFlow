@@ -21,7 +21,7 @@ export function App() {
 编辑器以 TypeScript 源码 tarball 随 LyFlow 发布，不发布到 npm registry。使用与运行库配套的发布资产安装，例如：
 
 ```powershell
-pnpm add ./lyflow-editor-vX.Y.Z.tgz
+pnpm add ./lyflow-editor-vX.Y.Z.tgz @tauri-apps/api@^2
 ```
 
 仓库内开发通过 workspace 依赖引用。资产名、版本与发布规则见 [发包指南](../../docs/deployment/packaging.md)。
@@ -37,7 +37,7 @@ peerDependencies —— **必须与宿主共用同一份实例**，否则包里�
 | `three` | `>=0.160.0 <1` |
 | `zustand` | `^5.0.2` |
 | `qing-steel` | `^0.11.2` |
-| `@tauri-apps/api` | `^2`，**可选** —— 只有用 `TauriTransport` 才需要 |
+| `@tauri-apps/api` | `^2`，浏览器和桌面宿主编译编辑器源码时都需要 |
 
 `qing-steel` 不在 npm registry，宿主按它的发布 tarball 直接依赖：
 

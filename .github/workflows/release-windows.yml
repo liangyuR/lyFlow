@@ -46,6 +46,7 @@ jobs:
       - name: 校验锁定的 SDK、runtime 与 NuGet
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           ENGINE: ${{ steps.select.outputs.engine }}
         run: |
           . ./scripts/reviewed-engine-release.ps1

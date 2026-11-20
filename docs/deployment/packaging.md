@@ -50,3 +50,5 @@ python -m pip install -r scripts/requirements.txt
 ```
 
 [原生引擎仓](https://github.com/liangyuR/lyflow-engine)维护原生构建输入、发布组合、C ABI、运行库探针与原生 SDK 验收。历史单仓发行的构建步骤保存在对应的工具 tag 中。
+
+Actions 查询 GitHub Release 元数据时使用当前公共仓的读取权限。所有引擎文件均从锁内的公开下载地址匿名获取。

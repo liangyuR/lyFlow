@@ -132,6 +132,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: 匿名恢复锁定的 SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $sdk = ./scripts/restore-native-sdk.ps1 -Destination "$env:RUNNER_TEMP/native-sdk"

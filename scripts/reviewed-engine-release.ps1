@@ -23,7 +23,9 @@ function Get-PublishedEngineRelease {
     if ($Release.Sdk.url -cnotmatch '^https://github\.com/liangyuR/lyFlow/releases/download/([^/]+)/[^/]+$') { throw 'Expected a public LyFlow Release URL in the engine lock.' }
     $tag = $Matches[1]
     if ($tag -cnotin @("v$($Release.Version)", "engine-assets-v$($Release.Version)")) { throw "Engine asset tag $tag does not match the lock." }
-    $published = Invoke-RestMethod -Uri "https://api.github.com/repos/liangyuR/lyFlow/releases/tags/$tag" -ErrorAction Stop
+    $headers = @{}
+    if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
+    $published = Invoke-RestMethod -Uri "https://api.github.com/repos/liangyuR/lyFlow/releases/tags/$tag" -Headers $headers -ErrorAction Stop
     if ($published.tag_name -cne $tag -or $published.draft -or $published.prerelease -or -not $published.published_at) {
         throw "Engine Release $tag must be published and cannot be draft or prerelease."
     }
