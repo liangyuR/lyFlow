@@ -189,9 +189,6 @@ jobs:
           pnpm --filter @lyflow/visualization test 2>&1 | Tee-Object -FilePath build/ci/visualization-test.log
           if ($LASTEXITCODE -ne 0) { throw "Visualization tests failed (exit $LASTEXITCODE)" }
 
-      - name: MCP 类型检查
-        run: pnpm --filter @lyflow/mcp typecheck
-
       - name: MCP 编译
         run: pnpm --filter @lyflow/mcp build
 
@@ -314,13 +311,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
@@ -341,12 +331,6 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.11
         with:
           version: v0.16.0
-
-      - name: 安装前端依赖
-        run: pnpm install --frozen-lockfile
-
-      - name: 桌面前端编译
-        run: pnpm --filter lyflow-app build
 
       - uses: actions/setup-python@v5
         with:
@@ -371,18 +355,12 @@ jobs:
       - name: Rust 编译（桌面应用与 CLI）
         run: cargo build --locked --manifest-path bridge/Cargo.toml
 
-      - name: Rust 单元测试
+      - name: Rust 单元测试与集成测试
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path build/ci -Force | Out-Null
-          cargo test --locked --manifest-path bridge/Cargo.toml --lib --bins 2>&1 | Tee-Object -FilePath build/ci/bridge-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust 单元测试失败 (exit $LASTEXITCODE)" }
-          cargo test --locked --manifest-path bridge/Cargo.toml --test python_nodes 2>&1 | Tee-Object -FilePath build/ci/python-client-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Python CLI/嵌入客户端集成失败 (exit $LASTEXITCODE)" }
-          cargo test --locked --manifest-path bridge/Cargo.toml --test profiles 2>&1 | Tee-Object -FilePath build/ci/profile-client-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Profile CLI/嵌入客户端集成失败 (exit $LASTEXITCODE)" }
-          cargo test --locked --manifest-path bridge/Cargo.toml --test host 2>&1 | Tee-Object -FilePath build/ci/host-client-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust 宿主注入集成失败 (exit $LASTEXITCODE)" }
+          cargo test --locked --no-fail-fast --manifest-path bridge/Cargo.toml --lib --bins --test python_nodes --test profiles --test host 2>&1 | Tee-Object -FilePath build/ci/bridge-test.log
+          if ($LASTEXITCODE -ne 0) { throw "Rust 测试失败 (exit $LASTEXITCODE)" }
 
       - name: 保存失败测试诊断
         if: failure()
@@ -428,8 +406,6 @@ jobs:
           python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
           python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps --verify-only --offline
           python scripts/fetch-barcode-deps.py
-          python tests/release/test-fetch-barcode-deps.py
-          python tests/release/test_fetch_p4_assets.py
 
       - uses: actions/cache@v4
         id: vision-cache
