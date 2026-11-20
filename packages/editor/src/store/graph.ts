@@ -37,7 +37,7 @@ import {
   type RecipeEntry,
   type RecipeSet,
 } from '../lib/recipes';
-import { effectiveValue, pruneUnknownParams, sparseSet, valueEquals } from '../lib/params';
+import { effectiveValue, sparseSet, valueEquals } from '../lib/params';
 import {
   augmentOperators,
   composeSubgraph as composeInto,
@@ -866,11 +866,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         nodes.push({
           id,
           op: op.id,
-          opVersion: n.opVersion ?? op.version,
-          params:
-            n.opVersion && n.opVersion !== op.version
-              ? structuredClone(n.params ?? {})
-              : pruneUnknownParams(op, n.params),
+          ...(n.opVersion === undefined ? {} : { opVersion: n.opVersion }),
+          params: plain(n.params ?? {}),
           ui,
         });
       }
@@ -1142,8 +1139,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         const sub = subgraphIdOf(n.op);
         const target = sub !== null ? (merge.ids.get(sub) ?? sub) : null;
         const opId = target !== null ? SUBGRAPH_OP_PREFIX + target : n.op;
-        const op = manifest.get(opId);
-        if (!op) {
+        if (!manifest.has(opId)) {
           missing.push(n.op); // 剪贴板里的算子在当前 core 里不存在，跳过
           continue;
         }
@@ -1157,8 +1153,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         newNodes.push({
           id,
           op: opId,
-          opVersion: n.opVersion ?? op.version,
-          params: pruneUnknownParams(op, n.params),
+          ...(n.opVersion === undefined ? {} : { opVersion: n.opVersion }),
+          params: plain(n.params ?? {}),
           // 静音的节点粘出来还是静音的（以前丢了）
           ...(n.bypass ? { bypass: true } : {}),
           ui: {

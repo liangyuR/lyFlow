@@ -157,7 +157,8 @@ test('片段插入生命周期：外部自动连接、内部连线、撤销与�
             {
               id: 'flush',
               op: 't.flush',
-              params: { unknown: 42 },
+              opVersion: '1.0.0',
+              params: { mode: 'registration' },
               ui: { position: { x: 200, y: 0 } },
             },
             { id: 'judge', op: 't.judge', ui: { position: { x: 400, y: 0 } } },
@@ -183,8 +184,15 @@ test('片段插入生命周期：外部自动连接、内部连线、撤销与�
         const line = doc().nodes.find((n) => n.op === 't.line');
         assert.equal(line.opVersion, '0.9.0');
         assert.deepEqual(line.params, { historicalDistanceMm: 1 });
-        assert.equal(doc().nodes.find((n) => n.op === 't.flush').opVersion, '1.0.0');
-        assert.deepEqual(doc().nodes.find((n) => n.op === 't.flush').params, {});
+        const flush = doc().nodes.find((n) => n.op === 't.flush');
+        assert.equal(flush.opVersion, '1.0.0');
+        assert.deepEqual(flush.params, { mode: 'registration' });
+        assert.ok(
+          !Object.hasOwn(
+            doc().nodes.find((n) => n.op === 't.judge'),
+            'opVersion',
+          ),
+        );
         assert.equal(line.ui.title, '基准线');
         assert.deepEqual(line.ui.position, { x: 500, y: 300 });
         for (const e of edgesInto(line.id)) assert.equal(e.from.node, locate);
@@ -234,7 +242,14 @@ test('节点剪贴板契约：普通节点与跨图子图定义的身份、连�
         useGraphStore.getState().setBypass([l], true);
         const doc = useGraphStore.getState().doc;
         const clip = {
-          nodes: doc.nodes.filter((n) => [r, l].includes(n.id)),
+          nodes: doc.nodes
+            .filter((n) => [r, l].includes(n.id))
+            .map((n) => {
+              const stored = { ...n };
+              if (n.id === r) stored.params = { mode: 'registration' };
+              else delete stored.opVersion;
+              return stored;
+            }),
           edges: doc.edges.filter((e) => e.from.node === r && e.to.node === l),
         };
         assert.equal(clip.edges.length, 1, '两个节点之间自动连上了一条');
@@ -247,6 +262,9 @@ test('节点剪贴板契约：普通节点与跨图子图定义的身份、连�
         const after = useGraphStore.getState().doc;
         const [pr, pl] = pasted.nodeIds.map((id) => after.nodes.find((n) => n.id === id));
         assert.ok(![r, l].includes(pr.id) && ![r, l].includes(pl.id), 'id 重新分配');
+        assert.equal(pr.opVersion, '1.0.0');
+        assert.deepEqual(pr.params, { mode: 'registration' });
+        assert.ok(!Object.hasOwn(pl, 'opVersion'));
         assert.deepEqual(
           [pr.ui.position, pl.ui.position],
           [

@@ -71,19 +71,6 @@ export function sparseSet(
   return next;
 }
 
-/** 丢弃 manifest 里已经不存在的参数键。打开老图时用。 */
-export function pruneUnknownParams(
-  op: OperatorDesc,
-  params: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const known = new Set(op.params.map((p) => p.name));
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(params ?? {})) {
-    if (known.has(k)) out[k] = v;
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------- 参数联动
 
 export function isConditionMet(
