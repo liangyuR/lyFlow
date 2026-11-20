@@ -126,8 +126,6 @@ struct Chain {
     return step(bundle, "dts.profile_bundle");
   }
 
-  double flushMm() { return flush.out("flush").asMeasurement()->value; }
-
 private:
   bool step(Call& c, const char* id, const std::unordered_map<std::string, Value>& overrides = {}) {
     status = c.run(id, overrides);
@@ -259,7 +257,7 @@ TEST_CASE("profile_clean 的 minIntensity 按亮度裁点") {
   CHECK(out->intensity.size() == out->pointCount());
 }
 
-TEST_CASE("现场样本：整条链跑得通，并打印与宿主 Python 旧算法的差值") {
+TEST_CASE("现场样本：测量有效，A / B 与宿主 Python 的面差相差 0.3 mm 以内") {
   for (int i = 0; i < td::kFieldProfileCount; ++i) {
     const td::FieldProfile& fp = td::kFieldProfiles[i];
     const std::string tag(fp.tag);
@@ -275,24 +273,8 @@ TEST_CASE("现场样本：整条链跑得通，并打印与宿主 Python 旧算�
     MESSAGE(tag << "（" << std::string(fp.ply) << "，Python 参数组 " << std::string(fp.paramSet)
                 << "） dts = " << m->value << " mm，Python = " << fp.flushPyMm
                 << " mm，Δ = " << delta << " mm");
-  }
-}
-
-TEST_CASE("现场样本 A / B 与 Python 旧算法差在 0.3 mm 以内") {
-  // 2026-09-17 的对照（packs/dts/README.md「与宿主 Python 旧算法的对照」）：
-  // A 第 0 条 Δ = +0.212 mm、B 第 0 条 Δ = −0.110 mm。挑面挑的是同一族面，
-  // 差值来自底部点的取法不同（Python 的 foot_arc_apex vs 这里的「凹-凸-凹」）。
-  // D 不在这里 —— V 形脚那一条差 59 mm，原因见 README 的「已知差距」。
-  const double kTolMm = 0.3;
-  for (int i = 0; i < td::kFieldProfileCount; ++i) {
-    const td::FieldProfile& fp = td::kFieldProfiles[i];
-    const std::string tag(fp.tag);
-    if (tag == "D")
-      continue;
-    CAPTURE(tag);
-    Chain chain;
-    REQUIRE(chain.run(cloudOf(fp.x, fp.z, fp.n)));
-    CHECK(std::fabs(chain.flushMm() - fp.flushPyMm) < kTolMm);
+    if (tag != "D")
+      CHECK(std::fabs(delta) < 0.3);
   }
 }
 

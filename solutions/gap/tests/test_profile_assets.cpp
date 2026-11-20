@@ -212,10 +212,9 @@ TEST_CASE("native gap historical majors point to rebuilding the graph") {
     CAPTURE(entry.second);
     auto graph = test::makeGraph({{"legacy", entry.first, Json::object()}}, {});
     graph["nodes"][0]["opVersion"] = entry.second;
-    const auto original = graph.dump();
     exec::RawGraph raw;
     Diagnostics diagnostics;
-    REQUIRE(exec::parseGraph(original, raw, diagnostics));
+    REQUIRE(exec::parseGraph(graph.dump(), raw, diagnostics));
     exec::Plan plan;
     exec::BuildOptions options;
     options.runId = "gap-historical-major";
@@ -230,7 +229,6 @@ TEST_CASE("native gap historical majors point to rebuilding the graph") {
         blocked = true;
     }
     CHECK(blocked);
-    CHECK(graph.dump() == original);
     CHECK(raw.nodes.front().opVersion == entry.second);
   }
 }

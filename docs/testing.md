@@ -21,7 +21,7 @@
 | Python SDK 与 worker | `python -B -m unittest discover -s python/tests -v` | Python 3.11 及以上与 NumPy；检查节点发现、数据交换和 worker 行为。 |
 | MCP 单元测试 | `pnpm --filter @lyflow/mcp test:unit` | 6 个文件、32 个用例。不含需要 CLI 的集成冒烟。完整入口为 `pnpm --filter @lyflow/mcp test`。 |
 | glue / gap 门禁 | `pnpm check:glue` / `pnpm check:gap` | 运行相应包的专项检查；真实数据和历史对拍需额外配置，不能把人造帧结果当现场结论。 |
-| 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2；完整领域场景需带 `gap;dts`。 |
+| 桌面交互 | `pnpm e2e` | CDP 驱动真实 Tauri/WebView2。领域场景需要对应的 solution 包，多模板分组还需要 `gap-template` 模块。 |
 | 桌面构建产物 | `pnpm e2e:packaged` | 同一套桌面交互断言验证构建产物，不等于运行库/SDK 发包验证。 |
 | 浏览器宿主 | `pnpm e2e:http` | HTTP 传输、结果取数与 React 宿主链路。 |
 | Windows 发包 | `pnpm run package` | 固定标准包、solution-glue、solution-gap、solution-dts，生成运行库/SDK ZIP、编辑器 tarball 和正式运行库 NuGet 包；详见 [发包契约](deployment/packaging.md)。 |
@@ -29,7 +29,8 @@
 桌面完整验收及按分组复验：
 
 ```powershell
-$env:LYFLOW_PACKS = 'gap;dts'
+$env:LYFLOW_PACKS = 'solution-gap;solution-dts'
+$env:LYFLOW_MODULES = 'gap-template;gap-model;gap-import'
 pnpm e2e
 pnpm e2e --only m3:suitePanels,params_p4
 ```
@@ -73,7 +74,7 @@ CTest 按日常 Core、Core `stress` 和公共内核运行相应 doctest。只�
 | 点云保序删点与旧紧凑模式诊断 | `packs/std-pointcloud/tests/test_p5_primitive_crop.cpp` 覆盖 `NaN` 标记、点序、通道、同源索引、`segment.extract_indices.rest`，以及显式、默认或绑定的旧紧凑模式触发整图校验失败。 |
 | 涂胶搜索、示教、灰度/彩色测量与飞拍场景 | `solutions/glue/tests/`，涵盖随包彩色、灰度和飞拍图。 |
 | 宿主注入（整节点与输入注入、只给部分输出、注入进缓存键） | `core/tests/test_flow.cpp`；Profile 的 C ABI 注入在 `core/tests/test_profile_c_api.cpp`。 |
-| Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`；StandardGap 导入图由宿主注入两路 Profile 运行在 `solutions/gap/tests/test_import_bundle.cpp`。 |
+| Gap/DTS 场景、导入器及退役诊断 | `solutions/gap/tests/`、`solutions/dts/tests/`。StandardGap 导入图使用宿主注入的两路 Profile。DTS 现场样本 A、B、D 各运行一次，检查测量有效性，并对 A、B 检查与 Python 基线的 0.3 mm 容差。 |
 | 锚框窗口、重叠高度观测和公差比较 | 几何计算在 `kernels/tests/test_geometry.cpp`，窗口空间检查在 `packs/std-geometry/tests/test_geometry.cpp`，观测在 `packs/std-profile/tests/test_compare_overlap.cpp`，比较在 `packs/std-metrology/tests/test_metrology.cpp`。 |
 | 刚体点对距离、配准变换及旧参数诊断 | `packs/std-geometry/tests/test_p5_pose_geometry.cpp` 覆盖距离检查与配准结果、退化配准失败，以及旧 `mode` 参数和图参数绑定的校验错误。 |
 | 安装后的 CLI/SDK 交付契约（EXACT 版本、链接与依赖闭包、覆盖生效与还原、身份绑定、CLI 与嵌入宿主一致） | `tests/release/*_contract.py`、`tests/release/p5_sdk_consumer/`、`bridge/tests/p6_delivery_contract.py`；产品版本取自 `scripts/release-common.ps1` 的 `Get-ReleaseVersion` 等单一来源，不在测试里写死。对应数值判据在 `core/tests/integration/p4_recognition.cpp`、`p5_depth_geometry.cpp` 及各包测试。 |
@@ -88,13 +89,13 @@ CTest 按日常 Core、Core `stress` 和公共内核运行相应 doctest。只�
 
 跨语言规则优先扩充 `schema/fixtures/recipes/`、`schema/examples/` 等共享夹具；全类型参数示例位于 `examples/param-showcase.lyflow.json`。C++ 辅助在 `core/tests/helpers.h`，CLI 测试辅助由 `bridge/src/cli.rs` 的 `test_support` 提供。
 
-P3、P4 和 P5 跨接口用例以原生调度的默认、覆盖结果为基准。C ABI 和 C++ SDK 各自运行默认、覆盖、恢复默认三步，并与相应基准比较输出和所需的原生缓冲区。P5 圆孔的正面和斜面精度归图像包测试，整图只跑一次以验证位姿接入圆盘投影后的掩膜与实例绑定。
+启用相关包和 P4 模型时，P3–P5 的 20 张图各在原生调度层运行默认和覆盖两种配置。三张图再通过 C ABI 和动态 C++ SDK 各执行默认、覆盖、恢复默认三步，与调度基准比对。工作空间图检查变换与 Record，原生标注图检查图像与掩膜 Tensor，深度检测图检查点云、索引及来源身份。上述矩阵合计 58 次整图执行。另有 P5 圆孔图运行一次，检查位姿接入圆盘投影后的掩膜与实例绑定；正面和斜面精度归图像包测试。
 
 ASCII PCD 的短语料、大文件跨块和随机词分别运行。P2 CAD 匹配的三档各通过 C ABI 运行原始模型，另用 balanced 档验证 C++ SDK 读取二进制保存后的模型。
 
-安装后的 P5 CLI 对八张图各运行一次默认参数。深度滤波和位姿配准两张代表图各补覆盖与恢复默认，共 12 次 `validate` 和 12 次 `run`。
+安装后的 P4 CLI 对七张图各验证默认结果和专属覆盖的效果，条码图再验证恢复默认，共 15 次 `validate` 和 15 次 `run`。P5 CLI 对八张图各运行一次默认参数，深度滤波和位姿配准两张代表图各补覆盖与恢复默认，共 12 次 `validate` 和 12 次 `run`。
 
-P0 检测图在调度层检查数值真值及双向惰性分支。C ABI 和 C++ SDK 的参数覆盖、恢复默认和结果交付由 P2 表达式及 P4 条码用例覆盖。
+P0 检测图在调度层检查数值真值及双向惰性分支。P2 表达式以及上述三张代表图覆盖 C ABI 和 C++ SDK 的参数覆盖、恢复默认和结果交付。
 
 ## 结果应如何解释
 
@@ -130,4 +131,4 @@ P3永久回归位于std-image的test_p3_markers/workspace/shape_matching.cpp，�
 
 `core/tests/test_frames.cpp`覆盖所有原生载荷、来源身份与缓存独立所有权、坏归档/预算、FIFO容量/顺序/重置/取消。深度缺陷和截面的中间记录覆盖来源云、截面云重绑及加载后再次保存。`core/tests/test_python.cpp`继续通过真实worker验证新直接几何/Tensor端口、版本错误与恢复。`python -B -m unittest discover -s python/tests -v`运行SDK侧测试。
 
-安装后的新CLI与C++17消费者不在 CI 中运行，改动交付链时在本地执行：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。编辑器功能测试总数保持100以下，无新增跳过；查看器浏览器证据与样例见[P6指南](p6-examples.md)。
+安装后的新CLI与C++17消费者不在 CI 中运行，改动交付链时在本地执行：`python bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`验证真实大数组逐字节往返、只读/重算、时间筛选、会话、文件日志及loopback ACK。发布入口也执行同一安装后契约。查看器浏览器证据与样例见[P6指南](p6-examples.md)。

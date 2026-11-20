@@ -485,6 +485,52 @@ async function suiteCancel(cdp, report) {
   return ids;
 }
 
+async function suitePackagedCore(cdp, report, staged) {
+  report.section('安装包（干净目录）');
+  const { kind, info, hasReroute, packs } = await cdp.eval(`
+    const transport = window.__lyflow.transport;
+    const [info, manifest] = await Promise.all([transport.getCoreInfo(), transport.getManifest()]);
+    return {
+      kind: transport.kind,
+      info,
+      hasReroute: manifest.operators.some((op) => op.id === 'util.reroute'),
+      packs: [...new Set(manifest.operators.map((op) => op.pack?.split('@')[0]).filter(Boolean))].sort(),
+    };
+  `);
+  report.eq('桌面壳通过 Tauri 读取 core', kind, 'tauri');
+  const desktopConfig = JSON.parse(
+    fs.readFileSync(new URL('../../bridge/tauri.conf.json', import.meta.url), 'utf8'),
+  );
+  report.eq('core 版本与桌面构建版本一致', info.version, desktopConfig.version);
+  report.ok('core 清单包含平台转接算子 util.reroute', hasReroute);
+  report.ok('CLI 也随包', staged.cli != null && fs.existsSync(staged.cli), String(staged.cli));
+  const standardPacks = !['0', 'OFF', 'FALSE'].includes(
+    (process.env.LYFLOW_STD_PACKS ?? '').toUpperCase(),
+  );
+  const modules = (process.env.LYFLOW_MODULES ?? '').split(';').map((s) => s.trim());
+  if (standardPacks || modules.includes('ml-runtime') || modules.includes('gap-model')) {
+    const ort = ['onnxruntime.dll', 'onnxruntime_providers_shared.dll'];
+    const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
+    report.eq('onnxruntime 两个 DLL 都在干净目录里', present, ort);
+  }
+  const release = JSON.parse(
+    fs.readFileSync(new URL('../../packaging/release.json', import.meta.url), 'utf8'),
+  );
+  const want = [
+    ...(standardPacks ? release.packs.filter((id) => id.startsWith('std-')) : []),
+    ...(process.env.LYFLOW_PACKS ?? '')
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ];
+  report.ok(
+    `打包的 core 带着这次构建要的包（${want.join('、')}）`,
+    want.every((p) => packs.includes(p)),
+    `有：${JSON.stringify(packs)}；要：${JSON.stringify(want)}`,
+  );
+  report.eq('打包产物不开热重载（开发期装置，只在 debug 构建里有）', info?.hotReload, false);
+}
+
 // ---------------------------------------------------------------------- main
 
 async function main() {
@@ -547,45 +593,8 @@ async function main() {
     )
     .catch(() => null);
 
-  if (packaged) {
-    report.section('安装包（干净目录）');
-    report.ok('打包产物启动成功并加载到了 core', staged.dlls >= 20, `${staged.dlls} 个 DLL`);
-    const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
-    report.ok('core 版本可读', Boolean(info?.version), JSON.stringify(info));
-    // 内置算子 16 个；库目录里可能还有别的，所以只断言下界
-    report.ok(
-      '内置算子全在（≥ 16）',
-      (info?.operatorCount ?? 0) >= 16,
-      String(info?.operatorCount),
-    );
-    report.ok('CLI 也随包', staged.cli != null && fs.existsSync(staged.cli), String(staged.cli));
-    // ml.onnx_run 要这两个 DLL，而它们不在 vcpkg 里 —— applocal 看不见，
-    // 是 packs/std-ml 的 cmake 拷进 core 的 bin/ 的（ADR-0015）。那个包默认开，所以永远随包。
-    const ort = ['onnxruntime.dll', 'onnxruntime_providers_shared.dll'];
-    const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
-    report.eq('onnxruntime 两个 DLL 都在干净目录里', present, ort);
-    // 装进去的 core 就是这次构建的那一份：以前 bundle.resources 指向 build-core.ps1 的另一棵构建树，
-    // 启用业务包后打出来的安装包里仍没有对应算子，这里的数照样对得上 —— 只看算子个数抓不到
-    const packs = await cdp.eval(`
-      return [...new Set([...window.__lyflow.stores.manifest.getState().operatorsById.values()]
-        .map((o) => (o.pack ?? '').split('@')[0]).filter(Boolean))].sort();
-    `);
-    const want = [
-      ...(process.env.LYFLOW_STD_PACKS === '0' ? [] : ['std-image', 'std-ml', 'std-pointcloud']),
-      ...(process.env.LYFLOW_PACKS ?? '')
-        .split(';')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    ];
-    report.ok(
-      `打包的 core 带着这次构建要的包（${want.join('、')}）`,
-      want.every((p) => packs.includes(p)),
-      `有：${JSON.stringify(packs)}；要：${JSON.stringify(want)}`,
-    );
-    report.eq('打包产物不开热重载（开发期装置，只在 debug 构建里有）', info?.hotReload, false);
-  }
-
   try {
+    if (packaged) await suitePackagedCore(cdp, report, staged);
     if (only === null || only.preamble) {
       const { pcdName } = await suiteChinesePath(cdp, report, ws);
       const { ids } = await suiteDemoPipeline(cdp, report, ws, pcdName);

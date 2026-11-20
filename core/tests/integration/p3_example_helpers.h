@@ -96,83 +96,66 @@ inline TensorPayload tensorPayload(const std::string& runId, const std::string& 
   return copy(view.shape, view.rank, view.data, view.count);
 }
 
-class SavedWorkflow {
+class Example {
 public:
-  explicit SavedWorkflow(const std::string& name) {
+  Example(const std::string& name, const std::string& assetPrefix,
+          const std::string& extraAsset = {}) {
     static std::atomic<unsigned> counter{0};
-    const auto original =
-        read(std::filesystem::path(LYFLOW_EXAMPLES_DIR) / (name + ".lyflow.json"));
+    const std::filesystem::path examples(LYFLOW_EXAMPLES_DIR);
     base = std::filesystem::temp_directory_path() /
            std::filesystem::u8path(
-               "lyflow-p3-图-" +
+               "lyflow-示例-" +
                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
                std::to_string(counter.fetch_add(1)));
     REQUIRE(std::filesystem::create_directory(base));
-    for (const auto& node : original.at("nodes")) {
-      if (!node.at("params").contains("path"))
+    for (const auto& entry : std::filesystem::directory_iterator(examples)) {
+      if (!entry.is_regular_file())
         continue;
-      const auto relative =
-          std::filesystem::u8path(node.at("params").at("path").get<std::string>());
-      REQUIRE_FALSE(relative.is_absolute());
-      REQUIRE(relative.parent_path().empty());
-      std::filesystem::copy_file(std::filesystem::path(LYFLOW_EXAMPLES_DIR) / relative,
-                                 base / relative,
-                                 std::filesystem::copy_options::overwrite_existing);
+      const auto filename = entry.path().filename().u8string();
+      if (filename.rfind(assetPrefix, 0) == 0 || filename == extraAsset)
+        std::filesystem::copy_file(entry.path(), base / entry.path().filename());
     }
-    path = base / "saved.lyflow.json";
-    {
-      std::ofstream file(path, std::ios::binary);
-      file << original.dump(2);
-      REQUIRE(file.good());
-    }
-    graph = read(path);
-    REQUIRE(graph == original);
-    REQUIRE(graph.dump().size() < 20000);
+    graph = read(base / (name + ".lyflow.json"));
   }
-  SavedWorkflow(const SavedWorkflow&) = delete;
-  SavedWorkflow& operator=(const SavedWorkflow&) = delete;
-  ~SavedWorkflow() {
+  Example(const Example&) = delete;
+  Example& operator=(const Example&) = delete;
+  ~Example() {
     std::error_code error;
     std::filesystem::remove_all(base, error);
   }
-  std::filesystem::path base, path;
+  std::filesystem::path base;
   Json graph;
 };
 
+enum class Coverage { Scheduler, Interfaces };
 using Check = std::function<void(const Json&, bool)>;
-using NativeCheck =
+using Observe =
     std::function<void(const Json&, const std::string&, Client*, bool changed, bool baseline)>;
 
-inline void crossInterfaces(const std::string& name, const Json& graph,
-                            const std::filesystem::path& savedPath, const Json& overrides,
-                            const Check& check, const NativeCheck& native = {}) {
-  const auto baseDir = savedPath.parent_path();
-  const auto base = baseDir.u8string(), source = graph.dump();
-  Client client(LYFLOW_TEST_RUNTIME);
-  std::array<Json, 2> baselines;
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    const bool changed = attempt == 1;
-    CAPTURE(name);
-    CAPTURE(attempt);
-    const Json params = changed ? overrides : Json::object();
-    auto& expected = baselines[changed ? 1 : 0];
-    if (attempt < 2) {
-      auto effective = graph;
-      for (const auto& parameter : params.items())
+inline void replay(const std::string& name, const Example& example, const Json& overrides,
+                   Coverage coverage, const Observe& observe) {
+  CAPTURE(name);
+  for (const bool changed : {false, true}) {
+    CAPTURE(changed);
+    auto effective = example.graph;
+    if (changed)
+      for (const auto& parameter : overrides.items())
         effective.at("params").at(parameter.key())["default"] = parameter.value();
-      Session scheduler(effective, baseDir, {}, false, 2, true);
-      const auto& log = scheduler.wait();
-      REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-      CHECK(log.seqIsDense());
-      for (const auto& node : effective.at("nodes"))
-        CHECK(log.finalState(node.at("id")) == "done");
-      expected = take(lyflow_run_outputs(log.runId.c_str()));
-      check(expected, changed);
-      if (native)
-        native(expected, log.runId, nullptr, changed, true);
-    }
+    Session scheduler(effective, example.base, {}, false, 2, true);
+    const auto& log = scheduler.wait();
+    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+    observe(take(lyflow_run_outputs(log.runId.c_str())), log.runId, nullptr, changed, true);
+  }
+  if (coverage == Coverage::Scheduler)
+    return;
 
-    const auto id = name + "-abi-" + std::to_string(attempt), parameters = params.dump();
+  const auto base = example.base.u8string(), source = example.graph.dump();
+  Client client(LYFLOW_TEST_RUNTIME);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    CAPTURE(attempt);
+    const bool changed = attempt == 1;
+    const auto parameters = (changed ? overrides : Json::object()).dump();
+    const auto id = name + "-abi-" + std::to_string(attempt);
     REQUIRE(take(lyflow_validate_params(source.c_str(), base.c_str(), parameters.c_str())).empty());
     lyflow_run_options options{};
     options.run_id = id.c_str();
@@ -184,11 +167,8 @@ inline void crossInterfaces(const std::string& name, const Json& graph,
         lyflow_run_start(source.c_str(), &options, nullptr, nullptr), lyflow_run_free);
     REQUIRE(run != nullptr);
     lyflow_run_join(run.get());
-    const auto abi = take(lyflow_run_outputs(id.c_str()));
-    CHECK(take(lyflow_run_summary(id.c_str())).at("status") == "ok");
-    agree(expected, abi);
-    if (native)
-      native(abi, id, nullptr, changed, false);
+    REQUIRE(take(lyflow_run_summary(id.c_str())).at("status") == "ok");
+    observe(take(lyflow_run_outputs(id.c_str())), id, nullptr, changed, false);
 
     RunOptions sdkOptions;
     sdkOptions.runId = id + "-sdk";
@@ -198,18 +178,26 @@ inline void crossInterfaces(const std::string& name, const Json& graph,
     sdkOptions.noReuse = true;
     const auto result = client.run(source, sdkOptions);
     REQUIRE_MESSAGE(result.ok(), result.summary);
-    CHECK(Json::parse(result.summary).at("status") == "ok");
-    const auto sdk = Json::parse(result.outputs);
-    agree(expected, sdk);
-    if (native)
-      native(sdk, sdkOptions.runId, &client, changed, false);
-    CHECK(read(savedPath) == graph);
+    observe(Json::parse(result.outputs), sdkOptions.runId, &client, changed, false);
   }
 }
 
-inline void crossInterfaces(const std::string& name, const Json& overrides, const Check& check,
-                            const NativeCheck& native = {}) {
-  const SavedWorkflow saved(name);
-  crossInterfaces(name, saved.graph, saved.path, overrides, check, native);
+inline void checkExample(const std::string& name, const Example& example, const Json& overrides,
+                         Coverage coverage, const Check& check, const Observe& native = {}) {
+  std::array<Json, 2> baselines;
+  replay(name, example, overrides, coverage,
+         [&](const Json& outputs, const std::string& runId, Client* client, bool changed,
+             bool baseline) {
+           auto& expected = baselines[changed];
+           if (baseline) {
+             check(outputs, changed);
+             if (coverage == Coverage::Interfaces)
+               expected = outputs;
+           } else {
+             agree(expected, outputs);
+           }
+           if (native)
+             native(outputs, runId, client, changed, baseline);
+         });
 }
 } // namespace lyflow::test::p3

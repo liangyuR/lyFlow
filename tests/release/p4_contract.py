@@ -4,7 +4,6 @@ import importlib.util
 import json
 import shutil
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 
@@ -102,6 +101,39 @@ def check(name, outputs):
         require(record(outputs, "after", "image.Barcodes.v1")["frame"] == "qr_refined", "Enhanced pixels must have their own frame")
 
 
+def check_override(name, defaults, outputs):
+    if name.startswith("p4-annotations-"):
+        original = instances(defaults)
+        expected = [item["id"] for item in original
+                    if item["attributes"]["annotationPickable"] and not item["attributes"]["occluded"]]
+        require(0 < len(expected) < len(original) and [item["id"] for item in instances(outputs)] == expected,
+                f"{name}: annotation filters must keep only pickable, unobscured source IDs")
+    elif name == "p4-segmentation":
+        require(instances(defaults) and not instances(outputs), "Minimum area failed to filter segments")
+    elif name == "p4-segmentation-retained":
+        require(record(defaults, "quality")["retainedCount"] > 0 and record(outputs, "quality")["retainedCount"] == 0,
+                "Mask replacement still retained annotation masks")
+    elif name == "p4-ocr":
+        original = record(defaults, "text")["value"]
+        digits = ["".join(c for c in line if c in "0123456789") for line in original.splitlines()]
+        expected = "\n".join(line for line in digits if line)
+        require(expected and expected != original and record(outputs, "text")["value"] == expected,
+                "Digit filter failed to retain only the recognized digits")
+    elif name == "p4-barcodes":
+        original = record(defaults, "detections")["items"]
+        expected = [(item["format"], item["text"]) for item in original if item["format"] in {"QRCode", "QRCodeModel2"}]
+        actual = [(item["format"], item["text"]) for item in record(outputs, "detections")["items"]]
+        require(0 < len(expected) < len(original) and actual == expected, "Format filter failed to retain only QR codes")
+    elif name == "p4-qr-refine":
+        original = record(defaults, "feedback")["modulePixels"]
+        pixels = CASES[name]["modulePixels"]
+        require(original != pixels and record(outputs, "feedback")["modulePixels"] == pixels and
+                all(outputs["image"]["value"][axis] * original == defaults["image"]["value"][axis] * pixels
+                    for axis in ("width", "height")), "Module size override failed to resize the refined image")
+    else:
+        raise AssertionError(f"{name}: missing parameter override check")
+
+
 def execute(cli, command, log):
     result = subprocess.run([str(cli), *command], capture_output=True, text=True, encoding="utf-8", timeout=240)
     log.with_suffix(".jsonl").write_text(result.stdout, encoding="utf-8")
@@ -111,7 +143,7 @@ def execute(cli, command, log):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate all P4 example schemas and saved CLI default/override/default contracts; no cases are skipped")
+    parser = argparse.ArgumentParser(description="Verify all installed P4 examples and parameter overrides, including default restoration on the barcode workflow")
     parser.add_argument("--cli", type=Path)
     parser.add_argument("--examples", type=Path, default=REPOSITORY / "examples")
     parser.add_argument("--assets", type=Path, default=REPOSITORY / "examples/p4-assets")
@@ -143,9 +175,10 @@ def main():
     for name, overrides in CASES.items():
         graph = saved / f"{name}.lyflow.json"
         defaults = None
-        for iteration, changed in enumerate((False, True, False)):
+        runs = 3 if name == "p4-barcodes" else 2
+        for iteration in range(runs):
             options = []
-            if changed:
+            if iteration == 1:
                 for key, value in overrides.items():
                     options.extend(("--param", key + "=" + json.dumps(value, ensure_ascii=False)))
             stem = output / f"{name}-{iteration}"
@@ -158,13 +191,13 @@ def main():
             if iteration == 0:
                 defaults = values
             elif iteration == 1:
-                require(values != defaults, f"{name}: parameter override did not change the results")
+                check_override(name, defaults, values)
             else:
                 require(values == defaults, f"{name}: default results changed after isolated override")
-        report["cases"].append({"graph": name, "runs": 3, "override": overrides, "status": "passed"})
+        report["cases"].append({"graph": name, "runs": runs, "override": overrides, "status": "passed"})
     require(original == {str(path.relative_to(saved)): digest(path) for path in saved.rglob("*") if path.is_file()}, "CLI changed saved source graphs/assets")
     (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"schemas": len(CASES), "runs": 3 * len(CASES), "status": "passed", "report": str(output / "report.json")}, ensure_ascii=False))
+    print(json.dumps({"schemas": len(CASES), "runs": sum(case["runs"] for case in report["cases"]), "status": "passed", "report": str(output / "report.json")}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

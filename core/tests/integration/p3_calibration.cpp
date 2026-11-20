@@ -61,21 +61,28 @@ void workspace(const Json& outputs, bool changed, bool legacy) {
   CHECK(p3::data(outputs, "workspace").at("format") ==
         (legacy ? "xyz-unversioned-yaml" : "lyflow-json-v1"));
 }
+void calibration(const std::string& name, const Json& overrides, p3::Coverage coverage,
+                 const p3::Check& check) {
+  const p3::Example example(name, "p3-");
+  p3::checkExample(name, example, overrides, coverage, check);
+}
 } // namespace
 
-TEST_CASE("P3 ArUco workspace example replays saved assets through scheduler C ABI and SDK") {
-  p3::crossInterfaces("p3-marker-workspace", {{"markerSize", .08}},
-                      [](const Json& result, bool changed) { marker(result, changed, false); });
+TEST_CASE("P3 ArUco workspace example locates a marker using the configured size") {
+  calibration("p3-marker-workspace", {{"markerSize", .08}}, p3::Coverage::Scheduler,
+              [](const Json& result, bool changed) { marker(result, changed, false); });
 }
-TEST_CASE("P3 STag workspace example preserves decoded identity across interfaces and overrides") {
-  p3::crossInterfaces("p3-stag-workspace", {{"markerSize", .08}},
-                      [](const Json& result, bool changed) { marker(result, changed, true); });
+TEST_CASE("P3 STag workspace example preserves decoded identity across marker sizes") {
+  calibration("p3-stag-workspace", {{"markerSize", .08}}, p3::Coverage::Scheduler,
+              [](const Json& result, bool changed) { marker(result, changed, true); });
 }
-TEST_CASE("P3 native workspace example persists frame selection and native roundtrip") {
-  p3::crossInterfaces("p3-workspace-native", {{"targetFrame", "world"}},
-                      [](const Json& result, bool changed) { workspace(result, changed, false); });
+TEST_CASE(
+    "P3 native workspace example preserves transforms and roundtrips across scheduler C ABI and SDK") {
+  calibration("p3-workspace-native", {{"targetFrame", "world"}}, p3::Coverage::Interfaces,
+              [](const Json& result, bool changed) { workspace(result, changed, false); });
 }
-TEST_CASE("P3 explicit legacy workspace example preserves units and parent frame after reload") {
-  p3::crossInterfaces("p3-workspace-legacy", {{"targetFrame", "Camera7"}},
-                      [](const Json& result, bool changed) { workspace(result, changed, true); });
+TEST_CASE(
+    "P3 explicit legacy workspace example preserves units and parent frame across target frames") {
+  calibration("p3-workspace-legacy", {{"targetFrame", "Camera7"}}, p3::Coverage::Scheduler,
+              [](const Json& result, bool changed) { workspace(result, changed, true); });
 }

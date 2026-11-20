@@ -60,6 +60,11 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
 几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
+`m8c` 的切槽、标签避让、槽位诊断各自创建三模板图，可以单独运行。构建 core 时启用
+`LYFLOW_PACKS=solution-gap` 和 `LYFLOW_MODULES=gap-template`。例如
+`pnpm e2e --only m8c:suiteLabelsApart` 验证相邻框的标签，
+`pnpm e2e --only m8c:suiteSlot3WrongSide` 验证拖框后的错误定位。
+
 挑出来的组照全量里的先后跑，但中间少了别的组，前一组留下的状态（视口缩放、hover 之类）会直接落到后一组头上。
 靠视口几何的组开头自己定死视口：`page.mjs` 的 `setViewport`（经窗口桥定 React Flow 的 x / y / zoom）；`normalizeZoom`
 只往小里压，上一组留下 0.2 的缩放它不管。以前记过的一处 —— `--only m4:suiteBigGraph,motion` 时 motion 的进场分组
@@ -122,8 +127,9 @@ cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
 `bridge/target/bundle-core/` 里的全部 DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西
 （`bundle.resources`；NSIS 的 `SetOutPath $INSTDIR`，WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」
 和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。不取 `target/release/` 里的 DLL：
-app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」那一组还断言打包的 core 带着
-这次构建 `LYFLOW_PACKS` 要的包、热重载关着 —— 跑的时候环境变量要与 `tauri build` 那次一致。
+app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」分组通过 WebView2 的 Tauri 接口核对
+core 版本、平台转接算子、本次构建启用的包，并确认热重载已关闭。
+运行时的 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 和 `LYFLOW_MODULES` 要与 `tauri build` 时一致。
 
 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，漏打包的 DLL
 仍然可能被系统从别处找到。

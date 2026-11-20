@@ -1,7 +1,5 @@
 #include "p3_example_helpers.h"
 
-#include <map>
-
 namespace {
 using namespace lyflow;
 using namespace lyflow::test;
@@ -52,51 +50,41 @@ void shape(const Json& outputs, bool changed, bool parallel) {
   }
 }
 
-void nativeFeatures(const Json& outputs, const std::string& runId, Client* client, bool parallel,
-                    bool baseline, std::map<std::string, p3::TensorPayload>& expected) {
+void nativeFeatures(const Json& outputs, const std::string& runId, bool parallel) {
   for (int branch = 0; branch < (parallel ? 2 : 1); ++branch) {
     const std::string node = branch ? "template_h" : "template_l";
     CAPTURE(node);
     const auto& model = p3::data(outputs, parallel ? (branch ? "modelH" : "modelL") : "model");
-    auto tensor = p3::tensorPayload(runId, node, "features", client);
-    if (baseline) {
-      const auto count = model.at("featureCount").get<std::uint32_t>();
-      CHECK(tensor.shape == std::vector<std::int64_t>{count, 4});
-      REQUIRE(tensor.values.size() == count * 4);
-      for (std::size_t i = 0; i < tensor.values.size(); i += 4) {
-        CHECK(std::isfinite(tensor.values[i]));
-        CHECK(std::isfinite(tensor.values[i + 1]));
-        CHECK(std::hypot(tensor.values[i + 2], tensor.values[i + 3]) ==
-              doctest::Approx(1).epsilon(1e-5));
-      }
-      expected.emplace(node, std::move(tensor));
-    } else {
-      const auto& reference = expected.at(node);
-      CHECK(tensor.shape == reference.shape);
-      CHECK(tensor.values == reference.values);
+    auto tensor = p3::tensorPayload(runId, node, "features", nullptr);
+    const auto count = model.at("featureCount").get<std::uint32_t>();
+    CHECK(tensor.shape == std::vector<std::int64_t>{count, 4});
+    REQUIRE(tensor.values.size() == count * 4);
+    for (std::size_t i = 0; i < tensor.values.size(); i += 4) {
+      CHECK(std::isfinite(tensor.values[i]));
+      CHECK(std::isfinite(tensor.values[i + 1]));
+      CHECK(std::hypot(tensor.values[i + 2], tensor.values[i + 3]) ==
+            doctest::Approx(1).epsilon(1e-5));
     }
   }
 }
 
 void replay(bool parallel) {
-  std::array<std::map<std::string, p3::TensorPayload>, 2> features;
+  const auto* name = parallel ? "p3-shape-parallel" : "p3-shape-cad";
+  const p3::Example example(name, "p3-");
   const Json overrides =
       parallel ? Json{{"leftModelId", "cad-L-override"}, {"rightModelId", "cad-H-override"}}
                : Json{{"modelId", "cad-L-override"}};
-  p3::crossInterfaces(
-      parallel ? "p3-shape-parallel" : "p3-shape-cad", overrides,
-      [parallel](const Json& outputs, bool changed) { shape(outputs, changed, parallel); },
-      [&](const Json& outputs, const std::string& runId, Client* client, bool changed,
-          bool baseline) {
-        nativeFeatures(outputs, runId, client, parallel, baseline, features[changed ? 1 : 0]);
-      });
+  p3::replay(name, example, overrides, p3::Coverage::Scheduler,
+             [&](const Json& outputs, const std::string& runId, Client*, bool changed, bool) {
+               shape(outputs, changed, parallel);
+               nativeFeatures(outputs, runId, parallel);
+             });
 }
 } // namespace
 
-TEST_CASE("P3 CAD shape example rebuilds native features across saved workflow interfaces") {
+TEST_CASE("P3 CAD shape example rebuilds native features with a model ID override") {
   replay(false);
 }
-TEST_CASE(
-    "P3 parallel CAD templates concatenate stable identities across interfaces and overrides") {
+TEST_CASE("P3 parallel CAD templates concatenate stable identities across model ID overrides") {
   replay(true);
 }

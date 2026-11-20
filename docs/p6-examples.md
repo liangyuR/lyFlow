@@ -48,7 +48,7 @@ C++17示例为`examples/p6-delivery_host.cpp`，使用安装SDK的`lyflow/frames
 - `core/tests/test_frames.cpp`：原生全类型、可选通道、位深、NaN、只读所有权、身份、预算、坏归档、FIFO顺序/容量/取消/重置。
 - `core/tests/test_python.cpp`与`python/tests/`：双端协议、实际worker、11类端口、单位/scale、非法输出与恢复。
 - `bridge/tests/p6_delivery_contract.py --cli <CLI> --core <DLL> --output-dir <目录>`：真实点云/图像/Tensor/Indices/Record逐字节往返、只读/重算、FIFO、日志与外部loopback接收器。
-- 共享可视化及编辑器既有功能组：身份、坐标、导出与错误提示；React18/19正式类型检查。编辑器总数保持100以下且不新增跳过。
+- 共享可视化及编辑器覆盖身份、坐标、导出与错误提示，并检查 React 18 和 React 19 的类型契约。
 
 软件门禁不证明传感器同步、生产精度、遮挡/对称件质量、现场节拍或长期稳定性。
 
