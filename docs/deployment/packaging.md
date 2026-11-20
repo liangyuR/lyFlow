@@ -85,6 +85,10 @@ Linux vision CI同样使用PowerShell7的正式OpenCV构建脚本，显式传入
 
 自 v2.0.3 起，工作流从公共仓默认分支读取与 tag 同名的 `packaging/engine-releases/vX.Y.Z.json`。公共 tag 标识工具仓的发布位置，锁文件中的 `sourceRepository` 和 `sourceRevision` 标识引擎。未来版本缺锁时发布停止。
 
+对于双仓版本，公共仓使用名为 `engine-assets-vX.Y.Z` 的 GitHub Release 草稿暂存已复核的三个文件。维护者批准后，在公共仓创建这个暂存草稿，将私有引擎产出的 runtime ZIP、原生 SDK ZIP 和 nupkg 原样上传，保持文件名与版本锁一致。暂存草稿与最终 `vX.Y.Z` Release 分开。锁文件先合入公共仓默认分支，资产读取作业从该分支取得可信摘要。
+
+手动运行 `Windows release` 并填写 `reviewed_tag` 可预演，例如 `v2.0.3`。工作流从暂存草稿取文件，验证 SHA-256，再用同一份 SDK 验公共工具；手动运行仅保存 Actions 产物。推送对应的正式 tag 时走同一输入路径，跳过 vcpkg 和公共仓原生构建，验证成功后用原始文件创建待人工发布的正式草稿。未指定复核版本的普通分支手动构建与旧单仓 tag 沿用源码构建入口。
+
 正式发布前，将锁文件和校验脚本合入公共仓默认分支。公开草稿使用已复核的三个原始文件和锁定的文件名；从公共源码重建的归档若摘要不同，草稿门禁会拒绝。人工发布 Release 后，`Publish native runtime NuGet` 确认正式发布状态，仅下载原始 nupkg，核对其 SHA-256 以及 nuspec 声明的包 ID、版本、私有仓地址和修订，再将原包推送到 GitHub Packages。实际 DLL 和运行库内容在引擎发包时验证。相同包版本已经存在时，流程停止。
 
 本地可用只验证模式预演，输出目录须能写入新的 nupkg：

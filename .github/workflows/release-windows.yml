@@ -5,6 +5,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      reviewed_tag:
+        description: 已锁定的引擎版本（例如 v2.0.3），从公共仓暂存草稿读取原始资产
+        type: string
+        required: false
       rebuild_deps:
         description: 显式允许缺失依赖编译并补全 NuGet 缓存；默认只恢复二进制
         type: boolean
@@ -26,7 +30,83 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
+  source:
+    name: 选择发行来源
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+      revision: ${{ steps.source.outputs.revision }}
+      reviewed: ${{ steps.source.outputs.reviewed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: source
+        shell: pwsh
+        env:
+          REVIEWED_TAG: ${{ inputs.reviewed_tag }}
+          DEPENDENCIES_ONLY: ${{ inputs.dependencies_only }}
+        run: |
+          . ./scripts/reviewed-engine-release.ps1
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $revision = git rev-parse HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $env:REVIEWED_TAG }
+          if ($tag -and $tag -cnotmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "无效发行 tag: $tag" }
+          $lock = if ($tag) { Get-ReviewedEngineRelease -Version $tag.Substring(1) }
+          if ($env:REVIEWED_TAG -and (!$lock -or $tag -cne $env:REVIEWED_TAG)) { throw '手动选择的 tag 需要匹配的引擎锁' }
+          if ($lock) {
+            if ($env:DEPENDENCIES_ONLY -eq 'true') { throw '锁定资产消费与依赖预热应分别运行' }
+            $version = $lock.Version
+          } elseif ($tag -and $tag -cne "v$version") { throw "tag 与产品版本 $version 不一致" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            git merge-base --is-ancestor HEAD origin/main
+            if ($LASTEXITCODE) { throw '版本 tag 必须指向 main 历史中的提交' }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+          "reviewed=$([bool]$lock)" >> $env:GITHUB_OUTPUT
+
+  reviewed-assets:
+    name: 读取已复核的原始资产
+    needs: source
+    if: needs.source.outputs.reviewed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # GitHub 只向有推送权限的身份提供草稿资产。
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /packaging/engine-releases/
+            /scripts/reviewed-engine-release.ps1
+      - name: 从暂存草稿下载并核对摘要
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENGINE_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          . ./scripts/reviewed-engine-release.ps1
+          $lock = Get-ReviewedEngineRelease -Version $env:ENGINE_VERSION
+          $dir = Join-Path $env:RUNNER_TEMP 'reviewed-engine-assets'
+          $patterns = foreach ($name in $lock.Assets.Keys) { '--pattern'; $name }
+          gh release download "engine-assets-v$env:ENGINE_VERSION" --repo $env:GITHUB_REPOSITORY --dir $dir @patterns
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Assert-ReviewedEngineAssets -Release $lock -Directory $dir
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: ${{ runner.temp }}/reviewed-engine-assets/
+          if-no-files-found: error
+          retention-days: 14
+
   deps:
+    needs: source
+    if: needs.source.outputs.reviewed != 'true'
     name: 固定发布依赖（vcpkg 二进制缓存）
     # 只准备固定第三方依赖；只有这个 job 获得 NuGet 缓存写权限，产品构建 job 仍然只读。
     permissions:
@@ -184,31 +264,11 @@ jobs:
       packages: read
     runs-on: windows-2022
     timeout-minutes: 350
-    outputs:
-      version: ${{ steps.source.outputs.version }}
-      revision: ${{ steps.source.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: 核对版本 tag 与 main 历史
-        id: source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "不支持的产品版本: $version" }
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'tag 与产品版本不一致' }
-            git merge-base --is-ancestor HEAD origin/main
-            if ($LASTEXITCODE -ne 0) { throw '版本 tag 必须指向 main 历史中的提交' }
-          }
-          $revision = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0) { throw '无法读取源码修订' }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "revision=$revision" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - uses: pnpm/action-setup@v4
 
@@ -352,7 +412,8 @@ jobs:
 
   public-tools:
     name: 从原生 SDK 构建公共工具
-    needs: build
+    needs: [source, build, reviewed-assets]
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.reviewed-assets.result == 'success') }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -378,7 +439,7 @@ jobs:
       - name: 解压本次构建的 SDK
         shell: pwsh
         env:
-          ENGINE_VERSION: ${{ needs.build.outputs.version }}
+          ENGINE_VERSION: ${{ needs.source.outputs.version }}
         run: |
           $sdk = Join-Path $env:RUNNER_TEMP 'native-sdk'
           $zip = Join-Path $env:RUNNER_TEMP "engine-assets/lyflow-native-sdk-win-x64-v$env:ENGINE_VERSION.zip"
@@ -422,8 +483,8 @@ jobs:
 
   publish:
     name: 创建草稿 Release
-    needs: [build, public-tools]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [source, public-tools]
+    if: ${{ !cancelled() && needs.public-tools.result == 'success' && github.event_name == 'push' && github.ref_type == 'tag' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -446,7 +507,7 @@ jobs:
         id: reviewed
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
         run: |
           . ./scripts/reviewed-engine-release.ps1
           $lock = Get-ReviewedEngineRelease -Version $env:RELEASE_VERSION
@@ -459,8 +520,8 @@ jobs:
       - name: 创建草稿且不覆盖已有资产
         uses: actions/github-script@v7
         env:
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
-          SOURCE_REVISION: ${{ needs.build.outputs.revision }}
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          SOURCE_REVISION: ${{ needs.source.outputs.revision }}
           ENGINE_REVISION: ${{ steps.reviewed.outputs.revision }}
           ENGINE_FILES: ${{ steps.reviewed.outputs.files }}
         with:
