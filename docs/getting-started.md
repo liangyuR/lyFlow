@@ -51,7 +51,7 @@ python -m pip install -r scripts/requirements.txt
 pnpm dev
 ```
 
-这会启动 core 监视构建、Tauri 和 Vite。首次构建需要编译 C++、Rust 与前端；后续修改 `core/` 或 `packs/` 会增量构建并热重载 DLL。热重载保留画布与撤销栈，取消正在执行的 run 并清空旧 DLL 的结果缓存，见 [ADR-0009](adr/0009-hot-reload-by-copy.md)。
+这会先构建 core，再启动 core 监视构建、Tauri 和 Vite。桌面应用复用 `build/core/bin` 中的原生核心。后续修改 `core/` 或 `packs/` 会增量构建并热重载 DLL。热重载保留画布与撤销栈，取消正在执行的 run 并清空旧 DLL 的结果缓存，见 [ADR-0009](adr/0009-hot-reload-by-copy.md)。
 
 第一次使用可以走一条无需外部数据的流程：
 
@@ -69,11 +69,10 @@ pnpm dev
 
 ```powershell
 $env:LYFLOW_PACKS = 'solution-glue'
-pnpm core:build
 pnpm dev
 ```
 
-多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换配置前停止正在运行的开发进程；`pnpm core:build` 会重新配置 `build/core`，再启动监视构建，避免后续热重载使用旧包组合。标准包与领域包的说明见 [文档首页](README.md)。
+多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换配置前停止正在运行的开发进程，再运行 `pnpm dev`，脚本会按当前的包组合重新配置 `build/core`。标准包与领域包的说明见 [文档首页](README.md)。
 
 只开发平台、不需要 PCL / OpenCV / ONNX Runtime 时，可在新的 PowerShell 会话中选择纯平台构建：
 
@@ -81,11 +80,10 @@ pnpm dev
 $env:LYFLOW_STD_PACKS = '0'
 Remove-Item -LiteralPath Env:LYFLOW_PACKS -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath Env:LYFLOW_OP_PACKS -ErrorAction SilentlyContinue
-pnpm core:build
 pnpm dev
 ```
 
-此模式仍需要 vcpkg 工具链，但不需要安装标准包的原生依赖；只包含 `gen.synthetic`、`util.reroute`、`flow.fallback` 和 `flow.select`，不能运行前面需要 `filter.voxel_grid` 的步骤。恢复标准包时，停止开发进程，设置 `$env:LYFLOW_STD_PACKS = '1'`，运行 `pnpm core:build` 后再启动。构建开关的完整语义见 [算子包指南](op-packs.md)。
+此模式仍需要 vcpkg 工具链，但不需要安装标准包的原生依赖；只包含 `gen.synthetic`、`util.reroute`、`flow.fallback` 和 `flow.select`，不能运行前面需要 `filter.voxel_grid` 的步骤。恢复标准包时，停止开发进程，设置 `$env:LYFLOW_STD_PACKS = '1'`，然后运行 `pnpm dev`。构建开关的完整语义见 [算子包指南](op-packs.md)。
 
 ## 4. 不开桌面，直接执行图
 
@@ -133,7 +131,7 @@ pnpm core:dump
 pnpm app:dev
 ```
 
-此入口使用静态快照，状态栏会显示提示；执行与文件操作仍需要实际后端。仅停止 core 监视构建可用 `pnpm dev --no-core-watch`；单独运行监视构建用 `pnpm core:watch`。
+此入口使用静态快照，状态栏会显示提示；执行与文件操作仍需要实际后端。用 `pnpm dev:app` 或 `pnpm dev --no-core-watch` 可构建并启动桌面应用，跳过 core 监视构建。单独运行监视构建用 `pnpm core:watch`。
 
 要通过浏览器连接真实 CLI，可在两个终端分别启动：
 
