@@ -25,7 +25,7 @@ C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows
 
 P2 阶段2新增 `image.height_extract`：正交深度图按米制参考平面或局部加权曲面生成有符号高度、有效观测掩膜和独立显示图；支持原始 F32 米制与显式比例的 U16，不把针孔深度直接当正交高度。完整模式、无效值、填值和资源限制见[高度分析](../../docs/p2-analysis-height.md)，示例为 [p2-depth-height](../../examples/p2-depth-height.lyflow.json)。
 
-另有 `cloud.image_roi` 将已标定图像掩膜映射回原点云索引，保留畸变、可见性和预览坐标约定；`image.render_model_3d` 按模型到场景实例及相机外参生成点模型叠图。两者使用现有相机 K/D 契约；后者是离散点模型投影，不生成未经提供的 Mesh 表面。回归见 [test_p2_projection.cpp](tests/test_p2_projection.cpp)。
+另有 `cloud.image_roi` 将已标定图像掩膜映射回原点云索引，保留畸变、可见性和预览坐标约定；`image.render_model_3d` 按模型到场景实例及相机外参生成点模型叠图。两者使用现有相机 K/D 契约；后者是离散点模型投影，不生成未经提供的 Mesh 表面。回归见 [test_p2_projection.cpp](https://github.com/liangyuR/lyflow-engine/blob/main/packs/std-image/tests/test_p2_projection.cpp)。
 
 | 算子 | 做什么 |
 |---|---|

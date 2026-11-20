@@ -6,18 +6,9 @@
 
 这个包是**全仓库唯一一处 `find_package(PCL)`**。core 不链接任何第三方库。
 
-## 构建
+## 使用与原生开发
 
-默认就开着：`LYFLOW_STD_PACKS` 缺省 ON，`core/CMakeLists.txt` 自动加入 `packs/*`。
-关掉它就是纯平台构建：
-
-```powershell
-$env:LYFLOW_STD_PACKS = "0"
-$env:LYFLOW_PACKS = ""
-pnpm check
-```
-
-不启用外部包时，纯平台保留 `gen.synthetic`、`util.reroute`、`flow.fallback` 和 `flow.select` 四个内置算子，不链接 PCL。
+正式 SDK 已包含点云算子。自定义点云组合及其依赖在[引擎仓](https://github.com/liangyuR/lyflow-engine/tree/main/packs/std-pointcloud)维护。下文的原生源码和依赖脚本路径均相对此仓。
 
 ## 算子
 

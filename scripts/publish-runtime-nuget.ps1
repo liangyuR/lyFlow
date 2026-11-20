@@ -5,23 +5,20 @@ param(
     [switch]$PackageOnly,
     [string]$ReviewedAssetsDir,
     [string]$OutputDir,
-    [string]$CredentialFile = 'C:\Users\11601\.ssh\github_nuget_auth.txt',
+    [string]$CredentialFile,
     [string]$NuGetPath
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'runtime-nuget-common.ps1')
-. (Join-Path $PSScriptRoot 'reviewed-engine-release.ps1')
 if ($Tag -notmatch '^v((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$') { throw 'Only formal vX.Y.Z releases can be published.' }
-$version = $Matches[1]
-$reviewed = Get-ReviewedEngineRelease -Version $version
-if ($ReviewedAssetsDir -and (-not $PackageOnly -or -not $reviewed)) { throw 'Local assets require -PackageOnly and a reviewed engine lock.' }
+$toolVersion = $Matches[1]
+if ($ReviewedAssetsDir -and -not $PackageOnly) { throw 'Local assets require -PackageOnly and a reviewed engine lock.' }
 $repository = 'liangyuR/lyFlow'
 $feed = 'https://nuget.pkg.github.com/liangyuR/index.json'
 $previousToken = $env:LYFLOW_NUGET_TOKEN
 $token = $null
 $headers = @{}
-$downloadHeaders = @{}
 $feedHeaders = @{}
 $work = $null
 $result = $null
@@ -29,11 +26,32 @@ try {
     if (-not $PackageOnly) {
         $token = $env:LYFLOW_NUGET_TOKEN
         if (-not $token) { $token = $env:NUGET_AUTH_TOKEN }
-        if (-not $token -and (Test-Path -LiteralPath $CredentialFile -PathType Leaf)) { $token = (Get-Content -LiteralPath $CredentialFile -Raw).Trim() }
+        if (-not $token -and $CredentialFile -and (Test-Path -LiteralPath $CredentialFile -PathType Leaf)) { $token = (Get-Content -LiteralPath $CredentialFile -Raw).Trim() }
         if (-not $token) { throw 'Set LYFLOW_NUGET_TOKEN or NUGET_AUTH_TOKEN, or provide CredentialFile.' }
     }
     $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
     if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
+    if (-not $ReviewedAssetsDir) {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/tags/$Tag" -Headers $headers
+        if ($release.draft -or $release.prerelease -or -not $release.published_at -or $release.tag_name -cne $Tag) { throw 'The selected Release must already be published and cannot be draft or prerelease.' }
+        $raw = $headers.Clone()
+        $raw.Accept = 'application/vnd.github.raw+json'
+        $product = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/contents/package.json?ref=$Tag" -Headers $raw
+        if ($product.version -cne $toolVersion) { throw 'Public tag does not match its tool version.' }
+        $version = if ($product.PSObject.Properties['lyflowEngineVersion']) { $product.lyflowEngineVersion } else { $toolVersion }
+        $reviewed = Get-ReviewedEngineRelease -Version $version
+        $null = Get-PublishedEngineRelease -Release $reviewed
+    } else {
+        $reviewed = Get-ReviewedEngineRelease
+        $version = $reviewed.Version
+        if ($toolVersion -cne (Get-ReleaseVersion -Root (Split-Path -Parent $PSScriptRoot))) { throw 'Local tools and selected tag differ.' }
+    }
+    if (-not $OutputDir) { $OutputDir = Join-Path (Split-Path -Parent $PSScriptRoot) ('build/nuget-publish-' + [guid]::NewGuid().ToString('N')) }
+    $OutputDir = [IO.Path]::GetFullPath($OutputDir)
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    $work = Join-Path $OutputDir ('.publish-stage-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    $packageName = "LyFlow.Runtime.win-x64.$version.nupkg"
     if (-not $PackageOnly) {
         $feedHeaders.Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("liangyuR:$token"))
         $service = Invoke-RestMethod -Uri $feed -Headers $feedHeaders
@@ -42,61 +60,41 @@ try {
         $baseAddress = [uri]$baseResources[0].'@id'
         if ($baseAddress.Scheme -ne 'https' -or $baseAddress.Host -ine 'nuget.pkg.github.com' -or -not $baseAddress.AbsolutePath.StartsWith('/liangyuR/', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected NuGet package endpoint.' }
         $indexUrl = $baseAddress.AbsoluteUri.TrimEnd('/') + '/lyflow.runtime.win-x64/index.json'
+        $existingVersions = @()
         try {
-            $existing = Invoke-RestMethod -Uri $indexUrl -Headers $feedHeaders
-            if ($version -cin @($existing.versions)) { throw "NuGet package LyFlow.Runtime.win-x64 $version already exists; publication is forbidden." }
+            $existingVersions = @((Invoke-RestMethod -Uri $indexUrl -Headers $feedHeaders).versions)
         } catch {
             if ($_.Exception.PSObject.Properties.Name -notcontains 'Response' -or $null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
         }
-    }
-    if (-not $ReviewedAssetsDir) {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/tags/$Tag" -Headers $headers
-        if ($release.draft -or $release.prerelease -or -not $release.published_at -or $release.tag_name -cne $Tag) { throw 'The selected Release must already be published and cannot be draft or prerelease.' }
-    }
-    if (-not $OutputDir) { $OutputDir = Join-Path (Split-Path -Parent $PSScriptRoot) ('build/nuget-publish-' + [guid]::NewGuid().ToString('N')) }
-    $OutputDir = [IO.Path]::GetFullPath($OutputDir)
-    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-    $work = Join-Path $OutputDir ('.publish-stage-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $work -Force | Out-Null
-    $packageName = "LyFlow.Runtime.win-x64.$version.nupkg"
-    if ($reviewed) {
-        $package = Join-Path $work $packageName
-        if ($ReviewedAssetsDir) {
-            Copy-Item -LiteralPath (Join-Path $ReviewedAssetsDir $packageName) -Destination $package
-        } else {
-            Invoke-WebRequest -Uri $reviewed.Assets[$packageName].url -OutFile $package
+        if ($version -cin $existingVersions) {
+            if ($toolVersion -ceq $version) { throw "NuGet package LyFlow.Runtime.win-x64 $version already exists; publication is forbidden." }
+            $registered = $baseAddress.AbsoluteUri.TrimEnd('/') + "/lyflow.runtime.win-x64/$version/lyflow.runtime.win-x64.$version.nupkg"
+            Invoke-WebRequest -Uri $registered -Headers $feedHeaders -OutFile (Join-Path $work $packageName)
+            Assert-ReviewedEngineAssets -Release $reviewed -Directory $work -Names $packageName
+            Write-Host "Tool $toolVersion reuses the verified NuGet package $packageName."
+            return
         }
-        Assert-ReviewedEngineAssets -Release $reviewed -Directory $work -Names $packageName
-        $archive = [IO.Compression.ZipFile]::OpenRead($package)
-        try {
-            $stream = $archive.GetEntry('LyFlow.Runtime.win-x64.nuspec').Open()
-            $nuspec = [xml]::new()
-            try { $nuspec.Load($stream) } finally { $stream.Dispose() }
-        } finally { $archive.Dispose() }
-        $spec = $nuspec.package.metadata
-        if ($spec.id -cne 'LyFlow.Runtime.win-x64' -or $spec.version -cne $version -or
-            $spec.repository.url -cne $reviewed.Repository -or $spec.repository.commit -cne $reviewed.Revision) {
-            throw 'NuGet package identity differs from the reviewed private engine.'
-        }
-        [IO.File]::Copy($package, (Join-Path $OutputDir $packageName), $false)
-        Write-Host "Verified original $packageName from $($reviewed.Repository) at $($reviewed.Revision)."
+    }
+    $package = Join-Path $work $packageName
+    if ($ReviewedAssetsDir) {
+        Copy-Item -LiteralPath (Join-Path $ReviewedAssetsDir $packageName) -Destination $package
     } else {
-        $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/commits/$Tag" -Headers $headers
-        $revision = [string]$commit.sha
-        if ($revision -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve the published release source revision.' }
-        $name = "lyflow-runtime-win-x64-$Tag.zip"
-        $assets = @($release.assets | Where-Object { $_.name -ceq $name -and $_.state -ceq 'uploaded' })
-        if ($assets.Count -ne 1) { throw "Release must contain exactly one uploaded $name asset." }
-        $zip = Join-Path $work $name
-        $downloadHeaders = $headers.Clone()
-        $downloadHeaders.Accept = 'application/octet-stream'
-        Invoke-WebRequest -Uri $assets[0].url -Headers $downloadHeaders -OutFile $zip
-        if ((Get-Item -LiteralPath $zip).Length -ne $assets[0].size) { throw 'Release asset download is incomplete.' }
-        $runtime = Join-Path $work 'runtime'
-        Expand-RuntimeReleaseArchive -ArchivePath $zip -Destination $runtime
-        & (Join-Path $PSScriptRoot 'package-runtime-nuget.ps1') -RuntimeDir $runtime -OutputDir $OutputDir -ExpectedVersion $version -ExpectedRevision $revision -NuGetPath $NuGetPath -PublishedAsset
-        $package = Join-Path $OutputDir $packageName
+        Invoke-WebRequest -Uri $reviewed.Assets[$packageName].url -OutFile $package
     }
+    Assert-ReviewedEngineAssets -Release $reviewed -Directory $work -Names $packageName
+    $archive = [IO.Compression.ZipFile]::OpenRead($package)
+    try {
+        $stream = $archive.GetEntry('LyFlow.Runtime.win-x64.nuspec').Open()
+        $nuspec = [xml]::new()
+        try { $nuspec.Load($stream) } finally { $stream.Dispose() }
+    } finally { $archive.Dispose() }
+    $spec = $nuspec.package.metadata
+    if ($spec.id -cne 'LyFlow.Runtime.win-x64' -or $spec.version -cne $version -or
+        $spec.repository.url -cne $reviewed.Repository -or $spec.repository.commit -cne $reviewed.Revision) {
+        throw 'NuGet package identity differs from the reviewed private engine.'
+    }
+    [IO.File]::Copy($package, (Join-Path $OutputDir $packageName), $false)
+    Write-Host "Verified original $packageName from $($reviewed.Repository) at $($reviewed.Revision)."
     if (-not $PackageOnly) {
         $nuget = Get-RuntimeNuGetTool -ToolPath $NuGetPath
         $config = Join-Path $work 'nuget.config'
@@ -117,7 +115,6 @@ try {
 } finally {
     $env:LYFLOW_NUGET_TOKEN = $previousToken
     $headers.Clear()
-    $downloadHeaders.Clear()
     $feedHeaders.Clear()
     $token = $null
     $result = $null

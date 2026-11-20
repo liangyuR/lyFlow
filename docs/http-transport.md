@@ -3,7 +3,7 @@
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。宿主服务按本文提供接口，实际类型定义见[Transport](../packages/editor/src/transport/types.ts)。
 
 `Transport` 将编辑器需要的执行、文件与结果能力映射为 REST 和 WebSocket；执行接口基于当前产品版本系列兼容的 C ABI，文件、快照等能力由宿主实现。
-当前 C ABI 签名以 [`c_api.h`](../core/include/lyflow/c_api.h) 为准；版本兼容与输入注入见[嵌入指南](embedding.md)。张量/下标读回与 summary 的设计依据分别保留在 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md) 和 [ADR-0022](adr/0022-run-summary-as-core-output.md)。局部运行的 `targets`、`isolate`、`force` 与顶层参数取值必须在传输层和执行端保持一致。
+当前 C ABI 签名以 [`c_api.h`](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/c_api.h) 为准；版本兼容与输入注入见[嵌入指南](embedding.md)。张量/下标读回与 summary 的设计依据分别保留在 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md) 和 [ADR-0022](adr/0022-run-summary-as-core-output.md)。局部运行的 `targets`、`isolate`、`force` 与顶层参数取值必须在传输层和执行端保持一致。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，

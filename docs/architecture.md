@@ -18,19 +18,18 @@
 `TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
 [docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
 `StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
-执行相关调用最终由按产品版本系列兼容的 C ABI 提供，文件与库目录等宿主能力由桥接层实现。当前 ABI 为字符串 `"1.3.3"`，客户端与引擎须属于同一 主.次 系列，补丁版本之间保持兼容，详见 [嵌入指南](embedding.md)。
+执行相关调用最终由按产品版本系列兼容的 C ABI 提供，文件与库目录等宿主能力由桥接层实现。ABI 使用产品版本字符串，客户端与引擎须属于同一 主.次 系列，补丁版本之间保持兼容，详见 [嵌入指南](embedding.md)。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，也是热重载的接缝；原生崩溃会影响宿主进程。需要进程隔离时，由宿主另起 CLI 或后端服务。
 
 算子包在**构建期**编进同一个 DLL，没有第四个进程也没有插件 ABI
-（[ADR-0013](adr/0013-op-packs-static.md)）。包分两类，机制相同：仓库内的
-`packs/*` 与 `LYFLOW_OP_PACKS` 指到的外部目录。core 自己只留 `gen.synthetic`
-（测试基础设施）、`util.reroute`（编辑器语义）与 `flow.fallback` / `flow.select`
+（[ADR-0013](adr/0013-op-packs-static.md)）。包分两类，机制相同：引擎仓内的
+`packs/*` 与 `LYFLOW_OP_PACKS` 指到的外部目录。`gen.synthetic` 由 `std-pointcloud` 提供。core 保留 `util.reroute`（编辑器语义）与 `flow.fallback` / `flow.select`
 （调度原语，[ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)），零第三方依赖
 （[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
-仓库内的包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：
+引擎仓内的包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：
 
 | 包                     | 算子                                                                                                  | 默认                                 |
 | ---------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -46,7 +45,7 @@ DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，�
 
 两点值得强调：
 
-开发默认组合与发布组合不同：Windows x64 运行库固定包含标准包、`solution-glue` 与 `solution-gap`，以 [发布配置](../packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
+开发默认组合与发布组合不同：Windows x64 运行库固定包含标准包、`solution-glue`、`solution-gap` 和 `solution-dts`，以 [发布配置](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json) 和 [发包契约](deployment/packaging.md) 为准。
 
 **执行调度必须在 C++。** 调度需要知道数据有多大、中间结果能不能复用、内存占用和哪几步能并行。
 这些信息只有 C++ 侧有。前端 JS 拿不到，也不该假装拿得到。
@@ -76,7 +75,7 @@ C++ 不能信任传进来的 GraphDoc。
 前端启动时拉一次全量算子描述。这决定了节点搜索面板里有什么、每个节点长什么样、
 参数面板渲染成什么控件。格式见 [operator-manifest.md](operator-manifest.md)。
 
-关键性质：**前端不硬编码任何算子。** 加一个新算子的完整流程是「在 C++ 里注册 → 重启（或热重载）」，
+关键性质：**前端不硬编码任何算子。** 加一个新算子的完整流程是「在引擎里注册 → 发布 SDK → 公共工具恢复 SDK 并重启」，
 前端代码零改动。
 
 ### ② GraphDoc — 图上行

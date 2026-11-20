@@ -25,7 +25,7 @@
 
 ## 固定资产与验证入口
 
-资产版本、来源、长度和许可说明在 [p1-model-assets.json](../packaging/p1-model-assets.json)，通过 [下载脚本](../scripts/fetch-p1-model-assets.py) 准备。脚本不覆盖已有不同内容的文件，下载失败清理本次临时文件。运行库包沿用不包含客户/测试 ONNX 模型的发布规则，模型作为明确版本的外部资产管理；SDK 示例提供准备与运行说明。
+资产版本、来源、长度和许可说明在 [p1-model-assets.json](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packaging/p1-model-assets.json)，通过 [下载脚本](https://github.com/liangyuR/lyFlow/blob/v2.0.3/scripts/fetch-p1-model-assets.py) 准备。脚本不覆盖已有不同内容的文件，下载失败清理本次临时文件。运行库包沿用不包含客户/测试 ONNX 模型的发布规则，模型作为明确版本的外部资产管理；SDK 示例提供准备与运行说明。
 
 - 预处理/后处理的确定性正反例：`packs/std-image/tests/test_detection_p1.cpp`。
 - 四种真实模型、公开两图、空背景与三种执行入口：`core/tests/integration/p1_detection.cpp`，显式启用 `LYFLOW_P1_MODEL_TESTS`，资产缺失时失败而不跳过。

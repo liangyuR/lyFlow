@@ -55,8 +55,9 @@ live preview 那三处原来就是后者，在 HTTP 下会静默失效。
 运行期还有一条：宿主渲染一个调 `useUiStore` 的探针组件，两份 React 时它会抛。
 两条都在 `pnpm check` / `pnpm e2e:http` 里。
 
-`@tauri-apps/api` 是**可选** peer：只有 `TauriTransport` 用得到它，
-浏览器宿主不装也能跑（那三处 `import()` 永远不会执行）。
+最初将 `@tauri-apps/api` 声明为可选 peer，依据是只有 `TauriTransport` 在运行时会调用它。
+外部宿主消费 2.0.3 源码包时发现，TypeScript 会解析入口导出的传输模块，包括浏览器宿主未调用的动态导入。
+当前它是必需的 peer，浏览器与桌面宿主均安装 `@tauri-apps/api@^2`。
 
 ### 四、样式：`--lyflow-*`，定义在编辑器根元素上
 

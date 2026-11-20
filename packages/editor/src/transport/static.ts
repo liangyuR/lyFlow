@@ -49,7 +49,7 @@ export class StaticTransport implements Transport {
     if (!res.ok) {
       throw new Error(
         `读不到 ${this.manifestUrl} (${res.status})。` +
-          `静态模式需要先 dump 一份：scripts/dump-manifest.ps1`,
+          `请将原生 SDK 根目录的 operator-manifest.json 提供在该地址。`,
       );
     }
     return (await res.json()) as OperatorManifestBundle;

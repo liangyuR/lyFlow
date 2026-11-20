@@ -67,9 +67,7 @@ pub struct HostConfig {
     pub python: Option<crate::python_settings::PythonRuntimeConfig>,
     /// 场景输入来源。`None` 时带 `sceneId` 的 `run_graph` 会报错。
     pub scenes: Option<Arc<dyn SceneProvider>>,
-    /// 开发期热重载（ADR-0009）。`false` 时不起 watcher 线程。
-    /// 按 git 依赖引 LyFlow 的宿主本来就没有可盯的 CMake 产物（`watch_source()` 是 None），
-    /// 这个开关是给「有产物但不想要」的场合用的。
+    /// 调试构建中允许监视 LYFLOW_WATCH_DLL 指定的 DLL。
     pub hot_reload: bool,
 }
 

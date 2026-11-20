@@ -58,6 +58,6 @@ P1在1.3.5中新增 **55个算子**：点云/剖面18、工件/几何19、图像
 - [云分组与配准](../examples/p1-cloud.lyflow.json)：受控点云与三维真值链，资产为[PCD样例](../examples/p1-clusters.pcd)。
 - [位姿非交换变换与往返](../examples/p1-pose-flow.lyflow.json)：无PCL/图像依赖的工件链。
 - [YOLOX检测](../examples/p1-detection.lyflow.json)及[YOLO检测](../examples/p1-yolo-detection.lyflow.json)：模型资产、许可证、准备和运行方法见[模型示例说明](../examples/p1-detection-README.md)。
-- 永久契约回归：[点云](../packs/std-pointcloud/tests/test_p1_cloud.cpp)、[位姿/几何](../packs/std-geometry/tests/test_pose.cpp)、[图像](../packs/std-image/tests/test_image_p1.cpp)、[检测](../packs/std-image/tests/test_detection_p1.cpp)。真实模型与执行入口验收见[集成测试](../core/tests/integration/p1_detection.cpp)及[测试地图](testing.md)。
+- 永久契约回归：[点云](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-pointcloud/tests/test_p1_cloud.cpp)、[位姿/几何](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-geometry/tests/test_pose.cpp)、[图像](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/tests/test_image_p1.cpp)、[检测](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/tests/test_detection_p1.cpp)。真实模型与执行入口验收见[集成测试](https://github.com/liangyuR/lyFlow/blob/v2.0.3/core/tests/integration/p1_detection.cpp)及[测试地图](testing.md)。
 
 本页列出实现、可运行资产和验证入口；最终测试数量与发布门禁结果以当前PR对应源码修订的CI及集成报告为准，不混用不同可选包构建的测试数字。

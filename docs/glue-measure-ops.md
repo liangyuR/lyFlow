@@ -657,7 +657,7 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
 | `@xyflow/react` | `^12.11.6` |
 | `three` | `>=0.160.0 <1` |
 | `zustand` | `^5.0.2` |
-| `@tauri-apps/api` | `^2`，可选，只有用 `TauriTransport` 才需要 |
+| `@tauri-apps/api` | `^2`，浏览器和桌面宿主编译编辑器源码时都需要 |
 
 普通依赖 `@dagrejs/dagre`、`immer`、`motion` 由包管理器装；`@lyflow/visualization` 在发布的 tarball 里已内联。包按 TypeScript 源码发布，
 宿主的打包器要能编译 TS/TSX。一页只能挂一个编辑器（store 与 transport 是模块级单例）。

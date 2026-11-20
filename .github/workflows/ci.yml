@@ -19,7 +19,7 @@ env:
 
 jobs:
   quality:
-    name: 前端 / MCP / C++ 格式与 workflow 检查
+    name: 公共工具格式与契约检查
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -42,110 +42,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: |
-            scripts/requirements-format.txt
-            scripts/requirements.txt
 
-      - name: 安装格式工具与前端依赖
-        run: |
-          python -m pip install -r scripts/requirements-format.txt
-          python -m pip install -r scripts/requirements.txt
-          pnpm install --frozen-lockfile
-
-      - name: 算子分包规划清单校验
-        run: |
-          python scripts/check-operator-package-audit.py
-          python scripts/tests/test_operator_package_audit.py
-          python tests/quality/test_module_graph.py
-          python tests/quality/test_release_identity.py
-
-      - name: 前端 / MCP / workflow 格式检查（Prettier）
-        run: pnpm format:check
-
-      - name: 固定匹配依赖准备安全测试
-        run: |
-          python tests/release/test_fetch_matching_deps.py
-          python tests/release/test_fetch_profile_math_deps.py
-
-      - name: 固定条码源码和P4公共资产准备安全测试
-        run: |
-          python tests/release/test-fetch-barcode-deps.py
-          python tests/release/test_fetch_p4_assets.py
-
-      - name: P4/P5示例JSON Schema契约（仅schema，不代替真实CLI门禁）
-        run: |
-          python tests/release/p4_contract.py --schema-only
-          python tests/release/p5_contract.py --schema-only
-          python tests/quality/test_graph_contract_schema.py
-
-      - name: C++ 格式检查（clang-format 20.1.8）
-        shell: bash
-        run: |
-          git ls-files -z -- '*.c' '*.h' '*.cpp' '*.hpp' '*.cc' '*.hh' '*.cxx' '*.hxx' | xargs -0 clang-format --dry-run --Werror
-
-  fast:
-    name: 前端 / MCP / Rust 客户端：编译、单元测试与格式
-    needs: [frontend, client]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: 核对并行检查结果
-        env:
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          CLIENT_RESULT: ${{ needs.client.result }}
-        run: test "$FRONTEND_RESULT" = success && test "$CLIENT_RESULT" = success
-
-  client:
-    name: Windows Rust 客户端 / 运行库契约
-    runs-on: windows-2022
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 运行库 NuGet 契约检查
-        shell: pwsh
-        run: |
-          ./tests/release/test-runtime-nuget.ps1
-          ./tests/release/test-runtime-nuget-publish.ps1
-
-      - name: 安装 Rust 工具链
-        shell: pwsh
-        run: |
-          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          rustup toolchain install $channel --profile minimal --component rustfmt
-          if ($LASTEXITCODE -ne 0) { throw 'Rust 工具链安装失败' }
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/lyflow-client
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Rust 格式检查（bridge 与客户端）
-        run: cargo fmt --manifest-path bridge/Cargo.toml --all -- --check
-
-      - name: Rust 格式检查（运行库探针）
-        run: cargo fmt --manifest-path tests/release/probe/Cargo.toml -- --check
-
-      - name: Rust 客户端编译
-        run: cargo build --locked --manifest-path crates/lyflow-client/Cargo.toml
-
-      - name: Rust 客户端单元测试
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path build/ci -Force | Out-Null
-          cargo test --locked --manifest-path crates/lyflow-client/Cargo.toml --lib 2>&1 | Tee-Object -FilePath build/ci/client-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust 客户端单元测试失败 (exit $LASTEXITCODE)" }
-
-      - name: 保存失败测试诊断
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: client-test-diagnostics
-          path: build/ci/*.log
-          if-no-files-found: ignore
-          retention-days: 7
+      - run: python -m pip install -r scripts/requirements.txt clang-format==20.1.8
+      - name: 公共 C++ 宿主示例格式
+        run: git ls-files -z -- '*.cpp' '*.h' '*.hpp' | xargs -0 -r clang-format --dry-run --Werror
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: python tests/quality/test_graph_contract_schema.py
+      - run: python tests/release/p4_contract.py --schema-only
+      - run: python tests/release/p5_contract.py --schema-only
+      - shell: pwsh
+        run: ./scripts/check.ps1 -Steps schema
 
   frontend:
     name: Windows 前端 / MCP：编译与单元测试
@@ -207,252 +114,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  native:
-    name: C++：编译与单元测试
+  public-tools:
+    name: Windows x64 正式 SDK / CLI / MCP / 桌面
     runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      SCCACHE_GHA_ENABLED: 'true'
-      SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.16.0
-
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: 准备并校验轻量轮廓数学头文件
-        shell: pwsh
-        run: |
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
-          if ($LASTEXITCODE -ne 0) { throw 'Eigen 头文件准备失败' }
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps --verify-only --offline
-          if ($LASTEXITCODE -ne 0) { throw 'Eigen 离线清单校验失败' }
-
-      - name: C++ 配置（平台 / dts / 值与几何）
-        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=solution-dts;std-value;std-geometry;std-profile;std-metrology" -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
-
-      - name: Python SDK 与 worker 测试
-        shell: pwsh
-        run: |
-          python -m pip install -r scripts/requirements.txt
-          "LYFLOW_TEST_PYTHON=$((Get-Command python).Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE 'python'
-          python -B -m unittest discover -s python/tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Python SDK/worker 测试失败' }
-
-      - name: C++ 编译
-        run: cmake --build build/core --config RelWithDebInfo --parallel
-
-      - name: C++ 单元测试（CTest / doctest）
-        run: ctest --test-dir build/core -C RelWithDebInfo -LE stress --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-results.xml"
-
-      - name: C++ 取消压力与 Python worker 恢复
-        shell: pwsh
-        run: |
-          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            $changed = git diff --name-only 'HEAD^1' HEAD -- core/ python/ scripts/build-core.ps1 .github/workflows/ci.yml
-            if ($LASTEXITCODE -ne 0) { throw '无法判断是否需要运行专项测试' }
-            if (-not $changed) { return }
-          }
-          ctest --test-dir build/core -C RelWithDebInfo -L stress --output-on-failure --no-tests=error --output-junit "${{ github.workspace }}/build/core/ctest-stress-results.xml"
-
-      - name: 算子分包清单与本组合注册一致
-        shell: pwsh
-        run: |
-          ./build/core/bin/lyflow-dump-manifest.exe | Set-Content -LiteralPath build/core/operator-manifest.json -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { throw '算子描述导出失败' }
-          python scripts/check-operator-package-audit.py --manifest build/core/operator-manifest.json --subset --complete-pack core --complete-pack std-value --complete-pack std-metrology --complete-pack solution-dts
-          if ($LASTEXITCODE -ne 0) { throw '分包清单与注册不一致' }
-
-      - name: M2轻量安装与独立公共核消费
-        shell: pwsh
-        run: |
-          cmake --install build/core --prefix build/m2-sdk-light
-          if ($LASTEXITCODE -ne 0) { throw 'M2轻量SDK安装失败' }
-          python tests/release/public_kernel_contract.py --sdk build/m2-sdk-light --runtime build/core/bin/lyflow_core.dll --output-dir build/m2-kernel-light
-          if ($LASTEXITCODE -ne 0) { throw 'M2轻量依赖或独立静态核消费失败' }
-
-      - name: 保存失败构建与测试诊断
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - run: python -m pip install -r scripts/requirements.txt
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          name: native-test-diagnostics
-          path: |
-            build/core/ctest-results.xml
-            build/core/ctest-stress-results.xml
-            build/core/Testing/Temporary/*.log
-            build/core/CMakeFiles/CMakeConfigureLog.yaml
-          if-no-files-found: ignore
-          retention-days: 7
-
-  rust:
-    name: Rust：桌面应用 / CLI 编译与单元测试
-    runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      SCCACHE_GHA_ENABLED: 'true'
-      SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
-      LYFLOW_STD_PACKS: '0'
-      LYFLOW_PACKS: solution-dts;std-value;std-geometry;std-profile;std-metrology
-      LYFLOW_PREBUILT_CORE_DIR: ${{ github.workspace }}/build/core/bin
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: 安装 Rust 工具链
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 匿名恢复锁定的 SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          rustup toolchain install $channel --profile minimal
-          if ($LASTEXITCODE -ne 0) { throw 'Rust 工具链安装失败' }
-
+          $sdk = ./scripts/restore-native-sdk.ps1 -Destination "$env:RUNNER_TEMP/native-sdk"
+          "LYFLOW_NATIVE_SDK=$sdk" >> $env:GITHUB_ENV
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: bridge
-          key: profile-dts-m3
+          workspaces: |
+            bridge
+            crates/lyflow-client
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.16.0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: 准备 Python 与轻量轮廓数学头文件
+      - run: cargo fmt --manifest-path bridge/Cargo.toml --all -- --check
+      - run: cargo test --locked --manifest-path crates/lyflow-client/Cargo.toml
+      - run: pnpm --filter lyflow-app build
+      - run: cargo test --locked --manifest-path bridge/Cargo.toml --no-fail-fast
+      - run: cargo build --locked --manifest-path bridge/Cargo.toml --features custom-protocol --bin lyflow-app
+      - name: CLI、MCP 和实际 WebView2 运行
         shell: pwsh
         run: |
-          python -m pip install -r scripts/requirements.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Python 依赖安装失败' }
-          "LYFLOW_TEST_PYTHON=$((Get-Command python).Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
-          if ($LASTEXITCODE -ne 0) { throw 'Eigen 头文件准备失败' }
-
-      - name: 编译 Rust 依赖的 core 运行库
-        run: |
-          cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF "-DLYFLOW_PACKS=solution-dts;std-value;std-geometry;std-profile;std-metrology" -DBUILD_TESTING=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
-          cmake --build build/core --config RelWithDebInfo --target lyflow_core --parallel
-
-      - name: Rust 编译（桌面应用与 CLI）
-        run: cargo build --locked --manifest-path bridge/Cargo.toml
-
-      - name: Rust 单元测试与集成测试
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path build/ci -Force | Out-Null
-          cargo test --locked --no-fail-fast --manifest-path bridge/Cargo.toml --lib --bins --test python_nodes --test profiles --test host 2>&1 | Tee-Object -FilePath build/ci/bridge-test.log
-          if ($LASTEXITCODE -ne 0) { throw "Rust 测试失败 (exit $LASTEXITCODE)" }
-
-      - name: 保存失败测试诊断
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-test-diagnostics
-          path: build/ci/*.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-  vision:
-    name: 值 / 位姿 / 几何 / 图像算子与组合流程
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      SCCACHE_GHA_ENABLED: 'true'
-      SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.16.0
-
-      - name: 安装构建工具与 YAML 依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ninja-build libyaml-cpp-dev
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            build/barcode-deps
-            build/third-party/zxing-cpp-3.1.1.zip
-          key: barcode-ubuntu-24.04-source-${{ hashFiles('packaging/barcode-deps.json', 'packaging/patches/ZXing-Cpp-*.patch', 'scripts/fetch-barcode-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
-
-      - name: 准备固定条码源码并验证准备器
-        run: |
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps
-          python scripts/fetch-profile-math-deps.py --output-dir build/profile-math-deps --verify-only --offline
-          python scripts/fetch-barcode-deps.py
-
-      - uses: actions/cache@v4
-        id: vision-cache
-        with:
-          path: |
-            build/vision-deps
-            build/opencv5-install
-          key: opencv5-ubuntu-24.04-x64-${{ hashFiles('packaging/vision-deps.json', 'scripts/build-vision-deps.ps1', 'scripts/fetch-vision-deps.py', 'scripts/fetch-matching-deps.py') }}-v1
-
-      - name: 正式脚本构建、验证 OpenCV 并配置视觉算子
-        shell: pwsh
-        run: |
-          ./scripts/build-vision-deps.ps1 -Parallel 3 -SkipBuild:('${{ steps.vision-cache.outputs.cache-hit }}' -eq 'true')
-          ./tests/release/test-build-vision-deps.ps1
-          foreach ($name in @('OpenCV_DIR', 'LYFLOW_OPENCV_ROOT', 'LYFLOW_OPENCV_BIN')) {
-            "$name=$([Environment]::GetEnvironmentVariable($name, 'Process'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          $libraries = $env:LYFLOW_OPENCV_BIN
-          if ($env:LD_LIBRARY_PATH) { $libraries += [IO.Path]::PathSeparator + $env:LD_LIBRARY_PATH }
-          "LD_LIBRARY_PATH=$libraries" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          cmake -S core -B build/vision -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF '-DLYFLOW_PACKS=std-value;std-geometry;std-image;std-metrology;std-ml;solution-glue' -DLYFLOW_MODULES=workspace-io -DLYFLOW_PACK_TESTS_ONLY=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON "-DOpenCV_DIR=$env:OpenCV_DIR"
-          if ($LASTEXITCODE -ne 0) { throw 'Linux 视觉算子配置失败' }
-
-      - name: 编译并自检算子契约
-        run: |
-          cmake --build build/vision --target lyflow-core-tests lyflow-kernel-tests lyflow-dump-manifest --parallel 4
-          build/vision/bin/lyflow-dump-manifest --check
-          build/vision/bin/lyflow-dump-manifest > build/vision/operator-manifest.json
-          python scripts/check-operator-package-audit.py --manifest build/vision/operator-manifest.json --subset --complete-pack core --complete-pack std-value --complete-pack std-geometry --complete-pack std-image --complete-pack std-metrology --complete-pack solution-glue
-          sccache --show-stats
-
-      - name: 验证数值、几何、图像和完整链
-        run: ctest --test-dir build/vision --output-on-failure --no-tests=error --output-junit test-results.xml
-
-      - name: 保存失败测试诊断
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vision-test-diagnostics
-          path: |
-            build/vision/test-results.xml
-            build/vision/Testing/Temporary/*.log
-            build/vision/CMakeFiles/CMakeConfigureLog.yaml
-            build/vision-opencv/*.log
-            build/vision-deps/prepared.json
-            build/barcode-deps/prepared.json
-            build/p5-sdk-contract/
-            build/p5-sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
-          if-no-files-found: ignore
-          retention-days: 7
+          ./scripts/check.ps1 -Steps manifest,cli,mcp
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:LYFLOW_E2E_BIN_DIR = (Resolve-Path bridge/target/debug).Path
+          pnpm e2e:packaged --only noderun:suiteSmart
+      - shell: pwsh
+        run: ./tests/release/test-runtime-nuget-publish.ps1

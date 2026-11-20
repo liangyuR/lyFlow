@@ -20,59 +20,12 @@ Tauri 桌面壳。职责：IPC、序列化、文件读写、进程生命周期�
 `desktop = ["host", …]`，所以 `--no-default-features --features host` 编出来的 lib
 有完整 IPC 层，却不依赖 `tauri-build` 与 dialog 插件。
 
-## C++ 怎么进来的
+## 加载原生 SDK
 
-M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
-（[ADR-0004](../docs/adr/0004-core-as-dll.md)）。M0/M1 那套「cc crate 直接编
-`core/src/**/*.cpp` 成静态库」在接入 PCL 之后走不通了：PCL 是 vcpkg 的
-`x64-windows` 动态三元组，一次 `find_package` 带进来十几个 import 库和二十多个
-运行时 DLL，而且清单会随版本变 —— 在 build.rs 里手工复刻 vcpkg 的依赖解析
-是死路。CMake 已经知道答案，让它回答。
+按[快速开始](../docs/getting-started.md)恢复与工具配套的 SDK，将绝对路径设为 `LYFLOW_NATIVE_SDK`。Cargo 从 SDK 的 `bin/` 暂存运行库 DLL 及 Python worker。CLI、桌面和集成测试从各自可执行文件所在目录加载 DLL。桌面打包从 `bridge/target/bundle-core/` 取得同一份资源，UTF-8 程序清单取自 SDK 的 `examples/lyflow-utf8.manifest`。
 
-`build.rs` 做四件事：
+### Windows 程序清单与窗口配置
 
-1. 用 cmake crate 驱动 `core/CMakeLists.txt`，只构建 `lyflow_core` 这一个目标
-   （两个 exe 归 `scripts/build-core.ps1` 管）。固定 `RelWithDebInfo`（D8）。
-2. 发 `cargo:rustc-env=LYFLOW_CORE_BIN=<build>/bin`，并把该目录里的
-   `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的 `deps/`（release 的 exe 从同目录加载）。
-3. 桌面构建再把这些 DLL 镜像到 `bridge/target/bundle-core/` —— `tauri.conf.json` 的 `bundle.resources`
-   指向这里，安装包里的 core 因此**就是这一次构建编出来的那一份**。release 每次整份换掉，
-   debug 只在还没有时放一份（tauri-build 在 debug 下也按 resources 拷文件，glob 空了要报错）。
-   以前 resources 指向 `build-core.ps1` 的 `build/core/bin`：另一棵构建树，
-   启用业务包后打出的安装包仍可能包含另一棵构建树里的旧 core（2026-10-01 实测）。
-4. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
-   （D9：`activeCodePage=UTF-8`），lyflow-app 再合并 `lyflow-app.manifest`（Common-Controls v6）。
-
-**不发任何 `rustc-link-lib`。** DLL 在运行时才加载：**开发构建**
-（`debug_assertions`）从**本配置自己的** `LYFLOW_CORE_BIN` 加载，其余情况从 exe
-同目录（不搜 PATH，也不看当前工作目录 —— 前者会加载到无关的同名 DLL，
-后者在双击启动时根本不是安装目录）。
-
-为什么开发构建不用 exe 同目录：cargo 会按 feature 集把同一个 crate 建好几遍
-（`lyflow-app` 带 `desktop`、lib 的 test、CLI `--no-default-features`），
-每一份有自己的 `OUT_DIR` 和自己的 `lyflow_core.dll`，而 `target/<profile>/`
-是**共用**的 —— 谁最后跑过 `build.rs` 谁的 DLL 就留在那里。带 `LYFLOW_OP_PACKS`
-构建的 app 因此会加载到不带包那次留下的 DLL，表现是算子凭空少一半。
-拷贝是 `build.rs` 的副作用，只在这个配置的 `build.rs` 重跑时才发生，
-所以「重新构建一次」并不能纠正它。
-
-Windows 上用 `LOAD_WITH_ALTERED_SEARCH_PATH` 加载：PCL、`yaml-cpp` 这些依赖
-DLL 跟着从**核心 DLL 自己的目录**解析，而不是 exe 目录。
-
-新增 `core/src/**/*.cpp` 会被自动编进来：`build.rs` 递归 glob 源文件与目录，
-并对每一项发 `cargo:rerun-if-changed`，所以加文件会触发重编。
-
-### 需要什么
-
-CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依次尝试
-`LYFLOW_NINJA` 环境变量 → PATH → VS 自带的那份（cmake.exe 旁边的 `../Ninja/`）
-→ vswhere。都找不到就退回 CMake 默认生成器，慢但能用。
-
-### 三个踩过的坑
-
-- **别 `canonicalize()` core 的路径。** Windows 上它返回 `\\?\D:\...`，
-  CMake 的 `file(GLOB)` 在这种扩展长度路径下一个文件都匹配不到，
-  最后报的是「No SOURCES given to target」，离真正的原因十万八千里。
 - **清单别走 tauri_build 的 `app_manifest`**，用 `new_without_app_manifest()` 关掉它，
   由 link.exe 的 `/MANIFESTINPUT` 贴。那条路把清单内联进 .rc 交给 rc.exe，按系统
   ANSI 代码页转码：ACP=936 的机器上中文注释变成 GBK、声明却是 UTF-8，exe 报
@@ -119,30 +72,11 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 [`schema/execution-event.schema.json`](../schema/execution-event.schema.json)）、
 `manifest-updated` 与 `core-reload-failed`（热重载，见下）。
 
-`load_graph` 返回的是 `{ doc, migrations }` 而不是裸 `doc`：**桥接层不改图**。
-它只是替 C++ 把 `kind === "migration"` 的诊断挑出来交给前端，
-写回 GraphDoc 是 `applyMigrations` 的事（[ADR-0008](../docs/adr/0008-migration-as-diagnostic.md)）。
+`load_graph` 保留读入的图。执行前按已加载引擎的契约校验，见[图文档](../docs/graph-doc.md)。
 
-## 热重载（开发期）
+## 运行库更新
 
-`watcher.rs` 盯着 `build/core/bin/lyflow_core.dll`（`scripts/core-watch.ps1` 的产物）。
-变了就走一轮换代，**顺序不能变**（[ADR-0009](../docs/adr/0009-hot-reload-by-copy.md)）：
-
-```
-RunManager::pause(ReleaseAll) → drain（取消并等齐在算的，放掉全部 RunHandle）→ 清空结果仓
-  → 复制成 lyflow_core.gen<N>.dll → 加载 → 自检 → 换掉 Arc<Core> → 结束窗口（排队的请求在新的一代上开跑）
-```
-
-- **必须先放掉全部 RunHandle（`drain`）。** `RunHandle` 持有 `Arc<Core>`；不放掉的话旧 DLL 只是
-  「被顶下去」而不是被卸载，两代同时活着、两个结果仓，症状会非常离奇。窗口里发起的运行只排队，
-  开跑时才取 core —— 以前排队的请求捕获的是提交时那一代。
-- **必须复制。** Windows 锁住已加载的 DLL，不复制的话第一次热重载之后 CMake
-  就再也构建不了了。旧代的 gen 文件删不掉是常态，清理放在下次启动。
-- 自检（`manifest_problems` 为空 + manifest 可解析）不过就保留旧代，
-  emit `core-reload-failed`。半坏的一代比旧的一代难查十倍。
-- `watch_source()` 靠 `env!("CARGO_MANIFEST_DIR")` 推路径，**只在 debug 构建里开**：
-  release 构建（安装包）一律不启动 watcher，`get_core_info().hotReload` 是 false。
-  以前只靠「安装包里这个路径不存在」，而在构建机上它一直在 —— 那里开的打包产物会盯着开发目录换代。
+公共桌面加载可执行文件旁的 SDK 运行库。升级 SDK 后重新构建并重启桌面，库目录监视仍负责发现用户添加的库算子。
 
 ### 运行的生命周期（`execution.rs`）
 

@@ -11,7 +11,7 @@
 
 |          | 仓库内的包                                                                                  | 外部包                                                 |
 | -------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 在哪     | 本仓库的 `packs/*`                                                                          | 任意目录                                               |
+| 在哪     | 引擎仓的 `packs/*` 和 `solutions/*`                                                                          | 任意目录                                               |
 | 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名                          | `LYFLOW_OP_PACKS` 按**目录**显式列出                   |
 | 注册顺序 | 在 core 的透传和调度算子之前                                                               | 在 core 的透传和调度算子之后                          |
 | 例子     | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`solutions/gap`、`solutions/dts` | 任何自己写的包                                         |
@@ -35,35 +35,11 @@ core 本身提供 `util.reroute`、`flow.fallback`、`flow.select`
 | `solution-gap`   | 0.3.0  | **OFF** | `gap.*` 原生场景、StandardGap 导入器与片段                                                                | 基础PCL；模板、模型、导入能力按模块启用                                          |
 | `solution-dts`   | 0.3.0  | **OFF** | 5 项 `dts.*` 胶条面差场景节点；公共处理已迁出                                                     | 公开Profile/度量核；编译期Eigen5.0.1，不链PCL/CV/ORT                                |
 
-`DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
-不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
+## 使用发布包与自定义原生组合
 
-```powershell
-$env:LYFLOW_PACKS = "solution-gap"
-$env:LYFLOW_MODULES = "gap-template;gap-model;gap-import"
-pnpm check          # 或 pnpm check:gap
-```
+公共工具使用已恢复 SDK 的算子集合，运行 `lyflow manifest` 查看当前 DLL 提供的节点和版本。完整发行的包和模块由[引擎发行清单](https://github.com/liangyuR/lyflow-engine/blob/main/packaging/release.json)声明。
 
-领域包默认关，是因为纯平台开发者不该为一个领域包装 yaml-cpp
-（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）。
-
-显式选择 `std-ml` 可使用四个 Tensor 解码节点。要在显式组合启用 ONNX 推理，增加 `LYFLOW_MODULES=ml-runtime`。要在显式几何组合读取工作空间，选择 `std-geometry` 并增加 `workspace-io`。默认开发和正式组合包含这两个模块。使用 `gen.synthetic` 的精简组合显式选择 `std-pointcloud`。
-
-## 用一个包构建
-
-`LYFLOW_OP_PACKS` 是**分号分隔的目录列表**，每个目录下要有一个 `lyflow_op_pack.cmake`：
-
-```powershell
-$env:LYFLOW_OP_PACKS = "$HOME\project\xyz-gap-inspector\lyflow"
-pnpm check          # 或 pnpm core:build / pnpm dev
-```
-
-不设这个变量就是默认构建：core + 默认开启的能力包。
-`scripts/build-core.ps1`、`bridge/build.rs`、`scripts/core-watch.ps1` 都读同一个变量。
-
-三个开关都按「CMake 缓存变量 → 同名环境变量 → 默认值」的顺序取值，
-**空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
-不该悄悄变成「关掉标准包」；要关就显式写 `0`。
+自定义原生组合在引擎仓中配置和构建。以下变量传给该仓的 CMake，下文的原生源码路径均从引擎仓根目录解析。Windows 准备步骤见[引擎指南](https://github.com/liangyuR/lyflow-engine/blob/main/README.md)。
 
 | 变量               | 值                   | 默认 | 语义                                                                                                                                                 |
 | ------------------ | -------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -74,21 +50,7 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 
 M2 先读取仓库内包的 `lyflow_pack_dependencies.cmake` 声明，再按选择计算模块依赖闭包；只有启用的包才加载 `lyflow_op_pack.cmake` 和创建对象库。第三方发现集中在模块 setup 中，未启用的 PCL/OpenCV/ORT 模块不会执行查找。缺模块、缺显式包依赖、重复声明和依赖环均在配置阶段拒绝，不依靠目录字母序猜测提供方。
 
-M4增加`OPTIONAL_MODULES`：可选模块声明不会执行后端setup。模块既可由`LYFLOW_MODULES`显式选择，也可由场景包的必选模块间接请求；公开包只启用自己声明且实际可用的可选能力，顺序由依赖图决定。CMake、桌面/CLI的Rust构建及`build-core.ps1`共用此选择；改变`LYFLOW_MODULES`会触发重新构建。带显式模块覆盖的产物不沿用固定发布组合身份。
-
-包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
-所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样；
-`packs/`、`solutions/`、`kernels/` 都在这两条监视链里，包括关闭默认包后显式选择的组合。
-
-### 纯平台构建
-
-```powershell
-$env:LYFLOW_STD_PACKS = "0"
-pnpm check
-```
-
-不点名就 `packs/*` 一个都不编。manifest 包含 `util.reroute`、`flow.fallback`、`flow.select` 三个算子，`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
-这一趟是「core 真的零依赖」的唯一证据，也是不装 PCL 就能开发平台本身的路子。
+`OPTIONAL_MODULES` 只声明包可以使用的后端。显式请求或其他包依赖的模块会进入实际构建集合。
 
 ### 只编某一个仓库内的包
 
@@ -103,49 +65,7 @@ cmake --build build-dts --target lyflow_core lyflow-core-tests
 
 `solution-dts` 显式依赖三个公共能力包；Eigen只参与编译期，不引入PCL/OpenCV/ORT运行时。SDK携带静态内核与相应许可。旧包名 `dts` 已退役，配置时会提示新的选择，不作为隐藏别名继续启用。
 
-外部宿主（按 cargo **git 依赖**引 `bridge` crate 的那种）只能走这条路：
-git checkout 落在 `~/.cargo/git/checkouts/` 下且路径不可预知，宿主给不出
-`LYFLOW_OP_PACKS` 要的绝对路径，只能按名字点名。`bridge/build.rs` 把
-`LYFLOW_STD_PACKS` / `LYFLOW_PACKS` 原样 `-D` 转给 cmake：
-
-```powershell
-$env:LYFLOW_STD_PACKS = "0"; $env:LYFLOW_PACKS = "solution-dts;std-profile;std-metrology;std-geometry"
-cargo build -p lyflow-app --no-default-features --bin lyflow
-```
-
-点名是「就编这个」，不看 `DEFAULT`：`LYFLOW_PACKS="std-profile"` 配 `LYFLOW_STD_PACKS=0` 只启用轮廓能力及其模块；场景包声明的 `PACKS` 依赖必须显式一起选择。
-依赖后端目标无需同时注册提供方包的算子。例如 gap 声明所需 PCL/点云算法/ORT/YAML 模块，单独选择 gap 会创建这些后端，仍不注册 `std-pointcloud` 或 `std-ml` 的节点。只有声明 `PACKS` 的依赖才要求把对应算子包一同选入。glue 的 `glue.bead_inspect` 片段引用 `io.load_image`，因此显式声明 `PACKS std-image`；纯平台只选 glue 会在配置阶段提示缺包。该注册要求不表示 OpenCV 模块由 std-image 的注册过程提供。
-
-门禁的其余各步照跑，只有**要标准包算子的用例不跑，而且看得出没跑**：
-
-- Rust：`bridge/build.rs` 在 `LYFLOW_STD_PACKS=0` 时发 `--cfg std_packs_off`，这些测试标了
-  `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，cargo 的汇总行写着「N ignored」。
-  默认构建不发这个 cfg，它们照跑；`core_ffi::tests::std_packs_are_built_unless_switched_off`
-  兜底 —— 开关没关却没有标准包的算子、或者关了却还有，都直接挂。
-- MCP：两条集成冒烟的图用 `filter.voxel_grid`，只有开关是 `0` 且 CLI 里确实没有它时才 skip 并打出原因。
-- `check.ps1` 收尾前再打一行黄字，说明上面的 ignored / skip 是这个模式有意为之。
-
-新写的测试用到标准包的算子（图里的节点、manifest 的算子个数、标准包注册的迁移），
-在 `#[test]` 下面加同一行。之所以按用例标 ignore，而不是在 `check.ps1` 里把 `cargo test` 与 MCP 冒烟整步跳过：
-整步跳过会把 bridge 里不靠标准包的那一大半（C ABI 加载与热重载、执行事件、配方、诊断……）一起丢掉，
-而它们恰好是「bridge 对着零依赖的 core 也能用」的证据。也没照 gap 测试那样查 manifest、没有就提前 `return`：
-Rust 的测试框架没有运行时 skip，提前 `return` 记成 passed，纯平台构建里几十条一条没跑，汇总行还是全绿。
-
-### 带包和不带包混着跑
-
-cargo 会按 feature 集把 `lyflow-app` 建好几遍（app、lib 的 test、CLI），
-每一份有自己的 `OUT_DIR` 和自己的 `lyflow_core.dll`。开发构建里每个 exe
-**加载的是自己那一份**（`build.rs` 发的 `LYFLOW_CORE_BIN`），
-所以两种模式来回切不会串味 —— 不带外部包跑过 `pnpm check` 之后，
-带 gap 包的 `pnpm tauri dev` 仍然带着 gap 的算子，反过来也一样。
-`target/debug/` 与 `deps/` 里那份拷贝只服务 `tauri build` 与打包。
-
-包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（`std-ml` 的 `onnxruntime.dll` 就是）
-不会因为下次不带那个包构建就消失。`std-ml` 默认开，所以这一条现在只在
-`LYFLOW_STD_PACKS=0` 与默认之间来回切时咬人：纯平台构建的 `bin/` 是另一个目录，
-但 `bridge/target/<profile>/` 里那份共享拷贝会留着上一次的。安装包取的是
-`bridge/target/bundle-core/`（`build.rs` 每次 release 构建整份换掉），不受那份共享拷贝影响；
-同一个构建目录里换包时 `bin/` 自己留下的旧 DLL 仍会跟着进去。
+场景包声明的 `PACKS` 依赖须显式一同选择。宿主通过预编译 SDK 加载已经选定的原生组合。
 
 ## 一个包长什么样
 
@@ -222,7 +142,7 @@ mypack/
   注册时逐份 `Registry::addSnippet(parseSnippet(text, source))`。写法照抄 `solutions/gap/lyflow_op_pack.cmake`
   与 `solutions/gap/ops/snippets.cpp`。这样片段跟着包走：包没编进来，它的片段也不会出现在面板里。
 - **自检**：启动自检与 `lyflow manifest --check` 查片段里的算子都注册了、参数名认得、边两端的端口存在
-  且类型接得上、对外输入没在片段里接边；`pnpm check` 另把每个片段文件对着 schema 校验一遍。
+  且类型接得上、对外输入没在片段里接边。
 - **用户片段**不在包里：桌面宿主扫 app data 下的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`（分号分隔），
   同 id 时用户的覆盖包里的。
 
@@ -450,21 +370,6 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 `gap.*` 用毫米，与它的 YAML 配置一致），但要在参数的 `unit` 字段里写清楚，
 并在算子内部换算 —— 端口上流动的几何值必须是米，否则叠画会错一千倍。
 
-## 门禁
+## 验证
 
-带包和不带包**两种模式都要绿**：
-
-```powershell
-pnpm check                                      # 默认：core + 默认开的 packs/*
-$env:LYFLOW_PACKS="solution-gap"; pnpm check             # 带仓库内默认关闭的包
-$env:LYFLOW_OP_PACKS="…\mypack"; pnpm check     # 带外部包
-```
-
-`pnpm check:gap` 按正式契约启用 `solution-gap` 与所需模块；完整运行库的包、模块集合由 `packaging/release.json` 统一声明。
-`solutions/gap/tools/` 下的 A/B 是历史对拍工具，不是门禁，见 `solutions/gap/README.md`。
-
-不带外部包那一遍是「包机制没有改变通用侧行为」的唯一证据。
-另有两条更强的，改了包机制本身时值得跑：
-`$env:LYFLOW_STD_PACKS="0"; pnpm check` —— 连标准包都不编；
-再把 `$env:LYFLOW_PACKS="dts"` 加上 —— 纯平台之上只点名一个包，
-这是外部宿主实际用的那条路。
+在引擎仓运行原生构建、包测试和 ABI 检查，见[原生测试地图](https://github.com/liangyuR/lyflow-engine/blob/main/docs/testing.md)。公共工具恢复该版本的 SDK 后运行 `pnpm check`，检查桥接、编辑器和 MCP 的消费路径。见[公共测试地图](testing.md)。

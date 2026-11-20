@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$LockFile,
+    [string]$LockFile,
     [Parameter(Mandatory)][string]$Destination,
     [string]$Archive
 )
@@ -9,8 +9,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'runtime-nuget-common.ps1')
 
-$lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
-if ($lock.schemaVersion -ne 1) { throw 'Unsupported native SDK lock version.' }
+$reviewed = Get-ReviewedEngineRelease -LockFile $LockFile
+$lock = $reviewed.Sdk
 $destinationPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 if (Test-Path -LiteralPath $destinationPath) { throw "SDK destination already exists: $destinationPath" }
 $parent = Split-Path -Parent $destinationPath
@@ -20,6 +20,7 @@ try {
     if ($Archive) {
         $zip = (Resolve-Path -LiteralPath $Archive).Path
     } else {
+        $null = Get-PublishedEngineRelease -Release $reviewed
         $zip = Join-Path $temporary 'sdk.zip'
         Invoke-WebRequest -Uri $lock.url -OutFile $zip
     }

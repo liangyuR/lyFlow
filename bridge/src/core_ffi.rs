@@ -26,15 +26,7 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// 开发构建先用本配置自己的 cmake 产物（build.rs 的 `LYFLOW_CORE_BIN`）：cargo 按
-/// feature 集把同一个 crate 建好几遍，而 target/<profile>/ 是共用的，谁后拷谁说了算。
 fn dll_path() -> PathBuf {
-    if cfg!(all(debug_assertions, not(native_sdk))) {
-        let own = Path::new(env!("LYFLOW_CORE_BIN")).join(DLL_NAME);
-        if own.is_file() {
-            return own;
-        }
-    }
     exe_dir().join(DLL_NAME)
 }
 
@@ -43,16 +35,14 @@ pub(crate) fn dll_file() -> PathBuf {
     dll_path()
 }
 
-/// 开发期热重载的源头：`scripts/core-watch.ps1` 就往这里构建（ADR-0009）。
-/// 只在 debug 构建里开：这个路径是编译时写死的，构建机上它一直在 —— 在那台机器上开打包出来的 app，
-/// 它会盯着开发目录，`build-core.ps1` 一编就把装好的 core 换成另一份（包都可能不一样）。
+/// 调试构建可监视独立引擎仓的输出 DLL。
 pub fn watch_source() -> Option<PathBuf> {
-    if !cfg!(all(debug_assertions, not(native_sdk))) {
+    if !cfg!(debug_assertions) {
         return None;
     }
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
-    let path = repo.join("build").join("core").join("bin").join(DLL_NAME);
-    path.exists().then_some(path)
+    std::env::var_os("LYFLOW_WATCH_DLL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
 }
 
 /// 带 pid：`deps/` 是所有 cargo 测试进程共用的，重名会撞上另一个进程还映射着的
@@ -155,32 +145,7 @@ pub fn manifest_problems() -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    /// 显式选择的标准包在精简构建中仍应注册。
     #[test]
-    fn std_packs_are_built_unless_switched_off() {
-        let v: serde_json::Value = serde_json::from_str(&manifest_json().unwrap()).unwrap();
-        let packs: std::collections::BTreeSet<&str> = v["operators"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|o| o["pack"].as_str())
-            .map(|p| p.split('@').next().unwrap())
-            .collect();
-        for pack in ["std-pointcloud", "std-ml"] {
-            let selected = option_env!("LYFLOW_PACKS")
-                .unwrap_or("")
-                .split(';')
-                .any(|value| value.trim() == pack);
-            assert_eq!(
-                packs.contains(pack),
-                !cfg!(std_packs_off) || selected,
-                "manifest 的 {pack} 与构建选择不一致: {packs:?}"
-            );
-        }
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn manifest_is_valid_json_with_expected_shape() {
         let raw = manifest_json().expect("读不到 manifest");
         let v: serde_json::Value = serde_json::from_str(&raw).expect("manifest 不是合法 JSON");

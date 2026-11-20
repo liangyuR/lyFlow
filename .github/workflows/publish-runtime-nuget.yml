@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 已正式发布的版本，例如 v1.1.0
+        description: 已正式发布的版本，例如 v2.0.3
         type: string
         required: true
 
@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     name: 验证正式 Release 并发布固定版本运行库
     runs-on: windows-2022
     timeout-minutes: 45
@@ -31,10 +32,6 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: 校验正式 Release 的引擎身份并发布固定版本运行库
         shell: pwsh
         env:
@@ -44,7 +41,7 @@ jobs:
         run: ./scripts/publish-runtime-nuget.ps1 -Tag $env:RELEASE_TAG -OutputDir "${{ runner.temp }}/runtime-nuget"
 
       - name: 保存已验证运行库包
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: runtime-nuget

@@ -18,9 +18,10 @@
 
 | Python几何端口、工件/云组查看、FIFO与原生帧录制回放/发布 | [P6指南](p6-examples.md) |
 
+标准包和 Gap、DTS、Glue 场景包已在 2.0 系列统一交付，原生实现与测试由[引擎仓](https://github.com/liangyuR/lyflow-engine)维护。公共工具按完整版本恢复 SDK。包的职责见[边界说明](operator-package-boundaries.md)，宿主接入方式见[拆仓交付](deployment/runtime-sdk-repo-split-plan.md)。
+
 ## 仍需独立推进或验收的范围
 
-- **算子包边界重整**：已形成[251项原生算子及7个Python示例的逐项审计](operator-package-audit.md)、[目标边界](operator-package-boundaries.md)和[M0–M7迁移计划](operator-package-migration-plan.md)。先统一轮廓、单位、坐标和标定契约，再抽公共几何/度量核，以DTS试点后拆解gap/glue；本轮仅完成规划，尚未迁移算法或改变ABI。
 - **同一页面的多个编辑器实例**：当前 store 和 Transport 仍为模块级单例，一页只支持一个编辑器。编辑器内部的多工作流标签已经实现，不等于实例隔离。支持方式见[嵌入指南](embedding.md)。
 - **业务宿主迁移**：xyz-gap-inspector、GlueSight 等仓库的数据库、采集、生产 UI 和部署由各自仓库负责。LyFlow 平台能力已实现不代表这些系统已完成迁移；量测准确率、误检漏检和生产节拍需要业务数据独立验收，不能以旧算法逐字段一致代替正确性验证。
 - **现场数据与产品判据**：真实多相机选取、现场标定、完整 NG 集和生产质量指标不能用合成图或单次离线回放替代。已有算子的前提和未验证边界见 [glue 接入](glue-integration.md)与 [gap 接入](gap-inspector-integration-design.md)。

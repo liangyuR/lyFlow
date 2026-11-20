@@ -24,69 +24,6 @@ function Get-RuntimeNuGetTool {
     return $ToolPath
 }
 
-function Assert-RuntimeNuGetMetadata {
-    param([string]$RuntimeDir, [string]$ExpectedVersion, [string]$ExpectedRevision)
-    if ($ExpectedVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'A stable three-part product version is required.' }
-    if ($ExpectedRevision -notmatch '^[0-9a-f]{40}$') { throw 'An exact source revision is required.' }
-    $metadata = Get-Content -LiteralPath (Join-Path $RuntimeDir 'lyflow-runtime.json') -Raw | ConvertFrom-Json
-    function Assert-NoContentDigests([object]$Value) {
-        if ($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsValueType) { return }
-        if ($Value -is [System.Collections.IEnumerable]) { foreach ($child in $Value) { Assert-NoContentDigests $child }; return }
-        foreach ($property in $Value.PSObject.Properties) {
-            if ($property.Name -match '(?i)(hash|digest|fingerprint|checksum|^sha\d*$)') { throw 'Legacy content digest fields are forbidden in runtime metadata.' }
-            Assert-NoContentDigests $property.Value
-        }
-    }
-    Assert-NoContentDigests $metadata
-    if ($metadata.schemaVersion -ne 1 -or $metadata.architecture -cne 'x64' -or $metadata.localValidationOnly -isnot [bool] -or $metadata.localValidationOnly) { throw 'Only formal x64 runtime metadata is accepted.' }
-    if ($metadata.engineVersion -cne $ExpectedVersion -or $metadata.abiVersion -cne $ExpectedVersion -or $metadata.sourceRevision -cne $ExpectedRevision) { throw 'Runtime version, ABI or source revision does not match the requested release.' }
-    $listed = @($metadata.files | ForEach-Object { $_.path })
-    $actual = @(Get-ChildItem -LiteralPath $RuntimeDir -File -Recurse | ForEach-Object { [IO.Path]::GetRelativePath($RuntimeDir, $_.FullName).Replace('\', '/') })
-    if ($listed.Count -ne @($listed | Sort-Object -Unique).Count -or @(Compare-Object -ReferenceObject $listed -DifferenceObject $actual).Count) { throw 'Runtime file inventory is incomplete or contains unexpected files.' }
-    foreach ($item in Get-ChildItem -LiteralPath $RuntimeDir -Recurse -Force) {
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime cannot contain reparse points.' }
-        if (-not $item.PSIsContainer) {
-            $relative = [IO.Path]::GetRelativePath($RuntimeDir, $item.FullName).Replace('\', '/')
-            $pythonFile = $relative -in @('python/README.md', 'python/pyproject.toml') -or (($relative -like 'python/lyflow_python/*' -or $relative -like 'python/examples/*') -and $item.Extension -ceq '.py') -or $relative -clike 'python/examples/*/README.md'
-            if ($relative -ne 'lyflow-runtime.json' -and $relative -notlike 'licenses/*' -and -not $pythonFile -and ($relative.Contains('/') -or $item.Extension -ine '.dll')) { throw "Unexpected runtime content: $relative" }
-            if ($item.Extension -ieq '.dll') {
-                $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($item.FullName))
-                try {
-                    if ($reader.ReadUInt16() -ne 0x5a4d) { throw "Not a PE DLL: $relative" }
-                    $reader.BaseStream.Position = 0x3c
-                    $offset = $reader.ReadInt32()
-                    if ($offset -lt 64 -or $offset -gt $reader.BaseStream.Length - 6) { throw "Invalid PE DLL: $relative" }
-                    $reader.BaseStream.Position = $offset
-                    if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne 0x8664) { throw "DLL architecture must be x64: $relative" }
-                } finally { $reader.Dispose() }
-            }
-        }
-    }
-    foreach ($name in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll', 'licenses/PROJECT-NOTICE.txt')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $name) -PathType Leaf)) { throw "Runtime missing $name" }
-    }
-    $configuration = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging/release.json') -Raw | ConvertFrom-Json
-    if ([version]$ExpectedVersion -ge [version]'1.3.12') {
-        foreach ($relative in $configuration.requiredRuntimeFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $relative) -PathType Leaf)) { throw "Runtime missing $relative" }
-        }
-    }
-    if ([version]$ExpectedVersion -ge [version]'1.4.5') {
-        if ('modules' -notin $metadata.PSObject.Properties.Name -or 'packs' -notin $metadata.PSObject.Properties.Name) { throw 'Runtime metadata is missing the release pack/module combination.' }
-        $actualModules = @($metadata.modules | Sort-Object -Unique)
-        $actualPacks = @($metadata.packs | ForEach-Object name | Sort-Object -Unique)
-        if (@($metadata.modules).Count -ne $actualModules.Count -or @($metadata.packs).Count -ne $actualPacks.Count -or
-            @(Compare-Object -CaseSensitive -ReferenceObject @($configuration.modules | Sort-Object) -DifferenceObject $actualModules).Count -or
-            @(Compare-Object -CaseSensitive -ReferenceObject @($configuration.packs | Sort-Object) -DifferenceObject $actualPacks).Count) {
-            throw 'Runtime pack/module combination differs from the release contract.'
-        }
-    }
-    foreach ($id in $configuration.requiredOperators) {
-        if ($id -cnotin @($metadata.operators | ForEach-Object { $_.id })) { throw "Runtime metadata missing required operator: $id" }
-    }
-    return $metadata
-}
-
 function Expand-RuntimeReleaseArchive {
     param([string]$ArchivePath, [string]$Destination)
     $Destination = [IO.Path]::GetFullPath($Destination)
@@ -109,4 +46,9 @@ function Expand-RuntimeReleaseArchive {
         }
     } finally { $archive.Dispose() }
     [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination)
+    # ZIP 的 DOS 时间使用本地时区；未来的 CMake 输入会让 Ninja 持续重新配置。
+    $now = [DateTime]::UtcNow
+    foreach ($item in Get-ChildItem -LiteralPath $Destination -Force -Recurse) {
+        if ($item.LastWriteTimeUtc -gt $now) { $item.LastWriteTimeUtc = $now }
+    }
 }

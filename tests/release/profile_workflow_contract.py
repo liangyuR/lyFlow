@@ -9,10 +9,9 @@ import shutil
 import struct
 import subprocess
 
-from public_robust_kernel_contract import isolated_workspace
+import tempfile
 
 
-ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_PACKS = {"std-profile", "std-geometry", "std-metrology"}
 FORBIDDEN_PUBLIC = re.compile(r"opencv|onnxruntime|kiss.?matcher|small.?gicp|yaml|zxing", re.I)
 DLL_IMPORT = re.compile(r"^\s+([\w.+-]+\.dll)\s*$", re.M | re.I)
@@ -120,12 +119,13 @@ def main():
     document = json.loads(graph.read_text(encoding="utf-8-sig"))
     csv = graph.parent / "m4-native-profile.csv"
     require(csv.is_file(), "Public workflow CSV fixture is absent")
-    version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
+    version = json.loads((sdk / "bin/lyflow-runtime.json").read_text(encoding="utf-8"))["engineVersion"]
     cmake, dumpbin = shutil.which("cmake"), shutil.which("dumpbin")
     require(cmake and dumpbin, "Use the MSVC developer environment with CMake/Ninja and dumpbin")
     environment = os.environ.copy()
     environment.pop("LYFLOW_CACHE_DIR", None)
-    with isolated_workspace(output) as workspace:
+    with tempfile.TemporaryDirectory(dir=output) as directory:
+        workspace = Path(directory)
         runtime = workspace / "runtime"
         shutil.copytree(runtime_source, runtime)
         executable = runtime / "lyflow.exe"

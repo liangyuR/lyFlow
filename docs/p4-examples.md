@@ -4,7 +4,7 @@
 
 ## 准备与运行
 
-在仓库根目录执行：
+在已恢复 SDK 的根目录执行。下文的 `lyflow` 指配套的 CLI：
 
 ```powershell
 python scripts/fetch-p4-model-assets.py --output-dir examples/p4-assets
@@ -19,7 +19,7 @@ lyflow run examples/p4-ocr.lyflow.json --no-cache --outputs --summary
 python scripts/fetch-p4-model-assets.py --output-dir examples/p4-assets --asset-dir build/p4-assets --offline
 ```
 
-清单 [p4-model-assets.json](../packaging/p4-model-assets.json) 固定十个文件的尺寸、SHA256、来源修订和许可。下载器不会用同名但校验错误的缓存文件。模型和字典由使用者准备，不随示例 JSON 重复提交。完整来源和许可见 [P4 资产说明](p4-assets.md)。
+清单 [p4-model-assets.json](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packaging/p4-model-assets.json) 固定十个文件的尺寸、SHA256、来源修订和许可。下载器不会用同名但校验错误的缓存文件。模型和字典由使用者准备，不随示例 JSON 重复提交。完整来源和许可见 [P4 资产说明](p4-assets.md)。
 
 模型图参数默认使用 `p4-assets/...`，相对于工作流文件目录解析。移动或保存工作流时，要把对应 `p4-assets` 和夹具一起移动；也可显式传入模型或图片的绝对路径。标注索引里的图片和标注路径相对于索引文件目录解析。
 

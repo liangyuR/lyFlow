@@ -21,7 +21,7 @@ noderun.mjs  节点运行按钮的分组（按钮位置与真鼠标、单击智�
 params_p1.mjs 图参数成形的分组（完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、复制路径名与撤销回到保存点）
 params_p2.mjs 参数面板的分组（开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
 params_p3.mjs 配方的分组（新建两个配方 Ctrl+S 落盘与重开还原、编辑落点与外部修改检测、从基础重算、切配方后的缓存命中与自动运行、撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
-params_p4.mjs 配方经 CLI 运行的分组（真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字 —— 接着对拍分组的状态，数据不在时自己用合成小图搭一个一样挤的，照样验）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
+params_p4.mjs 在中文工作区打开公开的表达式示例，保存配方，比较桌面与 CLI 的命名输出、检验显式参数覆盖，并在 1280 / 1366 / 1440 宽度检查工具栏布局。可用 LYFLOW_CLI 指定配套的 CLI。
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 record-params-p2.mjs 参数面板的截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
 record-params-p3.mjs 配方的截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
@@ -60,8 +60,7 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
 几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
-`m8c` 的切槽、标签避让、槽位诊断各自创建三模板图，可以单独运行。构建 core 时启用
-`LYFLOW_PACKS=solution-gap` 和 `LYFLOW_MODULES=gap-template`。例如
+`m8c` 的切槽、标签避让、槽位诊断各自创建三模板图，可以单独运行。使用带 `solution-gap` 和 `gap-template` 的正式 SDK。例如
 `pnpm e2e --only m8c:suiteLabelsApart` 验证相邻框的标签，
 `pnpm e2e --only m8c:suiteSlot3WrongSide` 验证拖框后的错误定位。
 
@@ -129,7 +128,7 @@ cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
 和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。不取 `target/release/` 里的 DLL：
 app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」分组通过 WebView2 的 Tauri 接口核对
 core 版本、平台转接算子、本次构建启用的包，并确认热重载已关闭。
-运行时的 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 和 `LYFLOW_MODULES` 要与 `tauri build` 时一致。
+打包与验收使用同一版本锁对应的 SDK。
 
 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，漏打包的 DLL
 仍然可能被系统从别处找到。

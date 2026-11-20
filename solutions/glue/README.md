@@ -37,13 +37,9 @@ solutions/glue/
 积木之间经 Bundle / Record 交接，下游积木不重算上游的结论（`bead_width` 自己再算一次它那一块的响应图，
 与 `bead_path` 用同一个函数、同一个结构元）。
 
-## 构建
+## 使用与原生开发
 
-```powershell
-$env:LYFLOW_PACKS = "solution-glue"
-pnpm check          # 或 pnpm core:build / pnpm dev
-pnpm check:glue     # LYFLOW_PACKS=solution-glue 的 pnpm check；设了 LYFLOW_GLUE_DATA 时再跑真实帧评估
-```
+正式 SDK 已包含涂胶场景。自定义原生组合、实现和现场帧评估工具见[引擎仓 Glue 场景](https://github.com/liangyuR/lyflow-engine/tree/main/solutions/glue)。
 
 响应图、扇扫、法向候选、颜色打分与模板定位由 `std-image` 注册，沿用原 `glue.*` ID。只启用图像和涂胶场景时，设置 `LYFLOW_STD_PACKS=0` 与 `LYFLOW_PACKS=std-image;solution-glue`。此组合使用 OpenCV 与几何核。
 

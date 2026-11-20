@@ -1,160 +1,54 @@
-# Windows x64 运行库与 SDK 发包
+# Windows x64 运行库与公共工具发行
 
-[文档首页](../README.md) · [环境准备](../getting-started.md) · [测试地图](../testing.md)
+[文档首页](../README.md) · [快速开始](../getting-started.md) · [测试地图](../testing.md)
 
-## 发布契约
+## 下载与版本
 
-`pnpm run package` 通过 [package-windows.ps1](../../scripts/package-windows.ps1) 从当前源码构建三个 ZIP、编辑器 tarball 与正式运行库 NuGet 包，并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 [Windows release](../../.github/workflows/release-windows.yml) 工作流使用同一入口。交付运行库、headless CLI/SDK 与编辑器源码包，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。桌面构建与安装包验证见 [测试地图](../testing.md)。
+公共工具版本取自 [package.json](../../package.json) 的 `version`，该工具固定使用的引擎版本取自 `lyflowEngineVersion`。每个[引擎版本锁](../../packaging/engine-releases/)记录原生 SDK、runtime ZIP 和 NuGet 原包的公开下载地址、SHA-256、引擎仓及精确修订。Rust 客户端按主、次版本检查 ABI。补丁级工具更新可继续依赖原有的已发布引擎。
 
-| 资产                                 | 布局与消费方式                                                                                                                                                                                                                          |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lyflow-runtime-win-x64-vX.Y.Z.zip`  | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。                                                                         |
-| `lyflow-native-sdk-win-x64-vX.Y.Z.zip` | 原生 SDK，含 `bin/` 运行库及 Python worker、C/C++ 头文件、静态库、CMake 配置、示例、`operator-manifest.json` 与 `schema/`。CLI 由消费方构建。 |
-| `lyflow-sdk-win-x64-vX.Y.Z.zip`      | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。                                                                                                                                             |
-| `lyflow-editor-vX.Y.Z.tgz`           | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
-| `lyflow-runtime.json`                | 输出目录中的随包清单副本，便于在解压前检查版本、ABI、算子和依赖。                                                                                                                                                                       |
-| `LyFlow.Runtime.win-x64.X.Y.Z.nupkg` | 与运行库 ZIP 使用同一份正式暂存内容，统一置于 `runtimes/win-x64/native/`；包含全部 DLL、`lyflow-runtime.json` 和许可证树。根 nuspec 的 repository commit 记录源码修订。诊断构建不生成正式 NuGet 包。                                    |
+| 下载项 | 版本与用途 |
+| --- | --- |
+| `lyflow-sdk-win-x64-vT.zip` | 完整 SDK，按工具版本 T 命名。包含锁定的原生 SDK 及公共仓编译的 Release CLI，解压后直接运行 `bin/lyflow.exe`。 |
+| `lyflow-editor-vT.tgz` | 同版 `@lyflow/editor` TypeScript 源码包。React 宿主按 tarball 依赖安装并编译。共享可视化实现随包提供，React 等 peer 依赖由宿主提供。2.0.3 的浏览器宿主也须显式安装 `@tauri-apps/api@^2`，使 TypeScript 和打包器能解析编辑器入口导出的传输模块。详见[嵌入指南](../embedding.md)。 |
+| `lyflow-runtime.json` | 完整 SDK 内 `bin/lyflow-runtime.json` 的独立副本。包含实际加载的引擎版本 E、ABI、修订、算子及依赖。 |
+| `lyflow-native-sdk-win-x64-vE.zip` | 原生 SDK，按引擎版本 E 命名，含 C/C++17 头文件、库、CMake 配置、schema、算子 manifest、Python worker 和示例。 |
+| `lyflow-runtime-win-x64-vE.zip` | 供宿主部署的 Windows x64 运行库、依赖、清单与许可证。 |
+| `LyFlow.Runtime.win-x64.E.nupkg` | 运行库 NuGet 原包，原生文件位于 `runtimes/win-x64/native/`。GitHub Packages 保留同一份原始字节。 |
 
-算子组合以 [release.json](../../packaging/release.json) 的 `packs` 为唯一来源，当前固定为 `std-value`、`std-geometry`、`std-profile`、`std-metrology`、`std-pointcloud`、`std-image`、`std-ml`、`solution-glue`、`solution-gap`、`solution-dts`。`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；正式组合由清单固定。`gap-import` 模块依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.32.0`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。SDK 另交付公开 C++17 几何/度量/轮廓静态库、`include/lyflow/kernel/`、CMake 组件目标和 `examples/public-kernels`；独立消费门禁从暂存 SDK 去除运行库 DLL 后编译并运行示例，见[公共内核](../public-kernels.md)。
+工具与新引擎同步发布时，六件资产位于同一个公共 [GitHub Release](https://github.com/liangyuR/lyFlow/releases)。只更新工具时，工具 Release 提供前三件和对应引擎 Release 的链接。旧 Release、tag 和已分发的包可继续按原地址恢复。
 
-正式能力模块同样以 `release.json` 的 `modules` 为唯一来源：`gap-template`、`gap-model`、`gap-import`。构建、打包、运行库元数据及 NuGet 消费均核对实际包与模块集合；少选、额外启用或未验证修订的自定义组合不得标为正式运行库。`solution-gap` 基础与模板、模型、导入能力分别声明，见 [Gap 原生迁移](../gap-profile-migration.md)。
+## 本地组包与消费验收
 
-### 独立构建原生 SDK 和公共工具
-
-公共消费入口是 `scripts/restore-native-sdk.ps1`。工具仓为每个双仓发行版本保留一个[受信任的版本锁](../../packaging/engine-releases/v2.0.3.json)，记录私有引擎仓、精确修订、完整版本，以及 SDK、runtime 和 NuGet 三件原始资产的公开 Release URL 与 SHA-256。复核期用 `-Archive` 指定本地文件；正式公开后，省略该参数即可按锁定 URL 匿名下载 SDK。恢复到新目录时，脚本先核对摘要，再核对包内正式构建标记、版本和引擎修订；全部通过后才交付目录。
+Windows x64 下安装 [Rust 和 Node.js 开发环境](../getting-started.md)，使用 PowerShell 7。默认从公开地址匿名恢复 SDK，校验归档 SHA-256、正式构建标记、版本及修订，然后构建 CLI、运行随包示例并打包编辑器。输出目录须为新路径。新组装的 SDK ZIP 使用固定历史时间，跨时区直接解压后也可构建 CMake 示例。恢复早期原生包时，解压脚本会将晚于本机当前时刻的文件时间调至当前时刻。
 
 ```powershell
-$env:LYFLOW_NATIVE_SDK = ./scripts/restore-native-sdk.ps1 -LockFile packaging/engine-releases/v2.0.3.json -Archive 'C:/SDK/lyflow-native-sdk-win-x64-v2.0.3.zip' -Destination build/sdk-2.0.3
+./scripts/package-windows.ps1 -OutputDir build/tool-release
 ```
 
-Rust 客户端按主、次版本加载兼容引擎，CLI 缓存身份使用实际引擎的完整版本和源码修订。公共工具与私有引擎各自保留 Git 修订。
+新引擎仍处于暂存阶段时，可传 `-Archive <原生 SDK ZIP>` 校验并使用本地原始资产。需要用固定工具 tag 的代码重组缺失下载时，`-SourceRoot <干净工具检出> -ExpectedTag vT` 核对版本、提交和工作树。`-LockFile` 可显式指定该版本的锁文件。已发布文件保持原字节。
 
-在本过渡仓中执行 `pnpm run package:native` 或 `pwsh -File scripts/package-windows.ps1 -NativeOnly`。私有引擎仓使用自己的 `scripts/package-windows.ps1`。该入口在原生测试、运行库探针和 C++17 EXACT 消费验证完成后，生成 runtime ZIP、原生 SDK ZIP、运行库清单与正式 NuGet。诊断模式沿用原有的 NuGet 限制。私有引擎仓的运行库探针由 MSVC 独立构建，通过原生 SDK 检查 DLL 身份、依赖来源、ONNX Runtime 和 Profile 宿主注入。LYPR 解码由公共 Rust 客户端的 Profile 集成测试覆盖。完整发包在同一 SDK 暂存目录上继续构建 CLI、组合 SDK 和编辑器包。
-
-从公共工具检出执行以下命令，先将下载的原生 SDK 解压到独立目录。Cargo 从指定 SDK 获取 DLL、Windows UTF-8 清单与 Python worker。每次构建选定一个引擎来源，`LYFLOW_PREBUILT_CORE_DIR` 留给现仓内部的 CMake 二进制目录。桌面开发入口 `pnpm dev` 在 SDK 模式下直接启动编辑器。
+在 x64 MSVC 开发环境下验证完整 SDK 和外部 React 宿主。需能使用 CMake、Ninja、dumpbin、Python、npm 及 Chrome 或 Edge。
 
 ```powershell
-$env:LYFLOW_NATIVE_SDK = (Resolve-Path 'C:/SDK/LyFlow').Path
-cargo build --locked --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
-& ./bridge/target/debug/lyflow.exe info
-& ./bridge/target/debug/lyflow.exe run "$env:LYFLOW_NATIVE_SDK/examples/p2-expression.lyflow.json" --summary
-pnpm install --frozen-lockfile
-pnpm --filter lyflow-app build
-cargo build --locked --manifest-path bridge/Cargo.toml --bin lyflow-app --features custom-protocol
-```
-
-本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 必须升级到采用相同产品版本 ABI 的客户端；旧数字 ABI 客户端不再列为兼容对象。
-
-std-pointcloud 0.3.0 起，Windows CPU 全局匹配还使用固定修订的 KISS-Matcher、ROBIN、small_gicp、xenium 和 oneTBB；来源、归档与最小补丁由 [matching-deps.json](../../packaging/matching-deps.json) 固定。构建入口先准备并校验源码，离线预备使用 `python scripts/fetch-matching-deps.py --archive-dir <归档目录> --offline`。运行库新增 `tbb12.dll`，沿用可再分发的经典 MSVC `vcomp140.dll`；不编译/链接/交付 PMC，也不带 LLVM `debug_nonredist` 库。正式打包将对应许可证、内嵌组件通知和来源修订纳入 `licenses/matching/` 及依赖清单。FoundationPose GPU 后端不属于这组默认资产。
-
-OpenCV 使用 [vision-deps.json](../../packaging/vision-deps.json) 固定的官方5.1.0源码，经 [build-vision-deps.ps1](../../scripts/build-vision-deps.ps1) 构建；不再从vcpkg的OpenCV4端口取得正式图像运行库。默认只构建core、imgproc、imgcodecs、geometry、objdetect及必需的features/flann模块，固定SSE2、动态CRT，关闭IPP/CUDA/OpenCL/TBB/OpenMP、额外字体、视频、GUI、DNN及非自由功能；JPEG、PNG、zlib采用固定源码内的实现。运行库必须带齐七个 `opencv_*510.dll`。SDK/运行库的 `licenses/opencv/` 包含Apache主许可证、安装树完整third-party许可证及对应来源修订，不能只复制OpenCV主LICENSE遗漏静态内嵌组件。
-
-STag仅消费固定MIT字典表，LyFlow独立实现轮廓提取和解码；不编译、链接或交付上游ED/LSD实现。许可证和该使用边界随包放入 `licenses/vision/stag/`。依赖清单新增 `vision-opencv` 的版本/源码修订和 `vision-stag` 的字典源码修订；哈希仅检查第三方下载和受管源树完整性，不作为产品或运行库身份。稳定版核对和已执行验证见 [依赖审计](../dependency-stable-audit.md)。
-
-std-image0.7.0新增固定ZXing-C++3.1.1只读静态后端，仅该私有后端使用C++20；导出SDK仍为C++17，不新增ZXing DLL。源清单、成功空内容QR的最小补丁及上游许可证固定在 [barcode-deps.json](../../packaging/barcode-deps.json)。发包的 `licenses/barcode/` 包含主许可、嵌入组件通知、来源/补丁修订和实际补丁文本，依赖库存标注静态链接。
-
-P4真实分割/OCR模型、字典、公开样本及许可通过 [资产工具](../p4-assets.md)单独准备，正式打包门禁实际运行这些模型；权重不复制到运行库或SDK ZIP。SDK交付7个工作流、可再生自有PNG与标注夹具、准备脚本/固定清单和说明，下载到 `examples/p4-assets` 后可运行对应链。
-
-P5另交付8个无外部权重依赖的保存工作流、可再生PCD/PNG/相机与标注夹具及物理真值。完整发包入口使用暂存 CLI 对八张示例图检查默认结果，并在深度滤波及位姿配准图上检验覆盖与恢复，共 12 次执行，核对原生载荷、索引来源及源文件不变；例程与支持边界见 [P5示例](../p5-examples.md)。
-
-产品版本与 ABI 统一为同一个完整字符串 `X.Y.Z`，例如 `"1.1.0"`。运行时兼容按 主.次 系列判定：同一 `X.Y` 系列的补丁版本必须保持 C ABI 兼容，C++/Rust 客户端加载同系列任一补丁版本的引擎；跨次版本拒绝加载。包元数据内的各版本字段仍须与该次发布逐字一致。`abiVersion` 必须是 JSON 字符串，旧数字 `15` 及旧数字 ABI 导出不再支持。DLL 通过 `lyflow_abi_version_string()` 报告 ABI，新客户端缺少该符号或收到不同版本时在任何后续 ABI 调用前拒绝加载。`lyflow-runtime.json` 记录 `engineVersion`、`abiVersion`、`sourceRevision`、架构、构建配置、算子包及版本、实际算子、依赖版本和相对文件清单。最终 DLL 查询结果必须与声明一致。`lyflow_source_revision()` 仅对受控发布组合的干净源码返回构建提交；正式包要求它与当前 HEAD 和元数据 `sourceRevision` 完全相同。脏源码或未知修订返回空字符串，仅允许在显式 `-AllowDirty` 的本地诊断包中使用，并将清单标为 `localValidationOnly`；这种产物不能作为正式发布交付。不使用内容哈希或指纹建立包身份、匹配或校验；Git 提交标识仅用于源码修订。
-
-Rust 客户端按公共工具仓的提交固定 Cargo `rev`，原生运行库按私有引擎版本锁固定修订。历史单仓版本可共用同一个 `rev`。GS 客户端集成与运行库消费验证由 GS 负责，发包不再绑定独立 GS 消费工程或客户端修订。同系列补丁版本的运行库可直接替换；破坏 C ABI 的改动必须提升次版本号，并同步更新客户端。SDK 消费方必须声明完整产品版本并使用 `find_package(lyflow X.Y.Z EXACT CONFIG REQUIRED)`。下游应保留已验收运行库及随包 CRT，不能无条件用其他版本覆盖。
-
-同一暂存运行库通过实际 manifest 核对算子全集及包归属，由安装后的 CLI 分别运行 StandardGap 导入图、DTS 默认与相邻基准图、Glue 测量图。各场景的输入在诊断目录合成。
-
-## 本地入口
-
-前置工具：Windows x64、PowerShell 7、Visual Studio 2022 C++ 工具集和 Windows SDK、CMake/Ninja、Git、仓库声明的 Rust/Node/pnpm，以及 Python 3.12。Python 门禁依赖使用 `scripts/requirements.txt`。
-
-```powershell
-pnpm install --frozen-lockfile
 python -m pip install -r scripts/requirements.txt
-pnpm run package -OutputDir C:\release\lyflow
+./tests/release/test-public-tools.ps1 -AssetsDir build/tool-release
 ```
 
-源码必须干净且有有效 Git 修订；不要在正在编辑的工作树里制作正式产物。正式 tag 构建可加 `-ExpectedTag vX.Y.Z`；脚本校验版本，不自动修改源码版本。输出目录应位于仓外或仓内已忽略的构建目录；默认是 `build/release`。已有同名产物时拒绝覆盖，复验构建须选新输出目录。输出目录不能位于内部release工作区、matching-deps、vision-deps、vision-downloads、vision-opencv或opencv5-install目录内，防止产物与受管源码/依赖安装混用。打包完成或失败时恢复此前的OpenCV_DIR、LYFLOW_OPENCV_ROOT/BIN及其他被入口调整的进程环境。`-AllowDirty`、`-SkipDependencySetup` 只用于本地诊断，tag 发布禁止使用。
+验收从归档解压到新目录，核对 CLI 实际加载的 DLL，再运行 P4/P5、Gap/DTS/Glue、原生帧录制回放和 Profile 工作流。外部 C++17 宿主通过 `find_package(lyflow … EXACT)` 链接运行，缺失依赖的案例也在隔离目录验证。P4 公共模型按 SDK 随附清单恢复，可通过 `LYFLOW_P4_ASSETS` 指向已有的校验文件。外部 React 项目安装发行 tarball，使用 TypeScript 和 Vite 生成生产构建；浏览器中通过 HTTP 打开、运行 SDK 内的示例图。客户数据、设备和生产节拍由实际宿主验收。
 
-入口恢复固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.32.0`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、`release.json` 中固定的 MSVC toolset 和 Windows SDK、vcpkg baseline、工具策略 `locked-tools-v1` 与发布组合修订 `public-kernels-three-solutions-v7` 构成稳定键；同一身份不再按运行编号重复保存。精确键未命中时按 `restore-keys` 退回同 toolset、同 SDK、同 baseline、同工具策略的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，哈希不符的包不会误用；普通发布缺包即失败，只有显式预热任务才编译缺失包。调整依赖 features、triplet 或发布组合时仍须同步更新缓存身份（当前 `public-kernels-three-solutions-v7`），让新组合另存一份。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；依赖准备与缓存保存在独立的 `deps` job 里完成，`build` job 恢复同一缓存后再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。普通发布的vcpkg端口始终使用 `--only-binarycaching`，缺缓存时停止，不允许临时回退源码编译。OpenCV是单独明确配置的固定源码构建，不属于该vcpkg回退路径：Windows按OS/架构、固定toolset/SDK、vision清单和构建/准备脚本缓存 `build/vision-deps` 与 `build/opencv5-install`，不使用跨版本restore前缀；只有精确cache-hit才传 `-SkipVisionBuild`。跳过编译仍验证固定源树、稳定版本、所有必需模块和许可证，失败即停止。显式rebuild_deps不恢复OpenCV安装缓存，重新执行源码构建。没有独立warm-vcpkg工作流，依赖预热继续使用Windows release的dispatch入口。
+## 发布步骤
 
-Linux vision CI同样使用PowerShell7的正式OpenCV构建脚本，显式传入返回的OpenCV_DIR，不依赖发行版libopencv-dev。只从发行版获取Ninja和yaml-cpp开发包；Linux按固定vision源/脚本精确缓存安装，命中仍执行源树、模块和许可证验证。共享库目录写入下一步的LD_LIBRARY_PATH，配置、manifest自检和CTest仍每轮执行，超时上限45分钟。Windows原生视觉job也显式传入同一已验证OpenCV_DIR，不让CMake从系统里误选另一套OpenCV。
+1. 在[引擎仓](https://github.com/liangyuR/lyflow-engine)构建并验证三个原包。新引擎 E 获准分发后，先在公共仓创建独立的 `engine-assets-vE` Release，将三个原始文件以审核通过的名称上传到草稿。该 tag 可指向公共仓当前的默认分支提交。检查草稿后以正式、非预发布、`--latest=false` 的方式公开。公开引擎资产不触发工具发包或 NuGet 推送。
+2. 为 E 添加 `packaging/engine-releases/vE.json`。三个 URL 填写上一步已公开的永久资产地址。已有 2.0.3 保留原来的 `v2.0.3` 地址。新锁和 `lyflowEngineVersion` 可以在同一工具 PR 中提交。常态 CI 用提交内的锁匿名下载 SDK，核验公开 Release 的正式状态、资产名称与 URL，再验证 SDK 摘要和引擎身份。已复核的锁合入默认分支后，即可发布工具。
+3. 更新工具版本 T 与 CHANGELOG，手动运行 [Windows release](../../.github/workflows/release-windows.yml) 检查资产。工作流读取受信任的默认分支锁，从公开地址下载三个原包、核对摘要，在 Windows 上组装完整 SDK 与编辑器，执行消费验收并保存 Actions 产物。推送指向默认分支历史的 `vT` tag 时，工作流创建工具 Release 草稿。若 T 等于 E，草稿同时附上三个引擎原包的原始字节。若工具继续沿用另一引擎版本，正文链接到该引擎的实际 Release。维护者复核后正式发布。
+4. 正式工具 Release 的发布事件触发 [NuGet 工作流](../../.github/workflows/publish-runtime-nuget.yml)。它从工具 tag 的元数据读取引擎 E，从默认分支取得对应的受信任锁，核验公开状态、原包摘要、nuspec 包 ID、版本、引擎仓及修订，再向 [GitHub Packages](https://github.com/liangyuR?tab=packages) 发布 E 的原包。工具补丁沿用已发布的 E 时，工作流下载已注册的 nupkg，核对锁内摘要后结束；同步发行的同版重复推送会报错。
 
-工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终三个 ZIP、编辑器 tarball、NuGet 包与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
-
-## 正式运行库 NuGet 分发
-
-自 v2.0.3 起，工作流从公共仓默认分支读取与 tag 同名的 `packaging/engine-releases/vX.Y.Z.json`。公共 tag 标识工具仓的发布位置，锁文件中的 `sourceRepository` 和 `sourceRevision` 标识引擎。未来版本缺锁时发布停止。
-
-对于双仓版本，公共仓使用名为 `engine-assets-vX.Y.Z` 的 GitHub Release 草稿暂存已复核的三个文件。维护者批准后，在公共仓创建这个暂存草稿，将私有引擎产出的 runtime ZIP、原生 SDK ZIP 和 nupkg 原样上传，保持文件名与版本锁一致。暂存草稿与最终 `vX.Y.Z` Release 分开。锁文件先合入公共仓默认分支，资产读取作业从该分支取得可信摘要。
-
-手动运行 `Windows release` 并填写 `reviewed_tag` 可预演，例如 `v2.0.3`。工作流从暂存草稿取文件，验证 SHA-256，再用同一份 SDK 验公共工具；手动运行仅保存 Actions 产物。推送对应的正式 tag 时走同一输入路径，跳过 vcpkg 和公共仓原生构建，验证成功后用原始文件创建待人工发布的正式草稿。未指定复核版本的普通分支手动构建与旧单仓 tag 沿用源码构建入口。
-
-正式发布前，将锁文件和校验脚本合入公共仓默认分支。公开草稿使用已复核的三个原始文件和锁定的文件名；从公共源码重建的归档若摘要不同，草稿门禁会拒绝。人工发布 Release 后，`Publish native runtime NuGet` 确认正式发布状态，仅下载原始 nupkg，核对其 SHA-256 以及 nuspec 声明的包 ID、版本、私有仓地址和修订，再将原包推送到 GitHub Packages。实际 DLL 和运行库内容在引擎发包时验证。相同包版本已经存在时，流程停止。
-
-本地可用只验证模式预演，输出目录须能写入新的 nupkg：
+本地仅验证已发布的 NuGet 原包可执行下列命令，将 `v2.0.3` 换成需要验证的工具 Release tag。
 
 ```powershell
-./scripts/publish-runtime-nuget.ps1 -Tag v2.0.3 -PackageOnly -ReviewedAssetsDir C:/release/reviewed -OutputDir C:/release/verified
+./scripts/publish-runtime-nuget.ps1 -Tag v2.0.3 -PackageOnly -OutputDir build/verified-runtime
 ```
 
-省略 `-ReviewedAssetsDir` 时使用已公开的 GitHub Release；本地输入仅用于 `-PackageOnly`。v2.0.2 及更早的单仓版本沿用公共 tag 修订和历史 runtime ZIP 制包流程。正式推送使用 `LYFLOW_NUGET_TOKEN`、`NUGET_AUTH_TOKEN` 或已配置的凭据文件。发布工作流需要现有包的写入权限，nuspec 的 repository 字段记录构建引擎的私有仓库。
+[原生引擎仓](https://github.com/liangyuR/lyflow-engine)维护原生构建输入、发布组合、C ABI、运行库探针与原生 SDK 验收。历史单仓发行的构建步骤保存在对应的工具 tag 中。
 
-公共工具与引擎的 Git 修订分别锁定。Rust 客户端按主、次版本进行 ABI 兼容检查，下载和发布按完整产品版本、引擎修订和归档摘要校验。文件顺序或签名等导致包字节变化时须重新复核。
-
-## 依赖二进制源（GitHub Packages）
-
-Actions 缓存之外，vcpkg 还挂一个常驻的二进制源：`https://nuget.pkg.github.com/liangyuR/index.json`（NuGet）。它独立于可能被淘汰的 Actions 缓存。`scripts/use-vcpkg-feed.ps1` 把它接到当前进程的 `VCPKG_BINARY_SOURCES`：本地 `files` 缓存在前，源在后；两处都没有时，发布立即失败。`prepare-release-deps.ps1` 在设置了 `LYFLOW_VCPKG_FEED_TOKEN` 时自动调用它；没有令牌时行为与以前相同。
-
-| 使用方                 | 令牌                                                                                                       | 模式                                |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| 发布工作流 `deps` job  | 工作流自带 `GITHUB_TOKEN`，job 权限 `packages: write`                                                      | 默认 `read`，显式预热时 `readwrite` |
-| 发布工作流 `build` job | `GITHUB_TOKEN`，`packages: read`                                                                           | `read`                              |
-| 开发机                 | classic PAT，`read:packages`（要上传则 `write:packages`）；GitHub Packages 的 NuGet 不认 fine-grained 令牌 | `read`（默认）                      |
-
-开发机配置：`gh auth refresh -h github.com -s read:packages` 后把 `gh auth token` 存进用户环境变量 `LYFLOW_VCPKG_FEED_TOKEN`；或在 GitHub 设置里新建 classic PAT。任何 vcpkg（包括下游项目自己的 `C:cpkg`）都可以用：`pwsh -File scripts/use-vcpkg-feed.ps1 -VcpkgRoot C:cpkg` 之后在同一进程里 `vcpkg install`。令牌只写进 `build/vcpkg-feed/nuget.config`（已忽略），不进仓库、URL 或日志。
-
-vcpkg 只把本次现编的包推到源里，从 Actions 缓存恢复的包不会再推。首次准备或更新依赖环境时，手动运行 `Windows release` 并勾选 `rebuild_deps` 与 `dependencies_only`：跳过 Actions 依赖缓存，允许编译 NuGet 中缺失的包并推送，不生成产品发布资产；已存在的 NuGet 包仍可复用。预热后使用全新的安装目录和本地缓存目录，以只读 NuGet 源和 `--only-binarycaching` 再恢复全部依赖，验证持久源已齐全。单独勾选 `dependencies_only` 可复验缓存，不允许编译。tag 发布禁止 `-AllowBuild`。本机显式预热使用 `./scripts/prepare-release-deps.ps1 -AllowBuild`，随后再运行 `pnpm run package`。
-
-依赖环境以 `packaging/release.json` 的 `dependencyToolchain` 和固定 vcpkg baseline 为准。准备脚本生成相同内容的 x64 overlay triplet，固定 MSVC toolset 与 Windows SDK；CI 的开发者环境也选同一组版本。`VCPKG_FORCE_DOWNLOADED_BINARIES=1` 强制使用该基线声明的 PowerShell、CMake、Ninja 等工具，不选 PATH 中较新的版本。保留 vcpkg 原有编译器和 ABI 检查，编译器实际内容变化仍会拒绝旧缓存，不能通过禁用 compiler tracking 强行复用。主机需安装配置要求的工具集与 SDK；升级这些输入须先更新配置并预热，普通发布不能自动更换。
-
-已确认的缓存失效原因：v1.1.5 与 v1.1.6 的 PCL 包内 `vcpkg_abi_info.txt` 显示 PowerShell 从 7.6.6 变为 7.6.9，`triplet_abi`、编译器及端口文件记录相同；PowerShell 版本和依赖 ABI 的变化使全部包失配。证据见 [ABI 对比任务](https://github.com/liangyuR/lyFlow/actions/runs/40836289490)。固定基线当前声明 PowerShell 7.6.4，首次切换固定环境须预热一次。
-
-每次依赖任务把实际工具版本、安装日志及计划/已安装的 `vcpkg_abi_info.txt` 保存到 `build/release-dependency-diagnostics/`，成功或失败均上传诊断 artifact。NuGet 凭据配置不在该目录，不上传到诊断或缓存。缓存验证使用独立的 `nuget-proof` 子目录，便于区分预热与空目录恢复证据。
-
-## GitHub 门禁与正式发布
-
-| 触发                       | 行为                                                                                            |
-| -------------------------- | ----------------------------------------------------------------------------------------------- |
-| PR / main push / 手动 `CI` | 仅编译、单元测试、类型与格式检查，不运行完整发包。                                              |
-| 手动 `Windows release`     | 默认运行完整门禁；`dependencies_only` 仅检查依赖，`rebuild_deps` 显式允许预热。不创建 Release。 |
-| `vX.Y.Z` tag push          | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。    |
-
-完整构建使用 GitHub 托管 `windows-2022`。`deps` job 只安装固定 baseline 的 vcpkg 端口，持有 `packages: write` 以写入依赖二进制源；编译 job 仅有 `contents: read` 与 `packages: read`。发布 job 依赖构建成功，在公共工具消费验证通过后下载三个 ZIP、编辑器 tarball、NuGet 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
-
-`Windows release` 独立运行，不再由日常 `CI` 调用，也不在 main push 时自动运行。需要发包时手动选择分支，或推送与产品版本匹配的 `vX.Y.Z` tag。
-
-过渡仓发布 Rust 缓存对应 `build/release-rust` 和 `build/release-probes/probe`，与日常 CI 的纯平台构建隔离。缓存只复用编译依赖，仍执行本轮源码构建、单测与 DLL 身份检查。GitHub 的不同 tag 不能互相读取缓存；要让后续 tag 复用缓存，先在 `main` 手动运行一次完整 `Windows release`（`dependencies_only=false`），成功后会同时预热固定依赖和 Rust 缓存，且不会创建 Release。只运行依赖准备不会预热 Rust；依赖配置或 Rust 工具链变更后需要重新预热，缓存也可能被 GitHub 驱逐。
-
-日常 CI 的 C++ 编译使用 sccache 与 MSVC `/Z7`，每轮仍重新配置 CMake、链接 DLL 并执行 CTest。前端/MCP 与 Rust 客户端在独立 Windows job 中并行检查，原 `fast` 检查名称保留为汇总门禁；Rust target 缓存只在 `main` 保存，PR 可恢复主分支缓存。PR 旧运行按原有并发配置自动取消。
-
-正式发布顺序：先合并经过审查的版本改动并确认日常 CI 成功，再推送匹配版本的 tag；检查草稿资产、ABI、算子组合及源码修订，最后人工发布。GS 仅引用已正式发布的固定 tag 和资产名，不使用 `latest`。签名和自动更新不属于首版。
-
-工作流拒绝任何已存在同版本 Release，包括草稿，不覆盖旧资产。若上传中断，保留草稿供排查，禁止通过重跑覆盖；采用新产品版本重新发包。源码、依赖或交付文件改变，都必须增加产品版本。
-
-## 验收范围与证据
-
-发布门禁覆盖固定依赖、core 单测、完整标准包的 Rust 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合及 packaging/release.json 声明的必需算子、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
-
-Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`；固定 `LYFLOW_STD_PACKS=1`，执行日常纯平台构建中因缺少标准包而忽略的测试。`host` 启用 IPC/执行层测试而无需桌面资源。CLI 产物仍由无默认特性的 `cargo build --release --bin lyflow` 生成。单测失败时保留 Cargo 退出码与日志，并停止后续工具组装。
-
-私有引擎仓用原生 C++ 探针读取 DLL 身份，本过渡仓的 `scripts/inspect-runtime.ps1` 沿用 Rust 探针，用 C++17 外部工程验证暂存 SDK。发布工作流随后在独立 Windows runner 解压原生 SDK，从公共源码编译桌面和 CLI，以 CLI 运行随包图，并通过 MCP 访问执行结果。
-
-本文件描述实现契约，不构成任何一次构建的通过证据。实际通过以对应源码修订的 GitHub 构建运行与随包清单为准；静态检查不代表干净 runner 的完整构建通过。
-
-GlueSight 安装包与静默安装验收由 GS 工作流负责。下游集成、客户图像效果、真实设备、现场驱动、节拍和长期稳定性由下游按需验收，构建成功不能代替这些结果。
-
-正式构建在固定依赖准备通过后显式启用 `LYFLOW_RELEASE_BUILD`，并只允许 Windows x64、RelWithDebInfo、固定的 `release.json` 算子包组合（`core/CMakeLists.txt` 的发布身份与之逐字一致）且无外部包的干净源码构建导出可复用源码修订。普通开发或外部算子构建返回空修订，不能启用跨进程磁盘缓存，也不能冒充正式依赖包。
-
-2026-10-11 的 main 构建 `c625155c` 虽通过编译、单测与 DLL 身份检查，但不含 GlueSight 必需的 `glue.taught_path`，不能作为 GS 示教业务依赖。后续修复移植原 PR #8 的示教胶路算子及其配套测量行为，并在 `packaging/release.json` 声明发布包必需算子；暂存 DLL 检查会拒绝缺少任一必需算子的包。新包是否满足 GS 软件契约仍以实际 DLL 检查和现有测量测试为准，不能用新算子注册或合成图通过替代现场准确率验收。
-
-2026-10-12 起 gap 包并入主发布包（`packaging/release.json` 加 `gap` 与 5 个必需的 gap 算子，vcpkg manifest 加 yaml-cpp），同时发布 `@lyflow/editor` 的 tarball。xyz-gap-inspector 由此可以只钉发布版本与资产校验和，不再以 submodule 钉提交、本地编 core。gap 算子的现场准确率仍由 xyz-gap-inspector 的回放与复核验收，发包门禁只覆盖 gap 包单测与算子注册。
+Actions 查询 GitHub Release 元数据时使用当前公共仓的读取权限。所有引擎文件均从锁内的公开下载地址匿名获取。

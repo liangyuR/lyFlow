@@ -4,7 +4,7 @@
 
 worker 在发现或执行任务前检查解释器版本；低于 Python 3.11 时返回 `python_version_unsupported`，不会导入节点。
 
-SDK 目录是本文件所在的 `python/`，模块是 `lyflow_python`。原生运行时通过绝对路径启动 `lyflow_python/worker.py`，节点中可以直接 `from lyflow_python import ...`，不需要把 SDK 安装进选中的解释器。独立运行示例或测试时，将 SDK 目录加入 `PYTHONPATH`。
+SDK 目录是已恢复原生 SDK 的 `bin/python/`，模块是 `lyflow_python`。原生运行时通过绝对路径启动 `lyflow_python/worker.py`，节点中可以直接 `from lyflow_python import ...`，不需要把 SDK 安装进选中的解释器。独立运行示例或测试时，将 SDK 目录加入 `PYTHONPATH`。
 
 ## 定义节点
 
@@ -98,7 +98,7 @@ python -u -B <sdkDir>/lyflow_python/worker.py --pipe <Win32命名管道名>
 
 `examples/offset.py` 是使用 `offset` 参数沿 Z 轴平移、带分块取消的点云节点；`examples/image_metrics/` 展示包入口导出、图像处理、量测和 Record 输出。
 
-在仓库根目录运行：
+worker 及其测试在[引擎仓](https://github.com/liangyuR/lyflow-engine/tree/main/python)。在该仓根目录运行：
 
 ```powershell
 python -B -m unittest discover -s python/tests -v

@@ -21,7 +21,7 @@ export function App() {
 编辑器以 TypeScript 源码 tarball 随 LyFlow 发布，不发布到 npm registry。使用与运行库配套的发布资产安装，例如：
 
 ```powershell
-pnpm add ./lyflow-editor-vX.Y.Z.tgz
+pnpm add ./lyflow-editor-vX.Y.Z.tgz @tauri-apps/api@^2
 ```
 
 仓库内开发通过 workspace 依赖引用。资产名、版本与发布规则见 [发包指南](../../docs/deployment/packaging.md)。
@@ -37,7 +37,7 @@ peerDependencies —— **必须与宿主共用同一份实例**，否则包里�
 | `three` | `>=0.160.0 <1` |
 | `zustand` | `^5.0.2` |
 | `qing-steel` | `^0.11.2` |
-| `@tauri-apps/api` | `^2`，**可选** —— 只有用 `TauriTransport` 才需要 |
+| `@tauri-apps/api` | `^2`，浏览器和桌面宿主编译编辑器源码时都需要 |
 
 `qing-steel` 不在 npm registry，宿主按它的发布 tarball 直接依赖：
 
@@ -129,7 +129,7 @@ Rust/Tauri 宿主通过 `lyflow_lib::host::attach`（`host` feature）装配 man
 
 Python 管理方法为 `getPythonSettings`、`setPythonSettings`、`refreshPythonNodes`。宿主通过 `supported` / `editable` 表达支持状态和只读配置，详见 [Python 节点指南](../../docs/python-nodes.md)。
 
-C ABI 签名以 [c_api.h](../../core/include/lyflow/c_api.h) 为准。产品版本与 ABI 使用同一个完整 `X.Y.Z` 字符串，C++/Rust 客户端按主、次版本系列判定运行时兼容：同系列补丁兼容，跨次版本拒绝加载。旧数字 ABI 不能作为当前接口契约。资产中的版本和源码修订仍须满足 [发包契约](../../docs/deployment/packaging.md)。
+C ABI 签名以 [c_api.h](https://github.com/liangyuR/lyflow-engine/blob/main/core/include/lyflow/c_api.h) 为准。产品版本与 ABI 使用同一个完整 `X.Y.Z` 字符串，C++/Rust 客户端按主、次版本系列判定运行时兼容：同系列补丁兼容，跨次版本拒绝加载。旧数字 ABI 不能作为当前接口契约。资产中的版本和源码修订仍须满足 [发包契约](../../docs/deployment/packaging.md)。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，

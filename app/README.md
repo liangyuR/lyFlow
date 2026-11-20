@@ -47,7 +47,6 @@ const transport = inTauri() ? new TauriTransport() : new StaticTransport();
 
 ## 浏览器模式
 
-`pnpm app:dev` 不启动 Tauri，manifest 读 `public/manifest.dev.json`
-（用 `pnpm core:dump` 刷新）。界面迭代的反馈循环因此是秒级而不是分钟级。
+`pnpm app:dev` 不启动 Tauri，manifest 读 `app/public/manifest.dev.json`。先创建 `app/public/`，将已恢复 SDK 根目录的 `operator-manifest.json` 复制到这个文件。界面迭代的反馈循环因此是秒级而不是分钟级。
 状态栏会把这种模式明确标成「静态快照」，避免有人对着三天前的数据调半天。
 要连真后端就用 `pnpm host:dev` + `pnpm test-server`。

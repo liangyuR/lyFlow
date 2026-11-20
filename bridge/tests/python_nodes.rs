@@ -7,9 +7,8 @@ unsafe extern "C" fn event(_: *const c_char, _: *mut c_void) {}
 
 #[test]
 fn python_cli_and_embedded_execute_identical_graph_and_refresh_without_touching_native_nodes() {
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
+    let exe = std::env::current_exe().unwrap();
+    let source = exe.parent().unwrap();
     let root = std::env::temp_dir().join(format!("lyflow-python-client-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let core = core_ffi::core().unwrap();

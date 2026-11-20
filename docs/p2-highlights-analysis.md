@@ -80,7 +80,7 @@ lyflow validate examples/p2-highlights.lyflow.json
 lyflow run examples/p2-highlights.lyflow.json --outputs --summary
 ```
 
-实际实现见[image_highlights.cpp](../packs/std-image/ops/image_highlights.cpp)，永久功能回归见[test_highlights.cpp](../packs/std-image/tests/test_highlights.cpp)，跨执行器/C ABI/C++ SDK的例图与方向覆写核对见[集成回归](../core/tests/integration/p2_highlights.cpp)。当前源码、文档和例图共同构成可审查对象，最终运行结果以对应PR最新源码修订的完整验证为准，不混用不同可选包或过滤运行的测试数字。
+实际实现见[image_highlights.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/ops/image_highlights.cpp)，永久功能回归见[test_highlights.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-image/tests/test_highlights.cpp)，跨执行器/C ABI/C++ SDK的例图与方向覆写核对见[集成回归](https://github.com/liangyuR/lyFlow/blob/v2.0.3/core/tests/integration/p2_highlights.cpp)。当前源码、文档和例图共同构成可审查对象，最终运行结果以对应PR最新源码修订的完整验证为准，不混用不同可选包或过滤运行的测试数字。
 
 ## 本地验证记录
 

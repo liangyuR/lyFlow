@@ -53,4 +53,4 @@
 
 图校验和运行计算共享同一语法解析器；图校验不要求可选变量已连接。语法、未知标识/函数、参数个数、非法数值字面量及资源超限报告 `bad_param`，指向 `expression` 并提供从 1 开始的字节位置。缺少实际使用的输入、类型/单位不符、除零或数学定义域问题报告 `bad_input`。数字字面量的溢出/不可表示下溢拒绝；运算结果按既有 float64 舍入，非有限结果拒绝。
 
-实现与契约回归入口分别为 [expression.cpp](../packs/std-value/ops/expression.cpp) 和 [test_expression.cpp](../packs/std-value/tests/test_expression.cpp)。回归覆盖优先级、函数/单位、完整语法、短路、恶意或资源超限输入、取消及真实调度器行为。[完整示例](../examples/p2-expression.lyflow.json)将均值、上限判定和 `flow.select` 组合，默认12mm/14mm得到均值13mm，超过15mm上限时选回上限。相同 GraphDoc 由 CLI、C ABI 与 C++ SDK 验证；具体结果以当前 PR 对应修订的检查报告为准，不以配置界面或单次运行代替完整验收。
+实现与契约回归入口分别为 [expression.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-value/ops/expression.cpp) 和 [test_expression.cpp](https://github.com/liangyuR/lyFlow/blob/v2.0.3/packs/std-value/tests/test_expression.cpp)。回归覆盖优先级、函数/单位、完整语法、短路、恶意或资源超限输入、取消及真实调度器行为。[完整示例](../examples/p2-expression.lyflow.json)将均值、上限判定和 `flow.select` 组合，默认12mm/14mm得到均值13mm，超过15mm上限时选回上限。相同 GraphDoc 由 CLI、C ABI 与 C++ SDK 验证；具体结果以当前 PR 对应修订的检查报告为准，不以配置界面或单次运行代替完整验收。

@@ -54,21 +54,7 @@ impl PythonRuntimeConfig {
 
     pub fn core_json(&self) -> Value {
         let mut value = serde_json::to_value(self).expect("Python config 可序列化");
-        let sdk = std::env::var_os("LYFLOW_PYTHON_SDK_DIR")
-            .map(PathBuf::from)
-            .or_else(|| {
-                if cfg!(all(debug_assertions, not(native_sdk))) {
-                    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .parent()?
-                        .join("python");
-                    source
-                        .join("lyflow_python/worker.py")
-                        .is_file()
-                        .then_some(source)
-                } else {
-                    None
-                }
-            });
+        let sdk = std::env::var_os("LYFLOW_PYTHON_SDK_DIR").map(PathBuf::from);
         if let Some(path) = sdk {
             value["sdkDir"] = Value::String(path.to_string_lossy().into_owned());
         }

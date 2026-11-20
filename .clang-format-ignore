@@ -1,5 +1,3 @@
-core/third_party/**
-solutions/dts/tests/data/**
 build/**
 **/target/**
 **/node_modules/**

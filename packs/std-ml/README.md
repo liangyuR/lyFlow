@@ -1,5 +1,7 @@
 # std-ml — LyFlow 标准算子包：推理与结果解码
 
+正式 SDK 已包含本包。以下原生依赖、构建命令和源码路径用于[引擎仓](https://github.com/liangyuR/lyflow-engine/tree/main/packs/std-ml)。
+
 默认构建启用 Tensor 解码与 ONNX 推理。
 
 | id | 输入 → 输出 | 参数 |

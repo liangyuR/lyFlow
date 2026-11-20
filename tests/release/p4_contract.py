@@ -34,7 +34,7 @@ def schemas(examples):
     spec = importlib.util.spec_from_file_location("lyflow_schema", script)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    schema = REPOSITORY / "schema/graph-doc.schema.json"
+    schema = examples.parent / "schema/graph-doc.schema.json"
     validator = module.make_validator(json.loads(schema.read_text(encoding="utf-8")), str(schema))
     for name in CASES:
         path = examples / f"{name}.lyflow.json"
@@ -156,7 +156,7 @@ def main():
         return
     if args.cli is None or not args.cli.is_file():
         parser.error("--cli must point to a built CLI loading the P4 runtime")
-    manifest = json.loads((REPOSITORY / "packaging/p4-model-assets.json").read_text(encoding="utf-8"))
+    manifest = json.loads((args.examples.resolve().parent / "packaging/p4-model-assets.json").read_text(encoding="utf-8"))
     for asset in manifest["assets"]:
         source = args.assets / asset["name"]
         require(source.stat().st_size == asset["bytes"] and digest(source) == asset["sha256"], f"Asset verification failed: {source}")

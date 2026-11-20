@@ -1,14 +1,3 @@
-// 配方经 CLI 运行的分组。
-//
-// `lyflow run --recipe A.lyflow-recipe.json` 的结果等于编辑器选配方 A 运行的结果：真实的 gap 图（KUN10 的点 2，
-//    软装 V 缝开口 + 面差）与真实的样本（KUN10 的几帧），逐位比较图级输出 gap / flush；`--param` 覆盖配方里的同名值。
-//    失配退出码与 MCP 在 cargo test 与 packages/mcp 的测试里，不在这里。
-// 顺手修：1280–1440 宽的窗口里工具栏的图名框至少完整放下 8 个汉字（「车门缝隙检测」曾被截断）。
-//
-// 数据：LYFLOW_GAP_KUN10 指到 luoshi 目录（下面有 database/KUN10 与 cloud/KUN10），缺省是这台机器上的位置。
-// 找不到数据或 core 里没有 gap 包时，这一组标「未验」并说明原因（grep 得到，不算通过）。
-// CLI 用 bridge/target/debug/lyflow.exe；它没带 gap 包时这一组记一条失败并给出重编命令（不在 e2e 里现编，也不静默跳过）。
-
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,250 +6,87 @@ import { fileURLToPath } from 'node:url';
 import { sleep } from './cdp.mjs';
 import {
   buildGraph,
-  clickSelector as click,
   lit,
   mustOk,
   newDoc,
   pickRecipe,
-  pressCtrl,
-  pressF5,
+  clickSelector,
   runAndWait,
   saveGraphTo,
 } from './page.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const CLI = path.join(ROOT, 'bridge', 'target', 'debug', 'lyflow.exe');
-const KUN10 = process.env.LYFLOW_GAP_KUN10 ?? 'C:\\Users\\11601\\OneDrive\\Desktop\\DTS\\luoshi';
-const POINT = '2';
-const FRAMES = 3;
 const RECIPE = '车型A·对拍';
 
-// ------------------------------------------------------------ 小工具
-
-const snap = (cdp) => cdp.eval(`return window.__lyflow.snapshot();`);
-
-/** 真按 Ctrl+S，等图与配方都存完。 */
-async function saveByKey(cdp) {
+async function saveRecipe(cdp) {
   await cdp.eval(
     `if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true;`,
   );
-  await pressCtrl(cdp, 'S');
+  mustOk((await clickSelector(cdp, '[data-testid="save-button"]')) === 'ok', '点击保存');
   await cdp.waitFor(
     `(() => { const s = window.__lyflow.snapshot(); return !s.dirty && !s.recipes.dirty; })()`,
-    { what: 'Ctrl+S 存完（图与配方都不脏）', timeoutMs: 20_000 },
+    { what: '保存完成（图与配方都不脏）', timeoutMs: 20_000 },
   );
   await sleep(150);
 }
 
-/** stdout 的 JSON Lines；最后一行是 --outputs 的图级输出。 */
-function cli(args) {
-  const r = spawnSync(CLI, args, { encoding: 'utf8', env: process.env, timeout: 120_000 });
-  const lines = (r.stdout ?? '')
-    .split(/\r?\n/)
-    .filter((l) => l.startsWith('{') || l.startsWith('['))
-    .map((l) => JSON.parse(l));
-  return { code: r.status, lines, stderr: r.stderr ?? '' };
+function cliOutputs(graph, ...args) {
+  const profile = process.env.LYFLOW_E2E_PACKAGED === '1' ? 'release' : 'debug';
+  const cli = process.env.LYFLOW_CLI ?? path.join(ROOT, 'bridge', 'target', profile, 'lyflow.exe');
+  const run = spawnSync(cli, ['run', graph, ...args, '--outputs', '--no-cache'], {
+    encoding: 'utf8',
+    timeout: 120_000,
+  });
+  mustOk(run.status === 0, 'CLI 执行成功', run.error?.message ?? run.stderr);
+  return JSON.parse(run.stdout.trim().split(/\r?\n/).at(-1));
 }
-
-function cliHasGap() {
-  const r = cli(['manifest']);
-  return r.code === 0 && (r.lines[0]?.operators ?? []).some((o) => o.id === 'gap.notch_width');
-}
-
-/** CLI 带没带 gap 包。不带就返回原因与重编命令：e2e 里不现编（一编几十分钟），也不静默跳过（跳过的分组照样「全绿」）。 */
-function gapCliProblem() {
-  const rebuild =
-    '先在仓库根重编：$env:LYFLOW_PACKS="solution-gap;solution-dts"; $env:LYFLOW_MODULES="gap-template;gap-model;gap-import"; cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features';
-  if (!fs.existsSync(CLI)) return `找不到 ${CLI}。${rebuild}`;
-  if (!cliHasGap())
-    return `${CLI} 里没有 gap.notch_width（编它时 LYFLOW_PACKS 没带 gap）。${rebuild}`;
-  return null;
-}
-
-/** 这次运行的图级输出里 gap / flush 两个量测，整段 JSON 文本（逐位比较用）。 */
-const measurementsOf = (outputs) => ({
-  gap: JSON.stringify(outputs?.gap ?? null),
-  flush: JSON.stringify(outputs?.flush ?? null),
-});
-
-// ------------------------------------------------------------ CLI --recipe 与编辑器对拍
 
 async function suiteCliMatchesEditor(cdp, report, ws) {
-  const graphSrc = path.join(KUN10, 'database', 'KUN10', 'device_0', POINT, `${POINT}.lyflow.json`);
-  const cloudRoot = path.join(KUN10, 'cloud', 'KUN10');
-  const title = `CLI --recipe 与编辑器选配方运行逐位相同（真实 gap 图 ${POINT}，KUN10 的 ${FRAMES} 帧）`;
-  if (!fs.existsSync(graphSrc) || !fs.existsSync(cloudRoot)) {
-    report.section(`${title}（未验：找不到 ${graphSrc} 或 ${cloudRoot}，设 LYFLOW_GAP_KUN10）`);
-    report.fail('真实 gap 数据在', `${graphSrc} / ${cloudRoot}`);
-    return;
-  }
-  const hasGap = await cdp.eval(
-    `return window.__lyflow.stores.manifest.getState().operatorsById.has('gap.notch_width');`,
-  );
-  if (!hasGap) {
-    report.section(
-      `${title}（未验：app 的 core 没有 gap 包，设 LYFLOW_PACKS='solution-gap;solution-dts' LYFLOW_MODULES='gap-template;gap-model;gap-import'）`,
-    );
-    report.fail('app 里有 gap.notch_width', 'LYFLOW_PACKS 没带 gap');
-    return;
-  }
-  report.section(title);
-  const cliProblem = gapCliProblem();
-  if (cliProblem !== null) {
-    report.fail('CLI 带着 gap 包（bridge/target/debug/lyflow.exe）', cliProblem);
-    return;
-  }
-
-  const frames = fs
-    .readdirSync(cloudRoot)
-    .sort()
-    .map((f) => path.join(cloudRoot, f, 'device_0', `${POINT}_0`))
-    .filter((d) => fs.existsSync(d))
-    .slice(0, FRAMES);
-  mustOk(
-    frames.length === FRAMES,
-    `找到 ${FRAMES} 帧点 ${POINT} 的样本`,
-    `只找到 ${frames.length} 帧（${cloudRoot}）`,
-  );
-
-  // 图拷进中文工作区（配方目录跟着图走），打开、把三个 notch_width 参数纳入配方
-  const dir = path.join(ws.dir, '车门缝隙 对拍');
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-  const graphFile = path.join(dir, '点2 开口与面差.lyflow.json');
-  // 线上那张图原样拷来。09-25 起它自己就是 result_bundle v2 的接法、n_load.layout = profile，
-  // 这里不再替它改任何东西
-  const src = JSON.parse(fs.readFileSync(graphSrc, 'utf8'));
-  fs.writeFileSync(graphFile, JSON.stringify(src, null, 2), 'utf8');
-  const recipeFile = path.join(dir, '点2 开口与面差.recipes', `${RECIPE}.lyflow-recipe.json`);
+  report.section('编辑器与 CLI 使用同一配方，显式图参数可以覆盖配方');
+  const dir = fs.mkdtempSync(path.join(ws.dir, '配方对拍-'));
+  const graph = path.join(dir, '限值判断.lyflow.json');
+  fs.copyFileSync(path.join(ROOT, 'examples', 'p2-expression.lyflow.json'), graph);
+  const recipeFile = path.join(dir, '限值判断.recipes', `${RECIPE}.lyflow-recipe.json`);
+  const overrides = { leftValue: 20, upperLimit: 16 };
 
   await newDoc(cdp);
-  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
   await cdp.eval(`
     const b = window.__lyflow;
-    b.stores.ui.getState().setPath([]);
-    const loaded = await b.transport.loadGraph(${lit(graphFile)});
-    b.stores.graph.getState().loadDoc(loaded.doc, ${lit(graphFile)});
+    b.stores.ui.getState().setAutoRun(false);
+    const file = ${lit(graph)};
+    const loaded = await b.transport.loadGraph(file);
+    b.stores.graph.getState().loadDoc(loaded.doc, file);
     await b.recipes.loaded();
     return true;
   `);
-  const promoted = await cdp.eval(`
-    const g = () => window.__lyflow.stores.graph.getState();
-    const names = ['gapOffset', 'levelDepth', 'flushOffset'].map((p) => g().promoteToGraphParam('n_notch', p));
-    g().setParam('n_load', 'dir', ${lit(frames[0])});
-    return names;
-  `);
-  mustOk(
-    JSON.stringify(promoted) === JSON.stringify(['gapOffset', 'levelDepth', 'flushOffset']),
-    'gapOffset、levelDepth、flushOffset 纳入配方（成为图参数）',
-    promoted,
-  );
-  await saveGraphTo(cdp, graphFile);
-
-  // 建配方 A、改三个值、选中它、Ctrl+S（图与配方文件一起落盘）
-  const made = await cdp.eval(`
-    const g = () => window.__lyflow.stores.graph.getState();
-    if (!g().createRecipe(${lit(RECIPE)})) return 'create';
-    g().setRecipeValue(${lit(RECIPE)}, 'gapOffset', -0.3);
-    g().setRecipeValue(${lit(RECIPE)}, 'levelDepth', 1);
-    g().setRecipeValue(${lit(RECIPE)}, 'flushOffset', 0.05);
-    return 'ok';
-  `);
-  mustOk(made === 'ok', '新建配方并写进三个值', made);
-  const picked = await pickRecipe(cdp, RECIPE);
-  mustOk(picked === 'ok', '工具栏下拉框选中配方', picked);
-  await saveByKey(cdp);
-  const onDisk = fs.existsSync(recipeFile) ? JSON.parse(fs.readFileSync(recipeFile, 'utf8')) : null;
-  report.eq('配方文件落盘，只存三个与基础不同的值', onDisk?.values, {
-    gapOffset: -0.3,
-    levelDepth: 1,
-    flushOffset: 0.05,
-  });
-  const st = await snap(cdp);
-  report.eq('编辑器交给 core 的取值 = default ← 配方', st.recipe?.params, {
-    gapOffset: -0.3,
-    levelDepth: 1,
-    flushOffset: 0.05,
-  });
-
-  const rows = [];
-  for (const [i, frame] of frames.entries()) {
-    await cdp.eval(
-      `window.__lyflow.stores.graph.getState().setParam('n_load', 'dir', ${lit(frame)}); return true;`,
-    );
-    await saveByKey(cdp);
-    const run = await runAndWait(cdp, () => pressF5(cdp));
-    const editor = measurementsOf(
-      await cdp.eval(`return await window.__lyflow.runOutputs(${lit(run.runId)});`),
-    );
-    const viaRecipe = cli(['run', graphFile, '--recipe', recipeFile, '--outputs', '--no-cache']);
-    const cliOut = measurementsOf(viaRecipe.lines[viaRecipe.lines.length - 1]);
-    const tag = `第 ${i + 1} 帧（${path.basename(path.dirname(path.dirname(frame)))}）`;
-    const hasValue = (v) => v !== 'null' && !v.includes('"failed"');
-    report.ok(
-      `${tag}：编辑器运行 ok、CLI 退出码 0，gap / flush 都有值`,
-      run.status === 'ok' && viaRecipe.code === 0 && hasValue(editor.gap) && hasValue(editor.flush),
-      JSON.stringify({
-        status: run.status,
-        cliCode: viaRecipe.code,
-        gap: editor.gap,
-        flush: editor.flush,
-        nodes: run.status === 'ok' ? undefined : run.nodes,
-        stderr: viaRecipe.code === 0 ? undefined : viaRecipe.stderr.slice(-400),
-      }),
-    );
-    report.eq(`${tag}：gap / flush 逐位相同（编辑器选配方 = CLI --recipe）`, cliOut, editor);
-    const row = { frame: tag, gap: editor.gap, flush: editor.flush };
-
-    if (i === 0) {
-      // 与基础比只在第一帧做一次：证明配方真的起了作用，不必每帧再多跑一遍 CLI
-      const base = cli(['run', graphFile, '--outputs', '--no-cache']);
-      const baseOut = measurementsOf(base.lines[base.lines.length - 1]);
-      report.ok(
-        `${tag}：与基础不同（配方真的起了作用）`,
-        baseOut.gap !== editor.gap && baseOut.flush !== editor.flush,
-        `基础 ${baseOut.gap} / ${baseOut.flush}`,
-      );
-      row.baseGap = baseOut.gap;
-      row.baseFlush = baseOut.flush;
-      // --param 覆盖配方里的同名值：gapOffset 盖回基础，结果等于「只改 levelDepth、flushOffset」
-      const pinned = cli([
-        'run',
-        graphFile,
-        '--recipe',
-        recipeFile,
-        '--param',
-        'gapOffset=-0.42',
-        '--outputs',
-        '--no-cache',
-      ]);
-      const same = cli([
-        'run',
-        graphFile,
-        '--param',
-        'levelDepth=1',
-        '--param',
-        'flushOffset=0.05',
-        '--outputs',
-        '--no-cache',
-      ]);
-      const a = measurementsOf(pinned.lines[pinned.lines.length - 1]);
-      const b = measurementsOf(same.lines[same.lines.length - 1]);
-      report.eq('--param 覆盖配方里的 gapOffset：gap 等于只用配方另外两个值的结果', a.gap, b.gap);
-      report.ok(
-        '被覆盖之后的 gap 与配方 A 的不同',
-        a.gap !== editor.gap,
-        `${a.gap} vs ${editor.gap}`,
-      );
-      report.ok(
-        'CLI 在 stderr 报了用的是哪个配方',
-        viaRecipe.stderr.includes(`配方「${RECIPE}」：3 个值，3 个与基础不同`),
-        viaRecipe.stderr,
-      );
+  const created = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    if (!g.createRecipe(${lit(RECIPE)})) return false;
+    for (const [key, value] of Object.entries(${lit(overrides)})) {
+      g.setRecipeValue(${lit(RECIPE)}, key, value);
     }
-    rows.push(row);
+    return true;
+  `);
+  mustOk(created, '编辑器创建配方');
+  mustOk((await pickRecipe(cdp, RECIPE)) === 'ok', '工具栏选中配方');
+  await saveRecipe(cdp);
+  report.eq('保存的配方只含覆盖值', JSON.parse(fs.readFileSync(recipeFile, 'utf8')).values, overrides);
+
+  const run = await runAndWait(cdp, () => clickSelector(cdp, '[data-testid="run-button"]'));
+  mustOk(run.status === 'ok', '编辑器运行完成', run.status);
+  const editor = await cdp.eval(`return window.__lyflow.runOutputs(${lit(run.runId)});`);
+  const base = cliOutputs(graph);
+  const recipe = cliOutputs(graph, '--recipe', recipeFile);
+  for (const output of ['mean', 'withinLimit', 'limited']) {
+    mustOk(editor[output]?.value?.data != null, `编辑器取得 ${output}`);
+    report.eq(`CLI 与编辑器的 ${output} 一致`, recipe[output]?.value, editor[output].value);
   }
-  console.log(`      逐帧：${JSON.stringify(rows)}`);
+  report.ok('配方改变均值并切换阈值判定',
+    base.mean.value.data.value !== recipe.mean.value.data.value &&
+      base.withinLimit.value.data.value !== recipe.withinLimit.value.data.value);
+  const baseLeft = JSON.parse(fs.readFileSync(graph, 'utf8')).params.leftValue.default;
+  const pinned = cliOutputs(graph, '--recipe', recipeFile, '--param', `leftValue=${baseLeft}`);
+  report.eq('显式参数覆盖配方后恢复基础均值', pinned.mean.value, base.mean.value);
 }
 
 // ------------------------------------------------------------ 工具栏宽度
@@ -297,8 +123,8 @@ async function crowdedRecipeState(cdp, ws) {
   `);
   mustOk(made === 'ok', '新建配方并写进一个值', made);
   mustOk((await pickRecipe(cdp, RECIPE)) === 'ok', '工具栏下拉框选中配方');
-  await saveByKey(cdp);
-  const run = await runAndWait(cdp, () => pressF5(cdp));
+  await saveRecipe(cdp);
+  const run = await runAndWait(cdp, () => clickSelector(cdp, '[data-testid="run-button"]'));
   mustOk(run.status === 'ok', '合成小图跑过一次', run.status);
   return { param, value: 3 };
 }
@@ -314,8 +140,8 @@ async function suiteToolbarWidth(cdp, report, ws) {
     return { file: g.filePath, recipe: b.snapshot().recipe?.current ?? null };
   `);
   let state = await readState();
-  // 接着对拍分组的状态；它没跑（KUN10 数据不在）就自己搭一个一样挤的，这一组照样验得到
-  let tweak = { param: 'levelDepth', value: 1.1 };
+  // 接着对拍分组的状态；它没跑就自己搭一个一样挤的，这一组照样验得到
+  let tweak = { param: 'leftValue', value: 21 };
   if (!(state.file && state.recipe === RECIPE)) {
     tweak = await crowdedRecipeState(cdp, ws);
     state = await readState();
