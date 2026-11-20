@@ -26,7 +26,7 @@ lyflow run examples/p5-depth-inspection.lyflow.json --no-cache --outputs --summa
 | [深度滤波](../examples/p5-depth-filters.lyflow.json) | mean、kernelSize=1，真实 XYZ/通道无变化 | `mode="fill"`、`kernelSize=7` | 九个孔洞补值，3063→3072 点；原观测不被当作新增实测 |
 | [正交图与掩膜提云](../examples/p5-orthographic-roi.lyflow.json) | height_map 与 orthographic_map；显示原生有符号高度，P4 标注掩膜关联提云 | `outputMode="normal_angle"` | 显示切换为 RGB 法线角图；真实有符号深度、索引与 94 点 ROI 集合不变 |
 | [盒体采样与裁云](../examples/p5-box-crop.lyflow.json) | 两个有 ID 的盒体，每面 100 点、种子7；box 裁剪和紧凑移除 | `shape="cylinder"` | 真实有限圆柱成员不同于外接盒；内部和外部仍完整分割 1200 个采样点 |
-| [刚体模板与姿态规则](../examples/p5-pose-rigid.lyflow.json) | 三个非共线定位点建立独立模板，与相同观测配准、比较 | `currentC=[0.02,0.12,0.01]` | 只改变观测 C，模板不变；刚体残差判退，仍交付可观的最优 proper 变换 |
+| [刚体模板与姿态规则](../examples/p5-pose-rigid.lyflow.json) | 三个非共线定位点建立模板，分别做点对距离检查和刚体配准 | `currentC=[0.02,0.12,0.01]` | 只改变观测 C，点对距离与配准残差均超差，配准仍输出最优刚体变换 |
 | [顶面投影与平面回投](../examples/p5-pose-project-plane.lyflow.json) | box 顶面真实掩膜，回投 z=1.01m 平面并测尺寸 | `liftMode="center"` | 使用显式已知尺寸 `[.12,.08,.02]`；定位中心仍在参考平面 |
 | [空间圆孔](../examples/p5-circles-3d.lyflow.json) | 已知半径 .05m，识别正视实心圆孔并保留真实圆盘投影 | `imagePath="p5-circle-tilted.png"` | 按倾斜圆孔的独立三维真值验证，两歧义解保持明确 |
 | [掩膜关联移除](../examples/p5-mask-remove.lyflow.json) | 两个三维实例显式关联 patch-up/down 掩膜 | `topExpand=2` | 删除78→104点；视野外点及相机后方未知点继续保留 |
@@ -58,15 +58,15 @@ lyflow run examples/p5-mask-remove.lyflow.json --param topExpand=2 --outputs --s
 
 ### 有限体、姿态与圆孔
 
-盒体 A 全尺寸 [.125,.125,.03125]、B [.0625,.0625,.0625]，中心分别为 [0,0,.5]、[.25,0,.5]。这些二进制可精确表示的边界便于验证 f32 采样和 closed 裁剪。圆柱模式的 X/Y 直径必须一致，因此不能用不等边长方体假装圆柱。裁剪、紧凑移除和碰撞计数共用一份查询。图参数 `shape` 控制查询几何，`maxCount` 独立控制计数分类。保序移除由原生专项测试覆盖。
+盒体 A 全尺寸 [.125,.125,.03125]、B [.0625,.0625,.0625]，中心分别为 [0,0,.5]、[.25,0,.5]。这些二进制可精确表示的边界便于验证 f32 采样和 closed 裁剪。圆柱模式的 X/Y 直径必须一致，因此不能用不等边长方体假装圆柱。图参数 `shape` 控制查询几何，`maxCount` 独立控制计数分类。同一份查询的命中索引接入 `segment.extract_indices`，其 `selected` 和 `rest` 分别交付 `cropped` 和 `outside`。紧凑删点后的剩余云就是 `outside`。保序移除由原生专项测试覆盖。
 
-刚体图的 A=[0,0,0]、B=[.1,0,0]、参考C=[0,.1,0] 相互独立。图参数只绑定 currentC.position，不同时改变模板。`pose.rigid_check` 以登记残差判定，另用 `pose.rigid_register` 输出实际 native Transform 和配准结果，再连接真实变换应用；不能用固定 identity 冒充。可观测但超公差时保留候选变换并判 accepted=false，退化不可观测时明确报错，不伪造变换。支链还示范有限对称翻转、显式连续轴对称旋转和二维工件向三维平面的嵌入；对称性是调用者声明，不能由任意盒尺寸推断。
+刚体图用 A=[0,0,0]、B=[.1,0,0]、参考 C=[0,.1,0] 构建模板。图参数只绑定 `currentC.position`。`pose.rigid_check` 比较观测与模板的点对距离。`pose.rigid_register` 计算刚体变换并输出配准残差，下游把实际 `Transform` 应用到观测位姿。配准可观测但超公差时交付候选变换并返回 `accepted=false`。定位点退化时返回 `unobservable`。支链还示范有限对称翻转、显式连续轴对称旋转和二维工件向三维平面的嵌入。
 
 顶面投影图的 CameraCalib.frame=camera 与二维 imageFrame=image 分开。原盒体中心 z=1、厚度 .02，顶面 z=1.01；回投定位中心就在该参考面，不自动减半厚度猜测原实体位于哪侧，也不声称恢复原盒体体积中心。dimensions 模式由真实掩膜的完整半像素足迹测尺寸，存在离散像素量化；center 模式只使用已知尺寸。`surface` 另可选 full，并据真实有限体射线支持处理，不填外接轮廓中的未知区域。
 
 圆孔图以实际黑孔边界表示已知半径；具有厚度的黑环有两个不同边界，不能把中线半径强加给其中一条。每个空间圆保留与实际相机约束一致的解，法向按无向平面比较，attributes.shape=circle 与真实圆盘投影关联。倾斜图至少一个解必须满足清单 centerToleranceM 和 normalCosineMinimum，不能只检查非空。所有几何输出仍 pickable=false。
 
-掩膜移除只通过三维实例 attributes.primitive2DId 显式关联真实检测 ID，禁止按数组位置猜测，也不会偷偷添加三维体积裁剪条件。topExpand=2 按每列原掩膜最上方增加两行，两个区域共增加26个删除点。原图之外与没有可信正深度的点继续保留并分开统计；三维有限体也可基于移除后的云接入 `cloud.query_primitives` 和 `cloud.remove_indices`。
+掩膜移除只通过三维实例 attributes.primitive2DId 显式关联真实检测 ID，禁止按数组位置猜测，也不会偷偷添加三维体积裁剪条件。topExpand=2 按每列原掩膜最上方增加两行，两个区域共增加26个删除点。原图之外与没有可信正深度的点继续保留并分开统计。也可在掩膜移除后的云上用 `cloud.query_primitives` 查询三维有限体，再用 `segment.extract_indices.rest` 紧凑删点，或用 `cloud.remove_indices` 保序移除。
 
 ## 正式合同验证
 
@@ -82,7 +82,7 @@ python tests/release/p5_contract.py --schema-only
 python tests/release/p5_contract.py --cli build/rust/release/lyflow.exe
 ```
 
-可用 `--examples <安装SDK/examples>` 验证安装后的文件，`--output-dir` 指定日志目录。脚本先核十个夹具的尺寸/SHA256，把八图和相关文件保存到新的 Unicode 目录，逐图执行默认→覆盖→默认共24次，核覆盖生效与还原、正式 summary、原生大载荷元信息和业务 ID 等结构契约（物理真值由 `core/tests/integration/p5_depth_geometry.cpp` 验证），并检查全部源文件没有被运行改写。
+可用 `--examples <安装SDK/examples>` 验证安装后的文件，`--output-dir` 指定日志目录。脚本先核十个夹具的尺寸/SHA256，把八图和相关文件保存到新的 Unicode 目录。每张图运行一次默认参数。深度滤波图和位姿配准图额外运行覆盖和恢复默认，共 12 次校验与 12 次执行。每轮检查正式 summary、原生大载荷元信息和业务 ID 等结构契约，全部源文件的摘要在测试后复核。物理真值在原生测试验证，其中正面和斜面圆孔由 `packs/std-image/tests/test_p5_inspection.cpp` 覆盖。
 
 点云的进程内 ID 不跨运行保证一致。脚本仅在保存副本追加 cloud.statistics 观察节点，逐运行验证每个 sourceCloudId/parentCloudId/resultCloudId/sliceCloudId 实际绑定的云角色后再规范化这些字段；不删除工件 ID、掩膜 ID、帧名或几何摘要，也不把绑定错误隐藏成“ID本来会变化”。CLI JSON 的云/掩膜/四边形仍为元信息；完整原生数组、索引身份、C ABI 和动态 C++ SDK 的保存重载一致性由正式 core 集成测试另验。Rust CLI 经过 Rust 客户端执行工作流，不能据此冒充 Rust SDK 全数组专项验收。
 

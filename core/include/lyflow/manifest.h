@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -301,6 +302,13 @@ struct Capabilities {
   bool deterministic = true; // 同输入同输出 -> 可参与缓存
 };
 
+struct RemovedParamValue {
+  std::string param;
+  std::string value;
+  std::string hint;
+  std::string defaultBeforeVersion;
+};
+
 struct OperatorDesc {
   std::string id;                   // 全局唯一，用 . 分命名空间
   std::string version;              // semver
@@ -325,6 +333,9 @@ struct OperatorDesc {
 
   /// 参数迁移链，按 fromMajor 任意顺序给都行。空 = 该算子从没破坏性升级过。
   std::vector<Migration> migrations;
+
+  std::map<std::string, std::string> removedParamHints;
+  std::vector<RemovedParamValue> removedParamValues;
 };
 
 /// 片段（m8-plan L14）：一组节点 + 边 + 对外端口提示，文件格式是 `*.lyflow-snippet.json`

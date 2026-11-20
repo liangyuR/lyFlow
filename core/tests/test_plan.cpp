@@ -74,7 +74,6 @@ TEST_CASE("注册表自检干净，core 自带的流程算子都在") {
     MESSAGE(p);
   CHECK(problems.empty());
 
-  // 包自己的清单在对应测试里。
   for (const auto& id : {"util.reroute", "flow.fallback", "flow.select"}) {
     CAPTURE(id);
     CHECK(ensureRegistry().find(id) != nullptr);

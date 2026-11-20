@@ -379,7 +379,7 @@ TEST_CASE("菱形图：四支各睡 200 ms，并行墙钟 < 500 ms；串行跑�
   }
 }
 
-TEST_CASE("随机取消 100 次：不死锁、不泄漏、状态始终自洽") {
+TEST_CASE("随机取消 100 次：不死锁、不泄漏、状态始终自洽" * doctest::test_suite("stress")) {
   ensureTestOps();
   const Json doc = diamondGraph(60);
   std::mt19937 rng(20260906);

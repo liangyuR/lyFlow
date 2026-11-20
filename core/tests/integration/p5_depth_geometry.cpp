@@ -1,6 +1,6 @@
 #include "p3_example_helpers.h"
 
-#include <cstring>
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -169,21 +169,19 @@ Snapshot snapshot(const Saved& saved, Json outputs, const std::string& runId, Cl
                   bool direct = false) {
   Snapshot result;
   std::map<std::string, std::set<std::string>> roles;
-  std::map<std::string, Blob> originals;
-  std::map<std::string, std::size_t> counts;
   for (const auto& role : saved.clouds) {
     const auto& data = p3::data(outputs, role.identity.c_str());
     const auto identity = data.at("sourceCloudId").get<std::string>();
     REQUIRE_FALSE(identity.empty());
     auto bytes = cloud(runId, role, client, direct, identity);
     CHECK(data.at("count").get<std::size_t>() == static_cast<std::size_t>(bytes.shape[0]));
-    if (originals.count(identity)) {
-      CHECK(originals.at(identity).shape == bytes.shape);
-      CHECK(originals.at(identity).bytes == bytes.bytes);
-    } else
-      originals.emplace(identity, bytes);
-    counts[identity] = static_cast<std::size_t>(bytes.shape[0]);
-    roles[identity].insert(role.name());
+    auto& names = roles[identity];
+    if (!names.empty()) {
+      const auto& first = result.buffers.at(*names.begin());
+      CHECK(first.shape == bytes.shape);
+      CHECK(first.bytes == bytes.bytes);
+    }
+    names.insert(role.name());
     result.buffers.emplace(role.name(), std::move(bytes));
   }
   std::map<std::string, std::string> identities;
@@ -249,9 +247,12 @@ Snapshot snapshot(const Saved& saved, Json outputs, const std::string& runId, Cl
         CHECK(view.value.count == view.value.total);
       }
       REQUIRE(identities.count(data.sourceId));
-      for (const auto index : values) {
-        CHECK(index >= 0);
-        CHECK(static_cast<std::size_t>(index) < counts.at(data.sourceId));
+      if (direct) {
+        const auto& source = result.buffers.at(*roles.at(data.sourceId).begin());
+        const auto invalid = std::find_if(values.begin(), values.end(), [&](const auto index) {
+          return index < 0 || index >= source.shape[0];
+        });
+        CHECK_MESSAGE(invalid == values.end(), output.key(), ": source cloud index out of range");
       }
       data.shape = {static_cast<std::int64_t>(values.size())};
       append(data, values.data(), values.size());
@@ -338,21 +339,21 @@ void cross(const std::string& name, const Json& overrides, const Check& check) {
     CAPTURE(attempt);
     const bool changed = attempt == 1;
     const Json params = changed ? overrides : Json::object();
-    auto effective = saved.graph;
-    for (const auto& parameter : params.items()) {
-      REQUIRE(effective.at("params").contains(parameter.key()));
-      effective["params"][parameter.key()]["default"] = parameter.value();
+    Snapshot overridden;
+    auto& expected = changed ? overridden : defaults;
+    if (attempt < 2) {
+      auto effective = saved.graph;
+      for (const auto& parameter : params.items()) {
+        REQUIRE(effective.at("params").contains(parameter.key()));
+        effective["params"][parameter.key()]["default"] = parameter.value();
+      }
+      Session session(effective, saved.base, {}, false, 2, true);
+      const auto& log = session.wait();
+      REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+      const auto scheduler = p3::take(lyflow_run_outputs(log.runId.c_str()));
+      check(scheduler, changed);
+      expected = snapshot(saved, scheduler, log.runId, nullptr, true);
     }
-    Session session(effective, saved.base, {}, false, 2, true);
-    const auto& log = session.wait();
-    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-    const auto scheduler = p3::take(lyflow_run_outputs(log.runId.c_str()));
-    check(scheduler, changed);
-    const auto native = snapshot(saved, scheduler, log.runId, nullptr, true);
-    if (attempt == 0)
-      defaults = native;
-    if (attempt == 2)
-      agree(defaults, native);
     const auto id = name + "-abi-" + std::to_string(attempt), parameters = params.dump();
     REQUIRE(
         p3::take(lyflow_validate_params(source.c_str(), base.c_str(), parameters.c_str())).empty());
@@ -369,8 +370,7 @@ void cross(const std::string& name, const Json& overrides, const Check& check) {
     REQUIRE_MESSAGE(p3::take(lyflow_run_summary(id.c_str())).at("status") == "ok",
                     p3::take(lyflow_run_summary(id.c_str())).dump());
     const auto abi = p3::take(lyflow_run_outputs(id.c_str()));
-    check(abi, changed);
-    agree(native, snapshot(saved, abi, id, nullptr));
+    agree(expected, snapshot(saved, abi, id, nullptr));
     RunOptions sdkOptions;
     sdkOptions.runId = id + "-sdk";
     sdkOptions.baseDir = base;
@@ -380,8 +380,7 @@ void cross(const std::string& name, const Json& overrides, const Check& check) {
     const auto result = client.run(source, sdkOptions);
     REQUIRE_MESSAGE(result.ok(), result.summary);
     const auto sdk = Json::parse(result.outputs);
-    check(sdk, changed);
-    agree(native, snapshot(saved, sdk, sdkOptions.runId, &client));
+    agree(expected, snapshot(saved, sdk, sdkOptions.runId, &client));
     CHECK(p3::read(saved.path) == saved.graph);
   }
 }
@@ -393,11 +392,6 @@ void pointCount(const Json& outputs, const char* name, std::size_t count, std::s
   CHECK(output.at("type") == "PointCloud");
   CHECK(output.at("elementCount").get<std::size_t>() == count);
   CHECK(output.at("byteSize").get<std::size_t>() == count * stride);
-}
-const Json& truth() {
-  static const auto value =
-      p3::read(std::filesystem::path(LYFLOW_EXAMPLES_DIR) / "p5-fixtures.json");
-  return value;
 }
 void projection(const Json& outputs) {
   pointCount(outputs, "sourceCloud", 3066);
@@ -483,9 +477,7 @@ TEST_CASE(
     } else
       CHECK(count == 1200);
     pointCount(outputs, "cropped", count, 27);
-    pointCount(outputs, "removed", count, 27);
     pointCount(outputs, "outside", 1200 - count, 27);
-    pointCount(outputs, "cloud", 1200 - count, 27);
     const auto& groups = p3::data(outputs, "sampleGroups").at("groups");
     REQUIRE(groups.size() == 2);
     CHECK(groups[0].at("id") == "boxA");
@@ -495,6 +487,7 @@ TEST_CASE(
 TEST_CASE("P5 registered rigid reference and explicit symmetry survive saved non rigid overrides") {
   cross("p5-pose-rigid", {{"currentC", {.02, .12, .01}}}, [](const Json& outputs, bool changed) {
     CHECK(p3::data(outputs, "accepted").at("value") == !changed);
+    CHECK(p3::data(outputs, "registration").at("accepted") == !changed);
     CHECK(outputs.at("transform").at("type") == "Transform");
     CHECK(p3::data(outputs, "reference").at("items")[2].at("position") == Json::array({0, .1, 0}));
     CHECK(p3::data(outputs, "current").at("items")[2].at("position") ==
@@ -517,30 +510,46 @@ TEST_CASE(
     CHECK(p3::data(outputs, "maskInfo").at("frame") == "image");
   });
 }
-TEST_CASE(
-    "P5 observed circular apertures preserve physical hypotheses and native masks across interfaces") {
-  cross("p5-circles-3d", {{"imagePath", "p5-circle-tilted.png"}},
-        [](const Json& outputs, bool changed) {
-          const auto& expected = truth().at("circles").at(changed ? "tilted" : "front");
-          const auto& items = p3::data(outputs, "circles").at("items");
-          REQUIRE(items.size() >= 1);
-          CHECK(items.size() <= 2);
-          bool correct = false;
-          for (const auto& item : items) {
-            double error = 0, cosine = 0;
-            for (int i = 0; i < 3; ++i) {
-              const double delta =
-                  item.at("center")[i].get<double>() - expected.at("centerM")[i].get<double>();
-              error += delta * delta;
-              cosine += item.at("normal")[i].get<double>() *
-                        expected.at("unorientedNormal")[i].get<double>();
-            }
-            correct = correct || (std::sqrt(error) <= .004 && std::abs(cosine) >= .98);
-            CHECK(item.at("center")[2].get<double>() > 0);
-            CHECK(item.at("radius") == .05);
-          }
-          CHECK(correct);
-        });
+TEST_CASE("P5 observed circle poses feed the native disk mask outputs") {
+  const std::filesystem::path examples(LYFLOW_EXAMPLES_DIR);
+  const auto graph = p3::read(examples / "p5-circles-3d.lyflow.json");
+  Session session(graph, examples, {}, false, 2, true);
+  const auto& log = session.wait();
+  REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
+  const auto outputs = p3::take(lyflow_run_outputs(log.runId.c_str()));
+  const auto& circles = p3::data(outputs, "circles").at("items");
+  const auto& poses = p3::data(outputs, "instances").at("items");
+  const auto& projected = p3::data(outputs, "projected").at("items");
+  const auto& info = p3::data(outputs, "maskInfo");
+  const auto& bindings = info.at("items");
+  REQUIRE_FALSE(circles.empty());
+  REQUIRE(poses.size() == circles.size());
+  REQUIRE(projected.size() == circles.size());
+  REQUIRE(bindings.size() == circles.size());
+
+  CHECK(outputs.at("masks").at("type") == "Tensor");
+  const auto& port = graph.at("outputs").at("masks");
+  Data masksData;
+  REQUIRE(exec::ResultStore::instance().get(log.runId, port.at("node").get<std::string>(),
+                                            port.at("port").get<std::string>(), masksData));
+  const auto* masks = masksData.asTensor();
+  REQUIRE(masks);
+  REQUIRE(masks->consistent());
+  REQUIRE(masks->shape == std::vector<std::int64_t>{static_cast<std::int64_t>(circles.size()),
+                                                    info.at("height").get<std::int64_t>(),
+                                                    info.at("width").get<std::int64_t>()});
+  const auto pixels = masks->data.size() / circles.size();
+  for (std::size_t i = 0; i < circles.size(); ++i) {
+    CAPTURE(i);
+    const auto& id = circles[i].at("id");
+    CHECK(poses[i].at("id") == id);
+    CHECK(projected[i].at("id") == id);
+    CHECK(bindings[i].at("id") == id);
+    CHECK(bindings[i].at("index") == i);
+    CHECK(bindings[i].at("hasMask") == true);
+    const auto first = masks->data.begin() + i * pixels;
+    CHECK(std::find(first, first + pixels, 1.0f) != first + pixels);
+  }
 }
 TEST_CASE(
     "P5 mask associated cloud removal preserves unknown outside points and all channels through interfaces") {

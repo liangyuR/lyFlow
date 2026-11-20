@@ -2,6 +2,8 @@
 #include "lyflow/cloud_groups.h"
 #include "lyflow/graph_migration.h"
 #include "lyflow/pose.h"
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -55,7 +57,6 @@ TEST_CASE(
   CHECK(judge.out("collisionPoses").asRecord()->data["items"][0]["classLabel"] == "箱体");
   REQUIRE(judge.run("cloud.classify_primitive_hits", {{"maxCount", Value::integer(4)}}).ok);
   CHECK(judge.out("freePoses").asRecord()->data["items"].size() == 2);
-  CHECK(extract.out("selected").asCloud()->intensity == std::vector<float>{1, 2, 4, 5});
   REQUIRE(c.run("cloud.query_primitives",
                 {{"shape", Value::text("cylinder")}, {"includeBoundary", Value::boolean(false)}})
               .ok);
@@ -78,12 +79,22 @@ TEST_CASE(
   REQUIRE(c.run("cloud.query_primitives", {{"anchor", Value::text("top")}}).ok);
   test::OpCall remove;
   remove.inputs = {{"cloud", source}, {"indices", c.out("innerIndices")}};
-  REQUIRE(remove.run("cloud.remove_indices", {{"outputMode", Value::text("preserve_order")}}).ok);
-  CHECK(remove.out("cloud").asCloud()->pointCount() == 6);
-  CHECK(std::isnan(remove.out("cloud").asCloud()->xyz[0]));
-  CHECK(std::isfinite(source.asCloud()->xyz[0]));
-  CHECK(remove.out("cloud").asCloud()->rgb == source.asCloud()->rgb);
-  CHECK(c.outputs.at("validity").asTensor()->data == std::vector<float>{0, 0, 1, 0, 1, 1});
+  REQUIRE(remove.run("cloud.remove_indices").ok);
+  const auto& original = *source.asCloud();
+  const auto& masked = *remove.out("cloud").asCloud();
+  const std::vector<float> validity{0, 0, 1, 0, 1, 1};
+  CHECK(c.outputs.at("validity").asTensor()->data == validity);
+  REQUIRE(masked.pointCount() == original.pointCount());
+  for (std::size_t i = 0; i < masked.xyz.size(); ++i) {
+    CHECK(std::isfinite(original.xyz[i]));
+    if (validity[i / 3] != 0)
+      CHECK(masked.xyz[i] == original.xyz[i]);
+    else
+      CHECK(std::isnan(masked.xyz[i]));
+  }
+  CHECK(masked.rgb == original.rgb);
+  CHECK(masked.normals == original.normals);
+  CHECK(masked.intensity == original.intensity);
   PointCloud model;
   model.push(0, 0, 0);
   c.inputs["model"] = Data::cloud(std::move(model));
@@ -91,12 +102,22 @@ TEST_CASE(
                 {{"mode", Value::text("model_radius")}, {"radius", Value::number(.1)}})
               .ok);
   CHECK(c.outputs.at("innerIndices").asIndices()->values == std::vector<std::int32_t>{0});
-  remove.inputs["indices"] = c.out("innerIndices");
-  REQUIRE(remove.run("cloud.remove_indices").ok);
-  CHECK(remove.out("cloud").asCloud()->intensity == std::vector<float>{2, 3, 4, 5, 6});
+  const auto hits = c.out("innerIndices");
+  test::OpCall extract;
+  extract.inputs = {{"cloud", source}, {"indices", hits}};
+  REQUIRE(extract.run("segment.extract_indices").ok);
+  CHECK(extract.out("rest").asCloud()->intensity == std::vector<float>{2, 3, 4, 5, 6});
+  remove.inputs["indices"] = hits;
   remove.inputs["cloud"] = cropCloud();
   CHECK_FALSE(remove.run("cloud.remove_indices").ok);
   CHECK(remove.status.portName == "indices");
+  remove.inputs = {
+      {"cloud", source},
+      {"indices",
+       Data::indices({original.id, {static_cast<std::int32_t>(original.pointCount())}})}};
+  CHECK_FALSE(remove.run("cloud.remove_indices").ok);
+  CHECK(remove.status.portName == "indices");
+  CHECK(remove.outputs.empty());
   CHECK_FALSE(c.run("cloud.query_primitives",
                     {{"mode", Value::text("model_radius")}, {"radius", Value::number(-1)}})
                   .ok);
@@ -104,28 +125,108 @@ TEST_CASE(
 }
 TEST_CASE("P5 crop validates frames empty instances invalid coordinates and output bindings") {
   using namespace lyflow;
-  test::OpCall c;
-  c.inputs = {{"cloud", cropCloud()}, {"poses", cropPoses(false, "other")}};
-  CHECK_FALSE(c.run("cloud.query_primitives").ok);
-  c.inputs["posesToCloud"] = Data::transform(Transform{});
-  REQUIRE(c.run("cloud.query_primitives").ok);
-  const auto* cloud = c.inputs.at("cloud").asCloud();
-  std::vector<cloud_groups::Group> groups;
-  std::string frame, why;
-  CHECK(cloud_groups::parse(*c.outputs.at("groups").asRecord(), *cloud,
-                            *c.outputs.at("groupIndices").asIndices(), groups, frame, why));
-  CHECK(frame == "world");
-  c.inputs = {{"cloud", cropCloud()}, {"poses", Data::record(poses::make3DList(Json::array()))}};
-  REQUIRE(c.run("cloud.query_primitives").ok);
-  CHECK(c.out("innerIndices").asIndices()->values.empty());
-  CHECK(c.out("outerIndices").asIndices()->values.size() == 6);
-  CHECK(c.out("support").asRecord()->data["items"].empty());
-  auto nanCloud = *c.inputs.at("cloud").asCloud();
-  nanCloud.xyz[0] = std::numeric_limits<float>::quiet_NaN();
-  c.inputs["cloud"] = Data::cloud(std::move(nanCloud));
-  REQUIRE(c.run("cloud.query_primitives").ok);
-  CHECK(c.out("support").asRecord()->data["unknownCount"] == 1);
-  CHECK(c.outputs.at("invalidIndices").asIndices()->values == std::vector<std::int32_t>{0});
+  SUBCASE("Frames, empty instances and invalid coordinates") {
+    test::OpCall c;
+    c.inputs = {{"cloud", cropCloud()}, {"poses", cropPoses(false, "other")}};
+    CHECK_FALSE(c.run("cloud.query_primitives").ok);
+    c.inputs["posesToCloud"] = Data::transform(Transform{});
+    REQUIRE(c.run("cloud.query_primitives").ok);
+    const auto* cloud = c.inputs.at("cloud").asCloud();
+    std::vector<cloud_groups::Group> groups;
+    std::string frame, why;
+    CHECK(cloud_groups::parse(*c.outputs.at("groups").asRecord(), *cloud,
+                              *c.outputs.at("groupIndices").asIndices(), groups, frame, why));
+    CHECK(frame == "world");
+    c.inputs = {{"cloud", cropCloud()}, {"poses", Data::record(poses::make3DList(Json::array()))}};
+    REQUIRE(c.run("cloud.query_primitives").ok);
+    CHECK(c.out("innerIndices").asIndices()->values.empty());
+    CHECK(c.out("outerIndices").asIndices()->values.size() == 6);
+    CHECK(c.out("support").asRecord()->data["items"].empty());
+    auto nanCloud = *c.inputs.at("cloud").asCloud();
+    nanCloud.xyz[0] = std::numeric_limits<float>::quiet_NaN();
+    c.inputs["cloud"] = Data::cloud(std::move(nanCloud));
+    REQUIRE(c.run("cloud.query_primitives").ok);
+    CHECK(c.out("support").asRecord()->data["unknownCount"] == 1);
+    CHECK(c.outputs.at("invalidIndices").asIndices()->values == std::vector<std::int32_t>{0});
+  }
+
+  SUBCASE("Graph versions and bindings distinguish retired compact from preserved ordering") {
+    const auto* op = ensureRegistry().find("cloud.remove_indices");
+    REQUIRE(op);
+    const auto source = cropCloud();
+    const auto hits = Data::indices({source.asCloud()->id, {0}});
+    const std::vector<exec::InjectedInput> inputs{
+        {"source", "cloud", source}, {"remove", "indices", hits}, {"independent", "indices", hits}};
+    struct Case {
+      const char* name;
+      Json nodeFields;
+      bool valid = false;
+      Json params = Json::object();
+      bool verifyBlockedRun = false;
+    };
+    const Case cases[] = {
+        {"explicit compact", {{"opVersion", "1.0.0"}, {"params", {{"outputMode", "compact"}}}}},
+        {"unversioned default", Json::object()},
+        {"legacy version default", {{"opVersion", "1.0.0"}}, false, Json::object(), true},
+        {"bound compact",
+         {{"opVersion", op->version}},
+         false,
+         {{"mode", {{"default", "compact"}, {"binds", {"remove.outputMode"}}}}}},
+        {"legacy explicit preserve_order",
+         {{"opVersion", "1.0.0"}, {"params", {{"outputMode", "preserve_order"}}}},
+         true},
+        {"legacy bound preserve_order",
+         {{"opVersion", "1.0.0"}},
+         true,
+         {{"mode", {{"default", "preserve_order"}, {"binds", {"remove.outputMode"}}}}}},
+        {"current default", {{"opVersion", op->version}}, true},
+    };
+    for (const auto& entry : cases) {
+      CAPTURE(entry.name);
+      auto graph = test::makeGraph(
+          {{"source", "gen.synthetic"}, {"remove", op->id}, {"independent", op->id}},
+          {{"source.cloud", "remove.cloud"}, {"source.cloud", "independent.cloud"}});
+      graph["nodes"][1].update(entry.nodeFields);
+      graph["nodes"][2]["opVersion"] = op->version;
+      graph["params"] = entry.params;
+      graph["outputs"] = {{"masked", {{"node", "remove"}, {"port", "cloud"}}},
+                          {"other", {{"node", "independent"}, {"port", "cloud"}}}};
+      if (!entry.valid) {
+        const auto diagnostics = Json::parse(exec::validateGraphJson(graph.dump(), {}));
+        const auto diag = std::find_if(diagnostics.begin(), diagnostics.end(), [](const Json& d) {
+          return d.at("nodeId") == "remove" && d.at("code") == "bad_param";
+        });
+        REQUIRE_MESSAGE(diag != diagnostics.end(), diagnostics.dump());
+        CHECK(diag->at("kind") == "diagnostic");
+        CHECK(diag->at("phase") == "validate");
+        CHECK(diag->at("severity") == "error");
+        CHECK(diag->at("paramPath") == "outputMode");
+        const auto message = diag->at("message").get<std::string>();
+        for (const char* hint : {"compact", "手动", "segment.extract_indices", "rest"})
+          CHECK_MESSAGE(message.find(hint) != std::string::npos, message);
+        if (!entry.verifyBlockedRun)
+          continue;
+      }
+
+      test::Session session(graph, {}, {}, false, 1, true, inputs);
+      const auto& log = session.wait();
+      REQUIRE_MESSAGE(log.runStatus() == (entry.valid ? "ok" : "error"), Json(log.events).dump());
+      Data output;
+      auto& store = exec::ResultStore::instance();
+      if (entry.valid) {
+        REQUIRE(store.get(log.runId, "remove", "cloud", output));
+        REQUIRE(output.asCloud());
+        CHECK(output.asCloud()->pointCount() == source.asCloud()->pointCount());
+        CHECK(std::isnan(output.asCloud()->xyz[0]));
+      } else {
+        const auto event = log.nodeEvent("remove", "error");
+        REQUIRE_MESSAGE(event.contains("error"), Json(log.events).dump());
+        CHECK(event.at("error").at("code") == "bad_param");
+        CHECK_FALSE(store.get(log.runId, "remove", "cloud", output));
+        CHECK_FALSE(store.get(log.runId, "independent", "cloud", output));
+      }
+    }
+  }
 
   SUBCASE("Migration preserves old output names and moves writable threshold and output mode") {
     auto legacy = test::makeGraph({{"source", "util.reroute"},

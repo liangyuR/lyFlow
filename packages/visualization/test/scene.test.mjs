@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   sceneBounds,
   renderSvg,
+  renderImageOverlaySvg,
   renderGridSvg,
   geometryPaths,
   sceneMetadata,
@@ -28,7 +29,8 @@ const scene = {
 };
 test('explicit coordinates, affine overlay and nonfinite metadata', () => {
   assert.deepEqual(sceneBounds(scene), [-0.8, -0.8, 10.8, 20.8]);
-  assert.equal(sceneMetadata(scene).layers[0].nonFinitePoints, 1);
+  const { nonFinitePoints, displayedPoints } = sceneMetadata(scene).layers[0];
+  assert.deepEqual([nonFinitePoints, displayedPoints], [1, 2]);
   const metricBounds = sceneBounds({
     ...scene,
     view: { equalAspect: false },
@@ -43,7 +45,6 @@ test('explicit coordinates, affine overlay and nonfinite metadata', () => {
     ],
   });
   assert.ok(metricBounds[1] > 0 && metricBounds[3] < 0.07);
-  assert.equal(sceneMetadata(scene).layers[0].displayedPoints, 2);
   assert.throws(
     () => renderSvg({ ...scene, layers: [{ ...scene.layers[0], frame: { ...frame, unit: 'm' } }] }),
     /unknown coordinate transform/,
@@ -118,6 +119,7 @@ test('scene escaping, layer support, empty output and shared views', () => {
   assert.ok(metric.includes('Metric source: actual output'));
   const svg = renderSvg(all);
   assert.ok(svg.includes('&lt;script&gt;'));
+  assert.ok(svg.includes('&lt;b&gt;'));
   assert.ok(svg.includes('1 non-finite'));
   assert.ok(!svg.includes('NaN'));
   assert.ok(renderSvg({ ...scene, layers: [] }).includes('No finite output data'));
@@ -129,20 +131,20 @@ test('scene escaping, layer support, empty output and shared views', () => {
       }),
     /identical frames/,
   );
-  assert.throws(
-    () =>
-      renderSvg({
-        ...scene,
-        layers: [
-          {
-            id: 'image',
-            kind: 'image',
-            frame,
-            bounds: [0, 0, 1, 1],
-            dataUrl: 'https://example.com/image.png',
-          },
-        ],
-      }),
-    /embedded/,
-  );
+  const imageFrame = { ...frame, unit: 'px' };
+  const remoteImage = {
+    ...scene,
+    frame: imageFrame,
+    layers: [
+      {
+        id: 'image',
+        kind: 'image',
+        frame: imageFrame,
+        bounds: [0, 0, 1, 1],
+        dataUrl: 'https://example.com/image.png',
+      },
+    ],
+  };
+  assert.throws(() => renderSvg(remoteImage), /embedded/);
+  assert.throws(() => renderImageOverlaySvg(remoteImage, 100, 80), /embedded/);
 });

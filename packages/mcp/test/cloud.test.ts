@@ -64,31 +64,10 @@ function encode(
   return buffer;
 }
 
-test('rgb 块（C ABI v12）排在强度之后：每点三个 0..255，统计进 r/g/b 通道、head 带 rgb', () => {
-  const summary = summarizeCloud(
-    decodeCloud(encode([0, 0, 0, 1, 1, 1], { intensity: [0.5, 1], rgb: [255, 0, 10, 0, 128, 20] })),
-    2,
-  );
-  assert.deepEqual(
-    {
-      r: summary.channels['r'],
-      intensity: summary.channels['intensity']?.max,
-      head: summary.head.map((p) => p.rgb),
-    },
-    {
-      r: { min: 0, max: 255, mean: 127.5 },
-      intensity: 1,
-      head: [
-        [255, 0, 10],
-        [0, 128, 20],
-      ],
-    },
-  );
-});
-
-test('解出点云并算出 bbox 与每通道统计', () => {
+test('解出含强度与 RGB 的点云，计算包围盒和通道统计并保留头部样本', () => {
   const buffer = encode([0, 0, 0, 1, 2, 3, 2, 4, 6, 3, 6, 9], {
     intensity: [0.25, 0.5, 0.75, 1],
+    rgb: [255, 0, 10, 0, 128, 20, 64, 255, 30, 191, 64, 40],
   });
   const summary = summarizeCloud(decodeCloud(buffer), 2);
 
@@ -100,9 +79,10 @@ test('解出点云并算出 bbox 与每通道统计', () => {
   assert.deepEqual(summary.channels['y'], { min: 0, max: 6, mean: 3 });
   assert.deepEqual(summary.channels['z'], { min: 0, max: 9, mean: 4.5 });
   assert.deepEqual(summary.channels['intensity'], { min: 0.25, max: 1, mean: 0.625 });
+  assert.deepEqual(summary.channels['r'], { min: 0, max: 255, mean: 127.5 });
   assert.equal(summary.head.length, 2);
-  assert.deepEqual(summary.head[0], { x: 0, y: 0, z: 0, intensity: 0.25 });
-  assert.deepEqual(summary.head[1], { x: 1, y: 2, z: 3, intensity: 0.5 });
+  assert.deepEqual(summary.head[0], { x: 0, y: 0, z: 0, intensity: 0.25, rgb: [255, 0, 10] });
+  assert.deepEqual(summary.head[1], { x: 1, y: 2, z: 3, intensity: 0.5, rgb: [0, 128, 20] });
 });
 
 test('bbox 用的是头部的全量包围盒，不是抽稀之后这几个点', () => {
@@ -244,10 +224,8 @@ test('图像载荷（LYIM）解出来；u16 拉伸到 8 位、超过边长按最
     { range: pic.range, bytes: [...pic.bytes] },
     { range: [0, 5000], bytes: [0, 51, 102, 153, 204, 255] },
   );
-  assert.deepEqual(
-    [toPicture(3, 2, 1, 2, img.values, 2).width, toPicture(3, 2, 1, 2, img.values, 2).height],
-    [2, 1],
-  );
+  const { width, height } = toPicture(3, 2, 1, 2, img.values, 2);
+  assert.deepEqual([width, height], [2, 1]);
 
   const png = encodePng(pic);
   assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

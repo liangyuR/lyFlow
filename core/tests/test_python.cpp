@@ -510,10 +510,10 @@ def profile_roundtrip(ctx, profile, mode):
   CHECK(run("ok", result).ok);
 }
 
-TEST_CASE("Python failures, queued cancellation and forced termination recover on the next task") {
+TEST_CASE("Python worker recovers from exceptions and isolates logs between tasks") {
   PythonFixture fixture;
   auto& registry = ensureRegistry();
-  const auto configured = python_runtime::configure(registry, fixture.config(3000).dump());
+  const auto configured = python_runtime::configure(registry, fixture.config().dump());
   INFO(configured.dump());
   REQUIRE(configured.at("ready") == true);
   const ComputeFn compute = registry.find("py.integration.control")->compute;
@@ -541,6 +541,19 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
   CHECK(control(compute, "ok", followingVerbose, result).ok);
   CHECK_FALSE(followingVerbose.logged("native-verbose-end"));
   CHECK_FALSE(followingVerbose.logged(std::string(100, 'x')));
+}
+
+TEST_CASE("Python worker recovers from cancellation, timeouts and process failure" *
+          doctest::test_suite("stress")) {
+  PythonFixture fixture;
+  auto& registry = ensureRegistry();
+  const auto configured = python_runtime::configure(registry, fixture.config(3000).dump());
+  INFO(configured.dump());
+  REQUIRE(configured.at("ready") == true);
+  const ComputeFn compute = registry.find("py.integration.control")->compute;
+  PythonContext context;
+  std::unordered_map<std::string, Data> result;
+  REQUIRE(control(compute, "ok", context, result).ok);
   const auto initialPid = result.at("record").asRecord()->data.at("pid");
   for (const char* mode : {"cooperative", "stubborn"}) {
     CAPTURE(mode);

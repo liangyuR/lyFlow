@@ -52,58 +52,43 @@ void shape(const Json& outputs, bool changed, bool parallel) {
   }
 }
 
-struct RawTensor {
-  lyflow_tensor_view view{};
-  ~RawTensor() { lyflow_tensor_view_free(&view); }
-};
 void nativeFeatures(const Json& outputs, const std::string& runId, Client* client, bool parallel,
-                    std::map<std::string, std::vector<float>>& previous) {
+                    bool baseline, std::map<std::string, p3::TensorPayload>& expected) {
   for (int branch = 0; branch < (parallel ? 2 : 1); ++branch) {
     const std::string node = branch ? "template_h" : "template_l";
+    CAPTURE(node);
     const auto& model = p3::data(outputs, parallel ? (branch ? "modelH" : "modelL") : "model");
-    const auto count = model.at("featureCount").get<std::uint32_t>();
-    std::vector<float> values;
-    if (client) {
-      auto tensor = client->tensor(runId, node, "features");
-      REQUIRE(tensor.valid());
-      REQUIRE(tensor.rank() == 2);
-      CHECK(tensor.shape()[0] == count);
-      CHECK(tensor.shape()[1] == 4);
-      REQUIRE(tensor.count() == count * 4);
-      values.assign(tensor.data(), tensor.data() + tensor.count());
+    auto tensor = p3::tensorPayload(runId, node, "features", client);
+    if (baseline) {
+      const auto count = model.at("featureCount").get<std::uint32_t>();
+      CHECK(tensor.shape == std::vector<std::int64_t>{count, 4});
+      REQUIRE(tensor.values.size() == count * 4);
+      for (std::size_t i = 0; i < tensor.values.size(); i += 4) {
+        CHECK(std::isfinite(tensor.values[i]));
+        CHECK(std::isfinite(tensor.values[i + 1]));
+        CHECK(std::hypot(tensor.values[i + 2], tensor.values[i + 3]) ==
+              doctest::Approx(1).epsilon(1e-5));
+      }
+      expected.emplace(node, std::move(tensor));
     } else {
-      RawTensor tensor;
-      REQUIRE(lyflow_output_tensor(runId.c_str(), node.c_str(), "features", 0, 0, &tensor.view) ==
-              0);
-      REQUIRE(tensor.view.rank == 2);
-      CHECK(tensor.view.shape[0] == count);
-      CHECK(tensor.view.shape[1] == 4);
-      REQUIRE(tensor.view.count == count * 4);
-      values.assign(tensor.view.data, tensor.view.data + tensor.view.count);
+      const auto& reference = expected.at(node);
+      CHECK(tensor.shape == reference.shape);
+      CHECK(tensor.values == reference.values);
     }
-    for (std::size_t i = 0; i < values.size(); i += 4) {
-      CHECK(std::isfinite(values[i]));
-      CHECK(std::isfinite(values[i + 1]));
-      CHECK(std::hypot(values[i + 2], values[i + 3]) == doctest::Approx(1).epsilon(1e-5));
-    }
-    const auto key = model.at("id").get<std::string>();
-    if (previous.count(key))
-      CHECK(values == previous.at(key));
-    else
-      previous.emplace(key, std::move(values));
   }
 }
 
 void replay(bool parallel) {
-  std::map<std::string, std::vector<float>> features;
+  std::array<std::map<std::string, p3::TensorPayload>, 2> features;
   const Json overrides =
       parallel ? Json{{"leftModelId", "cad-L-override"}, {"rightModelId", "cad-H-override"}}
                : Json{{"modelId", "cad-L-override"}};
   p3::crossInterfaces(
       parallel ? "p3-shape-parallel" : "p3-shape-cad", overrides,
       [parallel](const Json& outputs, bool changed) { shape(outputs, changed, parallel); },
-      [&](const Json& outputs, const std::string& runId, Client* client) {
-        nativeFeatures(outputs, runId, client, parallel, features);
+      [&](const Json& outputs, const std::string& runId, Client* client, bool changed,
+          bool baseline) {
+        nativeFeatures(outputs, runId, client, parallel, baseline, features[changed ? 1 : 0]);
       });
 }
 } // namespace

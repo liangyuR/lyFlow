@@ -110,10 +110,12 @@ LyFlow 1.3.11 / std-geometry 0.3.0 增加七个无PCL/OpenCV依赖的节点。�
 | `pose.rotate_axis_3d` | 显式continuousSymmetry，保持固定局部轴，Point/Direction、reverse/useZ；零向量/重合点/平行退化拒绝。                                            |
 | `pose.compare_3d`     | ID/index批次配对、bToA、父/局部平移差、三轴夹角和geodesic角，有限/连续对称，alarm超差原子失败。轴差用稳定atan2计算，不放宽公差。               |
 | `pose.rigid_template` | 2..256个带ID参考点的位置、逐点及点对公差；小Record可由GraphDoc参数/宿主持久化，不隐式修改全局文件。                                            |
-| `pose.rigid_check`    | 全部点对距离差或proper SO(3)对应点配准残差检查；始终交付result和accepted，退化observable=false，无伪造变换。                                   |
+| `pose.rigid_check`    | 比较全部点对的距离差，输出 `geometry.RigidCheck3D.v2` 和 `accepted`。                                                     |
 | `pose.rigid_register` | 要求定位点可观测，交付实际float32原生Transform、result和accepted；按该实际变换重评残差，可观超差保留候选，退化明确失败。                       |
 | `geometry.extend_2d`  | 互斥消费Point2D/Line2D/Circle2D、Features2D集合或Poses2D，嵌入指定X/Y/Z平面、显式px→m比例和可选刚体；保留线段端点、圆法向/半径及已知工件厚度。 |
 
-三维位置/尺寸/平移统一m，角度rad、xyzw单位四元数，跨帧须显式source→target刚体。工件ID/名称/类别/置信度/属性保留，计算结果pickable=false。模板距离模式不判绝对姿态且不能区分镜像；registration要求非共线及唯一可观旋转，float32交付误差必须满足原门限。二维升维是已知平面嵌入，不是未知深度恢复。
+三维位置/尺寸/平移统一m，角度rad、xyzw单位四元数，跨帧须显式source→target刚体。工件ID/名称/类别/置信度/属性保留，计算结果pickable=false。点对距离只反映点集的内部长度关系，刚体运动和镜像都保持这些距离。配准要求非共线及唯一可观旋转，使用 float32 输出矩阵重算残差。二维升维是已知平面嵌入。
+
+旧图若在 `pose.rigid_check` 上显式配置了 `mode`，校验会报错。继续检查点对距离时，手动删除 `mode`。原先执行配准的节点改用 `pose.rigid_register`，保留 `poses` 和 `template` 连线，并确认下游如何处理定位点不可观测错误。
 
 对称枚举最多1,000,000次，模板最多256点，小Record与原生Pose边界照既有协议；超限/非法输入/取消原子失败。正常空配对不生成虚构工件。有限体裁云在std-pointcloud，带K/D的三维投影/任意平面反投影在std-image，基础几何包不引入这些依赖。

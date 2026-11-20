@@ -7,7 +7,8 @@ param(
   [switch]$ReleaseBuild,
   [switch]$SkipVisionBuild,
   [switch]$P4ModelTests,
-  [string]$BuildDir
+  [string]$BuildDir,
+  [switch]$RunStressTests
 )
 $ErrorActionPreference = "Stop"
 
@@ -35,6 +36,7 @@ $config = $Configuration
 if ($config -notin @("Release", "RelWithDebInfo")) { throw "core 仅支持 Release 或 RelWithDebInfo（/MD）" }
 $runTests = -not $NoTests
 if ($P4ModelTests -and -not $runTests) { throw 'P4 模型验证不能与 -NoTests 同用' }
+if ($RunStressTests -and -not $runTests) { throw '-RunStressTests 不能与 -NoTests 同用' }
 
 # vcpkg 工具链只在首次 configure 时生效，缓存里没有它的话之后怎么传都不管用
 # （症状是「找不到 PCLConfig.cmake」）。所以发现不一致就直接重配。
@@ -68,7 +70,8 @@ $repoPacks = if ($env:LYFLOW_PACKS) { $env:LYFLOW_PACKS } else { "" }
 $modules = if ($env:LYFLOW_MODULES) { $env:LYFLOW_MODULES } else { "" }
 if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
-if ($stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks -split ';')) {
+$pointcloudEnabled = $stdPacks -notin @('0', 'OFF', 'FALSE') -or 'std-pointcloud' -in ($repoPacks -split ';')
+if ($pointcloudEnabled) {
   & python (Join-Path $PSScriptRoot 'fetch-matching-deps.py')
   if ($LASTEXITCODE -ne 0) { throw '固定三维匹配源码准备失败' }
 }
@@ -115,13 +118,30 @@ if ($LASTEXITCODE -ne 0) { throw "core 构建失败 (exit $LASTEXITCODE)" }
 # bridge/build.rs 整目录拷贝它。
 $bin = Join-Path $build "bin"
 $dump = Join-Path $bin "lyflow-dump-manifest.exe"
-& $dump --check
-if ($LASTEXITCODE -ne 0) { throw "算子描述自检失败" }
+if ($runTests -and $pointcloudEnabled -and -not ($ReleaseBuild -or $packs) -and $env:LYFLOW_TEST_OPS -ne '1') {
+  $manifest = Join-Path $build 'operator-manifest.json'
+  $consoleEncoding = [Console]::OutputEncoding
+  try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    & $dump | Set-Content -LiteralPath $manifest -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw '算子描述导出失败' }
+  } finally {
+    [Console]::OutputEncoding = $consoleEncoding
+  }
+  & python (Join-Path $PSScriptRoot 'check-operator-package-audit.py') --manifest $manifest --subset --complete-pack std-pointcloud
+  if ($LASTEXITCODE -ne 0) { throw '点云包注册清单审计失败' }
+} else {
+  & $dump --check
+  if ($LASTEXITCODE -ne 0) { throw '算子描述自检失败' }
+}
 
 if ($runTests) {
   $ctest = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
   if (-not (Test-Path -LiteralPath $ctest)) { $ctest = "ctest" }
-  & $ctest --test-dir $build -C $config --output-on-failure --no-tests=error --output-junit (Join-Path $build 'ctest-results.xml')
+  $testArgs = @('--test-dir', $build, '-C', $config, '--output-on-failure', '--no-tests=error',
+                '--output-junit', (Join-Path $build 'ctest-results.xml'))
+  if (-not ($RunStressTests -or $ReleaseBuild)) { $testArgs += @('-LE', 'stress') }
+  & $ctest @testArgs
   $testExit = $LASTEXITCODE
   if ($testExit -ne 0) { throw "core 测试失败 (exit $testExit)" }
 }

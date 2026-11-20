@@ -115,9 +115,7 @@
     {
       "id": "check",
       "op": "pose.rigid_check",
-      "params": {
-        "mode": "registration"
-      },
+      "params": {},
       "ui": {
         "position": {
           "x": 840,

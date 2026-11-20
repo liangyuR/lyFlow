@@ -6,21 +6,13 @@ namespace {
 using namespace lyflow;
 using namespace lyflow::test;
 
-struct TensorPayload {
-  std::vector<std::int64_t> shape;
-  std::vector<float> values;
-};
 struct ImagePayload {
   std::vector<std::uint32_t> format;
   std::vector<std::uint8_t> values;
 };
 struct Payloads {
-  std::map<std::string, TensorPayload> tensors;
+  std::map<std::string, p3::TensorPayload> tensors;
   std::map<std::string, ImagePayload> images;
-};
-struct RawTensor {
-  lyflow_tensor_view view{};
-  ~RawTensor() { lyflow_tensor_view_free(&view); }
 };
 struct RawImage {
   lyflow_image_view view{};
@@ -36,27 +28,7 @@ Payloads payloads(const Json& graph, const Json& outputs, const std::string& id,
     const auto& metadata = outputs.at(name);
     REQUIRE_FALSE(metadata.value("missing", false));
     if (metadata.at("type") == "Tensor") {
-      TensorPayload value;
-      if (client) {
-        auto view = client->tensor(id, node, port);
-        REQUIRE(view.valid());
-        value.shape.assign(view.shape(), view.shape() + view.rank());
-        if (view.count())
-          value.values.assign(view.data(), view.data() + view.count());
-        CHECK(view.total() == view.count());
-      } else {
-        RawTensor tensor;
-        REQUIRE(lyflow_output_tensor(id.c_str(), node.c_str(), port.c_str(), 0, 0, &tensor.view) ==
-                0);
-        const auto& view = tensor.view;
-        value.shape.assign(view.shape, view.shape + view.rank);
-        if (view.count)
-          value.values.assign(view.data, view.data + view.count);
-        CHECK(view.total == view.count);
-      }
-      CHECK(std::all_of(value.values.begin(), value.values.end(),
-                        [](float number) { return std::isfinite(number); }));
-      result.tensors.emplace(name, std::move(value));
+      result.tensors.emplace(name, p3::tensorPayload(id, node, port, client));
     } else if (metadata.at("type") == "Image") {
       ImagePayload value;
       if (client) {
@@ -147,69 +119,26 @@ public:
   Json graph;
 };
 
-using Check = std::function<void(const Json&, bool)>;
-void cross(const std::string& name, bool models, const Json& overrides, const Check& check) {
-  Saved saved(name, models);
-  Client client(LYFLOW_TEST_RUNTIME);
-  const auto source = saved.graph.dump(), base = saved.base.u8string();
-  Json defaults;
-  Payloads defaultPayloads;
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    CAPTURE(name);
-    CAPTURE(attempt);
-    const bool changed = attempt == 1;
-    const Json params = changed ? overrides : Json::object();
-    auto effective = saved.graph;
-    for (const auto& parameter : params.items()) {
-      REQUIRE(effective.at("params").contains(parameter.key()));
-      effective["params"][parameter.key()]["default"] = parameter.value();
-    }
-    Session session(effective, saved.base, {}, false, 2, true);
-    const auto& log = session.wait();
-    REQUIRE_MESSAGE(log.runStatus() == "ok", Json(log.events).dump());
-    const auto scheduler = p3::take(lyflow_run_outputs(log.runId.c_str()));
-    check(scheduler, changed);
-    const auto native = payloads(effective, scheduler, log.runId, nullptr);
-    if (!attempt) {
-      defaults = scheduler;
-      defaultPayloads = native;
-    }
-    if (attempt == 2) {
-      p3::agree(defaults, scheduler);
-      agree(defaultPayloads, native);
-    }
-    const auto id = name + "-abi-" + std::to_string(attempt), parameters = params.dump();
-    REQUIRE(
-        p3::take(lyflow_validate_params(source.c_str(), base.c_str(), parameters.c_str())).empty());
-    lyflow_run_options options{};
-    options.run_id = id.c_str();
-    options.base_dir = base.c_str();
-    options.params_json = parameters.c_str();
-    options.max_parallel = 2;
-    options.no_reuse = 1;
-    const std::unique_ptr<lyflow_run, decltype(&lyflow_run_free)> run(
-        lyflow_run_start(source.c_str(), &options, nullptr, nullptr), lyflow_run_free);
-    REQUIRE(run != nullptr);
-    lyflow_run_join(run.get());
-    REQUIRE(p3::take(lyflow_run_summary(id.c_str())).at("status") == "ok");
-    const auto abi = p3::take(lyflow_run_outputs(id.c_str()));
-    check(abi, changed);
-    p3::agree(scheduler, abi);
-    agree(native, payloads(effective, abi, id, nullptr));
-    RunOptions sdkOptions;
-    sdkOptions.runId = id + "-sdk";
-    sdkOptions.baseDir = base;
-    sdkOptions.paramsJson = parameters;
-    sdkOptions.maxParallel = 2;
-    sdkOptions.noReuse = true;
-    const auto result = client.run(source, sdkOptions);
-    REQUIRE_MESSAGE(result.ok(), result.summary);
-    const auto sdk = Json::parse(result.outputs);
-    check(sdk, changed);
-    p3::agree(scheduler, sdk);
-    agree(native, payloads(effective, sdk, sdkOptions.runId, &client));
-    CHECK(p3::read(saved.path) == saved.graph);
-  }
+void cross(const std::string& name, bool models, const Json& overrides, const p3::Check& check) {
+  const Saved saved(name, models);
+  std::array<Payloads, 2> baselines;
+  p3::crossInterfaces(name, saved.graph, saved.path, overrides, check,
+                      [&](const Json& outputs, const std::string& runId, Client* client,
+                          bool changed, bool baseline) {
+                        auto actual = payloads(saved.graph, outputs, runId, client);
+                        auto& expected = baselines[changed ? 1 : 0];
+                        if (baseline) {
+                          for (const auto& entry : actual.tensors) {
+                            CAPTURE(entry.first);
+                            const auto& values = entry.second.values;
+                            CHECK(std::all_of(values.begin(), values.end(),
+                                              [](float number) { return std::isfinite(number); }));
+                          }
+                          expected = std::move(actual);
+                        } else {
+                          agree(expected, actual);
+                        }
+                      });
 }
 
 void annotations(const Json& outputs, bool changed, bool legacy) {

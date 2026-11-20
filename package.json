@@ -7,8 +7,8 @@
   "scripts": {
     "format": "prettier --write \"{app,packages,examples}/**/*.{js,cjs,mjs,ts,tsx,jsx,css,html,json}\" package.json pnpm-workspace.yaml .github .prettierrc.json",
     "format:check": "prettier --check \"{app,packages,examples}/**/*.{js,cjs,mjs,ts,tsx,jsx,css,html,json}\" package.json pnpm-workspace.yaml .github .prettierrc.json",
-    "dev": "node scripts/dev.mjs",
-    "dev:app": "tauri dev",
+    "dev": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "dev:app": "pnpm dev --no-core-watch",
     "build": "tauri build",
     "tauri": "tauri",
     "app:dev": "pnpm --filter lyflow-app dev",

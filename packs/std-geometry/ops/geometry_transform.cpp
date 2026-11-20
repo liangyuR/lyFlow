@@ -66,6 +66,7 @@ Status transformPlane(const Inputs& in, const ParamView&, Outputs& out, ExecCont
 void registerGeometryTransforms(Registry& r) {
   OperatorDesc op = descriptor("geometry.transform_2d", "二维几何相似变换",
                                "2D point line circle transform similarity");
+  op.category = "几何/变换";
   Port input{"geometry", "Any", "Geometry", "Point2D/Line2D/Circle2D，输出保持同类型。", true};
   input.anyGroup = 1;
   Port output = input;
@@ -80,6 +81,7 @@ void registerGeometryTransforms(Registry& r) {
 
   op = descriptor("geometry.transform_plane", "三维平面仿射变换",
                   "3D plane affine inverse transpose transform");
+  op.category = "几何/变换";
   op.inputs = {
       Port{"plane", "Plane", "Plane", "米制单位法向平面 n·p+d=0。", true},
       Port{"transform", "Transform", "Transform", "源→目标的可逆仿射矩阵，米制平移。", true}};

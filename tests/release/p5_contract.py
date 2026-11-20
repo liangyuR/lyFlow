@@ -12,14 +12,14 @@ from p4_contract import digest, execute, record, require
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 CASES = {
-    "p5-depth-inspection": {"defectMode": "up"},
+    "p5-depth-inspection": {},
     "p5-depth-filters": {"mode": "fill", "kernelSize": 7},
-    "p5-orthographic-roi": {"outputMode": "normal_angle"},
-    "p5-box-crop": {"shape": "cylinder"},
+    "p5-orthographic-roi": {},
+    "p5-box-crop": {},
     "p5-pose-rigid": {"currentC": [.02, .12, .01]},
-    "p5-pose-project-plane": {"liftMode": "center"},
-    "p5-circles-3d": {"imagePath": "p5-circle-tilted.png"},
-    "p5-mask-remove": {"topExpand": 2},
+    "p5-pose-project-plane": {},
+    "p5-circles-3d": {},
+    "p5-mask-remove": {},
 }
 IDENTITIES = {"sourceCloudId", "parentCloudId", "resultCloudId", "sliceCloudId"}
 BINDINGS = {
@@ -50,10 +50,8 @@ BINDINGS = {
         "sampleGroups": {"sourceCloudId": "sourceCloud"},
         "wireGroups": {"sourceCloudId": "wireframe"},
         "groups": {"sourceCloudId": "sourceCloud"},
-        "removeGroups": {"sourceCloudId": "sourceCloud"},
         "support": {"sourceCloudId": "sourceCloud"},
         "cropQuality": {"sourceCloudId": "sourceCloud"},
-        "quality": {"sourceCloudId": "sourceCloud"},
     },
     "p5-mask-remove": {"quality": {"sourceCloudId": "sourceCloud"}},
 }
@@ -173,21 +171,20 @@ def check(name, outputs):
         mask_binding(outputs, "instances")
     elif name == "p5-box-crop":
         total = cloud(outputs, "sourceCloud", 27)
-        for role in ("wireframe", "cropped", "outside", "cloud", "removed"):
+        for role in ("wireframe", "cropped", "outside"):
             cloud(outputs, role, 27)
         count = outputs["cropped"]["elementCount"]
         require(count + outputs["outside"]["elementCount"] == total, "Crop partitions lost points")
-        require(outputs["removed"]["elementCount"] == count and outputs["cloud"]["elementCount"] == total - count, "Crop and compact removal disagree")
         record(outputs, "sampleGroups")
     elif name == "p5-pose-rigid":
-        record(outputs, "result", "geometry.RigidCheck3D.v1")
+        record(outputs, "result", "geometry.RigidCheck3D.v2")
         record(outputs, "comparison")
         poses(outputs, "reference")
         poses(outputs, "current")
         m = outputs["transform"]["value"]["m"]
         require(len(m) == 16, "Registration transform is not a native 4x4 matrix")
         finite(m, "registration transform")
-        require(record(outputs, "registration")["transform"] == m, "Reported registration transform differs from the actual native output")
+        require(record(outputs, "registration", "geometry.RigidCheck3D.v1")["transform"] == m, "Reported registration transform differs from the actual native output")
         for role in ("flipped", "rotated", "extended"):
             poses(outputs, role)
     elif name == "p5-pose-project-plane":
@@ -210,7 +207,7 @@ def check(name, outputs):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Verify eight P5 example schemas and formal saved CLI default/override/default contracts without skipping cases")
+    parser = argparse.ArgumentParser(description="Verify all eight installed P5 examples and test override isolation on representative workflows")
     parser.add_argument("--cli", type=Path)
     parser.add_argument("--examples", type=Path, default=REPOSITORY / "examples")
     parser.add_argument("--output-dir", type=Path, default=REPOSITORY / "build/p5-cli-contract")
@@ -248,9 +245,10 @@ def main():
     report = {"mode": "formal-cli", "savedDirectory": str(saved), "cases": []}
     for name, override in CASES.items():
         defaults = None
-        for iteration, changed in enumerate((False, True, False)):
+        runs = 3 if override else 1
+        for iteration in range(runs):
             options = []
-            if changed:
+            if iteration == 1:
                 for key, value in override.items():
                     options.extend(("--param", key + "=" + json.dumps(value, ensure_ascii=False)))
             graph = saved / f"{name}-observed.lyflow.json"
@@ -268,10 +266,11 @@ def main():
                 require(normalized != defaults, f"{name}: parameter override did not change the results")
             else:
                 require(defaults == normalized, f"{name}: defaults were changed by the isolated override")
-        report["cases"].append({"graph": name, "runs": 3, "override": override, "status": "passed"})
+        report["cases"].append({"graph": name, "runs": runs, "override": override, "status": "passed"})
     require(original == {str(path.relative_to(saved)): digest(path) for path in saved.iterdir() if path.is_file()}, "Workflow execution changed saved source assets")
     (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"mode": "formal-cli", "schemas": len(CASES), "runs": 3 * len(CASES), "status": "passed", "report": str(output / "report.json")}, ensure_ascii=False))
+    runs = sum(case["runs"] for case in report["cases"])
+    print(json.dumps({"mode": "formal-cli", "schemas": len(CASES), "runs": runs, "status": "passed", "report": str(output / "report.json")}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

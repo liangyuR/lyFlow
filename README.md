@@ -87,11 +87,10 @@ MCP 同时使用 HTTP 后端与本地 CLI；配置完成后，先调用 `get_env
 
 ```powershell
 $env:LYFLOW_PACKS = 'solution-glue'
-pnpm core:build
 pnpm dev
 ```
 
-多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换包配置后先停止开发进程、运行 `pnpm core:build` 重新配置，再启动 `pnpm dev`，使监视构建使用新的包组合。Windows 发布产物的标准包、`solution-glue` 与 `solution-gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
+多个领域包用分号分隔，例如 `'solution-gap;solution-dts;solution-glue'`。切换包配置时先停止开发进程，再运行 `pnpm dev`，脚本会按当前的包组合重新配置 core。Windows 发布产物的标准包、`solution-glue` 与 `solution-gap` 组合由 `packaging/release.json` 固定，与开发默认组合不同。构建开关、外部包和注册方式见 [算子包指南](docs/op-packs.md)；新增算子的实现约定见 [core 开发指南](core/README.md)。
 
 ## 开发与验证
 
