@@ -9,7 +9,7 @@
 | 下载项 | 版本与用途 |
 | --- | --- |
 | `lyflow-sdk-win-x64-vT.zip` | 完整 SDK，按工具版本 T 命名。包含锁定的原生 SDK 及公共仓编译的 Release CLI，解压后直接运行 `bin/lyflow.exe`。 |
-| `lyflow-editor-vT.tgz` | 同版 `@lyflow/editor` TypeScript 源码包。React 宿主按 tarball 依赖安装并编译。共享可视化实现随包提供，React 等 peer 依赖由宿主提供。2.0.3 的浏览器宿主也须显式安装 `@tauri-apps/api@^2`，使 TypeScript 和打包器能解析编辑器入口导出的传输模块。详见[嵌入指南](../embedding.md)。 |
+| `lyflow-editor-vT.tgz` | 同版 `@lyflow/editor` TypeScript 源码包。React 宿主按 tarball 依赖安装并编译。共享可视化实现随包提供，React 等 peer 依赖由宿主提供。使用编辑器的浏览器宿主也须显式安装 `@tauri-apps/api@^2`，使 TypeScript 和打包器能解析编辑器入口导出的传输模块。详见[嵌入指南](../embedding.md)。 |
 | `lyflow-runtime.json` | 完整 SDK 内 `bin/lyflow-runtime.json` 的独立副本。包含实际加载的引擎版本 E、ABI、修订、算子及依赖。 |
 | `lyflow-native-sdk-win-x64-vE.zip` | 原生 SDK，按引擎版本 E 命名，含 C/C++17 头文件、库、CMake 配置、schema、算子 manifest、Python worker 和示例。 |
 | `lyflow-runtime-win-x64-vE.zip` | 供宿主部署的 Windows x64 运行库、依赖、清单与许可证。 |
@@ -43,10 +43,10 @@ python -m pip install -r scripts/requirements.txt
 3. 更新工具版本 T 与 CHANGELOG，手动运行 [Windows release](../../.github/workflows/release-windows.yml) 检查资产。工作流读取受信任的默认分支锁，从公开地址下载三个原包、核对摘要，在 Windows 上组装完整 SDK 与编辑器，执行消费验收并保存 Actions 产物。推送指向默认分支历史的 `vT` tag 时，工作流创建工具 Release 草稿。若 T 等于 E，草稿同时附上三个引擎原包的原始字节。若工具继续沿用另一引擎版本，正文链接到该引擎的实际 Release。维护者复核后正式发布。
 4. 正式工具 Release 的发布事件触发 [NuGet 工作流](../../.github/workflows/publish-runtime-nuget.yml)。它从工具 tag 的元数据读取引擎 E，从默认分支取得对应的受信任锁，核验公开状态、原包摘要、nuspec 包 ID、版本、引擎仓及修订，再向 [GitHub Packages](https://github.com/liangyuR?tab=packages) 发布 E 的原包。工具补丁沿用已发布的 E 时，工作流下载已注册的 nupkg，核对锁内摘要后结束；同步发行的同版重复推送会报错。
 
-本地仅验证已发布的 NuGet 原包可执行下列命令，将 `v2.0.3` 换成需要验证的工具 Release tag。
+本地仅验证已发布的 NuGet 原包可执行下列命令，将 `v2.0.4` 换成需要验证的工具 Release tag。
 
 ```powershell
-./scripts/publish-runtime-nuget.ps1 -Tag v2.0.3 -PackageOnly -OutputDir build/verified-runtime
+./scripts/publish-runtime-nuget.ps1 -Tag v2.0.4 -PackageOnly -OutputDir build/verified-runtime
 ```
 
 [原生引擎仓](https://github.com/liangyuR/lyflow-engine)维护原生构建输入、发布组合、C ABI、运行库探针与原生 SDK 验收。历史单仓发行的构建步骤保存在对应的工具 tag 中。
