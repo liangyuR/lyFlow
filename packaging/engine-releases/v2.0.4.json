@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "2.0.4",
+  "sourceRevision": "535cd22479f13b0f455d20d2909f237bd3ff6320",
+  "sha256": "836586c6ca3f3ecad45440eaf8c704a481ec9d2a372d0927187e73480060cb5f",
+  "sourceRepository": "https://github.com/liangyuR/lyflow-engine",
+  "url": "https://github.com/liangyuR/lyFlow/releases/download/engine-assets-v2.0.4/lyflow-native-sdk-win-x64-v2.0.4.zip",
+  "runtime": {
+    "url": "https://github.com/liangyuR/lyFlow/releases/download/engine-assets-v2.0.4/lyflow-runtime-win-x64-v2.0.4.zip",
+    "sha256": "4d0e6f6e576ea350613d8e7626793d00d90b056386e84784e1a95ef6e45cde75"
+  },
+  "nuget": {
+    "url": "https://github.com/liangyuR/lyFlow/releases/download/engine-assets-v2.0.4/LyFlow.Runtime.win-x64.2.0.4.nupkg",
+    "sha256": "2a1e3a761252ec6694b3e0fc40aa3e352b1f199e3952830194d9f20dc6124847"
+  }
+}

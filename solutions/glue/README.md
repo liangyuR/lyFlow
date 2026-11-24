@@ -1,6 +1,6 @@
 # solution-glue — LyFlow 领域算子包：涂胶检测
 
-版本 0.5.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "solution-glue"`（与别的领域包一起：`"solution-gap;solution-dts;solution-glue"`）。
+版本 0.6.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "solution-glue"`（与别的领域包一起：`"solution-gap;solution-dts;solution-glue"`）。
 
 彩色跟踪和量宽对胶内高光、低置信度色谷采用同一套受约束合并：邻站或稳定历史胶宽可以扩大搜索范围，但明确背景不可跨越，合并宽度与中心须符合参考并优于原片段。外边被遮住时保留不完整标记，不用参考宽度替代实测；参数与输出契约见 [彩色测量算子](../../docs/glue-measure-ops.md#13-彩色测量算子)。
 
@@ -361,3 +361,15 @@ python solutions\glue\tools\glue_thumbs.py    # 第 17 条：每帧画上判定�
   超过 `widthRange` 上限就成了「断口」。示教线只在胶在图里的位置件与件之间稳定的拍照点上可靠 —— MX11 现场有几个拍照点两件之间
   胶的位置差 20–100 px（[集成记录](../../docs/glue-integration.md)「示教胶路」），那些点要么放宽 tolerance 并收紧胶宽范围，
   要么先配准（还没有）。
+
+## 混胶色差
+
+合格绿胶、纯黄、纯蓝与背景的取样用于建立每台相机的对数色度模型。三个算子均可从图中读取中间观测，产品报警与工艺公差由宿主负责。
+
+| 算子 | 契约 |
+| --- | --- |
+| `glue.mix_model` | 输入 u8 RGB 图像及同尺寸的单通道标签图（0 忽略、1 绿、2 黄、3 蓝、4 背景）。多帧按原始行序纵向拼接，`frameHeight` 指定单帧高度，避免饱和掩膜越过帧边界。输出 `glue.MixModel.v1`，含轴端点、离散度、样本数和传入的白平衡信息。 |
+| `glue.mix_map` | 用实时 RGB 图和模型计算黄 −1、绿 0、蓝 +1 的轴向偏移与归一离轴量。有效性码 0/1/2/3/4 依次表示可测胶面、高光、过暗、离轴与 ROI 外。背景矩形按原图像素给出。输出 `maps` 供区域量测，`colorMaps` 可接彩色定位。 |
+| `glue.mix_regions` | 输入 `maps` 及有向 `glue.Polyline`，沿胶路方向平滑，分开量取偏黄与偏蓝区域。输出 `glue.MixObservation.v1`，其中 `regions` 含原图轮廓、面积（px²）、确认长度和含短高光空缺的跨度（px），`stations` 含轴向中位数及截面可见性，`background` 给出背景偏移。 |
+
+轴向偏移用于判断偏色方向，不能直接换算成物料配比。背景不可用、没有可测胶面的站位和高光空缺各自保留观测状态。
