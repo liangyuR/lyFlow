@@ -34,6 +34,8 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true, // 端口被占就报错，别静默换端口让 Tauri 加载到空白页
+    // tauri dev 等 cargo 编完才开窗口，这段时间先把入口的模块图转换好
+    warmup: { clientFiles: ['./src/main.tsx'] },
   },
   build: {
     target: 'chrome110', // Tauri 用 WebView2，不用管老浏览器
