@@ -15,7 +15,7 @@ export function findRepoRoot(start?: string): string | null {
   return null;
 }
 
-export const NO_REPO =
+const NO_REPO =
   '找不到仓库里的 schema/ 与 docs/：这一份 @lyflow/mcp 是从仓库外的副本跑起来的，' +
   '本地文件类的 resource 拿不到。工具（list_operators / run_graph 等）不受影响。';
 

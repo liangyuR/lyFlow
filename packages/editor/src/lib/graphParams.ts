@@ -178,7 +178,7 @@ export function materializeBindings(
 
 /** 子图里被提升成子图参数的那个参数此刻的值（按 path 指的那个实例）：沿提升链往外，哪一层的实例上写着就用哪一层的，
  *  顶层实例上绑了图参数就用图参数的值；一路都没写就用那一层子图参数的 default。不是提升的返回 undefined。 */
-export function promotedValue(
+function promotedValue(
   doc: GraphDoc,
   path: SubPath,
   nodeId: string,

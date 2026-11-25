@@ -584,7 +584,7 @@ function emitCommitted(change: CommittedChange): void {
   }
 }
 
-export const TOPOLOGY_LOCKED = '拓扑已锁定';
+const TOPOLOGY_LOCKED = '拓扑已锁定';
 
 /** 迁移动作是否改连线：拓扑锁着时这种整条不写回。 */
 function migrationTouchesTopology(a: MigrationAction): boolean {

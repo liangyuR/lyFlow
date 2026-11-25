@@ -8,7 +8,7 @@ import type { GraphDoc } from '../types/graph';
 /** 没量到真实尺寸时的兜底。节点宽度基本固定，高度按端口数变。 */
 const DEFAULT_SIZE = { width: 220, height: 90 };
 
-export interface LayoutOptions {
+interface LayoutOptions {
   /** 只排这些节点，其余原地不动。空/未给 = 整图。 */
   only?: ReadonlySet<string>;
   /** 量测到的真实尺寸，画布组件的旁路缓存。 */
@@ -17,7 +17,7 @@ export interface LayoutOptions {
   origin?: { x: number; y: number };
 }
 
-export interface LayoutMove {
+interface LayoutMove {
   id: string;
   position: { x: number; y: number };
 }

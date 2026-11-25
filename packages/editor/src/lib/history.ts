@@ -17,7 +17,7 @@ export function stepHistory(dir: 'undo' | 'redo'): void {
 }
 
 /** 撤销历史列表的一行：做完这一步之后的样子。steps 是点它要走几步（负 = 撤销、正 = 重做、0 = 现在）。 */
-export interface HistoryRow {
+interface HistoryRow {
   label: string;
   steps: number;
   kind: 'future' | 'current' | 'past' | 'origin';

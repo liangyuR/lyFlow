@@ -29,14 +29,14 @@ export type LyNode = Node<OperatorNodeData, 'operator'>;
  *  放进来的话每条事件都得重建整批连线，还要同步进 sameEdge。 */
 export type LyEdge = Edge<{ lazy: boolean }>;
 
-export interface Selection {
+interface Selection {
   nodes: ReadonlySet<string>;
   edges: ReadonlySet<string>;
 }
 
 /** 节点的量测尺寸。UI 运行时状态，不进 GraphDoc；但 React Flow / MiniMap 靠它判断节点
  *  有没有尺寸，所以存在画布组件的旁路缓存里、映射时合并进来（见 README「踩过的坑」）。 */
-export type MeasuredSizes = ReadonlyMap<string, { width: number; height: number }>;
+type MeasuredSizes = ReadonlyMap<string, { width: number; height: number }>;
 
 const EMPTY_SELECTION: Selection = { nodes: new Set(), edges: new Set() };
 
@@ -49,7 +49,7 @@ const EMPTY_SELECTION: Selection = { nodes: new Set(), edges: new Set() };
  *  又经 `onNodesChange` -> 画布的 measured 旁路缓存 -> 这里流回节点对象，构成
  *  「量测 -> setNodes -> 重建 -> 再量测」的自激环，报 Maximum update depth exceeded。
  *  整批都没变时连数组引用一起复用，React Flow 的 StoreUpdater 就直接跳过 setNodes。 */
-export interface MappingCache {
+interface MappingCache {
   nodes: Map<string, LyNode>;
   edges: Map<string, LyEdge>;
   lastNodes: LyNode[] | null;
@@ -239,7 +239,7 @@ export function distanceToSegment(
   return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
 }
 
-export interface Rect {
+interface Rect {
   x: number;
   y: number;
   w: number;

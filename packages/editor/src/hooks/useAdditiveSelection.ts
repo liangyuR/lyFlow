@@ -4,7 +4,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 
 import { useUiStore } from '../store/ui';
 
-export interface KeptSelection {
+interface KeptSelection {
   nodes: ReadonlySet<string>;
   edges: ReadonlySet<string>;
 }

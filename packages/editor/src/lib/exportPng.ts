@@ -2,7 +2,7 @@ import { dialogs } from './dialogs';
 import { useUiStore } from '../store/ui';
 import { transport } from '../transport';
 
-export function pngFileName(baseName: string): string {
+function pngFileName(baseName: string): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '');
   const name = (baseName || 'view').replace(/[^\w.-]+/g, '_');
   return `${name}-${stamp}.png`;

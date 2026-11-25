@@ -8,9 +8,9 @@ import { createContext, useContext, useSyncExternalStore } from 'react';
 export const MOTION_MS = { fast: 120, base: 240, slow: 400 } as const;
 
 /** 缓出：起步快、落地轻。进出场与闪光都用它，线性只留给循环（CSS 里的流动）。 */
-export const EASE_OUT = [0.05, 0.7, 0.1, 1] as const;
+const EASE_OUT = [0.05, 0.7, 0.1, 1] as const;
 /** 缓入缓出：布局过渡用。两头慢，节点不会「弹」到新位置上。 */
-export const EASE_IN_OUT = [0.2, 0, 0, 1] as const;
+const EASE_IN_OUT = [0.2, 0, 0, 1] as const;
 
 /** motion 的 transition 预设。motion 的 duration 单位是秒。 */
 export const TRANSITION = {

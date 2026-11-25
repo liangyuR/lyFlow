@@ -33,7 +33,7 @@ export interface CompareSnapshot {
 
 /** 把 B 此刻显示着的结果冻成快照。由 Viewer3D 挂上（它才知道画面上有什么）；
  *  还没结果、或 Viewer3D 没挂着时返回 null。 */
-export type CompareCapture = (slot: CompareSlot) => CompareSnapshot | null;
+type CompareCapture = (slot: CompareSlot) => CompareSnapshot | null;
 
 export const COMPARE_NO_RESULT = 'B 还没有结果，运行一次后可以冻结';
 export const COMPARE_NO_NODE = '先选中一个节点再对比';
@@ -61,7 +61,7 @@ interface CompareState {
 }
 
 /** 当前的 A：钉住优先于选中，与 Viewer3D 的 activeId 同一条规则。 */
-export function activeSlot(): CompareSlot | null {
+function activeSlot(): CompareSlot | null {
   const ui = useUiStore.getState();
   const selected = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
   const nodeId = ui.pinnedNode ?? selected;

@@ -9,7 +9,7 @@ export interface FlowTabDocument {
   path?: string | undefined;
 }
 
-export interface FlowTabsProps {
+interface FlowTabsProps {
   tabs: readonly FlowTabDocument[];
   activeId: string;
   onSelect: (id: string) => void;

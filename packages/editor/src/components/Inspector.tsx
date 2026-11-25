@@ -46,12 +46,6 @@ import { MultiEditContext } from './NumberInput';
 import { copyText } from '../lib/clipboard';
 import { formatOutputValue } from '../lib/outputs';
 
-/** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
-// num 搬到了 lib/format（对比的差异表要在纯函数里用）；从这里转出，老的 import 不用改
-export { num } from '../lib/format';
-// formatOutputValue 搬到了 lib/outputs（节点底栏与运行收尾也要用）
-export { formatOutputValue } from '../lib/outputs';
-
 /** 该节点这次运行的输出：能读的值逐个列出；点云只列点数，点一下预览改看它（多个点云输出时，
  *  提取下标的 rest 这类以前在预览里怎么都看不到）。 */
 function OutputValues({ outputs, nodeKey }: { outputs: OutputStat[]; nodeKey: string }) {

@@ -48,7 +48,7 @@ export function revealShift(
 }
 
 /** 画布坐标下的矩形（节点的位置与大小）。 */
-export interface FlowRect {
+interface FlowRect {
   x: number;
   y: number;
   w: number;

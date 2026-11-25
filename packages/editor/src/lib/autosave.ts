@@ -114,7 +114,7 @@ export async function discardUntitledBackup(): Promise<void> {
 }
 
 /** 问用户的那句话。 */
-export function untitledRestoreMessage(backup: UntitledBackup): string {
+function untitledRestoreMessage(backup: UntitledBackup): string {
   const when = backup.savedAt ? `，${new Date(backup.savedAt).toLocaleString()} 备份的` : '';
   return (
     `上次有一张还没存过盘的图（${backup.loaded.doc.nodes.length} 个节点${when}）没有保存就退出了。` +
@@ -127,7 +127,7 @@ export function untitledRestoreMessage(backup: UntitledBackup): string {
 // 什么时候的。现在画在编辑器里（lib/modal），三选一：恢复 / 丢弃 / 取消 —— 取消什么都不动，备份留着、下次再问。
 // 没挂对话框的宿主（编辑器整个卸掉了）退回原生的是 / 否，与以前一样。
 
-export type RestoreAnswer = 'restore' | 'discard' | 'cancel';
+type RestoreAnswer = 'restore' | 'discard' | 'cancel';
 
 const whenText = (ms: number | null): string => (ms ? new Date(ms).toLocaleString() : '不详');
 

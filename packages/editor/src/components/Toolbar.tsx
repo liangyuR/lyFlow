@@ -86,7 +86,7 @@ function ToolbarIcon({ name }: { name: ToolbarIconName }) {
   );
 }
 
-export interface ToolbarActions {
+interface ToolbarActions {
   onSave: () => void;
   onSaveAs: () => void;
   onRename: () => void;

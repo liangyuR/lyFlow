@@ -7,7 +7,7 @@ import type { GraphNode } from '../types/graph';
 import type { OperatorDesc } from '../types/manifest';
 
 /** [xMin, yMin, xMax, yMax]，米。 */
-export type Rect = [number, number, number, number];
+type Rect = [number, number, number, number];
 
 const bounds = new Map<string, Rect>();
 let version = 0;
@@ -35,18 +35,18 @@ export function roiBoundsVersion(): number {
   return version;
 }
 
-export function knownRoiBounds(fullNodeId: string): Rect | null {
+function knownRoiBounds(fullNodeId: string): Rect | null {
   return bounds.get(fullNodeId) ?? null;
 }
 
-export interface ThumbBox {
+interface ThumbBox {
   param: string;
   /** 米。 */
   rect: Rect;
   current: boolean;
 }
 
-export interface Thumb {
+interface Thumb {
   /** 画布范围，米。 */
   extent: Rect;
   boxes: ThumbBox[];

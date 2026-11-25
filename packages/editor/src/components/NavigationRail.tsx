@@ -1,6 +1,6 @@
 export type NavigationPanel = 'nodes' | 'flows' | null;
 
-export interface NavigationRailProps {
+interface NavigationRailProps {
   active: NavigationPanel;
   onSelect: (pane: NavigationPanel) => void;
   onParameters: () => void;

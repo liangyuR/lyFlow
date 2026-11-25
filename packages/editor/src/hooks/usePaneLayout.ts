@@ -119,7 +119,7 @@ function useRowWidth(container: RefObject<HTMLElement | null>, wanted: number): 
   return width.current;
 }
 
-export interface PaneLayout {
+interface PaneLayout {
   paletteWidth: number;
   rightWidth: number;
   onPaletteSplitterDown: (event: React.PointerEvent) => void;

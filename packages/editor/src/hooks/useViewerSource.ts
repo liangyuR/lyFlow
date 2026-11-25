@@ -77,7 +77,7 @@ function keepSame(prev: Display, next: Display): Display {
   return same ? prev : next;
 }
 
-export interface ViewerSourceInput {
+interface ViewerSourceInput {
   /** null = 没有节点可看。 */
   slot: CompareSlot | null;
   /** 没有节点时的提示（「选中一个节点查看它的输出」/「选中了多个节点」）。 */

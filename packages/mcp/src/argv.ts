@@ -1,5 +1,5 @@
 import type { CaptureOptions } from './types.js';
-export interface SampleSelector {
+interface SampleSelector {
   samplesPath?: string | undefined;
   samplesGlob?: string | undefined;
   bind?: string | undefined;
@@ -11,7 +11,7 @@ export interface SampleSelector {
   splitHalf?: string | undefined;
 }
 
-export function graphParamsArgv(values: Record<string, unknown> | undefined): string[] {
+function graphParamsArgv(values: Record<string, unknown> | undefined): string[] {
   return Object.entries(values ?? {}).flatMap(([name, value]) => [
     '--param',
     `${name}=${JSON.stringify(value)}`,
@@ -44,7 +44,7 @@ export interface EvalInput extends SampleSelector {
   graphParams?: Record<string, unknown> | undefined;
 }
 
-export interface PerturbInput extends SampleSelector {
+interface PerturbInput extends SampleSelector {
   graphPath: string;
   after: string;
   region: unknown;
@@ -150,7 +150,7 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   return argv;
 }
 
-export interface ListMetricsInput extends SampleSelector {
+interface ListMetricsInput extends SampleSelector {
   graphPath: string;
   baseDir?: string | undefined;
   set?: string[] | undefined;
@@ -170,7 +170,7 @@ export function listMetricsArgv(input: ListMetricsInput): string[] {
   return argv;
 }
 
-export interface ParamsInput {
+interface ParamsInput {
   graphPath: string;
   node?: string[] | undefined;
   only?: 'explicit' | 'default' | 'bound' | 'graph' | undefined;
@@ -202,7 +202,7 @@ export function recipesArgv(graphPath: string, recipe?: string | undefined): str
   return argv;
 }
 
-export interface PatchInput {
+interface PatchInput {
   recipe?: string | undefined;
   graphPath: string;
   removeNode?: string[] | undefined;

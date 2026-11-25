@@ -23,14 +23,14 @@ import type { GraphDoc, GraphEdge, GraphLevel } from '../types/graph';
 import type { OperatorDesc } from '../types/manifest';
 
 /** 按钮的 `data-run-state`（U6，V5 起 disabled 只剩「本节点有校验错误」一种）。 */
-export type NodeRunState = 'idle' | 'running' | 'done' | 'error' | 'disabled';
+type NodeRunState = 'idle' | 'running' | 'done' | 'error' | 'disabled';
 
 // ------------------------------------------------------------------ 图结构
 
 /** 当前层里，这个节点每个**必需、非惰性**输入所连的上游（U4），按输入端口的声明顺序去重。
  *  只给「仅此节点」（isolate）的可用性用：它要求直接上游都已经有结果。
  *  子图里从子图输入口进来的那一路在这一层没有边，不算 —— 那由 core 的 R2 把关。 */
-export function runUpstreamOf(level: GraphLevel, nodeId: string, op: OperatorDesc): string[] {
+function runUpstreamOf(level: GraphLevel, nodeId: string, op: OperatorDesc): string[] {
   const out: string[] = [];
   for (const port of op.inputs) {
     if (port.required === false || port.lazy === true) continue;
@@ -219,13 +219,13 @@ export function previewTargets(
 
 /** 上游有没有可用结果：本会话跑过（done / skipped）、输出可取、不 stale。
  *  子图节点的聚合状态不带 stats，done / skipped 已经说明内部全跑完了。 */
-export function hasUsableResult(exec: NodeExecution | undefined, stale: boolean): boolean {
+function hasUsableResult(exec: NodeExecution | undefined, stale: boolean): boolean {
   if (!exec || stale) return false;
   if (exec.state !== 'done' && exec.state !== 'skipped') return false;
   return exec.stats?.outputsAvailable !== false;
 }
 
-export function missingUpstream(
+function missingUpstream(
   upstream: readonly string[],
   execs: ReadonlyMap<string, NodeExecution>,
   stale: ReadonlySet<string>,
@@ -306,10 +306,10 @@ export function nodeRunState(
   return 'idle';
 }
 
-export const TITLE_RUN = '运行此节点';
-export const TITLE_UP_TO_DATE = '已是最新（命中缓存）—— Shift+点击强制重算';
-export const TITLE_STOP = '停止';
-export const TITLE_INVALID = '此节点有校验错误，先修正参数再运行';
+const TITLE_RUN = '运行此节点';
+const TITLE_UP_TO_DATE = '已是最新（命中缓存）—— Shift+点击强制重算';
+const TITLE_STOP = '停止';
+const TITLE_INVALID = '此节点有校验错误，先修正参数再运行';
 
 /** 按钮的 title（V5）。names 是将一并运行的上游给人看的名字。 */
 export function nodeRunTitle(opts: {

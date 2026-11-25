@@ -24,7 +24,7 @@ export interface NumApplied {
 }
 
 /** 输入法打出来的全角符号、中文句号、乘除号、减号都换成 ASCII，空白去掉。 */
-export function normalizeNumText(s: string): string {
+function normalizeNumText(s: string): string {
   return s
     .normalize('NFKC')
     .replace(/。/g, '.')

@@ -5,7 +5,7 @@ import { LyFlowHttp } from './http.js';
 import { registerResources } from './resources.js';
 import { registerTools } from './tools.js';
 
-export const INSTRUCTIONS =
+const INSTRUCTIONS =
   'LyFlow 算子图平台。先 get_environment 核对 HTTP/CLI 身份，inspect_graph 查看生效参数与绑定，' +
   'validate_graph、plan_graph、run_graph 使用同一组 graphParams/recipe/set。绑定参数只改 graphParams。' +
   '执行状态、定位/量测有效性、产品 OK/NG 分别查看。复杂值用 summarize_output 分页与 artifact，' +

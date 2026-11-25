@@ -470,7 +470,7 @@ export async function discardRecipeAutosave(graphPath?: string): Promise<void> {
 // ------------------------------------------------------------ 导入、导出（P3.6）
 
 /** 读一个外部配方文件，准备导入。名字取文件里的 name（没有就用文件名）。 */
-export async function readRecipeForImport(path: string): Promise<RecipeEntry> {
+async function readRecipeForImport(path: string): Promise<RecipeEntry> {
   const text = await transport.readRecipeFile(path);
   const stem = recipeStem(baseNameOf(path)) ?? baseNameOf(path);
   const parsed = parseRecipeText(text, stem);

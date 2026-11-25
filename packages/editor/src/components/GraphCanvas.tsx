@@ -103,7 +103,7 @@ const CONNECTION_LINE_STYLE = { stroke: 'var(--lyflow-accent)', strokeWidth: 2 }
 const DEFAULT_EDGE_OPTIONS = { type: 'default' };
 const FIT_VIEW_OPTIONS = { maxZoom: 1, padding: 0.22 };
 
-export interface CanvasActions {
+interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
   onRunToNode: (nodeId: string) => void;
   onRunToSelected: () => void;

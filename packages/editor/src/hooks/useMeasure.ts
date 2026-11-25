@@ -7,7 +7,7 @@ import { pickMatrixOf, setMeasureMarks, type Scene } from '../lib/cloudScene';
 import { addPick, NO_MEASURE, pickCount, pickNearest, type Measure } from '../lib/pick';
 import type { CloudPayload } from '../types/execution';
 
-export interface MeasureState {
+interface MeasureState {
   measure: Measure;
   clear(): void;
 }

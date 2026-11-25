@@ -3,8 +3,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildPanelModel, flattenPanel, NO_DIAGNOSTICS } from '../src/lib/paramPanel.ts';
+import { buildPanelModel, flattenPanel } from '../src/lib/paramPanel.ts';
 import { augmentOperators } from '../src/lib/subgraph.ts';
+
+const NO_DIAGNOSTICS = { byNode: new Map(), byGraphParam: new Map() };
 
 const OP = {
   id: 't.op',

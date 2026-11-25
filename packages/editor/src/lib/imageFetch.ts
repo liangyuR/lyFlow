@@ -2,7 +2,7 @@
 // 连线查看器与主预览共用（ImageCanvas）。取数函数由调用方给 —— 单测用假的，不必真有 16 MB 的图。
 import { decodeImage, type ImagePayload } from '../types/execution';
 
-export interface FetchedLevel {
+interface FetchedLevel {
   width: number;
   height: number;
   channels: number;
@@ -11,7 +11,7 @@ export interface FetchedLevel {
   pixels: Uint8Array | Uint16Array | Float32Array;
 }
 
-export interface ImageResultBinding<T> {
+interface ImageResultBinding<T> {
   key: string;
   ownerNodeId: string;
   outputs: T | undefined;
@@ -40,7 +40,7 @@ export function imageEpochReady(expected: string, actual: string | null | undefi
 }
 
 /** `Transport.getOutputImage` 的形状：第 level 级、从 row 起 rows 行（0 = 到底），LYIM 载荷。 */
-export type GetImage = (
+type GetImage = (
   runId: string,
   nodeId: string,
   port: string,

@@ -7,7 +7,7 @@ import { fullId, nodeTitle, type PathSegment } from './subgraph';
 import { subgraphIdOf, type GraphDoc, type GraphLevel } from '../types/graph';
 import type { OperatorDesc } from '../types/manifest';
 
-export interface GraphNodeEntry {
+interface GraphNodeEntry {
   /** 事件里的完整 id（「子图节点/…/节点」）。 */
   id: string;
   /** 它所在的那一层。 */
@@ -57,7 +57,7 @@ export function listGraphNodes(
   return out;
 }
 
-export interface NodeHit {
+interface NodeHit {
   entry: GraphNodeEntry;
   score: number;
   /** 命中的是哪个字段，见 NODE_FIELD_LABELS。 */
@@ -74,7 +74,7 @@ export function docNodeKey(entry: GraphNodeEntry): string {
 export const NODE_FIELD_LABELS = ['名称', 'id', '算子', '所在子图'] as const;
 
 /** 查询拆成筛选词与要模糊找的字。 */
-export interface FinderQuery {
+interface FinderQuery {
   text: string;
   muted: boolean;
   error: boolean;

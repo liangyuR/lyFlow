@@ -3,7 +3,7 @@ import * as THREE from 'three';
 export type RampName = 'viridis' | 'gray' | 'jet';
 
 /** matplotlib viridis 的 11 个采样点，线性插值就够看。 */
-export const VIRIDIS: [number, number, number][] = [
+const VIRIDIS: [number, number, number][] = [
   [0.267, 0.005, 0.329],
   [0.283, 0.141, 0.458],
   [0.254, 0.265, 0.53],
@@ -17,7 +17,7 @@ export const VIRIDIS: [number, number, number][] = [
   [0.993, 0.906, 0.144],
 ];
 
-export function viridisRamp(t: number, out: THREE.Color) {
+function viridisRamp(t: number, out: THREE.Color) {
   const x = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1);
   const i = Math.min(VIRIDIS.length - 2, Math.floor(x));
   const f = x - i;
@@ -27,13 +27,13 @@ export function viridisRamp(t: number, out: THREE.Color) {
 }
 
 /** 灰度。打印和做对比图时比彩色可靠。 */
-export function grayRamp(t: number, out: THREE.Color) {
+function grayRamp(t: number, out: THREE.Color) {
   const v = 0.12 + 0.85 * Math.max(0, Math.min(1, t));
   out.setRGB(v, v, v);
 }
 
 /** 蓝→青→黄→红。饱和度高，找异常点最快。 */
-export function jetRamp(t: number, out: THREE.Color) {
+function jetRamp(t: number, out: THREE.Color) {
   const x = Math.max(0, Math.min(1, t));
   if (x < 0.5) out.setRGB(0.15 + 0.1 * x, 0.4 + 1.2 * x, 1.0 - 0.6 * x);
   else out.setRGB(0.35 + 1.3 * (x - 0.5), 1.0 - 1.2 * (x - 0.5), 0.4 - 0.7 * (x - 0.5));

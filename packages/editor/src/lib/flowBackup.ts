@@ -2,7 +2,7 @@ import type { BaseEdit } from '../store/recipe';
 import type { GraphDoc } from '../types/graph';
 import type { RecipeSet } from './recipes';
 
-export interface FlowRecipeBackup {
+interface FlowRecipeBackup {
   set: RecipeSet;
   saved: RecipeSet;
   current: string | null;
@@ -30,7 +30,7 @@ export interface FlowWorkspaceBackup {
   tabs: FlowTabBackup[];
 }
 
-export interface FlowBackupBackend {
+interface FlowBackupBackend {
   read(): Promise<unknown>;
   write(payload: FlowWorkspaceBackup): Promise<void>;
   clear(): Promise<void>;
@@ -102,7 +102,7 @@ function recipeShape(value: unknown): value is FlowRecipeBackup {
   );
 }
 
-export function isFlowWorkspaceBackup(value: unknown): value is FlowWorkspaceBackup {
+function isFlowWorkspaceBackup(value: unknown): value is FlowWorkspaceBackup {
   if (
     !record(value) ||
     value.version !== 1 ||

@@ -98,7 +98,7 @@ let cache: {
 } | null = null;
 
 /** 当前层级的「本地 id → 诊断」。子图节点收它内部全部节点的诊断。 */
-export function validationAt(
+function validationAt(
   path: SubPath,
   byNode: ReadonlyMap<string, GraphDiagnostic[]>,
 ): ReadonlyMap<string, GraphDiagnostic[]> {

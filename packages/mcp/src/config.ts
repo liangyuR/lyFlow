@@ -14,8 +14,7 @@ function clean(value: string | undefined): string | undefined {
   return v.length > 0 ? v : undefined;
 }
 
-export const MISSING_BASE =
-  '缺 LYFLOW_HTTP_BASE。它是 /lyflow/* 契约的基址，例如 http://127.0.0.1:8787';
+const MISSING_BASE = '缺 LYFLOW_HTTP_BASE。它是 /lyflow/* 契约的基址，例如 http://127.0.0.1:8787';
 
 export function resolveWorkDir(env: NodeJS.ProcessEnv = process.env): string {
   return path.resolve(

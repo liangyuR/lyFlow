@@ -29,10 +29,7 @@ export function digest(value: unknown): string {
     .digest('hex');
 }
 
-export async function environment(
-  config: Config,
-  http: LyFlowHttp,
-): Promise<Record<string, unknown>> {
+async function environment(config: Config, http: LyFlowHttp): Promise<Record<string, unknown>> {
   const remote = await http.manifest();
   const remoteInfo = await http.coreInfo();
   const local = config.cli ? await runCli(config, ['manifest']) : null;

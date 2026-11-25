@@ -1,9 +1,9 @@
 // 快捷键的唯一那张表（E7）。useShortcuts 的分发和 `?` 面板都从它生成 ——
 // 两处各维护一份必然漂移，用户看到的说明会和实际按键对不上。
 
-export type ShortcutScope = 'global' | 'canvas' | 'inspector' | 'viewer';
+type ShortcutScope = 'global' | 'canvas' | 'inspector' | 'viewer';
 
-export interface Shortcut {
+interface Shortcut {
   /** 稳定的动作 id，处理器按它注册。 */
   id: string;
   /** 显示用的按键组合。第一个是主键位，其余是别名（Ctrl+Y 之于 Ctrl+Shift+Z）。 */
@@ -198,7 +198,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'help', keys: ['?'], label: '快捷键面板', scope: 'global', group: '视图' },
 ];
 
-export const SHORTCUTS_BY_ID = new Map(SHORTCUTS.map((s) => [s.id, s]));
+const SHORTCUTS_BY_ID = new Map(SHORTCUTS.map((s) => [s.id, s]));
 
 /** 显示用的第一个键位，按钮 title 里用。 */
 export function keyHint(id: string): string {

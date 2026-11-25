@@ -53,7 +53,7 @@ export function formatOutputValue(o: ValueLike): string {
 }
 
 /** 判定分三档上色：不合格（fail / high / low）、接近边界（margin）、合格（ok）。空串、没判定、不认识的不上色。 */
-export type VerdictTone = 'ng' | 'margin' | 'ok';
+type VerdictTone = 'ng' | 'margin' | 'ok';
 
 export function verdictTone(verdict: string | null | undefined): VerdictTone | null {
   switch (verdict) {
@@ -71,7 +71,7 @@ export function verdictTone(verdict: string | null | undefined): VerdictTone | n
 }
 
 /** 节点底栏上的一个读数：量测输出（Measurement）的值与判定。 */
-export interface Reading {
+interface Reading {
   port: string;
   /** 底栏上写的：四位有效数字 + 单位；没测出来写「未测出」。 */
   text: string;
@@ -139,7 +139,7 @@ export function worstTone(outputs: readonly OutputStat[] | undefined): VerdictTo
 }
 
 /** 这次运行的判定一共几个：不合格、接近边界、合格、没测出来（值不是数）。工具栏上的「NG 2 · 边界 1 · ok 12」。 */
-export interface VerdictTally {
+interface VerdictTally {
   ng: number;
   margin: number;
   ok: number;

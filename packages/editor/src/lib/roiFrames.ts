@@ -8,7 +8,7 @@ import { levelOf, resolveOutput, type SubPath } from './subgraph';
 import { bundleKindOf, type BundleDesc, type OperatorDesc, type Param } from '../types/manifest';
 import { effectiveParams, isVisible } from './params';
 
-export interface RoiFrame {
+interface RoiFrame {
   /** 组的标识：底图 = `<dir 参数>|<files 参数…>`，数据坐标系 = "data"。 */
   key: string;
   /** 切换条上的名字，例如「模板 2 · f2」。数据坐标系的组是空串。 */
@@ -21,7 +21,7 @@ export interface RoiFrame {
   inputs: string[];
 }
 
-export function frameKeyOf(p: Param): string {
+function frameKeyOf(p: Param): string {
   const b = p.roiBackdrop;
   if (!b) return 'data';
   if (b.inputs && b.inputs.length > 0) return `inputs|${b.inputs.join(',')}`;
@@ -146,7 +146,7 @@ export interface LabelBox {
 }
 
 /** 标签相对框左上角的偏移。 */
-export interface LabelSpot {
+interface LabelSpot {
   dx: number;
   dy: number;
   /** above = 框上方（默认）、inside = 框内左上、stack = 上方再错开几行、below = 框下方。 */

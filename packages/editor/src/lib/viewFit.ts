@@ -81,7 +81,7 @@ export interface GridSpec {
   text: string;
 }
 
-export function gridText(cell: number): string {
+function gridText(cell: number): string {
   return cell < 1
     ? `格 ${Number((cell * 1000).toPrecision(3))} mm`
     : `格 ${Number(cell.toPrecision(3))} m`;

@@ -1,10 +1,10 @@
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
-export const CLOUD_HAS_NORMALS = 2;
+const CLOUD_HAS_NORMALS = 2;
 /** C ABI v12：rgb 块，3n 个 0..255，排在所有 float 通道之后。 */
 export const CLOUD_HAS_RGB = 4;
 
-export interface CloudPayload {
+interface CloudPayload {
   pointCount: number;
   totalPoints: number;
   bounds: Float32Array;
@@ -45,7 +45,7 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
   return { pointCount, totalPoints, bounds, xyz, intensity, normals, rgb };
 }
 
-export interface ChannelStat {
+interface ChannelStat {
   min: number | null;
   max: number | null;
   mean: number | null;
@@ -70,7 +70,7 @@ function statOf(values: Float32Array, stride: number, offset: number): ChannelSt
   return { min, max, mean: sum / count };
 }
 
-export interface CloudPoint {
+interface CloudPoint {
   x: number;
   y: number;
   z: number;
@@ -79,7 +79,7 @@ export interface CloudPoint {
   rgb?: [number, number, number];
 }
 
-export interface CloudSummary {
+interface CloudSummary {
   kind: 'cloud';
   pointCount: number;
   totalPoints: number;
@@ -152,7 +152,7 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
 export const TENSOR_MAGIC = 0x4e54594c;
 export const INDICES_MAGIC = 0x5849594c;
 
-export interface TensorSlice {
+interface TensorSlice {
   /** 永远是完整形状，不随切片变。 */
   shape: number[];
   total: number;
@@ -185,7 +185,7 @@ export function decodeTensor(buffer: ArrayBuffer): TensorSlice {
   return { shape, total, offset, values };
 }
 
-export interface IndicesSlice {
+interface IndicesSlice {
   total: number;
   /** u64，转成十进制字符串：超出 Number 的安全整数范围时不丢精度。 */
   sourceCloudId: string;

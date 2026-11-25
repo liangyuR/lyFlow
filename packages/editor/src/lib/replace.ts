@@ -35,17 +35,6 @@ export interface ReplacePlan {
   blocked: string | null;
 }
 
-/** 这次换会丢掉多少东西（搜索弹层的行尾、换完之后的提示都用它）。 */
-export function replaceLosses(plan: ReplacePlan): number {
-  return (
-    plan.droppedEdges.length +
-    plan.droppedParams.length +
-    plan.unbind.length +
-    plan.droppedInputs.length +
-    plan.droppedOutputs.length
-  );
-}
-
 function sameShape(value: unknown, def: unknown): boolean {
   if (Array.isArray(def)) return Array.isArray(value) && value.length === def.length;
   if (def === null || def === undefined) return true;
@@ -89,7 +78,7 @@ function paramFits(oldOp: OperatorDesc | undefined, newOp: OperatorDesc, name: s
   return !old || old.type === decl.type;
 }
 
-export function portFits(
+function portFits(
   newOp: OperatorDesc,
   side: 'inputs' | 'outputs',
   name: string,

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { resultSummary } from '@lyflow/visualization';
 
-import { num } from '../Inspector';
+import { num } from '../../lib/format';
 import type { OutputStat, OutputValue } from '../../types/execution';
 import { ResultScene } from '../ResultScene';
 
