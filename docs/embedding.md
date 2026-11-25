@@ -2,7 +2,7 @@
 
 Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Rust 接口和宿主只读覆盖见 [Python 自定义节点](python-nodes.md)。
 
-1.4系列新增原生Profile，包含明确的单位、坐标、采样顺序及来源映射；输入与结果无需JSON承载数组。跨宿主、稳定输入句柄及二进制协议见[Profile宿主协议](profile-host-protocol.md)，随SDK安装的[embed_profile.cpp](../examples/embed_profile.cpp)演示只读输入、NaN槽及单位换算。
+1.4系列新增原生Profile，包含明确的单位、坐标、采样顺序及来源映射；输入与结果无需JSON承载数组。跨宿主、稳定输入句柄及二进制协议见[Profile宿主协议](profile-host-protocol.md)，随SDK安装的 `examples/embed_profile.cpp` 演示只读输入、NaN槽及单位换算。
 
 几条路：
 
@@ -253,7 +253,7 @@ secondary.port = "secondary";
 options.profileInputs = { std::move(primary), std::move(secondary) };
 ```
 
-`InputCloud` / `options.inputs` 继续用于 PointCloud 端口；不能将裸 XYZ 直接注入 Profile 端口。完整可编译示例见 [embed_profile.cpp](../examples/embed_profile.cpp)。
+`InputCloud` / `options.inputs` 继续用于 PointCloud 端口；不能将裸 XYZ 直接注入 Profile 端口。完整可编译示例见 SDK 的 `examples/embed_profile.cpp`。
 
 `port` 有两种意思，按算子声明区分：
 

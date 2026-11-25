@@ -141,7 +141,7 @@ HTTP 载荷使用 `application/octet-stream`，URL 路径段须分别编码。�
 
 ## 验证范围
 
-随SDK安装的[embed_profile.cpp](../examples/embed_profile.cpp)使用稳定输入句柄注入三槽Profile，验证NaN、有限无效槽、源索引及米制导出单位。它通过独立安装目录的`find_package(lyflow 1.4.0 EXACT CONFIG REQUIRED)`及`lyflow::client`编译为C++17消费者，并已实际执行；不依赖源码树私有头。运行时需包含`std-profile`。随包[工作流](../examples/m1-profile-adapters.lyflow.json)可通过桌面或CLI运行。
+随SDK安装的 `examples/embed_profile.cpp` 使用稳定输入句柄注入三槽Profile，验证NaN、有限无效槽、源索引及米制导出单位。它通过独立安装目录的`find_package(lyflow 1.4.0 EXACT CONFIG REQUIRED)`及`lyflow::client`编译为C++17消费者，并已实际执行；不依赖源码树私有头。运行时需包含`std-profile`。随包[工作流](../examples/m1-profile-adapters.lyflow.json)可通过桌面或CLI运行。
 
 [原生 C ABI 回归](https://github.com/liangyuR/lyflow-engine/blob/main/core/tests/test_profile_c_api.cpp)检查原始缓冲复制、NaN 槽、精确切片、视图生命周期、稳定句柄的 run/plan/capture/cache 一致性，以及非法数据和空绑定诊断。[Rust / CLI 集成](../bridge/tests/profiles.rs)实际加载 Windows 1.4.0 DLL，检查 Rust 输入、Frame 捕获、缓存预测/清理、LYPR 布局、CLI 点云适配导出与快照落盘。[Profile 原生测试](https://github.com/liangyuR/lyflow-engine/blob/main/core/tests/test_profile.cpp)另覆盖数据契约、摘要与原生归档；编辑器解码回归见 [profile.test.mjs](../packages/editor/test/profile.test.mjs)。
 

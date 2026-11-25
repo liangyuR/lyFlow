@@ -84,13 +84,13 @@ HELLO 2026
 `p4-ocr-scene.png` 是本仓库生成的文字图，不是真实照片。`p4-ocr-scene-truth.json` 记录文字、旋转、字体来源及 SHA256。生成脚本只使用本机安装且有权使用的字体渲染，不分发字体文件：
 
 ```powershell
-python scripts/generate-p4-ocr-fixture.py
+python build/native-sdk/scripts/generate-p4-ocr-fixture.py
 ```
 
 `p4-barcodes.png`、`p4-qr-source.png` 为本仓库生成图形，无外部图片或字体。`p4-barcode-truth.json` 记录 payload、二维码完整 21×21 模块真值、尺寸和文件 SHA256。再生需要 Python NumPy/OpenCV，脚本通过 OpenCV QR 编码器生成标准码，并按 Code39 宽窄条规则绘制一维码：
 
 ```powershell
-python scripts/generate-p4-barcode-fixtures.py
+python build/native-sdk/scripts/generate-p4-barcode-fixtures.py
 ```
 
 PNG 压缩字节可能随编码器版本变化，重新生成时同步记录其 SHA256，解码内容与模块几何真值保持受检。宇航员图片为清单标明来源的 NASA 公共领域图片。标注示例为自有合成多边形、洞及重叠掩膜，使用带中文和逗号的文件名验证路径处理。
