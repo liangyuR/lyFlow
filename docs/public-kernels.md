@@ -21,7 +21,7 @@ M3已抽取轮廓数值方法并迁移DTS试点，M4a公开稳健拟合后端；
 
 ## 安装后使用
 
-SDK 中的 [CMake 示例](../examples/public-kernels/CMakeLists.txt)和[完整源码](../examples/public_kernels.cpp)使用精确产品版本及组件检查：
+SDK 中的 CMake 示例 `examples/public-kernels/CMakeLists.txt` 和完整源码 `examples/public_kernels.cpp` 使用精确产品版本及组件检查：
 
 ```cmake
 find_package(lyflow 2.0.4 EXACT REQUIRED COMPONENTS geometry_kernel metrology_kernel profile_kernel profile_analysis_kernel)

@@ -53,7 +53,7 @@ OCR注册表固定 [RapidOCR v3.10.0](https://github.com/RapidAI/RapidOCR/tree/b
 `examples/p4-ocr-scene.png` 是独立生成的文字栅格图；真值、源字体说明与固定PNG哈希在 [p4-ocr-scene-truth.json](../examples/p4-ocr-scene-truth.json)。原始夹具使用本机已安装的 Arial Bold 与 SimHei，只交付栅格结果，不分发字体文件。重新生成需要 Pillow 与自行合法取得的字体：
 
 ```powershell
-python scripts/generate-p4-ocr-fixture.py --output build/regenerated/p4-ocr-scene.png
+python build/native-sdk/scripts/generate-p4-ocr-fixture.py --output build/regenerated/p4-ocr-scene.png
 ```
 
 非Windows环境可通过 `--latin-font`、`--chinese-font` 指定本机字体。更换字体或Pillow版本可能改变栅格字节及识别结果；该脚本生成新的真值文件，不会修改固定资产清单。不能把不同栅格静默替换成已验证PNG。

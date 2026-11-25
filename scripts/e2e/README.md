@@ -22,9 +22,6 @@ params_p1.mjs 图参数成形的分组（完整规格的往返与 core 校验、
 params_p2.mjs 参数面板的分组（开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
 params_p3.mjs 配方的分组（新建两个配方 Ctrl+S 落盘与重开还原、编辑落点与外部修改检测、从基础重算、切配方后的缓存命中与自动运行、撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
 params_p4.mjs 在中文工作区打开公开的表达式示例，保存配方，比较桌面与 CLI 的命名输出、检验显式参数覆盖，并在 1280 / 1366 / 1440 宽度检查工具栏布局。可用 LYFLOW_CLI 指定配套的 CLI。
-record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
-record-params-p2.mjs 参数面板的截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
-record-params-p3.mjs 配方的截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 

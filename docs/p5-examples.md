@@ -7,7 +7,7 @@
 从仓库根目录执行：
 
 ```powershell
-python scripts/generate-p5-fixtures.py --output-dir build/p5-regenerated-fixtures
+python build/native-sdk/scripts/generate-p5-fixtures.py --output-dir build/p5-regenerated-fixtures
 lyflow validate examples/p5-depth-inspection.lyflow.json
 lyflow run examples/p5-depth-inspection.lyflow.json --no-cache --outputs --summary
 ```
