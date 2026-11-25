@@ -22,7 +22,7 @@ Tauri 桌面壳。职责：IPC、序列化、文件读写、进程生命周期�
 
 ## 加载原生 SDK
 
-按[快速开始](../docs/getting-started.md)恢复与工具配套的 SDK，将绝对路径设为 `LYFLOW_NATIVE_SDK`。Cargo 从 SDK 的 `bin/` 暂存运行库 DLL 及 Python worker。CLI、桌面和集成测试从各自可执行文件所在目录加载 DLL。桌面打包从 `bridge/target/bundle-core/` 取得同一份资源，UTF-8 程序清单取自 SDK 的 `examples/lyflow-utf8.manifest`。
+按[快速开始](../docs/getting-started.md)用 `pnpm sdk:restore` 恢复与工具配套的 SDK（默认 `build/native-sdk`，`LYFLOW_NATIVE_SDK` 可指向其他 SDK 的绝对路径）。Cargo 从 SDK 的 `bin/` 暂存运行库 DLL 及 Python worker。CLI、桌面和集成测试从各自可执行文件所在目录加载 DLL。桌面打包从 `bridge/target/bundle-core/` 取得同一份资源，UTF-8 程序清单取自 SDK 的 `examples/lyflow-utf8.manifest`。
 
 ### Windows 程序清单与窗口配置
 

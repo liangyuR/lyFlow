@@ -15,7 +15,8 @@ function Want($name) { return $picked.Count -eq 0 -or $picked -contains $name }
 function Step($name) { Write-Host "`n=== $name ===" -ForegroundColor Cyan }
 
 if (Want "manifest") {
-  python "$PSScriptRoot/validate_schema.py" "$env:LYFLOW_NATIVE_SDK/operator-manifest.json" "$root/schema/operator-manifest.schema.json"
+  $sdk = if ($env:LYFLOW_NATIVE_SDK) { $env:LYFLOW_NATIVE_SDK } else { Join-Path $root "build/native-sdk" }
+  python "$PSScriptRoot/validate_schema.py" "$sdk/operator-manifest.json" "$root/schema/operator-manifest.schema.json"
   if ($LASTEXITCODE) { throw "SDK manifest 不符合公共 schema" }
 }
 

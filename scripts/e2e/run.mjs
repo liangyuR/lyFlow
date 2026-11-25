@@ -499,7 +499,14 @@ async function suitePackagedCore(cdp, report, staged) {
   `);
   report.eq('桌面壳通过 Tauri 读取 core', kind, 'tauri');
   const sdkRuntime = JSON.parse(
-    fs.readFileSync(path.join(process.env.LYFLOW_NATIVE_SDK, 'bin/lyflow-runtime.json'), 'utf8'),
+    fs.readFileSync(
+      path.join(
+        process.env.LYFLOW_NATIVE_SDK ??
+          path.resolve(import.meta.dirname, '../../build/native-sdk'),
+        'bin/lyflow-runtime.json',
+      ),
+      'utf8',
+    ),
   );
   report.eq('桌面加载了选定的引擎版本', info.version, sdkRuntime.engineVersion);
   report.ok('core 清单包含平台转接算子 util.reroute', hasReroute);

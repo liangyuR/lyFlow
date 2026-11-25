@@ -4,11 +4,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LYFLOW_NATIVE_SDK");
     let sdk = std::env::var_os("LYFLOW_NATIVE_SDK")
         .map(PathBuf::from)
-        .expect("请先按 docs/getting-started.md 恢复原生 SDK 并设置 LYFLOW_NATIVE_SDK");
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../build/native-sdk"));
     let bin = sdk.join("bin");
     assert!(
         sdk.is_absolute() && bin.join("lyflow_core.dll").is_file(),
-        "LYFLOW_NATIVE_SDK 应指向包含 bin/lyflow_core.dll 的 SDK 绝对路径"
+        "找不到原生 SDK：{}。运行 pnpm sdk:restore，或把 LYFLOW_NATIVE_SDK 设为包含 bin/lyflow_core.dll 的 SDK 绝对路径",
+        sdk.display()
     );
     println!("cargo:rerun-if-changed={}", bin.display());
     let target = target_profile_dir();

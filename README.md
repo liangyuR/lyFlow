@@ -35,14 +35,14 @@ LyFlow 是面向点云与图像处理的视觉流程平台。用节点连接算�
 Windows x64 开发环境需要 PowerShell 7、MSVC C++ 工具集与 Windows SDK、Rust、Node 和 pnpm。桌面需要 WebView2 Runtime。首次检出后在仓库根目录执行：
 
 ```powershell
-$env:LYFLOW_NATIVE_SDK = ./scripts/restore-native-sdk.ps1 -Destination build/native-sdk
 pnpm install --frozen-lockfile
+pnpm sdk:restore
 pnpm cli:build
-& ./bridge/target/release/lyflow.exe run "$env:LYFLOW_NATIVE_SDK/examples/p2-expression.lyflow.json" --summary
+& ./bridge/target/release/lyflow.exe run build/native-sdk/examples/p2-expression.lyflow.json --summary
 pnpm dev
 ```
 
-示例的命名输出 `mean` 为 13 mm。新开 PowerShell 时，将 `LYFLOW_NATIVE_SDK` 指回已恢复的 SDK 绝对路径。依赖版本与桌面操作见[快速开始](docs/getting-started.md)。
+示例的命名输出 `mean` 为 13 mm。SDK 默认恢复到 `build/native-sdk`，构建与开发命令自动使用它；设置 `LYFLOW_NATIVE_SDK` 可改用其他 SDK。依赖版本与桌面操作见[快速开始](docs/getting-started.md)。
 
 ## 选择使用方式
 

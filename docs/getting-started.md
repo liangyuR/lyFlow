@@ -7,15 +7,15 @@
 从公共仓的新检出执行：
 
 ```powershell
-$env:LYFLOW_NATIVE_SDK = ./scripts/restore-native-sdk.ps1 -Destination build/native-sdk
 pnpm install --frozen-lockfile
+pnpm sdk:restore
 pnpm cli:build
 & ./bridge/target/release/lyflow.exe info
 & ./bridge/target/release/lyflow.exe manifest --check
-& ./bridge/target/release/lyflow.exe run "$env:LYFLOW_NATIVE_SDK/examples/p2-expression.lyflow.json" --summary
+& ./bridge/target/release/lyflow.exe run build/native-sdk/examples/p2-expression.lyflow.json --summary
 ```
 
-最后一行 JSON 的 `outputs.mean` 应报告 13 mm。恢复脚本从公共 Release 下载 SDK，核对版本锁的 SHA-256 及包内引擎修订，再交付目标目录。重新打开 PowerShell 时执行 `$env:LYFLOW_NATIVE_SDK = (Resolve-Path build/native-sdk).Path`。升级引擎时将新 SDK 恢复到新目录。
+最后一行 JSON 的 `outputs.mean` 应报告 13 mm。恢复脚本从公共 Release 下载 SDK，核对版本锁的 SHA-256 及包内引擎修订，再放到 `build/native-sdk`。Cargo、`pnpm dev`、`pnpm check` 与 `pnpm e2e` 未设置 `LYFLOW_NATIVE_SDK` 时都使用这个目录。版本锁升级后先删除 `build/native-sdk` 再执行 `pnpm sdk:restore`；要并存多个版本时，用 `./scripts/restore-native-sdk.ps1 -Destination <新目录>` 恢复并把 `LYFLOW_NATIVE_SDK` 设为该绝对路径。
 
 ## 在桌面运行
 
