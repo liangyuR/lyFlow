@@ -47,6 +47,36 @@ export interface Display {
   failed?: boolean;
 }
 
+function sameBase(a: BaseCloud | null, b: BaseCloud | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.localId === b.localId &&
+    a.label === b.label &&
+    a.resolved.nodeId === b.resolved.nodeId &&
+    a.resolved.port === b.resolved.port &&
+    a.direct === b.direct &&
+    a.type === b.type
+  );
+}
+
+/** 取数 effect 随图的每一次改动重跑（拖节点时每帧一次），算出来的展示多半与上一次相同：
+ *  沿用旧对象，预览不必再多提交一轮。 */
+function keepSame(prev: Display, next: Display): Display {
+  const same =
+    prev.nodeId === next.nodeId &&
+    prev.runId === next.runId &&
+    prev.cloud === next.cloud &&
+    prev.status === next.status &&
+    sameBase(prev.base, next.base) &&
+    prev.port === next.port &&
+    prev.preview === next.preview &&
+    prev.content === next.content &&
+    prev.busy === next.busy &&
+    prev.failed === next.failed;
+  return same ? prev : next;
+}
+
 export interface ViewerSourceInput {
   /** null = 没有节点可看。 */
   slot: CompareSlot | null;
@@ -166,16 +196,18 @@ export function useViewerSource({
       port: string | null = null,
     ) => {
       if (cancelled) return;
-      setDisplay({
-        nodeId,
-        runId: runId ?? null,
-        cloud: payload,
-        status,
-        base,
-        port,
-        preview: isPreview,
-        content,
-      });
+      setDisplay((prev) =>
+        keepSame(prev, {
+          nodeId,
+          runId: runId ?? null,
+          cloud: payload,
+          status,
+          base,
+          port,
+          preview: isPreview,
+          content,
+        }),
+      );
     };
 
     if (!node || !path) {
@@ -200,17 +232,19 @@ export function useViewerSource({
         failed ?? (p.pointCount === 0 ? '该节点的点云是空的' : null);
       const shown = (status: string | null, payload: CloudPayload | null) => {
         if (cancelled) return;
-        setDisplay({
-          nodeId,
-          runId: runId ?? null,
-          cloud: payload,
-          status,
-          base: payload ? base : null,
-          port: payload ? port : null,
-          preview: isPreview,
-          content,
-          ...(failed && payload ? { failed: true } : {}),
-        });
+        setDisplay((prev) =>
+          keepSame(prev, {
+            nodeId,
+            runId: runId ?? null,
+            cloud: payload,
+            status,
+            base: payload ? base : null,
+            port: payload ? port : null,
+            preview: isPreview,
+            content,
+            ...(failed && payload ? { failed: true } : {}),
+          }),
+        );
       };
       dropOtherRuns(runId);
       const type =
@@ -290,18 +324,21 @@ export function useViewerSource({
       // 同一个节点、同一种内容重跑：留着上一片云（图像模式的 lastGood 同一个意思），状态缩到角上。以前一重跑就摘掉
       // 点、盖上整块「正在计算…」，拖参数时每 30 ms 一次的预览让画面一闪一闪。runId 仍是屏幕上那片云的那次运行
       setDisplay((prev) =>
-        prev.nodeId === nodeId && prev.cloud && prev.content === content
-          ? { ...prev, status: text, busy: true }
-          : {
-              nodeId,
-              runId: runId ?? null,
-              cloud: null,
-              status: text,
-              base: null,
-              port: null,
-              preview: isPreview,
-              content,
-            },
+        keepSame(
+          prev,
+          prev.nodeId === nodeId && prev.cloud && prev.content === content
+            ? { ...prev, status: text, busy: true }
+            : {
+                nodeId,
+                runId: runId ?? null,
+                cloud: null,
+                status: text,
+                base: null,
+                port: null,
+                preview: isPreview,
+                content,
+              },
+        ),
       );
       return;
     }

@@ -101,6 +101,7 @@ const PAN_BUTTONS = [0, 1];
 const PRO_OPTIONS = { hideAttribution: false };
 const CONNECTION_LINE_STYLE = { stroke: 'var(--lyflow-accent)', strokeWidth: 2 };
 const DEFAULT_EDGE_OPTIONS = { type: 'default' };
+const FIT_VIEW_OPTIONS = { maxZoom: 1, padding: 0.22 };
 
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
@@ -1368,7 +1369,7 @@ export function GraphCanvas({
         snapGrid={GRID}
         proOptions={PRO_OPTIONS}
         fitView
-        fitViewOptions={{ maxZoom: 1, padding: 0.22 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.2}
         maxZoom={2.5}
         connectionLineStyle={CONNECTION_LINE_STYLE}
@@ -1394,7 +1395,7 @@ export function GraphCanvas({
           onLayout={() => onLayout?.()}
           onClear={() => useUiStore.getState().clearSelection()}
         />
-        <Controls showInteractive={false} fitViewOptions={{ maxZoom: 1, padding: 0.22 }} />
+        <Controls showInteractive={false} fitViewOptions={FIT_VIEW_OPTIONS} />
         <MiniMap
           pannable
           zoomable
