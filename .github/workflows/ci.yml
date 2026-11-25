@@ -117,6 +117,9 @@ jobs:
   public-tools:
     name: Windows x64 正式 SDK / CLI / MCP / 桌面
     runs-on: windows-2022
+    env:
+      # CI 的 debug 产物只用来跑测试，保留行号够定位失败，链接和缓存都更小
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,11 +146,11 @@ jobs:
           workspaces: |
             bridge
             crates/lyflow-client
-          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --manifest-path bridge/Cargo.toml --all -- --check
       - run: cargo test --locked --manifest-path crates/lyflow-client/Cargo.toml
-      - run: pnpm --filter lyflow-app build
+      # 类型检查已在 frontend job 跑过，这里只要桌面构建嵌入的 dist
+      - run: pnpm --filter lyflow-app exec vite build
       - run: cargo test --locked --manifest-path bridge/Cargo.toml --no-fail-fast
       - run: cargo build --locked --manifest-path bridge/Cargo.toml --features custom-protocol --bin lyflow-app
       - name: CLI、MCP 和实际 WebView2 运行

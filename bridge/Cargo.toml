@@ -14,7 +14,6 @@ default-run = "lyflow-app"
 
 [lib]
 name = "lyflow_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
 
 # 桌面壳。CLI 不依赖 Tauri，所以它被关在 desktop feature 后面（F6）。
 [[bin]]
@@ -64,3 +63,7 @@ custom-protocol = ["tauri/custom-protocol"]
 codegen-units = 1
 lto = true
 strip = true
+
+# 依赖只留行号（回溯仍能定位），PDB 和链接时间都更小；bridge 自己保留完整调试信息。
+[profile.dev.package."*"]
+debug = "line-tables-only"

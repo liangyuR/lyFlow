@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -14,33 +18,94 @@ fn main() {
     println!("cargo:rerun-if-changed={}", bin.display());
     let target = target_profile_dir();
     for dest in [&target, &target.join("deps")] {
-        stage_runtime(&bin, dest).expect("暂存 SDK 运行库失败");
+        stage_runtime(&bin, dest, false).expect("暂存 SDK 运行库失败");
     }
     #[cfg(feature = "desktop")]
-    {
-        let bundle = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/bundle-core");
-        if bundle.exists() {
-            std::fs::remove_dir_all(&bundle).expect("清理桌面运行库暂存目录失败");
-        }
-        stage_runtime(&bin, &bundle).expect("暂存桌面运行库失败");
-    }
+    stage_runtime(
+        &bin,
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("target/bundle-core"),
+        true,
+    )
+    .expect("暂存桌面运行库失败");
     utf8_manifest_step(&sdk.join("examples/lyflow-utf8.manifest"));
     tauri_step();
 }
 
-fn stage_runtime(bin: &Path, destination: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(bin)? {
+/// 只复制大小或修改时间与 SDK 不同的文件。python/ 总是与 SDK 对齐，删掉 SDK 里已经没有的文件；
+/// `exclusive` 的目录（bundle-core）整个归这里管，顶层多出来的 DLL 也删掉，
+/// 其余目录里还有 cargo 自己的产物，只增不删。
+fn stage_runtime(bin: &Path, destination: &Path, exclusive: bool) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+    let mut staged = HashSet::from([OsString::from("python")]);
+    for entry in fs::read_dir(bin)? {
         let entry = entry?;
         let path = entry.path();
         if path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
         {
-            std::fs::copy(&path, destination.join(entry.file_name()))?;
+            sync_file(&path, &destination.join(entry.file_name()))?;
+            staged.insert(entry.file_name());
         }
     }
-    stage_python(&bin.join("python"), destination)
+    if exclusive {
+        prune(destination, &staged)?;
+    }
+    sync_python(&bin.join("python"), &destination.join("python"))
+}
+
+fn sync_python(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+    let mut staged = HashSet::new();
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_name() == "__pycache__" || entry.file_name() == "tests" {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            sync_python(&path, &destination.join(entry.file_name()))?;
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "py" || ext == "md" || ext == "toml")
+        {
+            sync_file(&path, &destination.join(entry.file_name()))?;
+        } else {
+            continue;
+        }
+        staged.insert(entry.file_name());
+    }
+    prune(destination, &staged)
+}
+
+fn sync_file(source: &Path, destination: &Path) -> io::Result<()> {
+    let from = fs::metadata(source)?;
+    let modified = from.modified()?;
+    if let Ok(to) = fs::metadata(destination) {
+        if to.is_file() && to.len() == from.len() && to.modified()? == modified {
+            return Ok(());
+        }
+    }
+    fs::copy(source, destination)?;
+    fs::File::options()
+        .write(true)
+        .open(destination)?
+        .set_modified(modified)
+}
+
+fn prune(directory: &Path, keep: &HashSet<OsString>) -> io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if keep.contains(&entry.file_name()) {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn utf8_manifest_step(manifest: &Path) {
@@ -90,28 +155,4 @@ fn target_profile_dir() -> PathBuf {
         .nth(3)
         .expect("OUT_DIR 层级异常")
         .to_path_buf()
-}
-
-fn stage_python(source: &Path, destination: &Path) -> std::io::Result<()> {
-    println!("cargo:rerun-if-changed={}", source.display());
-    fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(destination)?;
-        for entry in std::fs::read_dir(source)? {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_name() == "__pycache__" || entry.file_name() == "tests" {
-                continue;
-            }
-            if entry.file_type()?.is_dir() {
-                copy_tree(&path, &destination.join(entry.file_name()))?;
-            } else if path
-                .extension()
-                .is_some_and(|ext| ext == "py" || ext == "md" || ext == "toml")
-            {
-                std::fs::copy(path, destination.join(entry.file_name()))?;
-            }
-        }
-        Ok(())
-    }
-    copy_tree(source, &destination.join("python"))
 }
