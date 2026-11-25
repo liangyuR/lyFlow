@@ -1,6 +1,12 @@
 # 版本变更
 
-## 2.0.4
+## 开发中
+
+- 新增 `pnpm sdk:restore`，把版本锁对应的原生 SDK 恢复到 `build/native-sdk`。未设置 `LYFLOW_NATIVE_SDK` 时，`pnpm dev`、`pnpm check`、`pnpm e2e` 和 Cargo 构建都使用该目录，新开终端无需重新设置环境变量。
+- `pnpm app:dev` 浏览器模式直接读取已恢复 SDK 的算子清单，不再需要手动复制 `manifest.dev.json`。
+- 移除重复的 `pnpm dev:app` 入口。
+
+## 2.0.4（已发布）
 
 - 新增双组分胶色差测量。用合格胶面和两种纯色组分建立参考模型，逐像素量出偏黄、偏蓝的方向和程度，沿胶路分别测量条纹面积、可见长度及含短高光的跨度。接口见[混胶色差](../solutions/glue/README.md#混胶色差)。
 - 开发 CLI、MCP 与桌面工具时从版本锁恢复正式 SDK。原生引擎及算子开发入口转到 lyflow-engine。
