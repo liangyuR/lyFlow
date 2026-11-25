@@ -644,12 +644,6 @@
   padding: 2px;
 }
 
-.ctl-unsupported {
-  color: var(--lyflow-fg-2);
-  font-size: 11px;
-  font-style: italic;
-}
-
 /* ---------------------------------------------------------- search popup */
 
 .search-backdrop {
@@ -1854,7 +1848,6 @@
 .drawer__summary-choice {
   color: var(--lyflow-accent-dim);
 }
-.drawer__summary-where,
 .drawer__summary-from {
   color: var(--lyflow-fg-2);
   font-size: 11px;

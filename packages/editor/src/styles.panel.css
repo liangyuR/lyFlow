@@ -72,11 +72,6 @@
   color: var(--lyflow-fg-0);
 }
 
-.ppanel__placeholder {
-  padding: 28px 18px;
-  color: var(--lyflow-fg-1);
-}
-
 .ppanel__body {
   display: flex;
   flex-direction: column;
