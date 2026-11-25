@@ -26,13 +26,9 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn dll_path() -> PathBuf {
-    exe_dir().join(DLL_NAME)
-}
-
-/// CLI 实际加载的 core DLL。
+/// 进程实际加载的 core DLL。
 pub(crate) fn dll_file() -> PathBuf {
-    dll_path()
+    exe_dir().join(DLL_NAME)
 }
 
 /// 调试构建可监视独立引擎仓的输出 DLL。
@@ -84,7 +80,7 @@ fn slot() -> &'static Slot {
     static SLOT: OnceLock<Slot> = OnceLock::new();
     SLOT.get_or_init(|| Slot {
         current: RwLock::new(
-            Core::load_from(&dll_path())
+            Core::load_from(&dll_file())
                 .map(Arc::new)
                 .map_err(|e| e.to_string()),
         ),

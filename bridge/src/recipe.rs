@@ -451,7 +451,6 @@ pub fn parse_index(text: &str) -> RecipeIndex {
 }
 
 pub struct RecipeDir {
-    pub dir: PathBuf,
     pub exists: bool,
     /// 按 index.json 的 order 排；没列到的按名字（码点序）接在后面。
     pub recipes: Vec<RecipeFile>,
@@ -464,7 +463,6 @@ pub struct RecipeDir {
 
 pub fn list_recipe_dir(dir: &Path) -> RecipeDir {
     let mut out = RecipeDir {
-        dir: dir.to_path_buf(),
         exists: dir.is_dir(),
         recipes: Vec::new(),
         default: None,

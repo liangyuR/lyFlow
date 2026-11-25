@@ -43,11 +43,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 tauri-plugin-dialog = { version = "2", optional = true }
-libloading = "0.8.9"
 # C ABI 边界那一层（`lyflow/client.hpp` 的 Rust 对应物）。桥接层只在它上面加
 # 路径解析、进程单例与热重载 —— 见 core_ffi.rs。
 lyflow-client = { path = "../crates/lyflow-client" }
-notify = { version = "8.2.0", default-features = false }
+notify = { version = "8.2.0", default-features = false, optional = true }
 # 配方的规格摘要（specDigest，docs/recipe.md §3）。Tauri 本来就间接依赖它，锁文件里的同一个版本。
 sha2 = "0.10"
 
@@ -55,7 +54,7 @@ sha2 = "0.10"
 default = ["desktop"]
 # IPC 层：commands / execution / watcher / host。外部 Rust 宿主（dts-check）只要这一份 ——
 # 它自己建 Builder、自己开窗，用不着 tauri-build 与 dialog 插件。
-host = ["dep:tauri"]
+host = ["dep:tauri", "dep:notify"]
 # 桌面壳需要的一切。关掉它 `cargo build --bin lyflow` 就完全不碰 Tauri。
 desktop = ["host", "dep:tauri-build", "dep:tauri-plugin-dialog"]
 # Tauri 自定义协议，release 构建需要

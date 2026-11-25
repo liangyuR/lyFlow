@@ -6,6 +6,7 @@
 //! 支持 `ascii` / `binary` / `binary_compressed`（LZF）三种 DATA；字段认 x y z、intensity、
 //! normal_x/y/z、rgb / rgba，其余字段跳过。点的顺序与 NaN 槽原样保留。
 
+use std::borrow::Cow;
 use std::path::Path;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -30,23 +31,19 @@ impl Field {
     }
 }
 
-/// 一个标量按声明的类型读成 f64（小端，PCD 规定）。
-fn scalar(bytes: &[u8], kind: char, size: usize) -> f64 {
-    let b = |n: usize| {
-        let mut a = [0u8; 8];
-        a[..n].copy_from_slice(&bytes[..n]);
-        a
-    };
+/// 一个标量按声明的类型读成 f32（小端，PCD 规定）。整数与 f64 只舍入一次。
+fn scalar(bytes: &[u8], kind: char, size: usize) -> f32 {
+    let b4 = || -> [u8; 4] { bytes[..4].try_into().unwrap() };
     match (kind, size) {
-        ('F', 4) => f64::from(f32::from_le_bytes(b(4)[..4].try_into().unwrap())),
-        ('F', 8) => f64::from_le_bytes(b(8)),
-        ('U', 1) => f64::from(bytes[0]),
-        ('U', 2) => f64::from(u16::from_le_bytes([bytes[0], bytes[1]])),
-        ('U', 4) => f64::from(u32::from_le_bytes(b(4)[..4].try_into().unwrap())),
-        ('I', 1) => f64::from(bytes[0] as i8),
-        ('I', 2) => f64::from(i16::from_le_bytes([bytes[0], bytes[1]])),
-        ('I', 4) => f64::from(i32::from_le_bytes(b(4)[..4].try_into().unwrap())),
-        _ => f64::NAN,
+        ('F', 4) => f32::from_le_bytes(b4()),
+        ('F', 8) => f64::from_le_bytes(bytes[..8].try_into().unwrap()) as f32,
+        ('U', 1) => f32::from(bytes[0]),
+        ('U', 2) => f32::from(u16::from_le_bytes([bytes[0], bytes[1]])),
+        ('U', 4) => u32::from_le_bytes(b4()) as f32,
+        ('I', 1) => f32::from(bytes[0] as i8),
+        ('I', 2) => f32::from(i16::from_le_bytes([bytes[0], bytes[1]])),
+        ('I', 4) => i32::from_le_bytes(b4()) as f32,
+        _ => f32::NAN,
     }
 }
 
@@ -187,26 +184,30 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
 
     let mut cloud = PcdCloud {
         xyz: Vec::with_capacity(n * 3),
-        ..PcdCloud::default()
+        intensity: Vec::with_capacity(if fi.is_some() { n } else { 0 }),
+        normals: Vec::with_capacity(if normals.is_some() { n * 3 } else { 0 }),
+        rgb: Vec::with_capacity(if frgb.is_some() { n * 3 } else { 0 }),
     };
     let body = &bytes[pos..];
 
     if data == "ascii" {
         let text = std::str::from_utf8(body).map_err(|_| "ascii 数据不是文本")?;
+        // 每个字段的第一个分量在一行里的下标
+        let mut at = Vec::with_capacity(fields.len());
+        let mut k = 0;
+        for f in &fields {
+            at.push(k);
+            k += f.count;
+        }
+        let mut tokens: Vec<&str> = Vec::with_capacity(k);
         for line in text
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty())
             .take(n)
         {
-            let tokens: Vec<&str> = line.split_whitespace().collect();
-            // 每个字段的第一个分量在这一行里的下标
-            let mut at = Vec::with_capacity(fields.len());
-            let mut k = 0;
-            for f in &fields {
-                at.push(k);
-                k += f.count;
-            }
+            tokens.clear();
+            tokens.extend(line.split_whitespace());
             // 直接按 f32 解析：先解成 f64 再截成 f32 是两次舍入，偶尔差最后一位
             let num = |f: usize| -> f32 {
                 tokens
@@ -243,7 +244,7 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
 
     // 两种二进制布局：binary 是逐点排（AoS），binary_compressed 解压之后是逐字段排（SoA）
     let (buffer, soa) = match data.as_str() {
-        "binary" => (body.to_vec(), false),
+        "binary" => (Cow::Borrowed(body), false),
         "binary_compressed" => {
             if body.len() < 8 {
                 return Err("binary_compressed 缺长度头".into());
@@ -253,7 +254,7 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             let chunk = body
                 .get(8..8 + packed)
                 .ok_or("binary_compressed 数据被截断")?;
-            (lzf_decompress(chunk, raw)?, true)
+            (Cow::Owned(lzf_decompress(chunk, raw)?), true)
         }
         other => return Err(format!("不认识的 DATA 格式 {other}")),
     };
@@ -271,24 +272,23 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             step * n
         ));
     }
+    // 每个字段第 i 个点的偏移是 base + i * stride：AoS 的 stride 是整点字节数，SoA 是字段自身字节数
+    let stride: Vec<usize> = fields
+        .iter()
+        .map(|f| if soa { f.bytes() } else { step })
+        .collect();
     let at = |f: usize, i: usize| -> &[u8] {
-        let off = if soa {
-            starts[f] + i * fields[f].bytes()
-        } else {
-            i * step + starts[f]
-        };
+        let off = starts[f] + i * stride[f];
         &buffer[off..off + fields[f].size]
     };
     let num = |f: usize, i: usize| scalar(at(f, i), fields[f].kind, fields[f].size);
     for i in 0..n {
-        cloud
-            .xyz
-            .extend([num(fx, i) as f32, num(fy, i) as f32, num(fz, i) as f32]);
+        cloud.xyz.extend([num(fx, i), num(fy, i), num(fz, i)]);
         if let Some(f) = fi {
-            cloud.intensity.push(num(f, i) as f32);
+            cloud.intensity.push(num(f, i));
         }
         if let Some(ns) = normals {
-            cloud.normals.extend(ns.map(|f| num(f, i) as f32));
+            cloud.normals.extend(ns.map(|f| num(f, i)));
         }
         if let Some(f) = frgb {
             let b = at(f, i);
