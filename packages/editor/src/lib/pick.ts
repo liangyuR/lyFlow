@@ -81,14 +81,14 @@ export function pickCount(m: Measure): 0 | 1 | 2 {
 }
 
 /** P2 − P1。 */
-export function deltaOf(m: Measure): [number, number, number] | null {
+function deltaOf(m: Measure): [number, number, number] | null {
   if (!m.p1 || !m.p2) return null;
   const [a, b] = [m.p1.xyz, m.p2.xyz];
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 
 /** 距离的写法：米 + 毫米并列（M5）。 */
-export function lengthText(v: number): string {
+function lengthText(v: number): string {
   return `${num(v)} m · ${num(v * 1000)} mm`;
 }
 

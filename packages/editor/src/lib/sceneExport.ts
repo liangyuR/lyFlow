@@ -88,7 +88,7 @@ function layersOf(root: THREE.Object3D, prefix: string, outputFrame: Frame = fra
   return result;
 }
 
-export function sceneSpecsOf(
+function sceneSpecsOf(
   scene: Scene,
   titles: string[],
   roiItems: readonly RoiItem[] = [],

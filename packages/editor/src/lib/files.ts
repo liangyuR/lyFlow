@@ -5,8 +5,6 @@ import { transport, type BackupStatus, type LoadedGraph, type RecentEntry } from
 import type { GraphDoc } from '../types/graph';
 import { dialogs } from './dialogs';
 
-export { NoDialogError } from './dialogs';
-
 /** 返回 null 表示用户取消。 */
 export async function pickOpenPath(): Promise<string | null> {
   return dialogs().pickOpenPath();

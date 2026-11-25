@@ -3,7 +3,7 @@ import { NodeToolbar, Position } from '@xyflow/react';
 
 import '../styles.selection.css';
 
-export interface SelectionToolbarProps {
+interface SelectionToolbarProps {
   selectedNodeIds: string[];
   visible: boolean;
   disabled: boolean;

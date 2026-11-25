@@ -20,7 +20,7 @@ export function valueAt(value: unknown, path: string): unknown {
   return current;
 }
 
-export function statistics(values: unknown[]): Record<string, unknown> {
+function statistics(values: unknown[]): Record<string, unknown> {
   const finite = values
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
     .sort((a, b) => a - b);

@@ -6,7 +6,7 @@ import { useCallback, useState } from 'react';
 import { readStoredNumber, removeStored, writeStoredNumber } from '../lib/prefs';
 import { rootOf } from '../lib/root';
 
-export interface DragFractionOptions {
+interface DragFractionOptions {
   /** 比例相对它的高度算：那一整列（右栏、整个编辑器）。 */
   column: () => HTMLElement | null;
   /** 被拖的那一块：从它现在的高度起算。 */

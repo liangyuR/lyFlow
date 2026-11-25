@@ -399,7 +399,7 @@ export function setPoints(scene: Scene, i: 0 | 1, points: THREE.Points | null): 
   if (points) scene.scene.add(points);
 }
 
-export interface Paint {
+interface Paint {
   shading: ShadingMode;
   ramp: RampName;
   lo: number;
@@ -445,7 +445,7 @@ function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number
 }
 
 /** 法线着色：分量的绝对值直接当 RGB。色带对它没有意义，所以走单独一条路。 */
-export function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
+function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
   const n = cloud.normals;
   if (!n) return;
   for (let i = 0; i < cloud.pointCount; i += 1) {
@@ -456,7 +456,7 @@ export function writeNormalColors(out: Float32Array, cloud: CloudPayload): void 
 }
 
 /** 就地写颜色。复用已有数组是为了换色带时不再分配几十兆。 */
-export function writeColors(
+function writeColors(
   out: Float32Array,
   cloud: CloudPayload,
   mode: ShadingMode,

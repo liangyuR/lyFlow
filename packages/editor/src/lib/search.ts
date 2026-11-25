@@ -159,7 +159,7 @@ export function searchOperators(operators: readonly OperatorDesc[], query: strin
   return hits;
 }
 
-export interface SnippetHit {
+interface SnippetHit {
   snippet: SnippetDesc;
   score: number;
   /** 命中的是哪个字段，见 SNIPPET_FIELD_LABELS */

@@ -1,7 +1,7 @@
 // 子序列模糊匹配 + 打分。要同时照顾缩写（"vg" → Voxel Grid）、连续子串、
 // 中文关键词。不引 fuse.js —— 几十行的东西，引进来还要调一堆权重参数。
 
-export interface FuzzyMatch {
+interface FuzzyMatch {
   score: number;
   /** 命中的字符下标，用来在 UI 里高亮。 */
   indices: number[];

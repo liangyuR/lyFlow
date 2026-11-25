@@ -13,15 +13,6 @@
   display: contents;
 }
 
-.toolbar__brand {
-  display: none;
-}
-
-.toolbar__brand > .qs-ic {
-  width: 26px;
-  height: 26px;
-}
-
 .toolbar__divider {
   flex: none;
   width: 1px;

@@ -3,9 +3,9 @@
 import zlib from 'node:zlib';
 
 export const IMAGE_MAGIC = 0x4d49594c;
-export const IMAGE_HEADER_BYTES = 48;
+const IMAGE_HEADER_BYTES = 48;
 
-export interface ImageSlice {
+interface ImageSlice {
   width: number;
   height: number;
   channels: number;

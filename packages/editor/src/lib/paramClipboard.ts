@@ -32,7 +32,7 @@ export interface ParamEditPlan {
 }
 
 /** 这个参数此刻不归节点自己管：被图参数绑着（值在图参数 / 配方里），或在子图里提升成了子图参数（值在实例上）。 */
-export function paramLock(
+function paramLock(
   doc: GraphDoc,
   path: SubPath,
   nodeId: string,

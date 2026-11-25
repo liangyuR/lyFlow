@@ -98,8 +98,8 @@ const constraintSchema = z
       (c.min === undefined || c.max === undefined || c.min <= c.max),
     '约束需要 min/max，且 min ≤ max',
   );
-export type Objective = z.infer<typeof objectiveSchema>;
-export type Constraint = z.infer<typeof constraintSchema>;
+type Objective = z.infer<typeof objectiveSchema>;
+type Constraint = z.infer<typeof constraintSchema>;
 const ok = (v: Record<string, unknown>) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(v) }],
   structuredContent: v,
@@ -114,7 +114,7 @@ const fail = (e: unknown) => ({
   isError: true,
 });
 
-export function parameterRoles(
+function parameterRoles(
   snapshot: Snapshot,
 ): Map<string, { role: string; value: unknown; bound?: string }> {
   const out = new Map<string, { role: string; value: unknown; bound?: string }>();

@@ -19,7 +19,7 @@ export class HttpError extends Error {
   }
 }
 
-export interface RunWaitResult {
+interface RunWaitResult {
   runId: string;
   events: ExecutionEvent[];
   timedOut: boolean;

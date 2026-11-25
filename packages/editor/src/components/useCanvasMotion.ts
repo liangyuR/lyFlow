@@ -21,7 +21,7 @@ import { useUiStore } from '../store/ui';
 
 type Point = { x: number; y: number };
 /** 布局过渡期间喂给 React Flow 的临时位置。null = 没有过渡，一切以 doc 为准。 */
-export type PositionOverride = ReadonlyMap<string, Point> | null;
+type PositionOverride = ReadonlyMap<string, Point> | null;
 
 /** 当前层级的「身份证」：差分只在同一张图（epoch）、同一层（path）里做。 */
 interface LevelSnapshot {
@@ -76,7 +76,7 @@ function scrub(root: Element): void {
   }
 }
 
-export interface CanvasMotion {
+interface CanvasMotion {
   /** 这一帧的临时位置（布局过渡中），没有就是 null。 */
   override: PositionOverride;
   /** 用户开始拖节点时掐掉正在进行的布局过渡：拖动以 doc 的位置为准。 */

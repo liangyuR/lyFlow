@@ -7,7 +7,7 @@ export const IDENTITY: readonly number[] = Object.freeze([
   1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 ]);
 
-export interface TR {
+interface TR {
   /** 平移，参数自己的单位（通常是米）。 */
   t: [number, number, number];
   /** 欧拉角，度。 */

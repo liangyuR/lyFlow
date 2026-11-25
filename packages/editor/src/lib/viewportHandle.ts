@@ -8,7 +8,7 @@ export interface Viewport {
   zoom: number;
 }
 
-export interface ViewportHandle {
+interface ViewportHandle {
   get(): Viewport;
   set(v: Viewport): void;
 }

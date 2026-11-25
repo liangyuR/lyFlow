@@ -27,9 +27,7 @@
 }
 
 .app,
-.app *,
-.lyflow-portal,
-.lyflow-portal * {
+.app * {
   box-sizing: border-box;
 }
 
@@ -431,14 +429,6 @@
   color: var(--lyflow-fg-1);
 }
 
-.detail__hint {
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--lyflow-fg-2);
-}
-
 .detail__section h4 {
   margin: 0 0 6px;
   font-size: 11px;
@@ -629,52 +619,6 @@
   color: var(--lyflow-warn);
 }
 
-/* ----------------------------------------------------------- placeholder */
-
-.placeholder {
-  padding: 64px 40px;
-  max-width: 620px;
-}
-
-.placeholder h1 {
-  margin: 0 0 14px;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.placeholder__lead {
-  margin: 0 0 26px;
-  color: var(--lyflow-fg-1);
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.placeholder__steps {
-  margin: 0 0 26px;
-  padding-left: 20px;
-  color: var(--lyflow-fg-1);
-}
-
-.placeholder__steps li {
-  margin-bottom: 7px;
-}
-
-.placeholder__steps code {
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--lyflow-bg-2);
-  color: var(--lyflow-accent);
-}
-
-.placeholder__note {
-  padding-top: 20px;
-  border-top: 1px solid var(--lyflow-border);
-  color: var(--lyflow-fg-2);
-  font-size: 12px;
-  line-height: 1.8;
-}
-
 /* ------------------------------------------------------------- statusbar */
 
 .statusbar {
@@ -712,9 +656,4 @@
 .statusbar__transport--static {
   background: color-mix(in srgb, var(--warn) 15%, transparent);
   color: var(--lyflow-warn);
-}
-
-.statusbar__status {
-  min-width: 48px;
-  text-align: right;
 }

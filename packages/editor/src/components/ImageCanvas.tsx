@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as THREE from 'three';
 
-import { num } from './Inspector';
+import { num } from '../lib/format';
 import { RAMPS, type RampName } from '../lib/ramps';
 import { fetchImageLevel, imageEpochReady } from '../lib/imageFetch';
 import { transport } from '../transport';
@@ -211,7 +211,7 @@ export interface ImageOverlayView {
   isCurrent?: boolean;
 }
 
-export interface ImageCanvasProps {
+interface ImageCanvasProps {
   /** 取哪一次运行的哪个输出。runId 为 null 时不取（上层显示原因）。 */
   runId: string | null;
   nodeId: string;

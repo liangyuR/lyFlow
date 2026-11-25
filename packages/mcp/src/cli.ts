@@ -10,7 +10,7 @@ export interface JsonLine {
   value: Record<string, unknown>;
 }
 
-export interface CliResult {
+interface CliResult {
   code: number;
   lines: JsonLine[];
   skipped: string[];
@@ -21,7 +21,7 @@ export interface CliResult {
   spawnError: string | null;
 }
 
-export interface CliOptions {
+interface CliOptions {
   timeoutMs?: number | undefined;
   cwd?: string | undefined;
   /** MCP 客户端取消了这次工具调用：结束子进程。以前子进程会在后台一直跑到完（最长 10 分钟）。 */

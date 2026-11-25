@@ -141,7 +141,7 @@ export function pathIsValid(doc: GraphDoc, path: SubPath): boolean {
 const NO_PARAMS: Param[] = [];
 
 /** 与 C++ 的 synthesizeOperator 同构：端口与参数来自 inputs/outputs/params。 */
-export function synthesizeOperator(subgraphId: string, def: SubgraphDef): OperatorDesc {
+function synthesizeOperator(subgraphId: string, def: SubgraphDef): OperatorDesc {
   const inputs: Port[] = (def.inputs ?? []).map((i) => ({
     name: i.name,
     type: i.type,
@@ -538,7 +538,7 @@ export function resolveOutput(
   return null;
 }
 
-export function isSubgraphUsed(doc: GraphDoc, subgraphId: string): boolean {
+function isSubgraphUsed(doc: GraphDoc, subgraphId: string): boolean {
   const op = SUBGRAPH_OP_PREFIX + subgraphId;
   if (doc.nodes.some((n) => n.op === op)) return true;
   for (const def of Object.values(doc.subgraphs ?? {})) {
@@ -642,7 +642,7 @@ export function subgraphReaches(
   return walk(from);
 }
 
-export interface SubgraphMerge {
+interface SubgraphMerge {
   /** 剪贴板里的子图 id → 粘进来之后用的 id。 */
   ids: Map<string, string>;
   /** 要加进 doc.subgraphs 的定义（里面的 sub: 已按 ids 改好）。 */

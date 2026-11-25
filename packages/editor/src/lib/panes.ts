@@ -1,6 +1,6 @@
 // 三栏（算子面板 | 画布 | 右栏）怎么分一行的宽度。纯函数，Workspace 每次渲染算一遍。
 
-export interface SidePane {
+interface SidePane {
   /** 记住的宽度：拖出来的、localStorage 里的。 */
   width: number;
   /** 最窄能缩到多少。 */

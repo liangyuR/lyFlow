@@ -46,7 +46,7 @@ function finishDrag(d: DragState | null, nodeId?: string): void {
   endPreview(nodeId);
 }
 
-export interface NumberInputProps {
+interface NumberInputProps {
   value: number;
   disabled: boolean;
   integer: boolean;

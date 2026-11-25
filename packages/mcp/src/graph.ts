@@ -63,7 +63,7 @@ export function applySet(doc: GraphDoc, set: Record<string, unknown>): GraphDoc 
   return doc;
 }
 
-export interface GraphInput {
+interface GraphInput {
   graph?: unknown;
   graphPath?: string | undefined;
   baseDir?: string | undefined;

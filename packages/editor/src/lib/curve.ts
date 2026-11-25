@@ -7,15 +7,15 @@
 export type CurveInterp = 'linear' | 'smooth';
 export type CurvePoint = [number, number];
 
-export interface CurveValue {
+interface CurveValue {
   points: CurvePoint[];
   interp?: CurveInterp;
 }
 
 /** 相邻两点的 x 至少差这么多：拖动时挤不过邻居，也不会挤出两个 x 相同的点。 */
-export const MIN_GAP = 0.001;
+const MIN_GAP = 0.001;
 
-export const IDENTITY_CURVE: CurveValue = Object.freeze({
+const IDENTITY_CURVE: CurveValue = Object.freeze({
   points: [
     [0, 0],
     [1, 1],

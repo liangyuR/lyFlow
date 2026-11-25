@@ -9,7 +9,7 @@ import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from '../lib/viewP
 import type { ParamClipboard } from '../lib/paramClipboard';
 import type { GraphDoc, GraphNode, PortRef } from '../types/graph';
 
-export interface SearchPopup {
+interface SearchPopup {
   /** 屏幕坐标，用来定位弹层 */
   screen: { x: number; y: number };
   /** 画布坐标，用来放置新节点 */
@@ -29,7 +29,7 @@ export interface SearchPopup {
   place?: (size: { h: number }) => { x: number; y: number } | null;
 }
 
-export interface Clipboard {
+interface Clipboard {
   nodes: GraphNode[];
   edges: GraphDoc['edges'];
   /** 这些节点用到的子图定义（lib/nodeClipboard）。 */
@@ -37,7 +37,7 @@ export interface Clipboard {
 }
 
 /** 正在拖出的那一端。side 是这一端在自己节点上的方向。 */
-export interface PendingConnection {
+interface PendingConnection {
   node: string;
   port: string;
   side: 'input' | 'output';
@@ -49,10 +49,10 @@ export type DrawerTab = 'log' | 'diagnostics' | 'runs' | 'cache';
 export type ParamPanelTab = 'nodes' | 'matrix' | 'recipes';
 
 /** 3D 视图的相机（G7）。放在 store 里是因为参数面板的 ROI 行要能把它切到 2D 拖框（P2.7）。 */
-export type ViewerMode = '3d' | '2d';
+type ViewerMode = '3d' | '2d';
 
 /** 鼠标指着的那条连线的两端（docs/motion-plan.md H3）。 */
-export interface HoverEdge {
+interface HoverEdge {
   id: string;
   from: PortRef;
   to: PortRef;
@@ -214,7 +214,7 @@ function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
 const NO_PATH: SubPath = [];
 
 const RECENT_OPS_KEY = 'lyflow.recentOperators';
-export const RECENT_OPS_MAX = 8;
+const RECENT_OPS_MAX = 8;
 
 function loadRecentOps(): string[] {
   try {

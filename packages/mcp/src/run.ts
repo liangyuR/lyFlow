@@ -3,7 +3,7 @@ import type { Diagnostic, ExecutionEvent, OutputValue, RunOutputs } from './type
 /** core 产出的 run summary（ADR-0022）。这一份不是 MCP 算出来的 ——
  *  它整个来自 run_finished 事件，与 `lyflow_run_summary(runId)` 是同一个对象。
  *  消费方不得从 node_state 重建它。 */
-export interface CoreNodeSummary {
+interface CoreNodeSummary {
   state: string;
   /** state=error/cancelled 时的错误码。 */
   code?: string;
@@ -17,7 +17,7 @@ export interface CoreNodeSummary {
 }
 
 /** 图级输出的三态（ADR-0022 H3）：有值 / 本来就没有 / 本该有但崩了。 */
-export interface CoreOutputSummary {
+interface CoreOutputSummary {
   state: string;
   node: string;
   port: string;
@@ -31,7 +31,7 @@ export interface CoreOutputSummary {
   code?: string;
 }
 
-export interface CoreRunSummary {
+interface CoreRunSummary {
   runId?: string;
   /** ok | degraded | failed（H2）。与 run_finished.status 不是一回事。 */
   status: string;
@@ -53,7 +53,7 @@ export function coreSummary(events: ExecutionEvent[]): CoreRunSummary | null {
   return null;
 }
 
-export interface NodeSummary {
+interface NodeSummary {
   id: string;
   state: string;
   outputsAvailable: boolean | null;
@@ -62,7 +62,7 @@ export interface NodeSummary {
   errors: Diagnostic[];
 }
 
-export interface RunSummary {
+interface RunSummary {
   status: string;
   durationMs: number | null;
   nodes: NodeSummary[];
@@ -70,7 +70,7 @@ export interface RunSummary {
   eventCount: number;
 }
 
-export interface GraphOutputSummary {
+interface GraphOutputSummary {
   node: string;
   port: string;
   type: string;

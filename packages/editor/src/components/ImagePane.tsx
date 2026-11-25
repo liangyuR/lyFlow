@@ -70,7 +70,7 @@ interface Meta {
   outputs: readonly OutputStat[] | undefined;
 }
 
-export interface ImagePaneProps {
+interface ImagePaneProps {
   doc: GraphDoc;
   path: SubPath;
   node: GraphNode;

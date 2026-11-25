@@ -71,14 +71,14 @@ const sceneInput = {
   maxPoints: z.number().int().min(1).max(200000).default(50000),
 };
 type LayerInput = z.infer<typeof layerSchema>;
-export type ViewInput = {
+type ViewInput = {
   imageRange?: [number, number] | undefined;
   frame: z.infer<typeof frameSchema>;
   layers: LayerInput[];
   view?: z.infer<typeof viewSchema> | undefined;
   maxPoints?: number | undefined;
 };
-export interface RunSnapshot {
+interface RunSnapshot {
   schemaVersion: number;
   snapshotId: string;
   runId: string;
@@ -184,7 +184,7 @@ function overlayLayers(value: unknown, base: Record<string, unknown>): Record<st
     return { ...item, ...common };
   });
 }
-export class Visualizations {
+class Visualizations {
   readonly root: string;
   constructor(
     readonly config: Config,

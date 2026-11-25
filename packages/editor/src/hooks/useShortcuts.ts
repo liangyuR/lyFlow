@@ -84,7 +84,7 @@ function hasTextSelection(doc: Document): boolean {
   return sel != null && !sel.isCollapsed && sel.toString().trim() !== '';
 }
 
-export interface ShortcutHandlers {
+interface ShortcutHandlers {
   onSave: () => void;
   onSaveAs: () => void;
   onOpen: () => void;

@@ -31,7 +31,7 @@ export interface BaseEdit {
   recipe: string;
 }
 
-export type RecipeStatus = 'none' | 'loading' | 'ready' | 'error';
+type RecipeStatus = 'none' | 'loading' | 'ready' | 'error';
 
 interface RecipeState {
   /** 内存里的配方集合（进撤销栈，K7）。 */

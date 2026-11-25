@@ -9,7 +9,7 @@ import { levelOf } from './subgraph';
 import type { GraphDoc } from '../types/graph';
 import type { OperatorDesc } from '../types/manifest';
 
-export interface ParamEditTargets {
+interface ParamEditTargets {
   /** 参数（有效值）或静音变了的节点，完整 id。子图定义里改的：每个实例各一个。 */
   nodes: string[];
   /** 取值（default 叠上当前配方）变了、现在还在的图参数。 */

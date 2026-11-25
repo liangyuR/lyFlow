@@ -40,7 +40,7 @@ export interface NodeExecution {
   errorSources?: string[] | undefined;
 }
 
-export interface LogEntry {
+interface LogEntry {
   seq: number;
   level: 'debug' | 'info' | 'warn' | 'error';
   nodeId?: string | undefined;
@@ -115,7 +115,7 @@ interface ExecutionState {
 const emptyNode = (): NodeExecution => ({ state: 'idle', errors: [] });
 
 /** 事件里的 nodeId 在不在 isolate 里：精确命中，或落在某个子图节点之下（R1 的前缀展开）。 */
-export function inIsolate(isolate: readonly string[], nodeId: string): boolean {
+function inIsolate(isolate: readonly string[], nodeId: string): boolean {
   return isolate.some((t) => nodeId === t || nodeId.startsWith(`${t}/`));
 }
 

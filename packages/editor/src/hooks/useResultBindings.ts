@@ -5,7 +5,7 @@ import { resultBindingsChanged } from '../lib/resultBindings';
 import type { OutputInfo } from '../types/execution';
 import { useRuntimeCapabilities } from './useRuntimeCapabilities';
 
-export interface RelatedOutput extends OutputInfo {
+interface RelatedOutput extends OutputInfo {
   nodeId: string;
 }
 

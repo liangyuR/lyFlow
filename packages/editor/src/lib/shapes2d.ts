@@ -6,7 +6,7 @@ import { geometryPaths } from '@lyflow/visualization';
 import type { OutputStat } from '../types/execution';
 
 /** 叠画一条折线/线段集合。z 全部为 0：这些几何本来就定义在 XY 平面上。 */
-export function polyline(points: number[], color: number, loop: boolean): THREE.Line {
+function polyline(points: number[], color: number, loop: boolean): THREE.Line {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(points), 3));
   const material = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });

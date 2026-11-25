@@ -23,7 +23,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-export function defaultParams(op: OperatorDesc): Record<string, unknown> {
+function defaultParams(op: OperatorDesc): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of op.params) out[p.name] = p.default;
   return out;
@@ -73,10 +73,7 @@ export function sparseSet(
 
 // ---------------------------------------------------------------- 参数联动
 
-export function isConditionMet(
-  cond: Condition | undefined,
-  effective: Record<string, unknown>,
-): boolean {
+function isConditionMet(cond: Condition | undefined, effective: Record<string, unknown>): boolean {
   if (!cond) return true;
   const actual = effective[cond.param];
   if (cond.eq !== undefined) return valueEquals(actual, cond.eq);
@@ -131,7 +128,7 @@ export function isEnabled(param: Param, effective: Record<string, unknown>): boo
 
 /** 分组：先按 group 字段聚合，再把 advanced 的收到末尾的「高级」组。
  *  保持 manifest 里的声明顺序 —— 算子作者排的顺序是有意义的。 */
-export interface ParamGroup {
+interface ParamGroup {
   name: string;
   advanced: boolean;
   params: Param[];

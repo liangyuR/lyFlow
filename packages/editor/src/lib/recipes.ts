@@ -12,8 +12,8 @@ import { summarize as summarizeTransform } from './transform';
 import type { GraphDoc, GraphParam } from '../types/graph';
 import type { EnumOption } from '../types/manifest';
 
-export const RECIPE_SCHEMA_VERSION = 1;
-export const RECIPE_EXT = '.lyflow-recipe.json';
+const RECIPE_SCHEMA_VERSION = 1;
+const RECIPE_EXT = '.lyflow-recipe.json';
 /** 目录下可选的索引：{ default?: 名字, order?: [名字…] }。 */
 export const RECIPE_INDEX = 'index.json';
 /** 30 s 自动备份写的那一份（整个内存里的配方集合）。不是配方文件，列目录时不当配方读。 */
@@ -130,7 +130,7 @@ export function uniqueRecipeName(set: RecipeSet, base: string): string {
 
 /** 按 Unicode 码点比（Rust 的 String 比较按 UTF-8 字节，与码点序相同；JS 默认按 UTF-16 码元，
  *  在 BMP 之外会不一样 —— 两边要算出同一个摘要，只能都按码点）。 */
-export function compareCodePoints(a: string, b: string): number {
+function compareCodePoints(a: string, b: string): number {
   const x = Array.from(a);
   const y = Array.from(b);
   const n = Math.min(x.length, y.length);
@@ -207,7 +207,7 @@ export function serializeRecipe(entry: RecipeEntry, doc: GraphDoc): string {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-export interface ParsedRecipe {
+interface ParsedRecipe {
   name: string;
   values: Record<string, unknown>;
   note?: string | undefined;
@@ -274,7 +274,7 @@ export function entryFromParsed(p: ParsedRecipe, name = p.name): RecipeEntry {
   };
 }
 
-export interface RecipeIndex {
+interface RecipeIndex {
   defaultName: string | null;
   order: string[];
 }
@@ -483,7 +483,7 @@ const short = (v: unknown): string => {
 };
 
 /** 四舍五入，.5 远离 0（与 Rust 的 f64::round 同一个口径，JS 的 Math.round 对负数是向上）。 */
-export function roundHalfAway(x: number): number {
+function roundHalfAway(x: number): number {
   return Math.sign(x) * Math.round(Math.abs(x));
 }
 
@@ -554,7 +554,7 @@ const VEC_LEN: Partial<Record<string, number>> = { vec2f: 2, vec3f: 3, vec4f: 4,
 
 /** 一个值对着图参数规格查 ②（类型不符）与 ③（越界 / 不在 options 里）。与 core 的 coerceParam + checkRange
  *  同一套判据（P1.2），另外给出修复建议：能转换就转换（再夹进限位），不能就删；越界夹到限位；不在 options 里改为默认。 */
-export function checkValue(gp: GraphParam, v: unknown): Check | null {
+function checkValue(gp: GraphParam, v: unknown): Check | null {
   const min = finite(gp.min) ? gp.min : undefined;
   const max = finite(gp.max) ? gp.max : undefined;
   switch (gp.type) {

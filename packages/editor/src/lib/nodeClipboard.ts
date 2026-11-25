@@ -5,9 +5,9 @@
 
 import type { GraphDoc, GraphEdge, GraphNode, SubgraphDef } from '../types/graph';
 
-export const NODE_CLIPBOARD_KIND = 'lyflow.nodes';
+const NODE_CLIPBOARD_KIND = 'lyflow.nodes';
 
-export interface NodeClipboard {
+interface NodeClipboard {
   nodes: GraphNode[];
   edges: GraphDoc['edges'];
   /** 这些节点（连同里面）用到的子图定义。没有子图节点时不写。 */

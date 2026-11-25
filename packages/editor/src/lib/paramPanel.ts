@@ -40,8 +40,6 @@ export interface PanelDiagnostics {
   byGraphParam: ReadonlyMap<string, readonly RowDiag[]>;
 }
 
-export const NO_DIAGNOSTICS: PanelDiagnostics = { byNode: new Map(), byGraphParam: new Map() };
-
 interface RowBase {
   key: string;
   type: ParamType | null;
@@ -90,7 +88,7 @@ export interface NodeParamRow extends RowBase {
   depth: number;
 }
 
-export type PanelRow = GraphParamRow | NodeParamRow;
+type PanelRow = GraphParamRow | NodeParamRow;
 
 export interface NodeSection {
   key: string;
@@ -109,7 +107,7 @@ export interface NodeSection {
   library: boolean;
 }
 
-export interface PanelModel {
+interface PanelModel {
   graphRows: GraphParamRow[];
   sections: NodeSection[];
 }
@@ -131,7 +129,7 @@ function titleOf(node: GraphNode, op: OperatorDesc | undefined): string {
 }
 
 /** 整张 doc 里用着这个子图定义的节点数（顶层 + 所有定义里）。 */
-export function instanceCount(doc: GraphDoc, subgraphId: string): number {
+function instanceCount(doc: GraphDoc, subgraphId: string): number {
   let n = 0;
   const count = (lvl: GraphLevel) => {
     for (const node of lvl.nodes) if (subgraphIdOf(node.op) === subgraphId) n += 1;
@@ -141,7 +139,7 @@ export function instanceCount(doc: GraphDoc, subgraphId: string): number {
   return n;
 }
 
-export interface BuildInput {
+interface BuildInput {
   doc: GraphDoc;
   /** manifest 的算子表合上本文档的 sub: 合成项（augmentOperators）。 */
   ops: ReadonlyMap<string, OperatorDesc>;
@@ -283,7 +281,7 @@ function sharedOf(doc: GraphDoc, path: SubPath): number {
 
 export type PanelChip = 'all' | 'modified' | 'recipe' | 'diag';
 
-export interface PanelFilter {
+interface PanelFilter {
   query: string;
   chip: PanelChip;
   type: ParamType | null;
@@ -324,7 +322,7 @@ export type PanelItem =
   | { kind: 'row'; key: string; row: NodeParamRow }
   | { kind: 'empty'; key: string; text: string };
 
-export interface PanelCounts {
+interface PanelCounts {
   all: number;
   modified: number;
   recipe: number;
@@ -333,7 +331,7 @@ export interface PanelCounts {
   byType: Partial<Record<ParamType, number>>;
 }
 
-export interface PanelView {
+interface PanelView {
   items: PanelItem[];
   counts: PanelCounts;
   /** 过滤是否生效（有搜索词、chip 不是「全部」或选了类型）。生效时折叠一概不算。 */
@@ -358,12 +356,12 @@ function queryHolds(row: PanelRow, terms: readonly string[]): boolean {
   return terms.every((t) => row.haystack.includes(t));
 }
 
-export function queryTerms(query: string): string[] {
+function queryTerms(query: string): string[] {
   return query.toLowerCase().split(/\s+/).filter(Boolean);
 }
 
 /** 模型里的全部行（图参数 + 各节参数，逐层展开）。 */
-export function allRows(model: PanelModel): PanelRow[] {
+function allRows(model: PanelModel): PanelRow[] {
   const out: PanelRow[] = [...model.graphRows];
   const walk = (secs: readonly NodeSection[]) => {
     for (const s of secs) {
@@ -375,10 +373,7 @@ export function allRows(model: PanelModel): PanelRow[] {
   return out;
 }
 
-export function countRows(
-  model: PanelModel,
-  filter: Pick<PanelFilter, 'query' | 'chip'>,
-): PanelCounts {
+function countRows(model: PanelModel, filter: Pick<PanelFilter, 'query' | 'chip'>): PanelCounts {
   const terms = queryTerms(filter.query);
   const counts: PanelCounts = { all: 0, modified: 0, recipe: 0, diag: 0, byType: {} };
   for (const row of allRows(model)) {

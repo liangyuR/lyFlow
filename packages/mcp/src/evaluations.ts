@@ -53,7 +53,7 @@ export interface Snapshot {
   snapshotFiles: FileIdentity[];
   cachePolicy: 'cold' | 'warm';
 }
-export interface EvaluationState {
+interface EvaluationState {
   evaluationId: string;
   status:
     | 'prepared'

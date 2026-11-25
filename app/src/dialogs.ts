@@ -10,7 +10,7 @@ function inTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
 
-export class NoDialogError extends Error {
+class NoDialogError extends Error {
   constructor() {
     super('浏览器模式没有文件对话框，请在 Tauri 里运行');
   }

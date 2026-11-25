@@ -42,12 +42,12 @@ export interface DiffResult {
   modeMismatch: boolean;
 }
 
-export interface Tolerance {
+interface Tolerance {
   absTol: number;
   relTol: number;
 }
 
-export const DEFAULT_TOLERANCE: Tolerance = { absTol: 1e-9, relTol: 1e-6 };
+const DEFAULT_TOLERANCE: Tolerance = { absTol: 1e-9, relTol: 1e-6 };
 
 /** Record 递归的深度，与 peek/ValueView 的 MAX_DEPTH 同；再深的整块按文本比。 */
 const MAX_DEPTH = 2;

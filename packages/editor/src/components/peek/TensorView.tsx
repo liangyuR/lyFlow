@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
-import { num } from '../Inspector';
+import { num } from '../../lib/format';
 import { registerPeekCanvas } from '../../lib/peekCanvas';
 import { RAMPS, type RampName } from '../../lib/ramps';
 import { PEEK_FROZEN, usePeekStore, type PeekOpts, type TensorLayout } from '../../store/peek';

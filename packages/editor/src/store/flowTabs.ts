@@ -31,7 +31,7 @@ type Data<T> = Pick<
 >;
 type GraphState = ReturnType<typeof useGraphStore.getState>;
 type UiState = ReturnType<typeof useUiStore.getState>;
-export type FlowRecipeSnapshot = ReturnType<typeof useRecipeStore.getState>;
+type FlowRecipeSnapshot = ReturnType<typeof useRecipeStore.getState>;
 type DocumentUi = Pick<
   UiState,
   | 'path'
@@ -44,7 +44,7 @@ type DocumentUi = Pick<
   | 'roiFrame'
 >;
 
-export interface FlowSnapshot {
+interface FlowSnapshot {
   historyTopologyLocked: boolean;
   graph: Pick<
     GraphState,
@@ -70,7 +70,7 @@ export interface FlowSnapshot {
   viewport: Viewport | null;
 }
 
-export interface FlowTab {
+interface FlowTab {
   id: string;
   title: string;
   filePath: string | null;
@@ -228,7 +228,7 @@ function refuse(message: string): false {
   return false;
 }
 
-export function canSwitchFlow(): boolean {
+function canSwitchFlow(): boolean {
   if (locked) return refuse('正在处理工作流，请稍后再切换');
   if (executionBusy()) return refuse('工作流正在运行，请停止运行后再切换');
   if (useRecipeStore.getState().status === 'loading') return refuse('正在读取配方，请稍后再切换');
@@ -352,7 +352,7 @@ function restore(id: string): void {
   refresh();
 }
 
-export interface PreparedFlowTab {
+interface PreparedFlowTab {
   commit(): void;
   cancel(): void;
 }
@@ -518,7 +518,7 @@ export async function resolveAllUnsaved(action = '关闭窗口'): Promise<boolea
   }
 }
 
-export interface FlowWorkspaceSnapshot {
+interface FlowWorkspaceSnapshot {
   activeId: string;
   tabs: { id: string; title: string; snapshot: FlowSnapshot }[];
 }
@@ -540,7 +540,7 @@ export function getFlowSnapshots(): FlowWorkspaceSnapshot {
   };
 }
 
-export function restoreFlowSnapshots(payload: FlowWorkspaceSnapshot): boolean {
+function restoreFlowSnapshots(payload: FlowWorkspaceSnapshot): boolean {
   if (
     payload.tabs.length === 0 ||
     !payload.tabs.some((tab) => tab.id === payload.activeId) ||
@@ -558,7 +558,7 @@ export function restoreFlowSnapshots(payload: FlowWorkspaceSnapshot): boolean {
   }
 }
 
-export interface FlowDocument {
+interface FlowDocument {
   id: string;
   title?: string;
   doc: GraphDoc;

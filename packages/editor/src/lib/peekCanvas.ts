@@ -1,4 +1,4 @@
-export type PeekCanvasGetter = () => HTMLCanvasElement | null | Promise<HTMLCanvasElement | null>;
+type PeekCanvasGetter = () => HTMLCanvasElement | null | Promise<HTMLCanvasElement | null>;
 
 const getters = new Map<string, PeekCanvasGetter>();
 

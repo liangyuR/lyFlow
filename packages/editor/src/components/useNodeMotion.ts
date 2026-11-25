@@ -29,7 +29,7 @@ import {
 import { useExecutionStore } from '../store/execution';
 import type { NodeState } from '../types/execution';
 
-export interface NodeMotionRefs {
+interface NodeMotionRefs {
   /** `.node` 本身。只许动 opacity（A5）。 */
   root: RefObject<HTMLDivElement | null>;
   /** 盖在节点上的光晕层。颜色由 data-kind 选（styles.motion.css），这里只动它的 opacity。 */

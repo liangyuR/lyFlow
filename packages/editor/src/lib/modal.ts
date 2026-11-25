@@ -4,13 +4,13 @@
 
 import { create } from 'zustand';
 
-export interface ModalChoice {
+interface ModalChoice {
   id: string;
   label: string;
   tone?: 'primary' | 'danger' | 'plain' | undefined;
 }
 
-export interface TextRequest {
+interface TextRequest {
   kind: 'text';
   title: string;
   message?: string | undefined;
@@ -23,7 +23,7 @@ export interface TextRequest {
   checkbox?: { label: string; checked: boolean } | undefined;
 }
 
-export interface ChoiceRequest {
+interface ChoiceRequest {
   kind: 'choice';
   title: string;
   message?: string | undefined;
@@ -32,7 +32,7 @@ export interface ChoiceRequest {
   choices: ModalChoice[];
 }
 
-export type TextAnswer = { value: string; checked: boolean };
+type TextAnswer = { value: string; checked: boolean };
 
 type Pending =
   | (TextRequest & { id: number; resolve: (v: TextAnswer | null) => void })

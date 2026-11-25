@@ -13,7 +13,7 @@ import {
   type GraphContext,
 } from './typecheck';
 
-export interface AutoWire {
+interface AutoWire {
   from: PortRef;
   to: PortRef;
 }

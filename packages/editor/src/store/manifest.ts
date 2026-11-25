@@ -12,7 +12,7 @@ import type {
   SnippetDesc,
 } from '../types/manifest';
 
-export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 interface ManifestState {
   status: LoadStatus;

@@ -14,7 +14,7 @@ import { useGraphStore } from '../store/graph';
 import { useUiStore } from '../store/ui';
 
 /** Viewer3D 的场景里 RoiLayer 用得到的那几样。 */
-export interface RoiHost {
+interface RoiHost {
   ortho: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   controls: { enabled: boolean };
@@ -38,7 +38,7 @@ const CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
 type Corner = (typeof CORNERS)[number];
 type Mode = 'move' | Corner;
 
-export function isDegenerate(v: readonly number[]): boolean {
+function isDegenerate(v: readonly number[]): boolean {
   return !(v[2]! > v[0]!) || !(v[3]! > v[1]!);
 }
 
@@ -67,7 +67,7 @@ function metersPerPixel(host: RoiHost): number {
 }
 
 /** 框的读数：坐标（参数自己的单位）、宽 × 高、框里有几个点。 */
-export function roiTagText(item: RoiItem, count: number | null): string {
+function roiTagText(item: RoiItem, count: number | null): string {
   const [x0, y0, x1, y1] = item.value;
   const unit = item.scale === 0.001 ? ' mm' : item.scale === 1 ? ' m' : '';
   const size = `${num(x1 - x0)} × ${num(y1 - y0)}${unit}`;

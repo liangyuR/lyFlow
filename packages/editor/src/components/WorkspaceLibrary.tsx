@@ -4,7 +4,7 @@ import { baseName, parentName, recentFiles } from '../lib/files';
 import type { RecentEntry } from '../transport';
 import type { FlowTabDocument } from './FlowTabs';
 
-export interface WorkspaceLibraryProps {
+interface WorkspaceLibraryProps {
   tabs: readonly FlowTabDocument[];
   activeId: string;
   onSelect: (id: string) => void;

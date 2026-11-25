@@ -8,7 +8,7 @@ import type { ViewerContent } from '../lib/viewRule';
 import type { OutputStat } from '../types/execution';
 import { ValuePane } from './ValuePane';
 
-export interface ComparePaneProps {
+interface ComparePaneProps {
   display: Display;
   loading: boolean;
   /** 这一侧自己的内容（按它的输出类型）。 */

@@ -45,7 +45,7 @@ export function previewTargetsOf(
 }
 
 /** 拖动过程中每一帧都在改值，攒一下再发。30 ms 是「跟手」和「别打死自己」的平衡点。 */
-export const PREVIEW_DEBOUNCE_MS = 30;
+const PREVIEW_DEBOUNCE_MS = 30;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let lastNode: string | null = null;
@@ -72,7 +72,7 @@ function watchedNodes(): ({ path: SubPath; nodeId: string } | null)[] {
 // -- 提交了一步就补的自动运行：改过的节点（完整 id）与图参数先攒着，停手 AUTO_RUN_DEBOUNCE_MS 再一起发 ----------
 
 /** 连按方向键微调、连按几次撤销只跑一次；短到敲完回车马上就有结果。 */
-export const AUTO_RUN_DEBOUNCE_MS = 250;
+const AUTO_RUN_DEBOUNCE_MS = 250;
 
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
 const autoNodes = new Set<string>();

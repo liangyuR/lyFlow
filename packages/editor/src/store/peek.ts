@@ -40,7 +40,7 @@ export interface PeekWindow {
   field: string | null;
 }
 
-export type PeekOpenRequest = Omit<
+type PeekOpenRequest = Omit<
   PeekWindow,
   'id' | 'z' | 'locked' | 'size' | 'opts' | 'viewAuto' | 'field'
 > &
@@ -64,7 +64,7 @@ function countWebgl(windows: readonly PeekWindow[], exceptId?: string): number {
   return n;
 }
 
-export const PEEK_DEFAULT_OPTS: PeekOpts = {
+const PEEK_DEFAULT_OPTS: PeekOpts = {
   maxPoints: 200_000,
   shading: 'intensity',
   ramp: 'viridis',
@@ -94,9 +94,9 @@ interface PeekState {
   prune(doc: GraphDoc, path: SubPath): void;
 }
 
-export const PEEK_MIN_VISIBLE = 40;
+const PEEK_MIN_VISIBLE = 40;
 
-export interface PeekBounds {
+interface PeekBounds {
   left: number;
   top: number;
   right: number;

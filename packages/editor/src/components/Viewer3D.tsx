@@ -77,9 +77,6 @@ import '../styles.viewer.css';
 import type { ViewPreset } from '../lib/viewFit';
 import { ViewPresetButtons, useViewPresetEvents } from './ViewPresetButtons';
 
-export type { ShadingMode, CameraMode } from '../lib/cloudScene';
-export type { RampName } from '../lib/ramps';
-
 // ------------------------------------------------------------ 2D 拖框（L15）
 
 /** 四个角色框各一种颜色；多于四个时轮着用。 */
