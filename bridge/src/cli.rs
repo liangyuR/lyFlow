@@ -995,7 +995,7 @@ fn execute_frame(
         runs.retain(|r| !Arc::ptr_eq(r, &handle));
     }
     // join 返回后 core 保证不再回调，这时读收集到的事件才是安全的
-    let events = unsafe { (*ptr).events.lock().map_err(|e| e.to_string())?.clone() };
+    let events = unsafe { std::mem::take(&mut *(*ptr).events.lock().map_err(|e| e.to_string())?) };
     let status = events
         .iter()
         .rev()

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::{Manager, Runtime};
 
 use crate::core_ffi;
@@ -22,7 +22,7 @@ use crate::python_settings::{self, PythonRuntimeConfig};
 use crate::recipe::{self, RECIPE_AUTOSAVE, RECIPE_EXT, RECIPE_INDEX};
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
-static MANIFEST: RwLock<Option<(u32, u64, serde_json::Value)>> = RwLock::new(None);
+static MANIFEST: RwLock<Option<(u32, u64, Arc<serde_json::Value>)>> = RwLock::new(None);
 static MANIFEST_REVISION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Serialize)]
@@ -47,7 +47,7 @@ pub struct LoadedGraph {
     pub migrations: Vec<serde_json::Value>,
 }
 
-fn manifest_value() -> Result<serde_json::Value, String> {
+fn manifest_value() -> Result<Arc<serde_json::Value>, String> {
     loop {
         let generation = core_ffi::generation();
         let revision = MANIFEST_REVISION.load(Ordering::Acquire);
@@ -55,19 +55,20 @@ fn manifest_value() -> Result<serde_json::Value, String> {
             MANIFEST.read().unwrap_or_else(|e| e.into_inner()).as_ref()
         {
             if *cached == generation && *cached_revision == revision {
-                return Ok(value.clone());
+                return Ok(Arc::clone(value));
             }
         }
         let raw = core_ffi::manifest_json()?;
         // 在边界上解析一次，等于顺手验证了 C++ 那个手写 JSON writer 的输出。
         // 它坏掉的话应该在这里炸，而不是让前端拿到半截 JSON 去猜。
-        let value: serde_json::Value = serde_json::from_str(&raw)
+        let value: Arc<serde_json::Value> = serde_json::from_str(&raw)
+            .map(Arc::new)
             .map_err(|e| format!("core 返回的 manifest 不是合法 JSON: {e}"))?;
         let mut cache = MANIFEST.write().unwrap_or_else(|e| e.into_inner());
         if MANIFEST_REVISION.load(Ordering::Acquire) != revision {
             continue;
         }
-        *cache = Some((generation, revision, value.clone()));
+        *cache = Some((generation, revision, Arc::clone(&value)));
         return Ok(value);
     }
 }
@@ -106,7 +107,7 @@ pub(crate) fn configure_python_catalog<R: Runtime>(
     invalidate_manifest();
     Ok(PythonRefresh {
         status,
-        manifest: manifest_value()?,
+        manifest: manifest_value()?.as_ref().clone(),
     })
 }
 
@@ -201,7 +202,7 @@ pub fn initialize_python<R: Runtime>(app: &tauri::AppHandle<R>) {
 
 #[tauri::command]
 pub fn get_manifest() -> Result<serde_json::Value, String> {
-    manifest_value()
+    manifest_value().map(|m| m.as_ref().clone())
 }
 
 #[tauri::command]
@@ -388,7 +389,7 @@ pub fn run_graph<R: Runtime>(
                 .scenes
                 .as_ref()
                 .ok_or("这个宿主没有配置 SceneProvider，无法注入场景数据")?;
-            provider.scene_inputs(&id, &doc, &manifest_value()?)?
+            provider.scene_inputs(&id, &doc, &*manifest_value()?)?
         }
         None => host::SceneInputs::default(),
     };
@@ -954,7 +955,7 @@ pub fn rescan_library_paused<R: Runtime>(
         let refresh = rescan_library_dirs(dirs).and_then(|status| {
             Ok(LibraryRefresh {
                 status,
-                manifest: manifest_value()?,
+                manifest: manifest_value()?.as_ref().clone(),
             })
         });
         let _ = tx.send(refresh);
