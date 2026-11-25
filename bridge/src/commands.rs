@@ -19,6 +19,7 @@ use crate::graph::GraphDoc;
 use crate::host::{self, HostConfig};
 use crate::library_settings;
 use crate::python_settings::{self, PythonRuntimeConfig};
+use crate::recipe::{self, RECIPE_AUTOSAVE, RECIPE_EXT, RECIPE_INDEX};
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
 static MANIFEST: RwLock<Option<(u32, u64, serde_json::Value)>> = RwLock::new(None);
@@ -33,7 +34,7 @@ pub struct CoreInfo {
     pub type_count: usize,
     /// 热重载换了几代。前端拿它判断 manifest 要不要重取。
     pub generation: u32,
-    /// 开发期才是 true：安装包里没有可盯的 CMake 产物。
+    /// 调试构建且 LYFLOW_WATCH_DLL 指向一个存在的 DLL 时才是 true。
     #[serde(rename = "hotReload")]
     pub hot_reload: bool,
 }
@@ -1253,9 +1254,6 @@ pub fn discard_backup<R: Runtime>(app: tauri::AppHandle<R>, path: String) -> Res
 // - 任意位置的 `*.lyflow-recipe.json`：读（导入）、写（导出，路径是用户在对话框里选的）。
 // 路径一律要绝对路径、不许有 `..`。
 
-const RECIPE_EXT: &str = ".lyflow-recipe.json";
-const RECIPE_INDEX: &str = "index.json";
-const RECIPE_AUTOSAVE: &str = "autosave~.json";
 const RECIPE_DIR_SUFFIX: &str = ".recipes";
 
 #[derive(Serialize, Debug)]
@@ -1275,7 +1273,7 @@ fn ends_with_ci(s: &str, suffix: &str) -> bool {
 }
 
 fn is_recipe_file_name(name: &str) -> bool {
-    ends_with_ci(name, RECIPE_EXT)
+    recipe::recipe_stem(name).is_some()
 }
 
 /// 目录里除了配方文件之外认的两个：索引与自动备份。
