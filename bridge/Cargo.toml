@@ -14,7 +14,6 @@ default-run = "lyflow-app"
 
 [lib]
 name = "lyflow_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
 
 # 桌面壳。CLI 不依赖 Tauri，所以它被关在 desktop feature 后面（F6）。
 [[bin]]
