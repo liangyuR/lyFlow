@@ -242,6 +242,28 @@ impl<'a> RunView<'a> {
             .filter(move |e| e["kind"] == "node_state" && e["nodeId"] == node.as_str())
     }
 
+    /// 能 `--emit` 的根：每个图输出 `outputs.<名字>`、每个跑过的节点端口 `nodes.<节点>.<端口>`。
+    fn emit_roots(&self) -> Vec<String> {
+        let mut out = BTreeSet::new();
+        if let Some(outputs) = self.outputs.and_then(Value::as_object) {
+            out.extend(outputs.keys().map(|k| format!("outputs.{k}")));
+        }
+        for e in self.events {
+            if e["kind"] != "node_state" {
+                continue;
+            }
+            let (Some(node), Some(ports)) =
+                (e["nodeId"].as_str(), e["stats"]["outputs"].as_array())
+            else {
+                continue;
+            };
+            for port in ports.iter().filter_map(|p| p["port"].as_str()) {
+                out.insert(format!("nodes.{node}.{port}"));
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// `--emit`：路径处的 JSON 原样。取不到（输出未激活、节点没跑、字段不存在）是 None。
     pub(crate) fn value(&self, path: &MetricPath) -> Option<Value> {
         match &path.kind {
@@ -991,7 +1013,7 @@ pub(crate) struct Row {
     pub quality: Option<Value>,
 }
 
-/// 一行里的一个错误：出错节点（图级诊断没有节点时为 None）、错误码与说明。同一节点的同一错误码只记一次。
+/// 一行里的一个错误：出错节点（图级诊断没有节点时为 None）、错误码与说明。完全相同的一条只记一次。
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct RowError {
     #[serde(rename = "nodeId")]
@@ -1002,10 +1024,9 @@ pub(crate) struct RowError {
 
 impl RowError {
     fn push(list: &mut Vec<RowError>, node: Option<&str>, code: &str, message: Option<&str>) {
-        if list
-            .iter()
-            .any(|e| e.code == code && e.node.as_deref() == node)
-        {
+        if list.iter().any(|e| {
+            e.code == code && e.node.as_deref() == node && e.message == message.unwrap_or_default()
+        }) {
             return;
         }
         list.push(RowError {
@@ -1021,6 +1042,14 @@ impl RowError {
             code: v["code"].as_str()?.to_string(),
             message: v["message"].as_str().unwrap_or_default().to_string(),
         })
+    }
+}
+
+impl Row {
+    /// 这一行出现过的错误码，各一次。上游失败时下游节点各带一条 upstream_failed，
+    /// 按行计数才不会让它盖过根因。
+    pub(crate) fn error_codes(&self) -> BTreeSet<&str> {
+        self.errors.iter().map(|e| e.code.as_str()).collect()
     }
 }
 
@@ -1206,8 +1235,8 @@ pub(crate) fn failure_digest(rows: &[Row]) -> Option<String> {
     for r in &bad {
         let (n, codes) = by_status.entry(r.status.as_str()).or_default();
         *n += 1;
-        for e in &r.errors {
-            *codes.entry(e.code.as_str()).or_default() += 1;
+        for code in r.error_codes() {
+            *codes.entry(code).or_default() += 1;
         }
     }
     let parts: Vec<String> = by_status
@@ -1238,7 +1267,18 @@ fn row_exit(status: &str) -> i32 {
 struct Attempt {
     row: Row,
     available: Vec<String>,
+    /// 首跑时这张图上能 `--emit` 的根：`outputs.<名字>` 与 `nodes.<节点>.<端口>`。
+    emit_roots: Vec<String>,
     resolved: Vec<bool>,
+}
+
+/// `--emit` 路径的根（不含字段部分），与 `RunView::emit_roots` 的写法一致。
+fn emit_root(path: &MetricPath) -> Option<String> {
+    match &path.kind {
+        MetricKind::Output { name, .. } => Some(format!("outputs.{name}")),
+        MetricKind::NodePort { node, port, .. } => Some(format!("nodes.{node}.{port}")),
+        _ => None,
+    }
 }
 
 impl<'a> Engine<'a> {
@@ -1353,6 +1393,7 @@ impl<'a> Engine<'a> {
                     quality: Some(quality),
                 },
                 available: Vec::new(),
+                emit_roots: Vec::new(),
                 resolved: vec![false; self.metrics.len()],
             });
         }
@@ -1409,6 +1450,11 @@ impl<'a> Engine<'a> {
             })
             .collect();
         let emitted: Vec<Option<Value>> = self.emits.iter().map(|p| view.value(p)).collect();
+        let emit_roots = if enumerate && !self.emits.is_empty() {
+            view.emit_roots()
+        } else {
+            Vec::new()
+        };
         let available = if enumerate {
             let mut paths = available_paths(&view);
             paths.extend(
@@ -1464,6 +1510,7 @@ impl<'a> Engine<'a> {
                 quality: Some(quality),
             },
             available,
+            emit_roots,
             resolved,
         })
     }
@@ -1521,6 +1568,25 @@ impl<'a> Engine<'a> {
                     return Err(EngineError::Usage(
                         format!("这些指标路径在图上取不到值：{}", missing.join(", ")),
                         a.available,
+                    ));
+                }
+                let unknown: Vec<String> = self
+                    .emits
+                    .iter()
+                    .filter(|p| {
+                        !a.emit_roots
+                            .iter()
+                            .any(|r| emit_root(p).as_deref() == Some(r.as_str()))
+                    })
+                    .map(|p| p.raw.clone())
+                    .collect();
+                if !unknown.is_empty() {
+                    return Err(EngineError::Usage(
+                        format!(
+                            "这些 --emit 路径的图输出或节点端口在图上不存在：{}",
+                            unknown.join(", ")
+                        ),
+                        a.emit_roots,
                     ));
                 }
             }
@@ -1752,8 +1818,8 @@ pub(crate) fn summarize(
                 if row.errors.is_empty() {
                     *entry.fail_codes.entry(status.to_string()).or_default() += 1;
                 } else {
-                    for e in &row.errors {
-                        *entry.fail_codes.entry(e.code.clone()).or_default() += 1;
+                    for code in row.error_codes() {
+                        *entry.fail_codes.entry(code.to_string()).or_default() += 1;
                     }
                 }
             }
@@ -1785,7 +1851,7 @@ fn list_metric_paths(engine: &Engine, samples: &[Sample], out: &Sink, err: &Sink
                 if row.errors.is_empty() {
                     String::new()
                 } else {
-                    let codes: Vec<&str> = row.errors.iter().map(|e| e.code.as_str()).collect();
+                    let codes: Vec<&str> = row.error_codes().into_iter().collect();
                     format!("（{}）", codes.join(", "))
                 }
             ),
@@ -2074,7 +2140,18 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 obj.insert("values".to_string(), Value::Object(values));
             }
             json_line(out, &line_json);
-            rows.push(row.clone());
+            // values 只为这一行的输出；统计用不到，不跟着整批常驻内存
+            rows.push(Row {
+                values: Vec::new(),
+                errors: row.errors.clone(),
+                summary: row.summary.clone(),
+                quality: row.quality.clone(),
+                snapshot_id: row.snapshot_id.clone(),
+                metrics: row.metrics.clone(),
+                skipped: row.skipped.clone(),
+                status: row.status.clone(),
+                ..*row
+            });
         };
         engine.run_remaining(&mut on_row, &completed, max_runs)
     };
@@ -2225,10 +2302,7 @@ fn resume_rows(
                 .iter()
                 .map(|m| v["metrics"][&m.raw].as_f64())
                 .collect(),
-            values: emits
-                .iter()
-                .map(|p| Some(v["values"][&p.raw].clone()).filter(|x| !x.is_null()))
-                .collect(),
+            values: Vec::new(),
             errors,
             duration_ms: v["durationMs"].as_f64().unwrap_or(0.0),
             skipped: Vec::new(),

@@ -114,8 +114,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--csv <out.csv>] [--base-dir <dir>] [--jobs <n>]
   lyflow eval     <graph> [<样本集>] [--params <paramsets.json>]
                           [--param <n>.<p>=<start>:<end>:<steps>]...
-                          (--metric <path> [--metric <path>]... | --list-metrics)
-                          [--emit <path>]... [--holdout <tag>=<value>] [--group-by <tag>]
+                          (--metric <path>... | --emit <path>... | --list-metrics)
+                          [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache]
                           [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--summary] [--max-runs <n>] [--resume-rows <jsonl>] [--progress-json]
@@ -137,8 +137,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
         --emit <path>：每行 eval_row 的 values 里原样带出该路径处的 JSON（对象、数组都保留，不归约），
-                  取不到时为 null；只认 outputs.<名字>[.字段...] 与 nodes.<节点>.<端口>[.字段...]，
-                  数组字段按数字段取下标（segment.dir.0）。只给 --emit 不给 --metric 也行。
+                  字段取不到时为 null；图输出或节点端口本身不存在时与 --metric 一样报用法错并列出可用的根。
+                  只认 outputs.<名字>[.字段...] 与 nodes.<节点>.<端口>[.字段...]，数组按数字段取下标（segment.dir.0）。
         eval_row 的 errors 是 [{nodeId, code, message}]：出错节点（图级诊断为 null）、错误码与说明。
         --list-metrics：不跑统计，只用第一个参数组 × 第一个样本跑一次，输出一行
                   {\"kind\":\"metric_paths\",\"paths\":[...]} —— 这张图在这批样本上能写的全部指标路径。

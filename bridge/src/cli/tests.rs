@@ -1282,6 +1282,81 @@ fn eval_separates_validation_failures_from_run_failures() {
     );
 }
 
+/// `--emit`：节点端口与图输出处的 JSON 原样写进 values；根不存在时同 --metric 一样报用法错。
+/// `--resume-rows` 认新的 errors 结构，旧版的字符串 errors 直接拒绝。
+#[test]
+fn eval_emits_json_values_and_rejects_unknown_roots() {
+    let dir = workspace("evalemit");
+    let doc = json!({
+        "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TD3",
+        "nodes": [
+            {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 500, "seed": 3301}},
+            {"id": "s", "op": "cloud.statistics"}
+        ],
+        "edges": [{"id": "e1", "from": {"node": "g", "port": "cloud"},
+                               "to": {"node": "s", "port": "cloud"}}],
+        "outputs": {"height": {"node": "s", "port": "height"}}
+    });
+    let graph = dir.join("stats.lyflow.json");
+    std::fs::write(&graph, doc.to_string()).unwrap();
+    let graph = graph.to_string_lossy().into_owned();
+    let samples = samples_file(&dir, "s.jsonl", &[r#"{"id":"a"}"#]);
+    let r = cli(&[
+        "eval",
+        &graph,
+        "--samples",
+        &samples,
+        "--emit",
+        "nodes.s.statistics",
+        "--emit",
+        "outputs.height.value",
+        "--emit",
+        "outputs.height.nope",
+    ]);
+    assert_eq!(r.code, EXIT_OK, "{}", r.err);
+    let lines = r.lines();
+    let row = lines.iter().find(|l| l["kind"] == "eval_row").unwrap();
+    assert!(row["values"]["nodes.s.statistics"].is_object(), "{row}");
+    assert!(row["values"]["outputs.height.value"].is_number(), "{row}");
+    assert!(row["values"]["outputs.height.nope"].is_null(), "{row}");
+    assert!(
+        lines.iter().all(|l| l["kind"] != "eval_summary"),
+        "只给 --emit 时没有指标统计"
+    );
+
+    let typo = cli(&[
+        "eval",
+        &graph,
+        "--samples",
+        &samples,
+        "--emit",
+        "outputs.hieght",
+    ]);
+    assert_eq!(typo.code, EXIT_USAGE, "{}", typo.out);
+    assert!(typo.err.contains("outputs.hieght"), "{}", typo.err);
+    assert!(typo.err.contains("nodes.s.statistics"), "{}", typo.err);
+
+    let old = samples_file(
+        &dir,
+        "old.jsonl",
+        &[
+            r#"{"kind":"eval_row","paramSet":0,"params":{},"sample":"a","status":"failed","metrics":{"run.durationMs":null},"errors":["io"]}"#,
+        ],
+    );
+    let resumed = cli(&[
+        "eval",
+        &graph,
+        "--samples",
+        &samples,
+        "--metric",
+        "run.durationMs",
+        "--resume-rows",
+        &old,
+    ]);
+    assert_eq!(resumed.code, EXIT_USAGE, "{}", resumed.out);
+    assert!(resumed.err.contains("errors"), "{}", resumed.err);
+}
+
 /// 不给样本就跑一次图；指标用的是 sweep 那套老写法 `v:cloud.elementCount`，eval 也得认。
 #[test]
 fn eval_without_samples_runs_the_graph_once() {

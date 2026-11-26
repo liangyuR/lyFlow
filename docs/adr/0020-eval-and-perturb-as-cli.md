@@ -122,8 +122,8 @@ lyflow eval <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <no
 ```
 
 - `std` 是**样本标准差（n-1）**，`n < 2` 时是 `null`。`p2p` = max − min。
-- `errors` 是 `[{"nodeId","code","message"}]`：出错节点（图级诊断为 `null`）、错误码与说明；`failCodes` 按 `code` 计数。
-- `--emit <值路径>`：只认 `outputs.…` 与 `nodes.<节点>.<端口>…`，路径处的 JSON 原样写进该行的 `values`（对象、数组不归约），取不到为 `null`。
+- `errors` 是 `[{"nodeId","code","message"}]`：出错节点（图级诊断为 `null`）、错误码与说明；`failCodes` 按行计数，一行里同一个 `code` 只算一次。
+- `--emit <值路径>`：只认 `outputs.…` 与 `nodes.<节点>.<端口>…`，路径处的 JSON 原样写进该行的 `values`（对象、数组不归约），字段取不到为 `null`，图输出或节点端口不存在时报用法错。
 - `--holdout <k>=<v>`：带该 tag 的样本进 `holdout` 组，其余进 `train`，两组分别报数。
   **留出是方法论底线，切法由人定** —— 工具只负责把两组数分开报，不替人选切分维度。
 - `--group-by <k>`：按 `tags[k]` 分组，缺这个 tag 的样本进 `(none)`。
