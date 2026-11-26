@@ -172,7 +172,7 @@ def main():
             r = {"frame": int(frame), "L": L, "status": row["status"], "sStart": synth.get("sStart"),
                  "sEnd": synth.get("sEnd"), "side": synth.get("side"), "breaks": got, "pathOk": path_ok}
             if row["status"] != "ok":
-                r["skip"] = "运行失败：" + ",".join(row.get("errors", []))
+                r["skip"] = "运行失败：" + ",".join(e["code"] for e in row.get("errors", []))
             elif base_breaks:
                 r["skip"] = "原帧本身报了断胶"
             elif not synth.get("ok"):

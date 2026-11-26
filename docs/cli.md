@@ -40,7 +40,7 @@ lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param 
                                   --metric nodeId:port.elementCount|byteSize|durationMs
                                   [--csv out.csv] [--base-dir d] [--jobs n]
 lyflow eval     graph.lyflow.json [<样本集>] [--params sets.json] [--param n.p=start:end:steps]...
-                                  (--metric <值路径> [--metric ...] | --list-metrics)
+                                  (--metric <值路径>... | --emit <值路径>... | --list-metrics)
                                   [--holdout tag=value] [--group-by tag] [--csv out.csv]
                                   [--base-dir d] [--parallel n] [--jobs n] [--no-cache]
                                   [--set ...] [--recipe ...] [--param name=<json>]... [--summary]
@@ -72,6 +72,10 @@ lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]
 `eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
 `nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径，
 `eval --list-metrics` 也能直接列出来（[ADR-0020](adr/0020-eval-and-perturb-as-cli.md)）。
+`--metric` 只取标量（数组归约成 count/mean/p95 等）；要逐样本拿结构化结果时用 `eval --emit <值路径>`，
+`outputs.bundle`、`nodes.n_gap.segment` 这类对象或数组原样写进每行 `eval_row` 的 `values`，字段取不到时为 `null`；
+图输出或节点端口本身不存在时报用法错。每行的 `errors` 是 `[{nodeId, code, message}]`，图级诊断的 `nodeId` 为 `null`；
+`eval_summary` 的 `failCodes` 与终端失败摘要按行计数，一行里同一个错误码只算一次。
 样本集的目录模式（`--samples-dir`）把「双相机配对 + 按时间前后各半打 tag」也内建了，
 不用再为每个测点写生成脚本。用法见 [Agent 调参指南](agent-tuning.md)。
 

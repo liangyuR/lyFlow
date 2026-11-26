@@ -74,6 +74,7 @@ fn the_progress_line_rewrites_itself_and_stays_silent_when_off() {
         sample: 0,
         status: status.to_string(),
         metrics: Vec::new(),
+        values: Vec::new(),
         errors: Vec::new(),
         duration_ms: ms,
         skipped: Vec::new(),
@@ -138,7 +139,8 @@ fn the_failure_digest_groups_by_status_then_code() {
         sample: 0,
         status: status.to_string(),
         metrics: Vec::new(),
-        errors: errors.iter().map(|e| e.to_string()).collect(),
+        values: Vec::new(),
+        errors: errors.iter().map(|e| error(e)).collect(),
         duration_ms: 0.0,
         skipped: Vec::new(),
         summary: None,
@@ -153,6 +155,19 @@ fn the_failure_digest_groups_by_status_then_code() {
         row("validation_failed", &["unknown_op"]),
         row("cancelled", &[]),
     ];
+    // 上游失败时下游节点各带一条 upstream_failed：按行计数，不让它盖过根因
+    let mut cascade = row("failed", &["io"]);
+    for node in ["v1", "v2", "v3"] {
+        cascade.errors.push(RowError {
+            node: Some(node.to_string()),
+            code: "upstream_failed".to_string(),
+            message: String::new(),
+        });
+    }
+    assert_eq!(
+        failure_digest(&[cascade]).as_deref(),
+        Some("没成的 1 次：failed 1（io × 1、upstream_failed × 1）")
+    );
     assert_eq!(
         failure_digest(&rows).as_deref(),
         Some("没成的 5 次：cancelled 1、failed 3（io × 3、bad_param × 1）、validation_failed 1（unknown_op × 1）")
@@ -279,6 +294,36 @@ fn metric_paths_cover_outputs_nodes_and_run() {
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.1")), Some(-2.0));
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.2")), None);
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.x")), None);
+
+    // --emit 取的是同一处的 JSON 原样：对象、数组、标量都不归约，取不到是 None
+    let emit = |spec: &str| view.value(&parse_emit(spec).unwrap());
+    assert_eq!(
+        emit("outputs.bundle.point_counts"),
+        Some(json!({"left": 640, "right": 512}))
+    );
+    assert_eq!(emit("outputs.gap.ok"), Some(json!(true)));
+    assert_eq!(emit("nodes.n_off.at.p"), Some(json!([0.5, -2.0])));
+    assert_eq!(emit("nodes.n_off.at.p.1"), Some(json!(-2.0)));
+    assert_eq!(
+        emit("nodes.n_fit.quality")
+            .unwrap()
+            .pointer("/data/inlierCount"),
+        Some(&json!(9))
+    );
+    assert_eq!(emit("outputs.cloud"), None);
+    assert_eq!(emit("nodes.n_off.at.p.2"), None);
+    assert_eq!(
+        view.emit_roots(),
+        [
+            "nodes.n_fit.line",
+            "nodes.n_fit.quality",
+            "nodes.n_off.at",
+            "nodes.n_off.dx",
+            "outputs.bundle",
+            "outputs.cloud",
+            "outputs.gap"
+        ]
+    );
 }
 
 #[test]
@@ -291,6 +336,16 @@ fn a_malformed_metric_path_is_rejected_up_front() {
         "outputs.",
     ] {
         assert!(parse_metric(bad).is_err(), "{bad} 应当被拒");
+    }
+    // --emit 只认图输出与节点端口：时长、计数、质量分不是 JSON 子树
+    for bad in [
+        "run.durationMs",
+        "nodes.n_fit.durationMs",
+        "nodes.n_fit.elementCount",
+        "quality.executionOk",
+        "gap",
+    ] {
+        assert!(parse_emit(bad).is_err(), "--emit {bad} 应当被拒");
     }
 }
 
@@ -588,6 +643,14 @@ fn glob_gives_colliding_stems_distinct_ids() {
     assert_eq!(samples[1].id, "f2/scan");
 }
 
+fn error(code: &str) -> RowError {
+    RowError {
+        node: Some("n".to_string()),
+        code: code.to_string(),
+        message: String::new(),
+    }
+}
+
 fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row {
     Row {
         snapshot_id: None,
@@ -595,7 +658,8 @@ fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row 
         sample,
         status: status.to_string(),
         metrics: vec![value],
-        errors: errors.iter().map(|s| (*s).to_string()).collect(),
+        values: Vec::new(),
+        errors: errors.iter().map(|e| error(e)).collect(),
         duration_ms: 1.0,
         skipped: Vec::new(),
         summary: None,

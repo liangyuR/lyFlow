@@ -57,6 +57,22 @@ nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs"
     )
 }
 
+/// `--emit` 的路径：只认图输出与节点端口，取到的是那一处的 JSON 原样，不归约成标量。
+pub(crate) fn parse_emit(spec: &str) -> Result<MetricPath, String> {
+    let kind = path_metric(spec).map_err(|_| bad_emit(spec))?;
+    match kind {
+        MetricKind::Output { .. } | MetricKind::NodePort { .. } => Ok(MetricPath {
+            raw: spec.to_string(),
+            kind,
+        }),
+        _ => Err(bad_emit(spec)),
+    }
+}
+
+fn bad_emit(spec: &str) -> String {
+    format!("看不懂的 --emit 路径 {spec}。写法是 outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]")
+}
+
 pub(crate) fn parse_metric(spec: &str) -> Result<MetricPath, String> {
     let kind = if spec.contains(':') {
         legacy_metric(spec)?
@@ -224,6 +240,46 @@ impl<'a> RunView<'a> {
             .iter()
             .rev()
             .filter(move |e| e["kind"] == "node_state" && e["nodeId"] == node.as_str())
+    }
+
+    /// 能 `--emit` 的根：每个图输出 `outputs.<名字>`、每个跑过的节点端口 `nodes.<节点>.<端口>`。
+    fn emit_roots(&self) -> Vec<String> {
+        let mut out = BTreeSet::new();
+        if let Some(outputs) = self.outputs.and_then(Value::as_object) {
+            out.extend(outputs.keys().map(|k| format!("outputs.{k}")));
+        }
+        for e in self.events {
+            if e["kind"] != "node_state" {
+                continue;
+            }
+            let (Some(node), Some(ports)) =
+                (e["nodeId"].as_str(), e["stats"]["outputs"].as_array())
+            else {
+                continue;
+            };
+            for port in ports.iter().filter_map(|p| p["port"].as_str()) {
+                out.insert(format!("nodes.{node}.{port}"));
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    /// `--emit`：路径处的 JSON 原样。取不到（输出未激活、节点没跑、字段不存在）是 None。
+    pub(crate) fn value(&self, path: &MetricPath) -> Option<Value> {
+        match &path.kind {
+            MetricKind::NodePort { node, port, rest } => self.node_states(node).find_map(|e| {
+                let entry = e["stats"]["outputs"]
+                    .as_array()?
+                    .iter()
+                    .find(|o| o["port"] == port.as_str())?;
+                descend(entry.get("value")?, rest).cloned()
+            }),
+            MetricKind::Output { name, rest } => {
+                let entry = self.outputs?.get(name.as_str())?;
+                descend(entry.get("value")?, rest).cloned()
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn resolve(&self, metric: &MetricPath) -> Option<f64> {
@@ -947,12 +1003,54 @@ pub(crate) struct Row {
     pub sample: usize,
     pub status: String,
     pub metrics: Vec<Option<f64>>,
-    pub errors: Vec<String>,
+    /// 与 `Engine::emits` 一一对应。
+    pub values: Vec<Option<Value>>,
+    pub errors: Vec<RowError>,
     pub duration_ms: f64,
     pub skipped: Vec<String>,
     /// 这一次运行的 run summary（ADR-0022）。没给 `--summary`、或校验就没过时是 None。
     pub summary: Option<Value>,
     pub quality: Option<Value>,
+}
+
+/// 一行里的一个错误：出错节点（图级诊断没有节点时为 None）、错误码与说明。完全相同的一条只记一次。
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub(crate) struct RowError {
+    #[serde(rename = "nodeId")]
+    pub node: Option<String>,
+    pub code: String,
+    pub message: String,
+}
+
+impl RowError {
+    fn push(list: &mut Vec<RowError>, node: Option<&str>, code: &str, message: Option<&str>) {
+        if list.iter().any(|e| {
+            e.code == code && e.node.as_deref() == node && e.message == message.unwrap_or_default()
+        }) {
+            return;
+        }
+        list.push(RowError {
+            node: node.map(str::to_string),
+            code: code.to_string(),
+            message: message.unwrap_or_default().to_string(),
+        });
+    }
+
+    fn parse(v: &Value) -> Option<RowError> {
+        Some(RowError {
+            node: v.get("nodeId")?.as_str().map(str::to_string),
+            code: v["code"].as_str()?.to_string(),
+            message: v["message"].as_str().unwrap_or_default().to_string(),
+        })
+    }
+}
+
+impl Row {
+    /// 这一行出现过的错误码，各一次。上游失败时下游节点各带一条 upstream_failed，
+    /// 按行计数才不会让它盖过根因。
+    pub(crate) fn error_codes(&self) -> BTreeSet<&str> {
+        self.errors.iter().map(|e| e.code.as_str()).collect()
+    }
 }
 
 pub(crate) enum EngineError {
@@ -969,6 +1067,8 @@ pub(crate) struct Engine<'a> {
     /// 命令行上的 `--param <名字>=<json>`：参数组写完图参数之后再写一遍，`--param` 永远最后说了算。
     pub pinned: &'a [String],
     pub metrics: &'a [MetricPath],
+    /// `--emit`：每行原样带出的 JSON 路径。
+    pub emits: &'a [MetricPath],
     pub param_sets: &'a [ParamSet],
     pub samples: &'a [Sample],
     pub parallel: i32,
@@ -1135,8 +1235,8 @@ pub(crate) fn failure_digest(rows: &[Row]) -> Option<String> {
     for r in &bad {
         let (n, codes) = by_status.entry(r.status.as_str()).or_default();
         *n += 1;
-        for c in &r.errors {
-            *codes.entry(c.as_str()).or_default() += 1;
+        for code in r.error_codes() {
+            *codes.entry(code).or_default() += 1;
         }
     }
     let parts: Vec<String> = by_status
@@ -1167,7 +1267,18 @@ fn row_exit(status: &str) -> i32 {
 struct Attempt {
     row: Row,
     available: Vec<String>,
+    /// 首跑时这张图上能 `--emit` 的根：`outputs.<名字>` 与 `nodes.<节点>.<端口>`。
+    emit_roots: Vec<String>,
     resolved: Vec<bool>,
+}
+
+/// `--emit` 路径的根（不含字段部分），与 `RunView::emit_roots` 的写法一致。
+fn emit_root(path: &MetricPath) -> Option<String> {
+    match &path.kind {
+        MetricKind::Output { name, .. } => Some(format!("outputs.{name}")),
+        MetricKind::NodePort { node, port, .. } => Some(format!("nodes.{node}.{port}")),
+        _ => None,
+    }
 }
 
 impl<'a> Engine<'a> {
@@ -1246,15 +1357,18 @@ impl<'a> Engine<'a> {
                 sample.truth.as_ref(),
                 "validation_failed",
             );
-            let mut errors: Vec<String> = Vec::new();
+            let mut errors: Vec<RowError> = Vec::new();
             for d in &diags {
                 if d["severity"] != "error" {
                     continue;
                 }
                 if let Some(code) = d["code"].as_str() {
-                    if !errors.iter().any(|c| c == code) {
-                        errors.push(code.to_string());
-                    }
+                    RowError::push(
+                        &mut errors,
+                        d["nodeId"].as_str(),
+                        code,
+                        d["message"].as_str(),
+                    );
                 }
             }
             return Ok(Attempt {
@@ -1271,6 +1385,7 @@ impl<'a> Engine<'a> {
                             _ => None,
                         })
                         .collect(),
+                    values: vec![None; self.emits.len()],
                     errors,
                     duration_ms: 0.0,
                     skipped: Vec::new(),
@@ -1278,6 +1393,7 @@ impl<'a> Engine<'a> {
                     quality: Some(quality),
                 },
                 available: Vec::new(),
+                emit_roots: Vec::new(),
                 resolved: vec![false; self.metrics.len()],
             });
         }
@@ -1310,7 +1426,8 @@ impl<'a> Engine<'a> {
         };
         let wants_outputs = enumerate
             || sample.truth.is_some()
-            || self.metrics.iter().any(MetricPath::needs_outputs);
+            || self.metrics.iter().any(MetricPath::needs_outputs)
+            || self.emits.iter().any(MetricPath::needs_outputs);
         let outputs: Option<Value> = if wants_outputs {
             self.core
                 .run_outputs(result.run_id())
@@ -1332,6 +1449,12 @@ impl<'a> Engine<'a> {
                 _ => view.resolve(m),
             })
             .collect();
+        let emitted: Vec<Option<Value>> = self.emits.iter().map(|p| view.value(p)).collect();
+        let emit_roots = if enumerate && !self.emits.is_empty() {
+            view.emit_roots()
+        } else {
+            Vec::new()
+        };
         let available = if enumerate {
             let mut paths = available_paths(&view);
             paths.extend(
@@ -1345,23 +1468,19 @@ impl<'a> Engine<'a> {
         } else {
             Vec::new()
         };
-        let mut errors: Vec<String> = Vec::new();
+        let mut errors: Vec<RowError> = Vec::new();
         for e in &result.events {
             if e["kind"] != "node_state" {
                 continue;
             }
-            let mut push = |code: &str| {
-                if !errors.iter().any(|c| c == code) {
-                    errors.push(code.to_string());
-                }
-            };
+            let node = e["nodeId"].as_str();
             if let Some(code) = e["error"]["code"].as_str() {
-                push(code);
+                RowError::push(&mut errors, node, code, e["error"]["message"].as_str());
             }
             if let Some(list) = e["errors"].as_array() {
                 for item in list {
                     if let Some(code) = item["code"].as_str() {
-                        push(code);
+                        RowError::push(&mut errors, node, code, item["message"].as_str());
                     }
                 }
             }
@@ -1379,6 +1498,7 @@ impl<'a> Engine<'a> {
                 status: status.to_string(),
                 snapshot_id,
                 metrics: values,
+                values: emitted,
                 errors,
                 duration_ms: result.duration_ms(),
                 skipped: result.skipped_nodes(),
@@ -1390,6 +1510,7 @@ impl<'a> Engine<'a> {
                 quality: Some(quality),
             },
             available,
+            emit_roots,
             resolved,
         })
     }
@@ -1447,6 +1568,25 @@ impl<'a> Engine<'a> {
                     return Err(EngineError::Usage(
                         format!("这些指标路径在图上取不到值：{}", missing.join(", ")),
                         a.available,
+                    ));
+                }
+                let unknown: Vec<String> = self
+                    .emits
+                    .iter()
+                    .filter(|p| {
+                        !a.emit_roots
+                            .iter()
+                            .any(|r| emit_root(p).as_deref() == Some(r.as_str()))
+                    })
+                    .map(|p| p.raw.clone())
+                    .collect();
+                if !unknown.is_empty() {
+                    return Err(EngineError::Usage(
+                        format!(
+                            "这些 --emit 路径的图输出或节点端口在图上不存在：{}",
+                            unknown.join(", ")
+                        ),
+                        a.emit_roots,
                     ));
                 }
             }
@@ -1678,8 +1818,8 @@ pub(crate) fn summarize(
                 if row.errors.is_empty() {
                     *entry.fail_codes.entry(status.to_string()).or_default() += 1;
                 } else {
-                    for code in &row.errors {
-                        *entry.fail_codes.entry(code.clone()).or_default() += 1;
+                    for code in row.error_codes() {
+                        *entry.fail_codes.entry(code.to_string()).or_default() += 1;
                     }
                 }
             }
@@ -1711,7 +1851,8 @@ fn list_metric_paths(engine: &Engine, samples: &[Sample], out: &Sink, err: &Sink
                 if row.errors.is_empty() {
                     String::new()
                 } else {
-                    format!("（{}）", row.errors.join(", "))
+                    let codes: Vec<&str> = row.error_codes().into_iter().collect();
+                    format!("（{}）", codes.join(", "))
                 }
             ),
         );
@@ -1751,12 +1892,24 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let metric_specs = parsed.many("metric");
+    let emit_specs = parsed.many("emit");
     // --list-metrics 不要指标：它就是用来问「有哪些指标可写」的
     let list_only = parsed.has("list-metrics");
-    if metric_specs.is_empty() && !list_only {
-        line(err, "至少给一个 --metric <path>，例如 --metric outputs.gap（不知道写什么就先 --list-metrics）");
+    if metric_specs.is_empty() && emit_specs.is_empty() && !list_only {
+        line(err, "至少给一个 --metric <path> 或 --emit <path>，例如 --metric outputs.gap（不知道写什么就先 --list-metrics）");
         return EXIT_USAGE;
     }
+    let emits: Vec<MetricPath> = match emit_specs
+        .iter()
+        .map(|s| parse_emit(s))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(m) => m,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
     let metrics: Vec<MetricPath> = match metric_specs
         .iter()
         .map(|s| parse_metric(s))
@@ -1910,6 +2063,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         base: &loaded,
         pinned: &pinned,
         metrics: &metrics,
+        emits: &emits,
         param_sets: &param_sets,
         samples: &samples,
         parallel,
@@ -1926,7 +2080,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let mut rows: Vec<Row> = match parsed.one("resume-rows") {
-        Some(file) => match resume_rows(file, &param_sets, &samples, &metrics) {
+        Some(file) => match resume_rows(file, &param_sets, &samples, &metrics, &emits) {
             Ok(rows) => rows,
             Err(e) => {
                 line(err, &e);
@@ -1977,8 +2131,27 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             if let (Some(s), Some(obj)) = (row.summary.as_ref(), line_json.as_object_mut()) {
                 obj.insert("summary".to_string(), s.clone());
             }
+            if let (false, Some(obj)) = (emits.is_empty(), line_json.as_object_mut()) {
+                let values: Map<String, Value> = emits
+                    .iter()
+                    .zip(&row.values)
+                    .map(|(p, v)| (p.raw.clone(), v.clone().unwrap_or(Value::Null)))
+                    .collect();
+                obj.insert("values".to_string(), Value::Object(values));
+            }
             json_line(out, &line_json);
-            rows.push(row.clone());
+            // values 只为这一行的输出；统计用不到，不跟着整批常驻内存
+            rows.push(Row {
+                values: Vec::new(),
+                errors: row.errors.clone(),
+                summary: row.summary.clone(),
+                quality: row.quality.clone(),
+                snapshot_id: row.snapshot_id.clone(),
+                metrics: row.metrics.clone(),
+                skipped: row.skipped.clone(),
+                status: row.status.clone(),
+                ..*row
+            });
         };
         engine.run_remaining(&mut on_row, &completed, max_runs)
     };
@@ -2089,6 +2262,7 @@ fn resume_rows(
     params: &[ParamSet],
     samples: &[Sample],
     metrics: &[MetricPath],
+    emits: &[MetricPath],
 ) -> Result<Vec<Row>, String> {
     let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
     let mut rows = BTreeMap::<(usize, usize), Row>::new();
@@ -2109,6 +2283,16 @@ fn resume_rows(
         if metrics.iter().any(|m| v["metrics"].get(&m.raw).is_none()) {
             return Err("resume 指标集合已改变".into());
         }
+        if emits.iter().any(|p| v["values"].get(&p.raw).is_none()) {
+            return Err("resume 的 --emit 路径已改变".into());
+        }
+        let errors = v["errors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(RowError::parse)
+            .collect::<Option<Vec<_>>>()
+            .ok_or("resume 行的 errors 不是 {nodeId, code, message} 对象，换用当前版本重跑")?;
         let row = Row {
             snapshot_id: v["snapshotId"].as_str().map(str::to_string),
             param_set: pi,
@@ -2118,12 +2302,8 @@ fn resume_rows(
                 .iter()
                 .map(|m| v["metrics"][&m.raw].as_f64())
                 .collect(),
-            errors: v["errors"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.as_str().map(str::to_string))
-                .collect(),
+            values: Vec::new(),
+            errors,
             duration_ms: v["durationMs"].as_f64().unwrap_or(0.0),
             skipped: Vec::new(),
             summary: v.get("summary").cloned(),
