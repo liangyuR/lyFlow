@@ -1,6 +1,6 @@
 # 版本变更
 
-## 开发中
+## 2.0.5
 
 - 新增 `pnpm sdk:restore`，把版本锁对应的原生 SDK 恢复到 `build/native-sdk`。未设置 `LYFLOW_NATIVE_SDK` 时，`pnpm dev`、`pnpm check`、`pnpm e2e` 和 Cargo 构建都使用该目录，新开终端无需重新设置环境变量。
 - `pnpm app:dev` 浏览器模式直接读取已恢复 SDK 的算子清单，不再需要手动复制 `manifest.dev.json`。
@@ -8,6 +8,7 @@
 - `pnpm dev` 启动和改动 bridge 后的增量构建更快，桌面窗口打开时前端模块已预先转换。
 - `lyflow eval` 新增 `--emit <值路径>`，每行 `eval_row` 在 `values` 里原样带出图输出或节点端口处的对象、数组与标量，批量回放可逐样本取 bundle、线段方向等结构化结果。`eval_row` / `perturb_row` 的 `errors` 改为 `[{nodeId, code, message}]`，带出出错节点和说明；旧版写出的行不能再用于 `--resume-rows`。
 - `lyflow run` 新增 `--events all|errors|none`。批量调用可只保留出错节点、error 级日志和 `run_finished`，或完全不写执行事件，只读 `--outputs` / `--summary`。
+- 引擎 2.0.5：同一 ONNX 模型被多次运行同时推理时不再排队，`eval` / `sweep` / `perturb --jobs N` 和宿主并发调用的吞吐随并发数提升，结果不变。
 
 ## 2.0.4（已发布）
 
