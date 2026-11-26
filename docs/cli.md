@@ -140,8 +140,9 @@ lyflow cache clear --cache-dir .cache/lyflow --stale
 `run` 的 stdout 每行一个 JSON，按 `kind` 区分：执行事件（`run_started`、`node_state`、`log`、`run_finished` 等，
 另带 `schemaVersion`，见 [execution-event schema](../schema/execution-event.schema.json)）；校验没过、图没有执行时的
 `diagnostic`；`--snapshot-dir` 的 `run_snapshot`；`--summary` 的 `run_summary`。`--outputs` 的图级输出是唯一一行没有
-`kind` 的，键是图输出名。批量调用只要结论时用 `--events errors`（只写出错的 `node_state`、error 级 `log` 与
-`run_finished`）或 `--events none`，配合 `--outputs` / `--summary`，每次运行的 stdout 从全部节点的输出值缩到几行。
+`kind` 的，键是图输出名（图输出不要起名为 `kind`）。批量调用只要结论时用 `--events errors`（只写 `state` 为
+`error` 的 `node_state`、error 级 `log` 与 `run_finished`；因上游失败而 `cancelled` 的节点不写，`seq` 因此不连续，
+不能再拿它判断丢包）或 `--events none`，配合 `--outputs` / `--summary`，每次运行的 stdout 从全部节点的输出值缩到几行。
 
 `run` 默认逐行输出执行事件；`--summary` 额外输出 `run_summary`，`status` 为 `ok`、`degraded` 或 `failed`。`eval` 每行默认不带 summary，按需用 `--summary` 打开。做业务判定时读取 summary，字段说明见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 

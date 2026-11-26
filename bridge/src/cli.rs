@@ -56,8 +56,9 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --input：把点云或完整 LYPR Profile 注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
                  整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.lypr
                  --input n_in.profile=scan.lypr 直接提供给 profile.input。
-        --events：stdout 上的执行事件写哪些。all（默认）逐条全写；errors 只写出错的 node_state、
-                 error 级 log 与 run_finished；none 一条不写。校验诊断、--outputs、--summary 不受影响。
+        --events：stdout 上的执行事件写哪些。all（默认）逐条全写；errors 只写 state=error 的 node_state
+                 （因上游失败而 cancelled 的不写）、error 级 log 与 run_finished，seq 因此不连续；
+                 none 一条不写。校验诊断、--outputs、--summary 不受影响。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
@@ -1662,11 +1663,10 @@ enum EventFilter {
 }
 
 /// `--events errors` 留下的事件：出错的节点、error 级日志和收尾的 run_finished。
+/// 因上游失败没跑的节点是 cancelled，不写 —— 根因在出错的那个节点上。
 fn is_error_event(e: &Value) -> bool {
     match e["kind"].as_str() {
-        Some("node_state") => {
-            e["state"] == "error" || e["errors"].as_array().is_some_and(|l| !l.is_empty())
-        }
+        Some("node_state") => e["state"] == "error",
         Some("log") => e["level"] == "error",
         Some("run_finished") => true,
         _ => false,
