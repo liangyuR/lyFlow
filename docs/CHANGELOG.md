@@ -1,6 +1,6 @@
 # 版本变更
 
-## 2.0.5
+## 2.0.5（已发布）
 
 - 新增 `pnpm sdk:restore`，把版本锁对应的原生 SDK 恢复到 `build/native-sdk`。未设置 `LYFLOW_NATIVE_SDK` 时，`pnpm dev`、`pnpm check`、`pnpm e2e` 和 Cargo 构建都使用该目录，新开终端无需重新设置环境变量。
 - `pnpm app:dev` 浏览器模式直接读取已恢复 SDK 的算子清单，不再需要手动复制 `manifest.dev.json`。
