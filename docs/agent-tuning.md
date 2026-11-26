@@ -258,6 +258,69 @@ lyflow eval graph.lyflow.json --samples frames.jsonl \
 Measurement 自动拆包（`outputs.gap` 直接是个数），bool 按 0/1（`outputs.gap.ok` 求 mean 就是通过率）。
 **路径拼错会退出 4 并在 stderr 列出这张图上所有可用的标量路径** —— 第一次拼错是常态，照着列表改。
 
+### 批量回放：一个进程跑全部样本，逐行带出结构化结果
+
+离线回放现场数据时，不要每条样本起一次 `lyflow run`：每个进程都要重新启动、加载图、新建 ONNX 会话，
+这部分开销常常比真正要调的节点还大。改成一次 `eval`，这些只付一次；同一会话可以被 `--jobs` 的多个线程并发推理。
+
+样本集每行写这一帧要读的文件，键是**实际读文件的那个节点**的参数。有的图由独立的读取节点读文件、
+下游节点只收输入端口，参数要写在读取节点上，写到下游节点上不会生效：
+
+```jsonc
+{"id":"14-09-2026-03-44-38","set":{"n_scan.source":"files","n_scan.primaryFile":"D:/replay/0001/Master.pcd","n_scan.secondaryFile":"D:/replay/0001/Slave.pcd"},"tags":{"point":"R5_1"}}
+{"id":"14-09-2026-03-45-02","set":{"n_scan.source":"files","n_scan.primaryFile":"D:/replay/0002/Master.pcd","n_scan.secondaryFile":"D:/replay/0002/Slave.pcd"},"tags":{"point":"R5_1"}}
+```
+
+所有样本共用的值（模型路径等图参数）放在命令行上，不必每行重复：
+
+```bash
+lyflow eval gap.lyflow.json --samples replay.jsonl \
+  --param modelPath=D:/models/gap.onnx \
+  --emit outputs.bundle --emit nodes.n_gap.segment.dir \
+  --metric outputs.gap --group-by point --jobs 8 > rows.jsonl
+```
+
+`--metric` 只取标量，数组会归约成 count/mean/p95；要拿对象、数组或某个字段原样的值，用 `--emit`。
+两者可以同时给，也可以只给 `--emit`。`--emit` 只认两种根：
+
+| 写法                                 | 取的是什么                                         |
+| ------------------------------------ | -------------------------------------------------- |
+| `outputs.<名字>[.字段...]`           | 图输出，例如整个 `outputs.bundle`                  |
+| `nodes.<节点>.<端口>[.字段...]`      | 节点端口的值，例如 `nodes.n_gap.segment`           |
+| `….<数字>`                           | 数组下标，例如 `nodes.n_gap.segment.dir.0`         |
+
+Record 的 `data` 层与 `--metric` 一样透明。`--list-metrics` 列出的是标量叶子，可以用来查字段名；
+根写错（图输出或节点端口不存在）会退出 4，并在 stderr 列出这张图上能 `--emit` 的全部根。
+字段取不到（输出未激活、节点没跑到）时该路径为 `null`，不算失败。
+
+每个（参数组 × 样本）一行，`values` 的键就是 `--emit` 的原文：
+
+```jsonc
+{"kind":"eval_row","paramSet":0,"sample":"14-09-2026-03-44-38","tags":{"point":"R5_1"},"status":"ok",
+ "metrics":{"outputs.gap":1.08},
+ "values":{"outputs.bundle":{"fits":{…},"point_counts":{…}},"nodes.n_gap.segment.dir":[0.998,0.061]},
+ "errors":[],"durationMs":27.1}
+{"kind":"eval_row","paramSet":0,"sample":"14-09-2026-03-45-02","tags":{"point":"R5_1"},"status":"failed",
+ "metrics":{"outputs.gap":null},
+ "values":{"outputs.bundle":null,"nodes.n_gap.segment.dir":null},
+ "errors":[{"nodeId":"n_projection_axis","code":"bad_input","message":"…"}],"durationMs":18.4}
+```
+
+失败分类按 `errors[].nodeId` 找出错节点，再按它的 op 判断失败发生在哪一步；图级诊断（校验没过、图没执行）的 `nodeId` 为 `null`。
+最后每个指标还有一行 `eval_summary`，`failCodes` 按行计数。下游脚本只读 `kind` 为 `eval_row` 的行即可。
+
+几点经验：
+
+- **参数扫描放在同一个进程里。** 多组参数用 `--params sets.json` 或 `--param n.p=start:end:steps` 一次给齐，不要加 `--no-cache`：
+  只改下游参数时，上游的读文件和推理结果在进程内命中缓存，每组参数只重跑改动的节点及其下游。
+  要分几条命令跑时再考虑 `--cache-dir`，注意它只落盘点云、Tensor、Image 这类输出，输出含 Bundle / Record 的节点每个进程都会重算。
+- **`--jobs` 先于多进程。** 一个进程开 `--jobs n` 共享已加载的模型；内存约为 n 倍。样本量很大、要按测点分组时，
+  按图或测点拆成几条 `eval` 并行，每条各自开 `--jobs`。
+- **`values` 不进统计。** 它只写进当行输出，不随整批常驻内存；`bundle` 这类大对象只在需要时 `--emit`，
+  能用字段路径（如 `outputs.bundle.fits`）就不要带整个对象。
+- **中断后续跑。** 用相同的参数组、`--metric` 与 `--emit` 再跑一次，加 `--resume-rows rows.jsonl` 跳过已完成的行并把它们并入统计；
+  新的输出重定向到另一个文件，不要覆盖 `rows.jsonl`。
+
 ### 留出：按时间前后各半
 
 `--holdout <tag>=<value>` 把带该标签的样本分到 `holdout` 组，其余进 `train`，两组分别报数。

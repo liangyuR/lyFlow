@@ -76,6 +76,7 @@ lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]
 `outputs.bundle`、`nodes.n_gap.segment` 这类对象或数组原样写进每行 `eval_row` 的 `values`，字段取不到时为 `null`；
 图输出或节点端口本身不存在时报用法错。每行的 `errors` 是 `[{nodeId, code, message}]`，图级诊断的 `nodeId` 为 `null`；
 `eval_summary` 的 `failCodes` 与终端失败摘要按行计数，一行里同一个错误码只算一次。
+批量回放的示例样本集、`--emit` 写法与 `eval_row` 样例见 [Agent 调参指南：批量回放](agent-tuning.md#批量回放一个进程跑全部样本逐行带出结构化结果)。
 样本集的目录模式（`--samples-dir`）把「双相机配对 + 按时间前后各半打 tag」也内建了，
 不用再为每个测点写生成脚本。用法见 [Agent 调参指南](agent-tuning.md)。
 
