@@ -7,6 +7,7 @@
 - 移除重复的 `pnpm dev:app` 入口。
 - `pnpm dev` 启动和改动 bridge 后的增量构建更快，桌面窗口打开时前端模块已预先转换。
 - `lyflow eval` 新增 `--emit <值路径>`，每行 `eval_row` 在 `values` 里原样带出图输出或节点端口处的对象、数组与标量，批量回放可逐样本取 bundle、线段方向等结构化结果。`eval_row` / `perturb_row` 的 `errors` 改为 `[{nodeId, code, message}]`，带出出错节点和说明；旧版写出的行不能再用于 `--resume-rows`。
+- `lyflow run` 新增 `--events all|errors|none`。批量调用可只保留出错节点、error 级日志和 `run_finished`，或完全不写执行事件，只读 `--outputs` / `--summary`。
 
 ## 2.0.4（已发布）
 

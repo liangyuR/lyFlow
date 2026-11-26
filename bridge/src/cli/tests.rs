@@ -371,14 +371,57 @@ fn run_exits_two_when_a_node_fails() {
     let dir = workspace("failrun");
     let doc = json!({
         "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCE",
-        "nodes": [{"id": "r", "op": "io.load_pcd", "params": {"path": "没有这个文件.pcd"}}],
-        "edges": []
+        "nodes": [
+            {"id": "r", "op": "io.load_pcd", "params": {"path": "没有这个文件.pcd"}},
+            {"id": "v", "op": "filter.voxel_grid", "params": {"leafSize": [0.02, 0.02, 0.02]}}
+        ],
+        "edges": [{"id": "e1", "from": {"node": "r", "port": "cloud"},
+                               "to": {"node": "v", "port": "cloud"}}]
     });
     let file = dir.join("bad.lyflow.json");
     std::fs::write(&file, doc.to_string()).unwrap();
     let r = cli(&["run", &file.to_string_lossy()]);
     assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
     assert_eq!(r.lines().last().unwrap()["status"], "error");
+
+    // --events errors：只剩出错的节点和收尾的 run_finished；下游因上游失败 cancelled 的 v 不写
+    let r = cli(&["run", &file.to_string_lossy(), "--events", "errors"]);
+    assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+    let kinds: Vec<(String, String)> = r
+        .lines()
+        .iter()
+        .map(|e| {
+            (
+                e["kind"].as_str().unwrap_or_default().to_string(),
+                e["state"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("node_state".to_string(), "error".to_string()),
+            ("run_finished".to_string(), String::new())
+        ],
+        "{}",
+        r.out
+    );
+    assert_eq!(r.lines()[0]["nodeId"], "r");
+
+    // --events none 一条事件都不写，--summary 照旧是最后一行；写法不对是参数错
+    let r = cli(&[
+        "run",
+        &file.to_string_lossy(),
+        "--events",
+        "none",
+        "--summary",
+    ]);
+    assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+    let lines = r.lines();
+    assert_eq!(lines.len(), 1, "{}", r.out);
+    assert_eq!(lines[0]["kind"], "run_summary");
+    let r = cli(&["run", &file.to_string_lossy(), "--events", "some"]);
+    assert_eq!(r.code, EXIT_USAGE, "{}", r.err);
 }
 
 /// ADR-0022：带 fallback 的图里，主路径炸了但结果量出来了 —— run_finished 是
