@@ -74,6 +74,7 @@ fn the_progress_line_rewrites_itself_and_stays_silent_when_off() {
         sample: 0,
         status: status.to_string(),
         metrics: Vec::new(),
+        values: Vec::new(),
         errors: Vec::new(),
         duration_ms: ms,
         skipped: Vec::new(),
@@ -138,7 +139,8 @@ fn the_failure_digest_groups_by_status_then_code() {
         sample: 0,
         status: status.to_string(),
         metrics: Vec::new(),
-        errors: errors.iter().map(|e| e.to_string()).collect(),
+        values: Vec::new(),
+        errors: errors.iter().map(|e| error(e)).collect(),
         duration_ms: 0.0,
         skipped: Vec::new(),
         summary: None,
@@ -279,6 +281,42 @@ fn metric_paths_cover_outputs_nodes_and_run() {
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.1")), Some(-2.0));
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.2")), None);
     assert_eq!(view.resolve(&metric("nodes.n_off.at.p.x")), None);
+}
+
+/// `--emit` 原样取出对象、数组与标量，不归约；取不到是 None。
+#[test]
+fn emit_paths_return_the_json_at_outputs_and_node_ports() {
+    let ev = events();
+    let out = named();
+    let view = RunView {
+        events: &ev,
+        outputs: Some(&out),
+    };
+    let emit = |spec: &str| view.value(&parse_emit(spec).unwrap());
+    assert_eq!(
+        emit("outputs.bundle.point_counts"),
+        Some(json!({"left": 640, "right": 512}))
+    );
+    assert_eq!(emit("outputs.gap.ok"), Some(json!(true)));
+    assert_eq!(emit("nodes.n_off.at.p"), Some(json!([0.5, -2.0])));
+    assert_eq!(emit("nodes.n_off.at.p.1"), Some(json!(-2.0)));
+    assert_eq!(
+        emit("nodes.n_fit.quality")
+            .unwrap()
+            .pointer("/data/inlierCount"),
+        Some(&json!(9))
+    );
+    assert_eq!(emit("outputs.cloud"), None);
+    assert_eq!(emit("nodes.n_off.at.p.2"), None);
+    for bad in [
+        "run.durationMs",
+        "nodes.n_fit.durationMs",
+        "nodes.n_fit.elementCount",
+        "quality.executionOk",
+        "gap",
+    ] {
+        assert!(parse_emit(bad).is_err(), "{bad} 应当被拒");
+    }
 }
 
 #[test]
@@ -588,6 +626,14 @@ fn glob_gives_colliding_stems_distinct_ids() {
     assert_eq!(samples[1].id, "f2/scan");
 }
 
+fn error(code: &str) -> RowError {
+    RowError {
+        node: Some("n".to_string()),
+        code: code.to_string(),
+        message: String::new(),
+    }
+}
+
 fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row {
     Row {
         snapshot_id: None,
@@ -595,7 +641,8 @@ fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row 
         sample,
         status: status.to_string(),
         metrics: vec![value],
-        errors: errors.iter().map(|s| (*s).to_string()).collect(),
+        values: Vec::new(),
+        errors: errors.iter().map(|e| error(e)).collect(),
         duration_ms: 1.0,
         skipped: Vec::new(),
         summary: None,

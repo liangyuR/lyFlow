@@ -1260,6 +1260,12 @@ fn eval_separates_validation_failures_from_run_failures() {
         .unwrap();
     assert_eq!(row["status"], "failed");
     assert!(row["metrics"]["nodes.r.elementCount"].is_null());
+    let error = &row["errors"][0];
+    assert_eq!(error["nodeId"], "r", "{row}");
+    assert!(
+        error["code"].is_string() && error["message"].is_string(),
+        "{row}"
+    );
     let summary = r
         .lines()
         .into_iter()
