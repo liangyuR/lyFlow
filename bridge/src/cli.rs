@@ -49,13 +49,15 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow run      <graph> [--to <nodeId>]... [--set <nodeId>.<param>=<json>]...
                           [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--preview] [--preview-points <n>] [--outputs] [--summary]
+                          [--preview] [--preview-points <n>] [--outputs] [--summary] [--events all|errors|none]
                           [--snapshot-dir <new-dir>] [--capture-policy all|selected|failures|metrics]
                           [--capture-output node:port] [--capture-max-bytes <n>]
                           [--input <nodeId>.<port>=<file.pcd|file.lypr>]...
         --input：把点云或完整 LYPR Profile 注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
                  整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.lypr
                  --input n_in.profile=scan.lypr 直接提供给 profile.input。
+        --events：stdout 上的执行事件写哪些。all（默认）逐条全写；errors 只写出错的 node_state、
+                 error 级 log 与 run_finished；none 一条不写。校验诊断、--outputs、--summary 不受影响。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
@@ -1651,6 +1653,26 @@ impl RunProgress {
 mod delivery;
 pub(crate) mod snapshot;
 
+/// `run --events`：stdout 上写哪些执行事件。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventFilter {
+    All,
+    Errors,
+    None,
+}
+
+/// `--events errors` 留下的事件：出错的节点、error 级日志和收尾的 run_finished。
+fn is_error_event(e: &Value) -> bool {
+    match e["kind"].as_str() {
+        Some("node_state") => {
+            e["state"] == "error" || e["errors"].as_array().is_some_and(|l| !l.is_empty())
+        }
+        Some("log") => e["level"] == "error",
+        Some("run_finished") => true,
+        _ => false,
+    }
+}
+
 fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(err, "用法：lyflow run <graph>");
@@ -1694,13 +1716,33 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
+    let events = match parsed.one("events").unwrap_or("all") {
+        "all" => EventFilter::All,
+        "errors" => EventFilter::Errors,
+        "none" => EventFilter::None,
+        other => {
+            return fail(
+                err,
+                &format!("--events 只认 all|errors|none，收到 {other}"),
+                EXIT_USAGE,
+            )
+        }
+    };
     let targets: Vec<String> = parsed.many("to").to_vec();
     let progress = progress_line().then(|| Arc::new(Mutex::new(RunProgress::new(err))));
-    let hook = progress.as_ref().map(|p| {
-        let p = Arc::clone(p);
+    let filtered = (events == EventFilter::Errors).then(|| Arc::clone(out));
+    let hook = (progress.is_some() || filtered.is_some()).then(|| {
+        let progress = progress.clone();
         Arc::new(move |e: &Value| {
-            if let Ok(mut p) = p.lock() {
-                p.event(e);
+            if let Some(p) = &progress {
+                if let Ok(mut p) = p.lock() {
+                    p.event(e);
+                }
+            }
+            if let Some(out) = &filtered {
+                if is_error_event(e) {
+                    json_line(out, e);
+                }
             }
         }) as EventHook
     });
@@ -1715,7 +1757,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             preview_points,
             preview: parsed.has("preview"),
             no_cache: parsed.has("no-cache"),
-            stream: Some(Arc::clone(out)),
+            stream: (events == EventFilter::All).then(|| Arc::clone(out)),
             params_json: None,
             inputs: &inputs.clouds,
             group: None,
@@ -2522,6 +2564,7 @@ const VALUE_OPTS: &[&str] = &[
     "snapshot-root",
     "snapshot-dir",
     "capture-policy",
+    "events",
     "capture-output",
     "capture-max-bytes",
     "resume-rows",

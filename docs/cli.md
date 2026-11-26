@@ -20,7 +20,7 @@ stderr 给人看。退出码：`0` 成功、`1` 校验失败、`2` 执行失败�
 lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]...
                                   [--recipe r.lyflow-recipe.json] [--param name=<json>]...
                                   [--base-dir d] [--parallel n] [--no-cache] [--cache-dir d]
-                                  [--preview] [--preview-points n] [--outputs] [--summary]
+                                  [--preview] [--preview-points n] [--outputs] [--summary] [--events all|errors|none]
                                   [--input nodeId.port=file.pcd|file.lypr]...
 lyflow cache    info|clear --cache-dir d [--stale]
 lyflow import   file --kind kind [--fine] [-o out.lyflow.json] [--base-dir d]
@@ -136,6 +136,12 @@ lyflow cache clear --cache-dir .cache/lyflow --stale
 这不是输入文件的内容校验：同名输入被覆盖却保留 size/mtime 时，需要清理缓存或使用冻结输入。`cache clear --stale` 清理旧构建身份，省略 `--stale` 清理该缓存目录全部结果；调用前确认目录用途。当前没有自动配额、跨机器共享或编辑器跨会话计算缓存承诺。
 
 ## 输出与退出码
+
+`run` 的 stdout 每行一个 JSON，按 `kind` 区分：执行事件（`run_started`、`node_state`、`log`、`run_finished` 等，
+另带 `schemaVersion`，见 [execution-event schema](../schema/execution-event.schema.json)）；校验没过、图没有执行时的
+`diagnostic`；`--snapshot-dir` 的 `run_snapshot`；`--summary` 的 `run_summary`。`--outputs` 的图级输出是唯一一行没有
+`kind` 的，键是图输出名。批量调用只要结论时用 `--events errors`（只写出错的 `node_state`、error 级 `log` 与
+`run_finished`）或 `--events none`，配合 `--outputs` / `--summary`，每次运行的 stdout 从全部节点的输出值缩到几行。
 
 `run` 默认逐行输出执行事件；`--summary` 额外输出 `run_summary`，`status` 为 `ok`、`degraded` 或 `failed`。`eval` 每行默认不带 summary，按需用 `--summary` 打开。做业务判定时读取 summary，字段说明见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 

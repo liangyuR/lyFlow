@@ -379,6 +379,37 @@ fn run_exits_two_when_a_node_fails() {
     let r = cli(&["run", &file.to_string_lossy()]);
     assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
     assert_eq!(r.lines().last().unwrap()["status"], "error");
+
+    // --events errors：只剩出错的节点和收尾的 run_finished
+    let r = cli(&["run", &file.to_string_lossy(), "--events", "errors"]);
+    assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+    let kinds: Vec<(String, String)> = r
+        .lines()
+        .iter()
+        .map(|e| {
+            (
+                e["kind"].as_str().unwrap_or_default().to_string(),
+                e["state"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("node_state".to_string(), "error".to_string()),
+            ("run_finished".to_string(), String::new())
+        ],
+        "{}",
+        r.out
+    );
+    assert_eq!(r.lines()[0]["nodeId"], "r");
+
+    // --events none 一条事件都不写；写法不对是参数错
+    let r = cli(&["run", &file.to_string_lossy(), "--events", "none"]);
+    assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+    assert!(r.out.trim().is_empty(), "{}", r.out);
+    let r = cli(&["run", &file.to_string_lossy(), "--events", "some"]);
+    assert_eq!(r.code, EXIT_USAGE, "{}", r.err);
 }
 
 /// ADR-0022：带 fallback 的图里，主路径炸了但结果量出来了 —— run_finished 是
