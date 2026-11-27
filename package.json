@@ -1,8 +1,8 @@
 {
   "name": "lyflow",
   "private": true,
-  "version": "2.0.5",
-  "lyflowEngineVersion": "2.0.5",
+  "version": "2.0.6",
+  "lyflowEngineVersion": "2.0.6",
   "packageManager": "pnpm@12.4.2",
   "description": "通用 Vision Flow：节点图编排点云/图像算子，图在前端编辑，计算在 C++ 执行",
   "scripts": {
