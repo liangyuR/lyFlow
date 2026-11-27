@@ -1,5 +1,9 @@
 # 版本变更
 
+## 2.0.6
+
+- 引擎 2.0.6：`gap.seam_circles` / `gap.fit_gap_circles` 每侧新增 `leftSource` / `rightSource`（`fit` 或 `reference_end`）与 `leftReferenceAlong` / `rightReferenceAlong`。`reference_end` 时该侧不拟合，按参考线靠缝端点放固定半径圆，配合 `flow.fallback` 在单侧圆角缺点时给出带补位标记的间隙读数。缺省行为不变。
+
 ## 2.0.5（已发布）
 
 - 新增 `pnpm sdk:restore`，把版本锁对应的原生 SDK 恢复到 `build/native-sdk`。未设置 `LYFLOW_NATIVE_SDK` 时，`pnpm dev`、`pnpm check`、`pnpm e2e` 和 Cargo 构建都使用该目录，新开终端无需重新设置环境变量。

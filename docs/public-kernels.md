@@ -24,7 +24,7 @@ M3已抽取轮廓数值方法并迁移DTS试点，M4a公开稳健拟合后端；
 SDK 中的 CMake 示例 `examples/public-kernels/CMakeLists.txt` 和完整源码 `examples/public_kernels.cpp` 使用精确产品版本及组件检查：
 
 ```cmake
-find_package(lyflow 2.0.5 EXACT REQUIRED COMPONENTS geometry_kernel metrology_kernel profile_kernel profile_analysis_kernel)
+find_package(lyflow 2.0.6 EXACT REQUIRED COMPONENTS geometry_kernel metrology_kernel profile_kernel profile_analysis_kernel)
 add_executable(my-kernel-host main.cpp)
 target_compile_features(my-kernel-host PRIVATE cxx_std_17)
 target_link_libraries(my-kernel-host PRIVATE lyflow::geometry_kernel lyflow::metrology_kernel
@@ -76,7 +76,7 @@ M4a公开原点云及Gap使用的RANSAC/LM实现；DTS的TLS与工作毫米算�
 单独使用后端时，构建选择`LYFLOW_STD_PACKS=OFF`和`LYFLOW_MODULES=profile-robust-kernel`；需要默认轻量Profile链的构建无需选择该模块。安装SDK后显式请求后端组件：
 
 ```cmake
-find_package(lyflow 2.0.5 EXACT REQUIRED COMPONENTS profile_robust_kernel)
+find_package(lyflow 2.0.6 EXACT REQUIRED COMPONENTS profile_robust_kernel)
 add_executable(my-robust-host main.cpp)
 target_compile_features(my-robust-host PRIVATE cxx_std_17)
 target_link_libraries(my-robust-host PRIVATE lyflow::profile_robust_kernel)

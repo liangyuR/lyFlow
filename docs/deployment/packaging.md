@@ -43,10 +43,10 @@ python -m pip install -r scripts/requirements.txt
 3. 更新工具版本 T 与 CHANGELOG，手动运行 [Windows release](../../.github/workflows/release-windows.yml) 检查资产。工作流读取受信任的默认分支锁，从公开地址下载三个原包、核对摘要，在 Windows 上组装完整 SDK 与编辑器，执行消费验收并保存 Actions 产物。推送指向默认分支历史的 `vT` tag 时，工作流创建工具 Release 草稿。若 T 等于 E，草稿同时附上三个引擎原包的原始字节。若工具继续沿用另一引擎版本，正文链接到该引擎的实际 Release。维护者复核后正式发布。
 4. 正式工具 Release 的发布事件触发 [NuGet 工作流](../../.github/workflows/publish-runtime-nuget.yml)。它从工具 tag 的元数据读取引擎 E，从默认分支取得对应的受信任锁，核验公开状态、原包摘要、nuspec 包 ID、版本、引擎仓及修订，再向 [GitHub Packages](https://github.com/liangyuR?tab=packages) 发布 E 的原包。工具补丁沿用已发布的 E 时，工作流下载已注册的 nupkg，核对锁内摘要后结束；同步发行的同版重复推送会报错。
 
-本地仅验证已发布的 NuGet 原包可执行下列命令，将 `v2.0.5` 换成需要验证的工具 Release tag。
+本地仅验证已发布的 NuGet 原包可执行下列命令，将 `v2.0.6` 换成需要验证的工具 Release tag。
 
 ```powershell
-./scripts/publish-runtime-nuget.ps1 -Tag v2.0.5 -PackageOnly -OutputDir build/verified-runtime
+./scripts/publish-runtime-nuget.ps1 -Tag v2.0.6 -PackageOnly -OutputDir build/verified-runtime
 ```
 
 [原生引擎仓](https://github.com/liangyuR/lyflow-engine)维护原生构建输入、发布组合、C ABI、运行库探针与原生 SDK 验收。历史单仓发行的构建步骤保存在对应的工具 tag 中。
